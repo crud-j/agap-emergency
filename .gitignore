@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+.expo/
+out/
+
+# Environment files — NEVER commit secrets
+.env
+.env.local
+.env.*.local
+.env.prod
+*.secret
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Database
+*.db
+*.sqlite
+
+# Coverage
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+
+# Prisma generated
+backend/src/generated/
+
+# Test
+jest-coverage/
+
+# Mobile
+mobile/.expo/
+mobile/ios/Pods/
+mobile/android/.gradle/
+mobile/android/app/build/
+
+.claude/
+docs/

@@ -1,0 +1,78 @@
+version: '3.9'
+
+# AGAP Emergency Response Platform — Development Docker Compose
+# For production, use docker-compose.prod.yml
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: agap_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agap_user
+      POSTGRES_PASSWORD: agap_password
+      POSTGRES_DB: agap_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - agap_postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agap_user -d agap_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: agap_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - agap_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: agap_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://agap_user:agap_password@postgres:5432/agap_db?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  agap_postgres_data:
+  agap_redis_data:
+
+networks:
+  default:
+    name: agap_network

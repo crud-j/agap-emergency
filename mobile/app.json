@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "AGAP",
+    "slug": "agap-emergency",
+    "version": "0.1.0",
+    "sdkVersion": "57.0.0",
+    "orientation": "portrait",
+    "scheme": "agap",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0F172A"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A"
+      },
+      "package": "com.agap.emergency",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.agap.emergency",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "AGAP needs your location to report your emergency accurately.",
+        "NSLocationAlwaysUsageDescription": "AGAP uses your location in the background for responder tracking.",
+        "NSCameraUsageDescription": "AGAP uses the camera to capture evidence at the incident scene.",
+        "NSPhotoLibraryUsageDescription": "AGAP needs photo library access to attach images to incidents."
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location",
+      "expo-notifications",
+      "expo-secure-store",
+      "expo-sensors",
+      "expo-camera"
+    ]
+  }
+}

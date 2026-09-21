@@ -1,0 +1,89 @@
+name: AGAP CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck shared
+        run: pnpm --filter @agap/shared typecheck
+
+      - name: Typecheck backend
+        run: pnpm --filter @agap/backend typecheck
+
+      - name: Typecheck frontend
+        run: pnpm --filter @agap/frontend typecheck
+
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: agap_test
+          POSTGRES_PASSWORD: agap_test
+          POSTGRES_DB: agap_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @agap/backend db:generate
+        env:
+          DATABASE_URL: postgresql://agap_test:agap_test@localhost:5432/agap_test
+
+      - name: Run backend tests
+        run: pnpm --filter @agap/backend test
+        env:
+          DATABASE_URL: postgresql://agap_test:agap_test@localhost:5432/agap_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test_jwt_secret_not_for_production
+          JWT_REFRESH_SECRET: test_refresh_secret_not_for_production
+          NODE_ENV: test

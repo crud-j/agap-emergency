@@ -1,0 +1,1649 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [postgis(version: "3.6.1"), uuid_ossp(map: "uuid-ossp")]
+}
+
+model User {
+  id                                                                       String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  full_name                                                                String                         @db.VarChar(255)
+  email                                                                    String?                        @unique @db.VarChar(255)
+  phone_number                                                             String?                        @unique @db.VarChar(20)
+  password_hash                                                            String?                        @db.VarChar(255)
+  role                                                                     user_role                      @default(CITIZEN)
+  status                                                                   user_status                    @default(PENDING_VERIFICATION)
+  profile_completeness                                                     Int                            @default(0) @db.SmallInt
+  is_guest                                                                 Boolean                        @default(false)
+  is_email_verified                                                        Boolean                        @default(false)
+  is_phone_verified                                                        Boolean                        @default(false)
+  barangay                                                                 String?                        @db.VarChar(100)
+  municipality                                                             String?                        @default("Bocaue") @db.VarChar(100)
+  province                                                                 String?                        @default("Bulacan") @db.VarChar(100)
+  full_address                                                             String?
+  preferred_language                                                       String                         @default("fil") @db.VarChar(10)
+  last_login_at                                                            DateTime?                      @db.Timestamptz(6)
+  created_at                                                               DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at                                                               DateTime                       @default(now()) @db.Timestamptz(6)
+  created_by_id                                                            String?                        @db.Uuid
+  account_lifecycle_events_account_lifecycle_events_performed_by_idTousers account_lifecycle_events[]     @relation("account_lifecycle_events_performed_by_idTousers")
+  account_lifecycle_events_account_lifecycle_events_user_idTousers         account_lifecycle_events[]     @relation("account_lifecycle_events_user_idTousers")
+  alert_triggers                                                           alert_triggers[]
+  announcement_deliveries                                                  announcement_deliveries[]
+  announcements                                                            Announcement[]
+  audit_logs                                                               AuditLog[]
+  consent_records                                                          consent_records[]
+  dispatch_crew                                                            dispatch_crew[]
+  dispatches                                                               dispatches[]
+  emergency_contacts                                                       EmergencyContact[]
+  escalations                                                              Escalation[]
+  facility_referrals                                                       facility_referrals[]
+  false_alerts_false_alerts_classified_by_idTousers                        false_alerts[]                 @relation("false_alerts_classified_by_idTousers")
+  false_alerts_false_alerts_user_idTousers                                 false_alerts[]                 @relation("false_alerts_user_idTousers")
+  feedback_ratings                                                         feedback_ratings[]
+  ics_assignments                                                          ics_assignments[]
+  incident_agency_participants                                             incident_agency_participants[]
+  incident_attachments                                                     IncidentAttachment[]
+  incident_events                                                          IncidentEvent[]
+  incident_handovers_incident_handovers_from_user_idTousers                incident_handovers[]           @relation("incident_handovers_from_user_idTousers")
+  incident_handovers_incident_handovers_to_user_idTousers                  incident_handovers[]           @relation("incident_handovers_to_user_idTousers")
+  incident_messages                                                        incident_messages[]
+  incident_patients                                                        incident_patients[]
+  incident_reporters                                                       IncidentReporter[]
+  incident_resolutions                                                     incident_resolutions[]
+  location_history                                                         location_history[]
+  medical_profiles                                                         MedicalProfile?
+  message_reads                                                            message_reads[]
+  notifications                                                            Notification[]
+  offline_event_queue                                                      offline_event_queue[]
+  on_scene_assessments                                                     on_scene_assessments[]
+  organization_memberships                                                 organization_memberships[]
+  resource_status_log                                                      resource_status_log[]
+  sensitive_data_access_log                                                sensitive_data_access_log[]
+  sms_subscribers                                                          sms_subscribers[]
+  surge_incidents                                                          surge_incidents[]
+  system_configurations                                                    system_configurations[]
+  triage_tags                                                              triage_tags[]
+  user_sessions                                                            user_sessions[]
+  user_verifications                                                       user_verifications[]
+  users                                                                    User?                          @relation("usersTousers", fields: [created_by_id], references: [id], onUpdate: NoAction)
+  other_users                                                              User[]                         @relation("usersTousers")
+  webauthn_authentication_log                                              webauthn_authentication_log[]
+  webauthn_challenges                                                      webauthn_challenges[]
+  webauthn_credentials                                                     webauthn_credentials[]
+
+  @@index([barangay], map: "idx_users_barangay")
+  @@index([created_at(sort: Desc)], map: "idx_users_created_at")
+  @@index([full_name(ops: raw("gin_trgm_ops"))], map: "idx_users_name_trgm", type: Gin)
+  @@index([role], map: "idx_users_role")
+  @@index([status], map: "idx_users_status")
+  @@map("users")
+}
+
+model EmergencyContact {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id         String   @db.Uuid
+  contact_name    String   @db.VarChar(255)
+  relationship    String?  @db.VarChar(100)
+  phone_number    String   @db.VarChar(20)
+  email           String?  @db.VarChar(255)
+  priority_order  Int      @default(1) @db.SmallInt
+  notify_on_alert Boolean  @default(true)
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+  users           User     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_emergency_contacts_user")
+  @@map("emergency_contacts")
+}
+
+model MedicalProfile {
+  id                  String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id             String              @unique @db.Uuid
+  consent_record_id   String              @db.Uuid
+  blood_type          String?             @db.VarChar(5)
+  allergies           String[]
+  current_medications String[]
+  medical_conditions  String[]
+  disabilities        String[]
+  responder_notes     String?
+  last_reviewed_at    DateTime?           @db.Timestamptz(6)
+  created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime            @default(now()) @db.Timestamptz(6)
+  incident_patients   incident_patients[]
+  consent_records     consent_records     @relation(fields: [consent_record_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users               User                @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("medical_profiles")
+}
+
+model Organization {
+  id                                                                   String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                                                                 String                         @db.VarChar(255)
+  short_name                                                           String?                        @db.VarChar(50)
+  organization_type                                                    organization_type
+  barangay                                                             String?                        @db.VarChar(100)
+  municipality                                                         String?                        @default("Bocaue") @db.VarChar(100)
+  province                                                             String?                        @default("Bulacan") @db.VarChar(100)
+  address                                                              String?
+  location                                                             Unsupported("geography")?
+  contact_number                                                       String?                        @db.VarChar(20)
+  email                                                                String?                        @db.VarChar(255)
+  operational_area                                                     Unsupported("geography")?
+  is_active                                                            Boolean                        @default(true)
+  joined_at                                                            DateTime                       @default(now()) @db.Timestamptz(6)
+  created_at                                                           DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at                                                           DateTime                       @default(now()) @db.Timestamptz(6)
+  announcements                                                        Announcement[]
+  dispatches                                                           dispatches[]
+  facilities                                                           Facility[]
+  ics_assignments                                                      ics_assignments[]
+  incident_agency_participants                                         incident_agency_participants[]
+  incident_messages                                                    incident_messages[]
+  incident_metrics                                                     incident_metrics[]
+  organization_memberships                                             organization_memberships[]
+  resource_requests_resource_requests_providing_org_idToorganizations  ResourceRequest[]              @relation("resource_requests_providing_org_idToorganizations")
+  resource_requests_resource_requests_requesting_org_idToorganizations ResourceRequest[]              @relation("resource_requests_requesting_org_idToorganizations")
+  resources                                                            resources[]
+  sla_policies                                                         sla_policies[]
+  surge_incidents                                                      surge_incidents[]
+  vehicles                                                             Vehicle[]
+
+  @@index([organization_type], map: "idx_organizations_type")
+  @@map("organizations")
+}
+
+model Incident {
+  id                           String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  public_reference             String                         @unique @db.VarChar(30)
+  trigger_method               trigger_method                 @default(SOS_BUTTON)
+  client_event_id              String?                        @unique @db.VarChar(100)
+  category                     incident_category
+  priority                     incident_priority              @default(MEDIUM)
+  status                       incident_status                @default(SUBMITTED)
+  consciousness_state          consciousness_state?           @default(UNKNOWN)
+  breathing_status             breathing_status?              @default(UNKNOWN)
+  description                  String?
+  number_of_patients           Int?                           @default(1) @db.SmallInt
+  hazard_flags                 String[]
+  river_level_meters           Decimal?                       @db.Decimal(5, 2)
+  surge_incident_id            String?                        @db.Uuid
+  is_surge_incident            Boolean                        @default(false)
+  submitted_at                 DateTime                       @default(now()) @db.Timestamptz(6)
+  received_at                  DateTime?                      @db.Timestamptz(6)
+  acknowledged_at              DateTime?                      @db.Timestamptz(6)
+  assessed_at                  DateTime?                      @db.Timestamptz(6)
+  dispatch_pending_at          DateTime?                      @db.Timestamptz(6)
+  dispatched_at                DateTime?                      @db.Timestamptz(6)
+  en_route_at                  DateTime?                      @db.Timestamptz(6)
+  on_scene_at                  DateTime?                      @db.Timestamptz(6)
+  resolved_at                  DateTime?                      @db.Timestamptz(6)
+  closed_at                    DateTime?                      @db.Timestamptz(6)
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  alert_triggers               alert_triggers[]
+  audit_logs                   AuditLog[]
+  dispatches                   dispatches[]
+  escalations                  Escalation[]
+  facility_referrals           facility_referrals[]
+  false_alerts                 false_alerts[]
+  feedback_ratings             feedback_ratings[]
+  incident_agency_participants incident_agency_participants[]
+  incident_attachments         IncidentAttachment[]
+  incident_command_structures  incident_command_structures?
+  incident_details             incident_details?
+  incident_events              IncidentEvent[]
+  incident_handovers           incident_handovers[]
+  incident_locations           incident_locations?
+  incident_messages            incident_messages[]
+  incident_metrics             incident_metrics?
+  incident_patients            incident_patients[]
+  incident_reporters           IncidentReporter?
+  incident_resolutions         incident_resolutions?
+  surge_incidents              surge_incidents?               @relation(fields: [surge_incident_id], references: [id], onUpdate: NoAction, map: "fk_surge_incident")
+  location_history             location_history[]
+  notifications                Notification[]
+  offline_event_queue          offline_event_queue[]
+  on_scene_assessments         on_scene_assessments[]
+  resource_recommendations     resource_recommendations[]
+  resource_requests            ResourceRequest[]
+  resource_status_log          resource_status_log[]
+  resources                    resources[]
+  sensitive_data_access_log    sensitive_data_access_log[]
+  transport_records            TransportRecord[]
+  triage_tags                  triage_tags[]
+
+  @@index([category], map: "idx_incidents_category")
+  @@index([status, priority, submitted_at(sort: Desc)], map: "idx_incidents_composite")
+  @@index([priority], map: "idx_incidents_priority")
+  @@index([public_reference], map: "idx_incidents_reference")
+  @@index([status], map: "idx_incidents_status")
+  @@index([submitted_at(sort: Desc)], map: "idx_incidents_submitted_at")
+  @@map("incidents")
+}
+
+model IncidentReporter {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id      String   @unique @db.Uuid
+  user_id          String?  @db.Uuid
+  is_guest         Boolean  @default(false)
+  reporter_name    String?  @db.VarChar(255)
+  reporter_phone   String?  @db.VarChar(20)
+  contact_callback String?  @db.VarChar(20)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  incidents        Incident @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users            User?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([incident_id], map: "idx_reporters_incident")
+  @@index([user_id], map: "idx_reporters_user")
+  @@map("incident_reporters")
+}
+
+model IncidentAttachment {
+  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id       String              @db.Uuid
+  uploaded_by_id    String?             @db.Uuid
+  file_name         String              @db.VarChar(255)
+  file_type         String              @db.VarChar(50)
+  file_size_bytes   Int?
+  storage_bucket    String              @db.VarChar(255)
+  storage_key       String              @db.VarChar(500)
+  storage_url       String?
+  is_processed      Boolean             @default(false)
+  uploaded_at       DateTime            @default(now()) @db.Timestamptz(6)
+  incidents         Incident            @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             User?               @relation(fields: [uploaded_by_id], references: [id], onUpdate: NoAction)
+  incident_messages incident_messages[]
+
+  @@map("incident_attachments")
+}
+
+model IncidentEvent {
+  id                String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id       String           @db.Uuid
+  from_status       incident_status?
+  to_status         incident_status
+  triggered_by_id   String?          @db.Uuid
+  triggered_by_role user_role?
+  notes             String?
+  occurred_at       DateTime         @default(now()) @db.Timestamptz(6)
+  incidents         Incident         @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             User?            @relation(fields: [triggered_by_id], references: [id], onUpdate: NoAction)
+
+  @@index([incident_id, occurred_at(sort: Desc)], map: "idx_incident_events")
+  @@map("incident_events")
+}
+
+model Vehicle {
+  id               String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organization_id  String        @db.Uuid
+  plate_number     String?       @unique @db.VarChar(20)
+  unit_code        String?       @db.VarChar(50)
+  resource_type    resource_type
+  make             String?       @db.VarChar(100)
+  model            String?       @db.VarChar(100)
+  year             Int?          @db.SmallInt
+  capacity_persons Int?          @db.SmallInt
+  is_active        Boolean       @default(true)
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime      @default(now()) @db.Timestamptz(6)
+  resources        resources[]
+  organizations    Organization  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("vehicles")
+}
+
+model Facility {
+  id                    String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organization_id       String?                   @db.Uuid
+  name                  String                    @db.VarChar(255)
+  facility_type         facility_type
+  barangay              String?                   @db.VarChar(100)
+  municipality          String?                   @db.VarChar(100)
+  province              String?                   @db.VarChar(100)
+  address               String?
+  location              Unsupported("geography")?
+  contact_number        String?                   @db.VarChar(20)
+  emergency_contact     String?                   @db.VarChar(20)
+  receiving_status      facility_receiving_status @default(UNKNOWN)
+  capacity_total        Int?                      @db.SmallInt
+  capacity_available    Int?                      @db.SmallInt
+  has_emergency_room    Boolean?                  @default(false)
+  has_icu               Boolean?                  @default(false)
+  blood_bank            Boolean?                  @default(false)
+  is_evacuation_center  Boolean?                  @default(false)
+  elevation_masl        Decimal?                  @db.Decimal(6, 1)
+  is_active             Boolean                   @default(true)
+  last_verified_at      DateTime?                 @db.Timestamptz(6)
+  created_at            DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                  @default(now()) @db.Timestamptz(6)
+  organizations         Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  facility_capabilities facility_capabilities[]
+  facility_referrals    facility_referrals[]
+  transport_records     TransportRecord[]
+
+  @@map("facilities")
+}
+
+model TransportRecord {
+  id                    String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id           String             @db.Uuid
+  dispatch_id           String             @db.Uuid
+  patient_id            String?            @db.Uuid
+  destination_id        String?            @db.Uuid
+  transport_started_at  DateTime?          @db.Timestamptz(6)
+  estimated_arrival_at  DateTime?          @db.Timestamptz(6)
+  arrived_at            DateTime?          @db.Timestamptz(6)
+  handover_completed_at DateTime?          @db.Timestamptz(6)
+  destination_changed   Boolean            @default(false)
+  change_reason         String?
+  created_at            DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime           @default(now()) @db.Timestamptz(6)
+  facilities            Facility?          @relation(fields: [destination_id], references: [id], onUpdate: NoAction)
+  dispatches            dispatches         @relation(fields: [dispatch_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  incidents             Incident           @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  incident_patients     incident_patients? @relation(fields: [patient_id], references: [id], onUpdate: NoAction)
+
+  @@map("transport_records")
+}
+
+model Notification {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id             String?                   @db.Uuid
+  recipient_user_id       String?                   @db.Uuid
+  recipient_phone         String?                   @db.VarChar(20)
+  channel                 notification_channel
+  event_type              String                    @db.VarChar(100)
+  title                   String?                   @db.VarChar(255)
+  body                    String
+  data_payload            Json?
+  sms_payload             String?                   @db.VarChar(160)
+  status                  notification_status       @default(PENDING)
+  retry_count             Int                       @default(0) @db.SmallInt
+  max_retries             Int                       @default(3) @db.SmallInt
+  scheduled_at            DateTime?                 @db.Timestamptz(6)
+  sent_at                 DateTime?                 @db.Timestamptz(6)
+  delivered_at            DateTime?                 @db.Timestamptz(6)
+  failed_at               DateTime?                 @db.Timestamptz(6)
+  failure_reason          String?
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  notification_deliveries notification_deliveries[]
+  incidents               Incident?                 @relation(fields: [incident_id], references: [id], onUpdate: NoAction)
+  users                   User?                     @relation(fields: [recipient_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([channel], map: "idx_notifications_channel")
+  @@index([incident_id], map: "idx_notifications_incident")
+  @@index([recipient_user_id], map: "idx_notifications_recipient")
+  @@index([status], map: "idx_notifications_status")
+  @@map("notifications")
+}
+
+model Escalation {
+  id               String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id      String            @db.Uuid
+  sla_policy_id    String?           @db.Uuid
+  escalation_level escalation_level
+  status           escalation_status @default(ACTIVE)
+  triggered_reason String
+  sla_breach_at    DateTime          @db.Timestamptz(6)
+  notified_user_id String?           @db.Uuid
+  acknowledged_at  DateTime?         @db.Timestamptz(6)
+  resolved_at      DateTime?         @db.Timestamptz(6)
+  created_at       DateTime          @default(now()) @db.Timestamptz(6)
+  incidents        Incident          @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users            User?             @relation(fields: [notified_user_id], references: [id], onUpdate: NoAction)
+  sla_policies     sla_policies?     @relation(fields: [sla_policy_id], references: [id], onUpdate: NoAction)
+
+  @@index([incident_id], map: "idx_escalations_incident")
+  @@index([status], map: "idx_escalations_status")
+  @@map("escalations")
+}
+
+model ResourceRequest {
+  id                                                               String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id                                                      String                  @db.Uuid
+  requesting_org_id                                                String                  @db.Uuid
+  providing_org_id                                                 String?                 @db.Uuid
+  resource_type                                                    resource_type
+  quantity                                                         Int                     @default(1) @db.SmallInt
+  capability_needed                                                String[]
+  priority                                                         incident_priority       @default(HIGH)
+  status                                                           resource_request_status @default(PENDING)
+  request_notes                                                    String?
+  response_notes                                                   String?
+  requested_at                                                     DateTime                @default(now()) @db.Timestamptz(6)
+  fulfilled_at                                                     DateTime?               @db.Timestamptz(6)
+  created_at                                                       DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at                                                       DateTime                @default(now()) @db.Timestamptz(6)
+  incidents                                                        Incident                @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations_resource_requests_providing_org_idToorganizations  Organization?           @relation("resource_requests_providing_org_idToorganizations", fields: [providing_org_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations_resource_requests_requesting_org_idToorganizations Organization            @relation("resource_requests_requesting_org_idToorganizations", fields: [requesting_org_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("resource_requests")
+}
+
+model AuditLog {
+  id          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  actor_id    String?      @db.Uuid
+  actor_role  user_role?
+  action      audit_action
+  entity_type String?      @db.VarChar(100)
+  entity_id   String?      @db.Uuid
+  module_id   String?      @db.VarChar(10)
+  old_values  Json?
+  new_values  Json?
+  ip_address  String?      @db.Inet
+  user_agent  String?
+  incident_id String?      @db.Uuid
+  occurred_at DateTime     @default(now()) @db.Timestamptz(6)
+  users       User?        @relation(fields: [actor_id], references: [id], onUpdate: NoAction)
+  incidents   Incident?    @relation(fields: [incident_id], references: [id], onUpdate: NoAction)
+
+  @@index([action], map: "idx_audit_logs_action")
+  @@index([actor_id], map: "idx_audit_logs_actor")
+  @@index([entity_type, entity_id], map: "idx_audit_logs_entity")
+  @@index([incident_id], map: "idx_audit_logs_incident")
+  @@index([occurred_at(sort: Desc)], map: "idx_audit_logs_occurred")
+  @@map("audit_logs")
+}
+
+model Announcement {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  publisher_id            String                    @db.Uuid
+  organization_id         String?                   @db.Uuid
+  title                   String                    @db.VarChar(500)
+  body                    String
+  category                announcement_category
+  severity                announcement_severity     @default(INFORMATIONAL)
+  scope                   announcement_scope        @default(MUNICIPALITY_WIDE)
+  target_barangays        String[]
+  status                  announcement_status       @default(DRAFT)
+  publish_now             Boolean                   @default(true)
+  scheduled_at            DateTime?                 @db.Timestamptz(6)
+  published_at            DateTime?                 @db.Timestamptz(6)
+  archived_at             DateTime?                 @db.Timestamptz(6)
+  superseded_by_id        String?                   @db.Uuid
+  push_sent_count         Int?                      @default(0)
+  sms_sent_count          Int?                      @default(0)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  announcement_deliveries announcement_deliveries[]
+  organizations           Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  users                   User                      @relation(fields: [publisher_id], references: [id], onUpdate: NoAction)
+  announcements           Announcement?             @relation("announcementsToannouncements", fields: [superseded_by_id], references: [id], onUpdate: NoAction)
+  other_announcements     Announcement[]            @relation("announcementsToannouncements")
+
+  @@index([category], map: "idx_announcements_category")
+  @@index([severity], map: "idx_announcements_severity")
+  @@index([status], map: "idx_announcements_status")
+  @@map("announcements")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model account_lifecycle_events {
+  id                                                    String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id                                               String   @db.Uuid
+  event_type                                            String   @db.VarChar(100)
+  performed_by_id                                       String?  @db.Uuid
+  reason                                                String?
+  occurred_at                                           DateTime @default(now()) @db.Timestamptz(6)
+  users_account_lifecycle_events_performed_by_idTousers User?    @relation("account_lifecycle_events_performed_by_idTousers", fields: [performed_by_id], references: [id], onUpdate: NoAction)
+  users_account_lifecycle_events_user_idTousers         User     @relation("account_lifecycle_events_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model alert_triggers {
+  id                  String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id         String?              @db.Uuid
+  user_id             String?              @db.Uuid
+  trigger_method      trigger_method
+  client_event_id     String               @unique @db.VarChar(100)
+  device_info         Json?
+  shake_magnitude     Decimal?             @db.Decimal(6, 3)
+  latitude            Decimal?             @db.Decimal(10, 7)
+  longitude           Decimal?             @db.Decimal(10, 7)
+  accuracy_meters     Decimal?             @db.Decimal(8, 2)
+  triggered_at        DateTime             @default(now()) @db.Timestamptz(6)
+  cancel_deadline_at  DateTime?            @db.Timestamptz(6)
+  was_cancelled       Boolean              @default(false)
+  cancellation_reason cancellation_reason?
+  cancelled_at        DateTime?            @db.Timestamptz(6)
+  incidents           Incident?            @relation(fields: [incident_id], references: [id], onUpdate: NoAction)
+  users               User?                @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([incident_id], map: "idx_triggers_incident")
+  @@index([trigger_method], map: "idx_triggers_method")
+  @@index([user_id], map: "idx_triggers_user")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model announcement_deliveries {
+  id                String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  announcement_id   String               @db.Uuid
+  channel           notification_channel
+  recipient_user_id String?              @db.Uuid
+  recipient_phone   String?              @db.VarChar(20)
+  sms_subscriber_id String?              @db.Uuid
+  status            notification_status  @default(PENDING)
+  retry_count       Int                  @default(0) @db.SmallInt
+  sent_at           DateTime?            @db.Timestamptz(6)
+  delivered_at      DateTime?            @db.Timestamptz(6)
+  failed_at         DateTime?            @db.Timestamptz(6)
+  failure_reason    String?
+  created_at        DateTime             @default(now()) @db.Timestamptz(6)
+  announcements     Announcement         @relation(fields: [announcement_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             User?                @relation(fields: [recipient_user_id], references: [id], onUpdate: NoAction)
+  sms_subscribers   sms_subscribers?     @relation(fields: [sms_subscriber_id], references: [id], onUpdate: NoAction)
+
+  @@index([announcement_id], map: "idx_ann_deliveries_ann")
+  @@index([status], map: "idx_ann_deliveries_status")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model consent_records {
+  id               String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id          String           @db.Uuid
+  consent_type     String           @db.VarChar(100)
+  status           consent_status   @default(GRANTED)
+  granted_at       DateTime         @default(now()) @db.Timestamptz(6)
+  withdrawn_at     DateTime?        @db.Timestamptz(6)
+  expires_at       DateTime?        @db.Timestamptz(6)
+  ip_address       String?          @db.Inet
+  device_info      Json?
+  created_at       DateTime         @default(now()) @db.Timestamptz(6)
+  users            User             @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  medical_profiles MedicalProfile[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model dispatch_crew {
+  id            String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  dispatch_id   String     @db.Uuid
+  user_id       String     @db.Uuid
+  role_on_scene String?    @db.VarChar(100)
+  added_at      DateTime   @default(now()) @db.Timestamptz(6)
+  dispatches    dispatches @relation(fields: [dispatch_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users         User       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([dispatch_id, user_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model dispatches {
+  id                   String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id          String                 @db.Uuid
+  resource_id          String                 @db.Uuid
+  dispatcher_id        String                 @db.Uuid
+  organization_id      String                 @db.Uuid
+  status               dispatch_status        @default(PENDING)
+  dispatch_notes       String?
+  authorized_at        DateTime               @default(now()) @db.Timestamptz(6)
+  sent_at              DateTime?              @db.Timestamptz(6)
+  accepted_at          DateTime?              @db.Timestamptz(6)
+  rejected_at          DateTime?              @db.Timestamptz(6)
+  rejected_reason      String?
+  completed_at         DateTime?              @db.Timestamptz(6)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  dispatch_crew        dispatch_crew[]
+  users                User                   @relation(fields: [dispatcher_id], references: [id], onUpdate: NoAction)
+  incidents            Incident               @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations        Organization           @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  resources            resources              @relation(fields: [resource_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  facility_referrals   facility_referrals[]
+  on_scene_assessments on_scene_assessments[]
+  transport_records    TransportRecord[]
+
+  @@index([dispatcher_id], map: "idx_dispatches_dispatcher")
+  @@index([incident_id], map: "idx_dispatches_incident")
+  @@index([resource_id], map: "idx_dispatches_resource")
+  @@index([status], map: "idx_dispatches_status")
+}
+
+model facility_capabilities {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  facility_id     String   @db.Uuid
+  capability_name String   @db.VarChar(100)
+  is_available    Boolean  @default(true)
+  notes           String?
+  facilities      Facility @relation(fields: [facility_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([facility_id, capability_name])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model facility_referrals {
+  id                    String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id           String             @db.Uuid
+  dispatch_id           String?            @db.Uuid
+  facility_id           String             @db.Uuid
+  patient_id            String?            @db.Uuid
+  coordinated_by_id     String?            @db.Uuid
+  pre_arrival_notes     String?
+  eta_minutes           Int?               @db.SmallInt
+  acknowledgment_status String?            @default("PENDING") @db.VarChar(50)
+  acknowledged_at       DateTime?          @db.Timestamptz(6)
+  patient_arrived_at    DateTime?          @db.Timestamptz(6)
+  created_at            DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime           @default(now()) @db.Timestamptz(6)
+  users                 User?              @relation(fields: [coordinated_by_id], references: [id], onUpdate: NoAction)
+  dispatches            dispatches?        @relation(fields: [dispatch_id], references: [id], onUpdate: NoAction)
+  facilities            Facility           @relation(fields: [facility_id], references: [id], onUpdate: NoAction)
+  incidents             Incident           @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  incident_patients     incident_patients? @relation(fields: [patient_id], references: [id], onUpdate: NoAction)
+
+  @@index([facility_id], map: "idx_referrals_facility")
+  @@index([incident_id], map: "idx_referrals_incident")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model false_alerts {
+  id                                         String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id                                String           @db.Uuid
+  user_id                                    String?          @db.Uuid
+  classified_by_id                           String?          @db.Uuid
+  false_alert_type                           false_alert_type
+  notes                                      String?
+  classified_at                              DateTime         @default(now()) @db.Timestamptz(6)
+  created_at                                 DateTime         @default(now()) @db.Timestamptz(6)
+  users_false_alerts_classified_by_idTousers User?            @relation("false_alerts_classified_by_idTousers", fields: [classified_by_id], references: [id], onUpdate: NoAction)
+  incidents                                  Incident         @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_false_alerts_user_idTousers          User?            @relation("false_alerts_user_idTousers", fields: [user_id], references: [id], onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model feedback_ratings {
+  id                   String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id          String   @db.Uuid
+  submitted_by_id      String?  @db.Uuid
+  overall_rating       Int?     @db.SmallInt
+  response_time_rating Int?     @db.SmallInt
+  responder_rating     Int?     @db.SmallInt
+  app_usability_rating Int?     @db.SmallInt
+  comments             String?
+  submitted_at         DateTime @default(now()) @db.Timestamptz(6)
+  incidents            Incident @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                User?    @relation(fields: [submitted_by_id], references: [id], onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model first_aid_guides {
+  id               String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  category         incident_category
+  title            String             @db.VarChar(255)
+  content_fil      String
+  content_en       String
+  steps            Json
+  is_active        Boolean            @default(true)
+  display_order    Int?               @default(1) @db.SmallInt
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  incident_details incident_details[]
+}
+
+model ics_assignments {
+  id                          String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ics_id                      String                      @db.Uuid
+  user_id                     String                      @db.Uuid
+  organization_id             String?                     @db.Uuid
+  position                    ics_position
+  assigned_at                 DateTime                    @default(now()) @db.Timestamptz(6)
+  relieved_at                 DateTime?                   @db.Timestamptz(6)
+  incident_command_structures incident_command_structures @relation(fields: [ics_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations               Organization?               @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                       User                        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([ics_id, position, user_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_agency_participants {
+  id               String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id      String       @db.Uuid
+  organization_id  String       @db.Uuid
+  invited_by_id    String?      @db.Uuid
+  joined_at        DateTime     @default(now()) @db.Timestamptz(6)
+  left_at          DateTime?    @db.Timestamptz(6)
+  role_in_incident String?      @db.VarChar(100)
+  incidents        Incident     @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users            User?        @relation(fields: [invited_by_id], references: [id], onUpdate: NoAction)
+  organizations    Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([incident_id, organization_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_command_structures {
+  id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id     String            @unique @db.Uuid
+  activated_at    DateTime          @default(now()) @db.Timestamptz(6)
+  deactivated_at  DateTime?         @db.Timestamptz(6)
+  objectives      String[]
+  situation_notes String?
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime          @default(now()) @db.Timestamptz(6)
+  ics_assignments ics_assignments[]
+  incidents       Incident          @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_details {
+  id                 String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id        String            @unique @db.Uuid
+  subcategory        String?           @db.VarChar(100)
+  people_affected    Int?              @default(1) @db.SmallInt
+  property_damage    Boolean?          @default(false)
+  fire_spreading     Boolean?          @default(false)
+  road_blocked       Boolean?          @default(false)
+  water_level_note   String?           @db.VarChar(255)
+  additional_notes   String?
+  first_aid_guide_id String?           @db.Uuid
+  submitted_at       DateTime          @default(now()) @db.Timestamptz(6)
+  first_aid_guides   first_aid_guides? @relation(fields: [first_aid_guide_id], references: [id], onUpdate: NoAction, map: "fk_incident_details_first_aid")
+  incidents          Incident          @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_handovers {
+  id                                           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id                                  String    @db.Uuid
+  from_user_id                                 String    @db.Uuid
+  to_user_id                                   String    @db.Uuid
+  situation_summary                            String
+  pending_actions                              String[]
+  resources_in_field                           Json?
+  handed_over_at                               DateTime  @default(now()) @db.Timestamptz(6)
+  acknowledged_at                              DateTime? @db.Timestamptz(6)
+  users_incident_handovers_from_user_idTousers User      @relation("incident_handovers_from_user_idTousers", fields: [from_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  incidents                                    Incident  @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_incident_handovers_to_user_idTousers   User      @relation("incident_handovers_to_user_idTousers", fields: [to_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_locations {
+  id                   String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id          String                    @unique @db.Uuid
+  latitude             Decimal                   @db.Decimal(10, 7)
+  longitude            Decimal                   @db.Decimal(10, 7)
+  accuracy_meters      Decimal?                  @db.Decimal(8, 2)
+  altitude_meters      Decimal?                  @db.Decimal(8, 2)
+  point                Unsupported("geography")?
+  formatted_address    String?
+  street               String?                   @db.VarChar(255)
+  barangay             String?                   @db.VarChar(100)
+  municipality         String?                   @db.VarChar(100)
+  province             String?                   @db.VarChar(100)
+  geocoding_confidence Decimal?                  @db.Decimal(3, 2)
+  captured_at          DateTime                  @default(now()) @db.Timestamptz(6)
+  source               String?                   @default("GPS") @db.VarChar(50)
+  incidents            Incident                  @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([barangay], map: "idx_locations_barangay")
+  @@index([incident_id], map: "idx_locations_incident")
+  @@index([point], map: "idx_locations_point", type: Gist)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_messages {
+  id                   String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id          String              @db.Uuid
+  sender_id            String              @db.Uuid
+  organization_id      String?             @db.Uuid
+  message_text         String
+  attachment_id        String?             @db.Uuid
+  is_deleted           Boolean             @default(false)
+  sent_at              DateTime            @default(now()) @db.Timestamptz(6)
+  incident_attachments IncidentAttachment? @relation(fields: [attachment_id], references: [id], onUpdate: NoAction)
+  incidents            Incident            @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations        Organization?       @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  users                User                @relation(fields: [sender_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  message_reads        message_reads[]
+
+  @@index([incident_id, sent_at(sort: Desc)], map: "idx_messages_incident")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_metrics {
+  id                        String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id               String               @unique @db.Uuid
+  organization_id           String?              @db.Uuid
+  category                  incident_category?
+  priority                  incident_priority?
+  barangay                  String?              @db.VarChar(100)
+  trigger_method            trigger_method?
+  submitted_at              DateTime?            @db.Timestamptz(6)
+  acknowledged_at           DateTime?            @db.Timestamptz(6)
+  dispatched_at             DateTime?            @db.Timestamptz(6)
+  on_scene_at               DateTime?            @db.Timestamptz(6)
+  resolved_at               DateTime?            @db.Timestamptz(6)
+  acknowledge_duration_secs Int?
+  dispatch_duration_secs    Int?
+  response_duration_secs    Int?
+  total_duration_secs       Int?
+  acknowledge_sla_met       Boolean?
+  dispatch_sla_met          Boolean?
+  final_status              incident_status?
+  patient_disposition       patient_disposition?
+  aggregated_at             DateTime             @default(now()) @db.Timestamptz(6)
+  incidents                 Incident             @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations             Organization?        @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([barangay], map: "idx_metrics_barangay")
+  @@index([category], map: "idx_metrics_category")
+  @@index([organization_id], map: "idx_metrics_org")
+  @@index([submitted_at(sort: Desc)], map: "idx_metrics_submitted")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_patients {
+  id                     String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id            String                 @db.Uuid
+  is_reporter            Boolean                @default(false)
+  is_unknown             Boolean                @default(false)
+  patient_name           String?                @db.VarChar(255)
+  approximate_age        Int?                   @db.SmallInt
+  sex                    String?                @db.VarChar(20)
+  user_id                String?                @db.Uuid
+  medical_profile_id     String?                @db.Uuid
+  scene_assessment_notes String?
+  vitals_at_scene        Json?
+  interventions_done     String[]
+  created_at             DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime               @default(now()) @db.Timestamptz(6)
+  patient_sequence       Int                    @default(1) @db.SmallInt
+  facility_referrals     facility_referrals[]
+  incidents              Incident               @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  medical_profiles       MedicalProfile?        @relation(fields: [medical_profile_id], references: [id], onUpdate: NoAction)
+  users                  User?                  @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  on_scene_assessments   on_scene_assessments[]
+  transport_records      TransportRecord[]
+  triage_tags            triage_tags[]
+
+  @@index([incident_id], map: "idx_patients_incident")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model incident_resolutions {
+  id                       String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id              String               @unique @db.Uuid
+  closed_by_id             String               @db.Uuid
+  outcome                  String               @db.VarChar(100)
+  patient_disposition      patient_disposition?
+  time_to_acknowledge_secs Int?
+  time_to_dispatch_secs    Int?
+  time_to_on_scene_secs    Int?
+  time_to_resolved_secs    Int?
+  total_response_secs      Int?
+  resolution_notes         String?
+  follow_up_required       Boolean              @default(false)
+  follow_up_notes          String?
+  closed_at                DateTime             @default(now()) @db.Timestamptz(6)
+  users                    User                 @relation(fields: [closed_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  incidents                Incident             @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model location_history {
+  id              String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id     String                    @db.Uuid
+  user_id         String?                   @db.Uuid
+  resource_id     String?                   @db.Uuid
+  latitude        Decimal                   @db.Decimal(10, 7)
+  longitude       Decimal                   @db.Decimal(10, 7)
+  accuracy_meters Decimal?                  @db.Decimal(8, 2)
+  speed_kmh       Decimal?                  @db.Decimal(6, 2)
+  heading_degrees Decimal?                  @db.Decimal(5, 2)
+  point           Unsupported("geography")?
+  recorded_at     DateTime                  @default(now()) @db.Timestamptz(6)
+  resources       resources?                @relation(fields: [resource_id], references: [id], onUpdate: NoAction, map: "fk_location_history_resource")
+  incidents       Incident                  @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           User?                     @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([incident_id, recorded_at(sort: Desc)], map: "idx_loc_history_incident")
+  @@index([point], map: "idx_loc_history_point", type: Gist)
+  @@index([resource_id, recorded_at(sort: Desc)], map: "idx_loc_history_resource")
+}
+
+model message_reads {
+  id                String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  message_id        String            @db.Uuid
+  user_id           String            @db.Uuid
+  read_at           DateTime          @default(now()) @db.Timestamptz(6)
+  incident_messages incident_messages @relation(fields: [message_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             User              @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([message_id, user_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model notification_deliveries {
+  id                  String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  notification_id     String       @db.Uuid
+  provider            String       @db.VarChar(50)
+  provider_message_id String?      @db.VarChar(255)
+  provider_status     String?      @db.VarChar(100)
+  provider_response   Json?
+  delivered_at        DateTime?    @db.Timestamptz(6)
+  created_at          DateTime     @default(now()) @db.Timestamptz(6)
+  notifications       Notification @relation(fields: [notification_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model offline_event_queue {
+  id                 String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  client_event_id    String      @unique @db.VarChar(100)
+  user_id            String?     @db.Uuid
+  event_type         String      @db.VarChar(100)
+  payload            Json
+  device_info        Json?
+  queued_at_device   DateTime    @db.Timestamptz(6)
+  received_at_server DateTime    @default(now()) @db.Timestamptz(6)
+  sync_status        sync_status @default(PENDING)
+  incident_id        String?     @db.Uuid
+  processed_at       DateTime?   @db.Timestamptz(6)
+  error_message      String?
+  created_at         DateTime    @default(now()) @db.Timestamptz(6)
+  incidents          Incident?   @relation(fields: [incident_id], references: [id], onUpdate: NoAction)
+  users              User?       @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([sync_status], map: "idx_offline_queue_status")
+  @@index([user_id], map: "idx_offline_queue_user")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model on_scene_assessments {
+  id                  String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id         String               @db.Uuid
+  patient_id          String?              @db.Uuid
+  dispatch_id         String?              @db.Uuid
+  assessed_by_id      String               @db.Uuid
+  blood_pressure_sys  Int?                 @db.SmallInt
+  blood_pressure_dia  Int?                 @db.SmallInt
+  pulse_bpm           Int?                 @db.SmallInt
+  respiratory_rate    Int?                 @db.SmallInt
+  temperature_celsius Decimal?             @db.Decimal(4, 1)
+  oxygen_saturation   Int?                 @db.SmallInt
+  gcs_score           Int?                 @db.SmallInt
+  consciousness_state consciousness_state?
+  breathing_status    breathing_status?
+  visible_injuries    String[]
+  interventions       String[]
+  triage_tag          String?              @db.VarChar(20)
+  assessment_notes    String?
+  assessed_at         DateTime             @default(now()) @db.Timestamptz(6)
+  users               User                 @relation(fields: [assessed_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  dispatches          dispatches?          @relation(fields: [dispatch_id], references: [id], onUpdate: NoAction)
+  incidents           Incident             @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  incident_patients   incident_patients?   @relation(fields: [patient_id], references: [id], onUpdate: NoAction)
+
+  @@index([incident_id], map: "idx_assessments_incident")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model organization_memberships {
+  id              String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organization_id String       @db.Uuid
+  user_id         String       @db.Uuid
+  position        String?      @db.VarChar(100)
+  is_active       Boolean      @default(true)
+  joined_at       DateTime     @default(now()) @db.Timestamptz(6)
+  left_at         DateTime?    @db.Timestamptz(6)
+  organizations   Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           User         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, user_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model permissions {
+  id               String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name             String             @unique @db.VarChar(100)
+  description      String?
+  module_id        String?            @db.VarChar(10)
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  role_permissions role_permissions[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model resource_capabilities {
+  id                              String                            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                            String                            @unique @db.VarChar(100)
+  description                     String?
+  category                        String?                           @db.VarChar(50)
+  created_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  resource_capability_assignments resource_capability_assignments[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model resource_capability_assignments {
+  id                    String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  resource_id           String                @db.Uuid
+  capability_id         String                @db.Uuid
+  is_verified           Boolean               @default(false)
+  assigned_at           DateTime              @default(now()) @db.Timestamptz(6)
+  resource_capabilities resource_capabilities @relation(fields: [capability_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  resources             resources             @relation(fields: [resource_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([resource_id, capability_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model resource_recommendations {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id     String    @db.Uuid
+  resource_id     String    @db.Uuid
+  rank            Int       @db.SmallInt
+  score           Decimal?  @db.Decimal(5, 2)
+  distance_meters Int?
+  eta_seconds     Int?
+  reasoning       Json?
+  generated_at    DateTime  @default(now()) @db.Timestamptz(6)
+  incidents       Incident  @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  resources       resources @relation(fields: [resource_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model resource_status_log {
+  id            String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  resource_id   String                    @db.Uuid
+  from_status   resource_status?
+  to_status     resource_status
+  latitude      Decimal?                  @db.Decimal(10, 7)
+  longitude     Decimal?                  @db.Decimal(10, 7)
+  point         Unsupported("geography")?
+  speed_kmh     Decimal?                  @db.Decimal(6, 2)
+  incident_id   String?                   @db.Uuid
+  changed_by_id String?                   @db.Uuid
+  recorded_at   DateTime                  @default(now()) @db.Timestamptz(6)
+  users         User?                     @relation(fields: [changed_by_id], references: [id], onUpdate: NoAction)
+  incidents     Incident?                 @relation(fields: [incident_id], references: [id], onUpdate: NoAction)
+  resources     resources                 @relation(fields: [resource_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([resource_id, recorded_at(sort: Desc)], map: "idx_resource_status_log")
+  @@index([point], map: "idx_resource_status_point", type: Gist)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model resources {
+  id                              String                            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organization_id                 String                            @db.Uuid
+  vehicle_id                      String?                           @db.Uuid
+  name                            String                            @db.VarChar(255)
+  call_sign                       String?                           @db.VarChar(50)
+  resource_type                   resource_type
+  status                          resource_status                   @default(AVAILABLE)
+  current_incident_id             String?                           @db.Uuid
+  base_location                   Unsupported("geography")?
+  base_barangay                   String?                           @db.VarChar(100)
+  is_active                       Boolean                           @default(true)
+  created_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  dispatches                      dispatches[]
+  location_history                location_history[]
+  resource_capability_assignments resource_capability_assignments[]
+  resource_recommendations        resource_recommendations[]
+  resource_status_log             resource_status_log[]
+  incidents                       Incident?                         @relation(fields: [current_incident_id], references: [id], onUpdate: NoAction)
+  organizations                   Organization                      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vehicles                        Vehicle?                          @relation(fields: [vehicle_id], references: [id], onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_resources_org")
+  @@index([status], map: "idx_resources_status")
+  @@index([resource_type], map: "idx_resources_type")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model risk_areas {
+  id                     String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                   String                    @db.VarChar(255)
+  description            String?
+  risk_type              incident_category
+  risk_level             String                    @default("MODERATE") @db.VarChar(20)
+  area_boundary          Unsupported("geography")?
+  barangay               String?                   @db.VarChar(100)
+  flood_threshold_meters Decimal?                  @db.Decimal(5, 2)
+  is_active              Boolean                   @default(true)
+  created_at             DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                  @default(now()) @db.Timestamptz(6)
+
+  @@index([area_boundary], map: "idx_risk_areas_boundary", type: Gist)
+  @@index([risk_type], map: "idx_risk_areas_type")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model role_permissions {
+  id            String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  role          user_role
+  permission_id String      @db.Uuid
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  permissions   permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([role, permission_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model sensitive_data_access_log {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  accessor_id String    @db.Uuid
+  data_type   String    @db.VarChar(100)
+  entity_id   String    @db.Uuid
+  purpose     String?
+  incident_id String?   @db.Uuid
+  accessed_at DateTime  @default(now()) @db.Timestamptz(6)
+  users       User      @relation(fields: [accessor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  incidents   Incident? @relation(fields: [incident_id], references: [id], onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model sla_policies {
+  id                         String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organization_id            String             @db.Uuid
+  incident_category          incident_category?
+  priority                   incident_priority?
+  acknowledge_threshold_secs Int                @default(120)
+  dispatch_threshold_secs    Int                @default(300)
+  on_scene_threshold_secs    Int                @default(900)
+  is_active                  Boolean            @default(true)
+  created_at                 DateTime           @default(now()) @db.Timestamptz(6)
+  escalations                Escalation[]
+  organizations              Organization       @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model sms_subscribers {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  phone_number            String                    @unique @db.VarChar(20)
+  user_id                 String?                   @db.Uuid
+  barangay_preference     String?                   @db.VarChar(100)
+  scope_preference        announcement_scope?       @default(MUNICIPALITY_WIDE)
+  is_active               Boolean                   @default(true)
+  subscribed_at           DateTime                  @default(now()) @db.Timestamptz(6)
+  opted_out_at            DateTime?                 @db.Timestamptz(6)
+  opt_out_source          String?                   @db.VarChar(50)
+  announcement_deliveries announcement_deliveries[]
+  users                   User?                     @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model spatial_ref_sys {
+  srid      Int     @id
+  auth_name String? @db.VarChar(256)
+  auth_srid Int?
+  srtext    String? @db.VarChar(2048)
+  proj4text String? @db.VarChar(2048)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model surge_incidents {
+  id                 String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  declared_by_id     String                    @db.Uuid
+  organization_id    String                    @db.Uuid
+  name               String                    @db.VarChar(255)
+  description        String?
+  category           incident_category
+  affected_area      Unsupported("geography")?
+  affected_barangays String[]
+  status             surge_status              @default(ACTIVE)
+  bocaue_river_level Decimal?                  @db.Decimal(5, 2)
+  activated_at       DateTime                  @default(now()) @db.Timestamptz(6)
+  deactivated_at     DateTime?                 @db.Timestamptz(6)
+  created_at         DateTime                  @default(now()) @db.Timestamptz(6)
+  incidents          Incident[]
+  users              User                      @relation(fields: [declared_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations      Organization              @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  triage_tags        triage_tags[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model system_configurations {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  config_key    String   @unique @db.VarChar(255)
+  config_value  Json
+  description   String?
+  is_sensitive  Boolean  @default(false)
+  updated_by_id String?  @db.Uuid
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+  users         User?    @relation(fields: [updated_by_id], references: [id], onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model triage_tags {
+  id                String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  surge_id          String             @db.Uuid
+  patient_id        String?            @db.Uuid
+  incident_id       String?            @db.Uuid
+  triage_color      String             @db.VarChar(20)
+  triage_notes      String?
+  tagged_by_id      String?            @db.Uuid
+  tagged_at         DateTime           @default(now()) @db.Timestamptz(6)
+  incidents         Incident?          @relation(fields: [incident_id], references: [id], onUpdate: NoAction)
+  incident_patients incident_patients? @relation(fields: [patient_id], references: [id], onUpdate: NoAction)
+  surge_incidents   surge_incidents    @relation(fields: [surge_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             User?              @relation(fields: [tagged_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_sessions {
+  id                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id            String   @db.Uuid
+  token_hash         String   @unique @db.VarChar(255)
+  refresh_token_hash String?  @unique @db.VarChar(255)
+  device_info        Json?
+  ip_address         String?  @db.Inet
+  is_revoked         Boolean  @default(false)
+  last_active_at     DateTime @default(now()) @db.Timestamptz(6)
+  expires_at         DateTime @db.Timestamptz(6)
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  users              User     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expires_at], map: "idx_user_sessions_expires")
+  @@index([user_id], map: "idx_user_sessions_user_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_verifications {
+  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id           String              @db.Uuid
+  verification_type verification_type
+  token             String              @db.VarChar(255)
+  status            verification_status @default(PENDING)
+  expires_at        DateTime            @db.Timestamptz(6)
+  verified_at       DateTime?           @db.Timestamptz(6)
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  users             User                @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([token], map: "idx_user_verifications_token")
+  @@index([user_id], map: "idx_user_verifications_user")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model webauthn_authentication_log {
+  id                   String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id              String?               @db.Uuid
+  credential_id        String?               @db.Uuid
+  was_successful       Boolean
+  failure_reason       String?               @db.VarChar(255)
+  ip_address           String?               @db.Inet
+  user_agent           String?
+  occurred_at          DateTime              @default(now()) @db.Timestamptz(6)
+  webauthn_credentials webauthn_credentials? @relation(fields: [credential_id], references: [id], onUpdate: NoAction)
+  users                User?                 @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([credential_id], map: "idx_webauthn_auth_log_credential")
+  @@index([user_id, occurred_at(sort: Desc)], map: "idx_webauthn_auth_log_user")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model webauthn_challenges {
+  id            String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id       String?                  @db.Uuid
+  ceremony_type webauthn_ceremony_type
+  status        webauthn_ceremony_status @default(PENDING)
+  challenge     String                   @unique
+  ip_address    String?                  @db.Inet
+  user_agent    String?
+  expires_at    DateTime                 @db.Timestamptz(6)
+  completed_at  DateTime?                @db.Timestamptz(6)
+  created_at    DateTime                 @default(now()) @db.Timestamptz(6)
+  users         User?                    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expires_at], map: "idx_webauthn_challenges_expires")
+  @@index([status], map: "idx_webauthn_challenges_status")
+  @@index([user_id], map: "idx_webauthn_challenges_user")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model webauthn_credentials {
+  id                          String                        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id                     String                        @db.Uuid
+  credential_id               String                        @unique
+  public_key                  String
+  sign_count                  BigInt                        @default(0)
+  aaguid                      String?                       @db.Uuid
+  attestation_format          String?                       @db.VarChar(50)
+  transports                  webauthn_transport[]
+  is_backup_eligible          Boolean                       @default(false)
+  is_backed_up                Boolean                       @default(false)
+  device_label                String?                       @db.VarChar(150)
+  is_active                   Boolean                       @default(true)
+  last_used_at                DateTime?                     @db.Timestamptz(6)
+  last_used_ip                String?                       @db.Inet
+  revoked_at                  DateTime?                     @db.Timestamptz(6)
+  revoked_reason              String?                       @db.VarChar(255)
+  created_at                  DateTime                      @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime                      @default(now()) @db.Timestamptz(6)
+  webauthn_authentication_log webauthn_authentication_log[]
+  users                       User                          @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_webauthn_credentials_user")
+}
+
+enum announcement_category {
+  CLASS_SUSPENSION
+  FLOOD_ALERT
+  EVACUATION_ORDER
+  ROAD_CLOSURE
+  FIRE_ADVISORY
+  INDUSTRIAL_HAZARD
+  POST_DISASTER_UPDATE
+  RESCUE_UPDATE
+  GENERAL_INFORMATION
+}
+
+enum announcement_scope {
+  MUNICIPALITY_WIDE
+  BARANGAY_SPECIFIC
+  CATEGORY_SPECIFIC
+}
+
+enum announcement_severity {
+  INFORMATIONAL
+  ADVISORY
+  WARNING
+  CRITICAL
+}
+
+enum announcement_status {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+  SUPERSEDED
+}
+
+enum audit_action {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  PERMISSION_DENIED
+  STATUS_CHANGE
+  DISPATCH
+  ESCALATE
+  PUBLISH
+  SUBSCRIBE
+  UNSUBSCRIBE
+  CONSENT_GRANT
+  CONSENT_WITHDRAW
+  DATA_EXPORT
+  SYSTEM
+}
+
+enum breathing_status {
+  NORMAL
+  DIFFICULTY
+  NOT_BREATHING
+  UNKNOWN
+}
+
+enum cancellation_reason {
+  ACCIDENTAL_TRIGGER
+  SITUATION_RESOLVED
+  DUPLICATE_REPORT
+  WRONG_APP
+  TEST
+  OTHER
+}
+
+enum consciousness_state {
+  CONSCIOUS
+  UNCONSCIOUS
+  ALTERED
+  UNKNOWN
+}
+
+enum consent_status {
+  GRANTED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum dispatch_status {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum escalation_level {
+  LEVEL_1_SUPERVISOR
+  LEVEL_2_INCIDENT_COMMANDER
+  LEVEL_3_ADMINISTRATOR
+  LEVEL_4_DRRMO
+}
+
+enum escalation_status {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  CANCELLED
+}
+
+enum facility_receiving_status {
+  OPEN
+  AT_CAPACITY
+  CLOSED
+  EMERGENCY_ONLY
+  UNKNOWN
+}
+
+enum facility_type {
+  HOSPITAL
+  EVACUATION_CENTER
+  BARANGAY_HALL
+  RELIEF_CENTER
+  CLINIC
+  OTHER
+}
+
+enum false_alert_type {
+  ACCIDENTAL
+  DUPLICATE
+  TEST
+  PRANK
+  MISIDENTIFIED
+  OTHER
+}
+
+enum ics_position {
+  INCIDENT_COMMANDER
+  OPERATIONS_SECTION_CHIEF
+  LOGISTICS_SECTION_CHIEF
+  PLANNING_SECTION_CHIEF
+  SAFETY_OFFICER
+  PUBLIC_INFORMATION_OFFICER
+  LIAISON_OFFICER
+}
+
+enum incident_category {
+  MEDICAL
+  ROAD_ACCIDENT
+  FLOOD
+  RESCUE
+  FIRE
+  INDUSTRIAL
+  DEBRIS
+  OTHER
+}
+
+enum incident_priority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum incident_status {
+  DRAFT
+  SUBMITTED
+  RECEIVED
+  ACKNOWLEDGED
+  ASSESSED
+  DISPATCH_PENDING
+  DISPATCHED
+  EN_ROUTE
+  ON_SCENE
+  TRANSPORTING
+  ASSISTING
+  RESOLVED
+  CLOSED
+  CANCELLED
+  FALSE_ALERT
+  DUPLICATE
+  UNABLE_TO_RESPOND
+  REFERRED
+}
+
+enum notification_channel {
+  PUSH
+  SMS
+  IN_APP
+  EMAIL
+}
+
+enum notification_status {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  RETRYING
+  CANCELLED
+}
+
+enum organization_type {
+  MDRRMO
+  BFP
+  PNP
+  HOSPITAL
+  EMS_PROVIDER
+  NGO
+  LGU
+  OTHER
+}
+
+enum patient_disposition {
+  TREATED_ON_SCENE
+  TRANSPORTED_TO_HOSPITAL
+  TRANSPORTED_TO_EVACUATION_CENTER
+  REFUSED_TRANSPORT
+  DECEASED_ON_SCENE
+  TRANSFERRED_TO_OTHER_AGENCY
+  UNABLE_TO_LOCATE
+  NO_PATIENT_FOUND
+  OTHER
+}
+
+enum resource_request_status {
+  PENDING
+  OFFERED
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  FULFILLED
+}
+
+enum resource_status {
+  AVAILABLE
+  DISPATCHED
+  EN_ROUTE
+  ON_SCENE
+  TRANSPORTING
+  RETURNING
+  OUT_OF_SERVICE
+  OFFLINE
+  RESERVED
+}
+
+enum resource_type {
+  AMBULANCE
+  RESCUE_BOAT
+  FIRE_TRUCK
+  RESCUE_TRUCK
+  CLEARING_EQUIPMENT
+  MOTORCYCLE_RESPONDER
+  COMMAND_VEHICLE
+  OTHER
+}
+
+enum surge_status {
+  INACTIVE
+  MONITORING
+  ACTIVE
+  DEACTIVATING
+}
+
+enum sync_status {
+  PENDING
+  SYNCED
+  FAILED
+  DUPLICATE_REJECTED
+}
+
+enum trigger_method {
+  SOS_BUTTON
+  SHAKE_GESTURE
+  MANUAL_REPORT
+  DISPATCHER_CREATED
+  SYSTEM_GENERATED
+}
+
+enum user_role {
+  CITIZEN
+  BYSTANDER
+  DISPATCHER
+  SUPERVISOR
+  RESPONDER
+  HOSPITAL_USER
+  ORG_ADMINISTRATOR
+  ANNOUNCEMENTS_PUBLISHER
+  SYSTEM_ADMINISTRATOR
+}
+
+enum user_status {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum verification_status {
+  PENDING
+  VERIFIED
+  EXPIRED
+  CANCELLED
+}
+
+enum verification_type {
+  EMAIL
+  PHONE
+}
+
+enum webauthn_ceremony_status {
+  PENDING
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
+enum webauthn_ceremony_type {
+  REGISTRATION
+  AUTHENTICATION
+}
+
+enum webauthn_transport {
+  USB
+  NFC
+  BLE
+  INTERNAL
+  HYBRID
+  SMART_CARD
+}
