@@ -86,4 +86,14 @@ export class DisasterModeController {
   async resources() {
     return this.disasterModeService.getAvailableResources();
   }
+
+  @Post('broadcast')
+  @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'Send surge broadcast to all responders (MOD-52)' })
+  async broadcast(
+    @Body() body: { surgeId: string; message: string },
+    @Request() req: any,
+  ) {
+    return this.disasterModeService.broadcast(body, req.user.id);
+  }
 }

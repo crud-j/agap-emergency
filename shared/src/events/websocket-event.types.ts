@@ -16,4 +16,5 @@ export type AgapWebSocketPayloadMap = {
   'incident.assigned': IncidentAssignedPayload;
   'responder.location_updated': ResponderLocationUpdatedPayload;
   'responder.status_changed': ResponderStatusChangedPayload;
+  'responder.eta_updated': Record<string, unknown>;
 };

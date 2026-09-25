@@ -4,6 +4,7 @@ export const RESPONDER_EVENTS = {
   LOCATION_UPDATED: 'responder.location_updated',
   STATUS_CHANGED: 'responder.status_changed',
   AVAILABILITY_CHANGED: 'responder.availability_changed',
+  ETA_UPDATED: 'responder.eta_updated',
 } as const;
 
 export type ResponderEventName = (typeof RESPONDER_EVENTS)[keyof typeof RESPONDER_EVENTS];

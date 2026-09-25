@@ -4,10 +4,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { SosAlertDto } from './dto/sos-alert.dto';
 import { RealtimeService } from '../realtime/realtime.service';
-import { IncidentStatus } from '@agap/shared';
+import { IncidentStatus, QUEUE_NAMES } from '@agap/shared';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -17,6 +19,9 @@ export class EmergencyAlertsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
+    @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.SLA_MONITOR) private readonly slaQueue: Queue,
   ) {}
 
   async createFromSos(
@@ -124,6 +129,45 @@ export class EmergencyAlertsService {
       });
     } catch (err) {
       this.logger.error(`Realtime notify failed for ${incident.id}: ${String(err)}`);
+    }
+
+    // Queue jobs are best-effort; failure must never affect the persisted incident.
+    try {
+      const hasCoords = (dto.latitude !== undefined && dto.longitude !== undefined) ? 'Y' : 'N';
+      const lat = dto.latitude?.toFixed(4) ?? '0';
+      const lng = dto.longitude?.toFixed(4) ?? '0';
+      const unixTs = Math.floor(incident.created_at.getTime() / 1000);
+      const smsPayload = `AGAP|${incident.public_reference}|${lat},${lng}|${unixTs}|${incident.category}|C:${hasCoords}`;
+
+      await this.smsQueue.add('emergency-sms', {
+        phone: process.env['MDRRMO_OPS_PHONE'] ?? '',
+        message: smsPayload.slice(0, 160),
+        incidentId: incident.id,
+      });
+
+      await this.notificationQueue.add('ops-center-alert', {
+        channel: 'PUSH',
+        title: `New ${incident.category} Alert`,
+        body: `${incident.public_reference} — ${incident.description ?? 'Emergency reported'}`,
+        data: { incidentId: incident.id, type: 'INCIDENT_CREATED' },
+      });
+
+      if (userId) {
+        await this.notificationQueue.add('emergency-contact-notify', {
+          userId,
+          channel: 'EMERGENCY_CONTACTS',
+          body: `Emergency alert submitted. Ref: ${incident.public_reference}`,
+          data: { incidentId: incident.id },
+        });
+      }
+
+      await this.slaQueue.add(
+        'sla-monitor',
+        { incidentId: incident.id, escalationType: 'ACKNOWLEDGEMENT' },
+        { delay: Number(process.env['DEFAULT_SLA_ACKNOWLEDGE_SECONDS'] ?? 120) * 1000 },
+      );
+    } catch (err) {
+      this.logger.error(`Queue jobs failed for ${incident.id}: ${String(err)}. Incident unaffected.`);
     }
 
     this.logger.log(`SOS incident created: ${incident.public_reference}`);

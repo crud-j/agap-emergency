@@ -1,14 +1,11 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsString, Matches } from 'class-validator';
 
 export class ForgotPasswordDto {
-  @ApiPropertyOptional({ example: 'juan@example.com' })
-  @IsOptional()
-  @IsEmail()
-  email?: string;
-
-  @ApiPropertyOptional({ example: '09171234567' })
-  @IsOptional()
+  @ApiProperty({ example: '09171234567' })
   @IsString()
-  phoneNumber?: string;
+  @Matches(/^(\+63|0)9\d{9}$/, {
+    message: 'phoneNumber must be a valid Philippine mobile number',
+  })
+  phoneNumber!: string;
 }

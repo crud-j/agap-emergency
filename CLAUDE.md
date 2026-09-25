@@ -71,7 +71,7 @@ Types, constants, enums, validation schemas, and WebSocket event names used acro
 | Service | Purpose |
 |---|---|
 | Firebase Cloud Messaging | Push notifications |
-| Semaphore | Philippine SMS (Globe, Smart, Sun, Dito) |
+| Textbee (textbee.dev) | SMS gateway via Android device SIM |
 | Map Provider | Geocoding, routing, ETA |
 | Object Storage | Incident photos and media |
 
@@ -375,7 +375,7 @@ Medical profile requires a separate ConsentRecord before any access. Audit logs 
 
 ## Dual-Path Alert Delivery
 
-Data path (HTTPS) + SMS path (Semaphore) fire **simultaneously** at trigger. SMS payload < 160 chars:
+Data path (HTTPS) + SMS path (Textbee) fire **simultaneously** at trigger. SMS payload < 160 chars:
 ```
 AGAP|INC-2026-001234|14.5995,120.9842|1754179200|FIRE|C:Y
 ```
@@ -433,7 +433,7 @@ Both fire immediately because connectivity in Bocaue flood zones is degraded dur
 - **Fireworks industry:** Barangays Bundukan, Biñang 1st — industrial fire/explosion is a real mass-casualty scenario
 - **High-traffic corridors:** MacArthur Highway, NLEX Interchange, Governor F. Halili Avenue
 - **Multi-agency partner:** BFP (Bureau of Fire Protection) — MOD-34 handles coordination
-- **SMS provider:** Semaphore (covers all PH carriers including weak-signal rural areas)
+- **SMS provider:** Textbee (textbee.dev) — Android device-based SMS gateway using local SIM card. Env vars: `TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID`, `MDRRMO_OPS_PHONE`
 
 ---
 

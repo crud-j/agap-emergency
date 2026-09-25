@@ -1,4 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
@@ -7,9 +10,13 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AnnouncementsService {
+  private readonly logger = new Logger(AnnouncementsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.PUSH_NOTIFICATIONS) private readonly pushQueue: Queue,
   ) {}
 
   async findPublished(filters: { category?: string; barangay?: string }) {
@@ -79,6 +86,50 @@ export class AnnouncementsService {
       entityId: id,
       moduleId: 'MOD-53',
     });
+
+    try {
+      const subscribers = await this.prisma.sms_subscribers.findMany({
+        where: { is_active: true },
+        select: { phone_number: true },
+      });
+
+      const title = published.title.slice(0, 50);
+      const body = (published.body ?? '').slice(0, 130);
+      const smsText = `AGAP: ${title}. ${body}. Reply STOP to opt out.`.slice(0, 160);
+
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < subscribers.length; i += BATCH_SIZE) {
+        const batch = subscribers.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map((sub) =>
+            this.smsQueue.add('announcement-sms', {
+              phone: sub.phone_number,
+              message: smsText,
+            }),
+          ),
+        );
+      }
+
+      await this.prisma.announcement.update({
+        where: { id: published.id },
+        data: { sms_sent_count: subscribers.length },
+      });
+    } catch (err) {
+      this.logger.error(`Announcement SMS broadcast failed: ${String(err)}`);
+    }
+
+    // Enqueue push broadcast — failure must not affect published status
+    try {
+      await this.pushQueue.add('announcement-push-broadcast', {
+        announcementId: published.id,
+        title: published.title.slice(0, 100),
+        body: (published.body ?? '').slice(0, 200),
+        targetBarangays: (published.target_barangays as string[]) ?? [],
+      });
+    } catch (err) {
+      this.logger.error(`Announcement push enqueue failed: ${String(err)}`);
+    }
+
     return published;
   }
 

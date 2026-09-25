@@ -128,4 +128,59 @@ export class DispatchController {
     await this.dispatchService.removeCrew(id, userId);
     return { message: 'Crew removed' };
   }
+
+  // ---- Transport lifecycle (MOD-40) ----
+
+  @Post(':id/transport')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER)
+  @ApiOperation({ summary: 'Start patient transport to facility (MOD-40)' })
+  async startTransport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { destinationId?: string; patientId?: string },
+    @Request() req: any,
+  ) {
+    return this.dispatchService.startTransport(id, body, req.user.id);
+  }
+
+  @Get(':id/transport')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get transport record for dispatch (MOD-40)' })
+  async getTransport(@Param('id', ParseUUIDPipe) id: string) {
+    return this.dispatchService.getTransport(id);
+  }
+
+  @Patch(':id/transport/destination')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER)
+  @ApiOperation({ summary: 'Change transport destination (MOD-40)' })
+  async changeTransportDestination(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { destinationId: string; reason?: string },
+    @Request() req: any,
+  ) {
+    return this.dispatchService.changeTransportDestination(id, body, req.user.id);
+  }
+
+  @Post(':id/transport/arrived')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER)
+  @ApiOperation({ summary: 'Mark arrived at destination facility (MOD-40)' })
+  async markTransportArrived(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: any,
+  ) {
+    return this.dispatchService.markTransportArrived(id, req.user.id);
+  }
+
+  @Post(':id/transport/handover')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER)
+  @ApiOperation({ summary: 'Complete patient handover at facility (MOD-40)' })
+  async completePatientHandover(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: any,
+  ) {
+    return this.dispatchService.completePatientHandover(id, req.user.id);
+  }
 }

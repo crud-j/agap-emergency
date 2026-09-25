@@ -1,5 +1,6 @@
-FROM node:20-alpine AS base
-RUN npm install -g pnpm
+# syntax=docker/dockerfile:1
+FROM node:22-alpine AS base
+RUN npm install -g pnpm@9
 WORKDIR /app
 
 # Development stage
@@ -8,7 +9,8 @@ COPY package.json pnpm-lock.yaml* ./
 COPY backend/package.json ./backend/
 COPY shared/package.json ./shared/
 COPY pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=agap-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 COPY . .
 WORKDIR /app/backend
 RUN pnpm db:generate
@@ -20,14 +22,15 @@ COPY package.json pnpm-lock.yaml* ./
 COPY backend/package.json ./backend/
 COPY shared/package.json ./shared/
 COPY pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=agap-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 COPY . .
 WORKDIR /app/backend
 RUN pnpm db:generate
 RUN pnpm build
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 RUN npm install -g pnpm
 WORKDIR /app
 COPY --from=build /app/backend/dist ./dist

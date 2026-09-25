@@ -31,6 +31,26 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   CORS_ORIGIN: string = 'http://localhost:3001';
+
+  @IsString()
+  @IsOptional()
+  STORAGE_ENDPOINT: string = 'http://localhost:9000';
+
+  @IsString()
+  @IsOptional()
+  STORAGE_BUCKET: string = 'agap-media';
+
+  @IsString()
+  @IsOptional()
+  STORAGE_ACCESS_KEY: string = '';
+
+  @IsString()
+  @IsOptional()
+  STORAGE_SECRET_KEY: string = '';
+
+  @IsString()
+  @IsOptional()
+  STORAGE_REGION: string = 'us-east-1';
 }
 
 export function validateConfig(config: Record<string, unknown>) {

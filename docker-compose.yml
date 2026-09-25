@@ -1,5 +1,3 @@
-version: '3.9'
-
 # AGAP Emergency Response Platform — Development Docker Compose
 # For production, use docker-compose.prod.yml
 
@@ -13,7 +11,7 @@ services:
       POSTGRES_PASSWORD: agap_password
       POSTGRES_DB: agap_db
     ports:
-      - "5432:5432"
+      - "5461:5432"
     volumes:
       - agap_postgres_data:/var/lib/postgresql/data
       - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d
@@ -28,9 +26,9 @@ services:
     image: redis:7-alpine
     container_name: agap_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
     ports:
-      - "6379:6379"
+      - "6382:6379"
     volumes:
       - agap_redis_data:/data
     healthcheck:
@@ -41,8 +39,8 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
       target: development
     container_name: agap_backend
     restart: unless-stopped
@@ -51,10 +49,11 @@ services:
       DATABASE_URL: postgresql://agap_user:agap_password@postgres:5432/agap_db?schema=public
       REDIS_URL: redis://redis:6379
     ports:
-      - "3000:3000"
+      - "3002:3000"
     volumes:
-      - ./backend:/app
-      - /app/node_modules
+      - .:/app
+      - agap_node_modules:/app/node_modules
+      - agap_backend_node_modules:/app/backend/node_modules
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,15 +62,34 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
+  minio:
+    build:
+      context: ./infrastructure/minio
+      dockerfile: Dockerfile
+    container_name: agap_minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   agap_postgres_data:
   agap_redis_data:
+  agap_node_modules:
+  agap_backend_node_modules:
+  minio_data:
 
 networks:
   default:

@@ -4,7 +4,10 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { JwtService } from '@nestjs/jwt';
+import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
@@ -20,6 +23,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
   ) {}
 
   async validateUser(email: string, password: string) {
@@ -33,10 +37,19 @@ export class AuthService {
 
   async login(user: { id: string; email?: string | null; role: string }) {
     const payload = { sub: user.id, email: user.email, role: user.role };
-    return {
-      accessToken: this.jwtService.sign(payload),
-      user,
-    };
+    const accessToken = this.jwtService.sign(payload);
+    const refreshToken = this.generateRefreshToken();
+
+    await this.prisma.user_sessions.create({
+      data: {
+        user_id: user.id,
+        token_hash: this.hashToken(accessToken),
+        refresh_token_hash: this.hashToken(refreshToken),
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    return { accessToken, refreshToken, user };
   }
 
   async hashPassword(password: string): Promise<string> {
@@ -44,51 +57,44 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
-    if (!dto.email && !dto.phoneNumber) {
-      throw new BadRequestException('Either email or phone number is required');
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
     }
 
-    if (dto.email) {
-      const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
-      if (existing) throw new BadRequestException('Email already registered');
-    }
-    if (dto.phoneNumber) {
-      const existing = await this.prisma.user.findUnique({
-        where: { phone_number: dto.phoneNumber },
-      });
-      if (existing) throw new BadRequestException('Phone number already registered');
-    }
+    const existing = await this.prisma.user.findUnique({
+      where: { phone_number: dto.phoneNumber },
+    });
+    if (existing) throw new BadRequestException('Phone number already registered');
 
     const passwordHash = await this.hashPassword(dto.password);
 
     const user = await this.prisma.user.create({
       data: {
         full_name: dto.fullName,
-        email: dto.email ?? null,
-        phone_number: dto.phoneNumber ?? null,
+        phone_number: dto.phoneNumber,
         password_hash: passwordHash,
         status: 'PENDING_VERIFICATION',
       },
     });
 
-    // Issue a verification token for the primary channel.
-    const verificationType = dto.email ? 'EMAIL' : 'PHONE';
+    // Issue a 6-digit OTP for SMS verification (delivery not yet wired — MOD-17).
+    const otp = this.generateOtp();
     await this.prisma.user_verifications.create({
       data: {
         user_id: user.id,
-        verification_type: verificationType,
-        token: this.generateOtp(),
+        verification_type: 'PHONE',
+        token: otp,
         expires_at: new Date(Date.now() + 15 * 60 * 1000),
       },
     });
 
     const { password_hash: _, ...safeUser } = user;
-    const { accessToken } = await this.login({
+    const { accessToken, refreshToken } = await this.login({
       id: user.id,
       email: user.email,
       role: user.role,
     });
-    return { user: safeUser, accessToken };
+    return { user: safeUser, accessToken, refreshToken };
   }
 
   async registerGuest(dto: RegisterGuestDto) {
@@ -195,17 +201,8 @@ export class AuthService {
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
-    if (!dto.email && !dto.phoneNumber) {
-      throw new BadRequestException('Either email or phone number is required');
-    }
-
-    const user = await this.prisma.user.findFirst({
-      where: {
-        OR: [
-          ...(dto.email ? [{ email: dto.email }] : []),
-          ...(dto.phoneNumber ? [{ phone_number: dto.phoneNumber }] : []),
-        ],
-      },
+    const user = await this.prisma.user.findUnique({
+      where: { phone_number: dto.phoneNumber },
     });
 
     // Do not reveal whether the account exists.
@@ -213,14 +210,14 @@ export class AuthService {
       await this.prisma.user_verifications.create({
         data: {
           user_id: user.id,
-          verification_type: dto.email ? 'EMAIL' : 'PHONE',
+          verification_type: 'PHONE',
           token: this.generateOtp(),
           expires_at: new Date(Date.now() + 15 * 60 * 1000),
         },
       });
     }
 
-    return { message: 'If the account exists, reset instructions have been sent' };
+    return { message: 'If the account exists, a reset OTP has been sent via SMS' };
   }
 
   async resetPassword(dto: ResetPasswordDto) {
@@ -271,6 +268,60 @@ export class AuthService {
     });
 
     return { message: 'Password changed' };
+  }
+
+  async loginPhone(phoneNumber: string) {
+    const user = await this.prisma.user.findUnique({ where: { phone_number: phoneNumber } });
+
+    if (user) {
+      // Expire any pending phone OTPs before issuing a fresh one (prevents replay)
+      await this.prisma.user_verifications.updateMany({
+        where: { user_id: user.id, verification_type: 'PHONE', status: 'PENDING' },
+        data: { status: 'EXPIRED' },
+      });
+
+      const otp = this.generateOtp();
+      await this.prisma.user_verifications.create({
+        data: {
+          user_id: user.id,
+          verification_type: 'PHONE',
+          token: otp,
+          expires_at: new Date(Date.now() + 10 * 60 * 1000),
+        },
+      });
+
+      await this.smsQueue.add('otp-sms', {
+        phone: phoneNumber,
+        message: `Your AGAP login code is ${otp}. Expires in 10 minutes. Do not share this code.`,
+      });
+    }
+
+    // Never reveal whether the phone number has an account
+    return { message: 'If this number is registered, an OTP has been sent.' };
+  }
+
+  async verifyPhoneOtp(phoneNumber: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { phone_number: phoneNumber } });
+    if (!user) throw new UnauthorizedException('Invalid OTP');
+
+    const verification = await this.prisma.user_verifications.findFirst({
+      where: {
+        user_id: user.id,
+        verification_type: 'PHONE',
+        token: code,
+        status: 'PENDING',
+        expires_at: { gt: new Date() },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+    if (!verification) throw new UnauthorizedException('Invalid or expired OTP');
+
+    await this.prisma.user_verifications.update({
+      where: { id: verification.id },
+      data: { status: 'VERIFIED', verified_at: new Date() },
+    });
+
+    return this.login({ id: user.id, email: user.email, role: user.role });
   }
 
   private generateOtp(): string {

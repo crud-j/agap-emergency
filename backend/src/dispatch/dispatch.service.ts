@@ -4,10 +4,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
-import { IncidentStatus } from '@agap/shared';
+import { IncidentStatus, QUEUE_NAMES } from '@agap/shared';
 import { Prisma } from '@prisma/client';
 
 const DISPATCHABLE_STATUSES = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
@@ -16,7 +19,11 @@ const DISPATCHABLE_STATUSES = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
 export class DispatchService {
   private readonly logger = new Logger(DispatchService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+    @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue: Queue,
+  ) {}
 
   async findAll(filters: { incidentId?: string; status?: string }) {
     const where: Prisma.dispatchesWhereInput = {};
@@ -45,6 +52,7 @@ export class DispatchService {
   async create(dto: CreateDispatchDto, dispatcherId: string) {
     const incident = await this.prisma.incident.findUnique({
       where: { id: dto.incidentId },
+      include: { incident_reporters: true },
     });
     if (!incident) throw new NotFoundException('Incident not found');
     if (!DISPATCHABLE_STATUSES.includes(incident.status)) {
@@ -107,13 +115,44 @@ export class DispatchService {
     });
 
     this.logger.log(`Dispatch ${dispatch.id} created by ${dispatcherId}`);
+
+    try {
+      this.realtime.notifyDispatchCreated(dispatch.incident_id, {
+        dispatchId: dispatch.id,
+        resourceId: dispatch.resource_id,
+        status: dispatch.status,
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for dispatch create: ${String(err)}`);
+    }
+
+    const reporterUserId = incident.incident_reporters?.user_id;
+    try {
+      if (reporterUserId) {
+        await this.notificationQueue.add('dispatch-created-push', {
+          userId: reporterUserId,
+          channel: 'PUSH',
+          title: 'Help is on the way',
+          body: `Responders have been dispatched. Ref: ${incident.public_reference}`,
+          data: { incidentId: incident.id, type: 'DISPATCH_CREATED' },
+        });
+        await this.notificationQueue.add('dispatch-contact-notify', {
+          userId: reporterUserId,
+          channel: 'EMERGENCY_CONTACTS',
+          body: `AGAP: Emergency responders dispatched for ${incident.public_reference}. Help is on the way.`,
+        });
+      }
+    } catch (err) {
+      this.logger.error(`Dispatch notification failed: ${String(err)}. Dispatch unaffected.`);
+    }
+
     return dispatch;
   }
 
   async cancel(id: string, _userId: string) {
     const dispatch = await this.findById(id);
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.dispatches.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.dispatches.update({
         where: { id },
         data: { status: 'CANCELLED' },
       });
@@ -121,8 +160,19 @@ export class DispatchService {
         where: { id: dispatch.resource_id },
         data: { status: 'AVAILABLE', current_incident_id: null },
       });
-      return updated;
+      return result;
     });
+
+    try {
+      this.realtime.notifyDispatchCancelled(dispatch.incident_id, {
+        dispatchId: id,
+        resourceId: dispatch.resource_id,
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for dispatch cancel: ${String(err)}`);
+    }
+
+    return updated;
   }
 
   async reassign(id: string, newResourceId: string, userId: string) {
@@ -210,5 +260,65 @@ export class DispatchService {
     });
 
     return updated;
+  }
+
+  // ---- Transport lifecycle (MOD-40) ----
+
+  async startTransport(
+    dispatchId: string,
+    dto: { destinationId?: string; patientId?: string },
+    _userId: string,
+  ) {
+    const dispatch = await this.findById(dispatchId);
+    return this.prisma.transportRecord.create({
+      data: {
+        dispatch_id: dispatchId,
+        incident_id: dispatch.incident_id,
+        destination_id: dto.destinationId ?? null,
+        patient_id: dto.patientId ?? null,
+        transport_started_at: new Date(),
+      },
+    });
+  }
+
+  async getTransport(dispatchId: string) {
+    const record = await this.prisma.transportRecord.findFirst({
+      where: { dispatch_id: dispatchId },
+      orderBy: { created_at: 'desc' },
+    });
+    if (!record) throw new NotFoundException('Transport record not found');
+    return record;
+  }
+
+  async changeTransportDestination(
+    dispatchId: string,
+    dto: { destinationId: string; reason?: string },
+    _userId: string,
+  ) {
+    const record = await this.getTransport(dispatchId);
+    return this.prisma.transportRecord.update({
+      where: { id: record.id },
+      data: {
+        destination_id: dto.destinationId,
+        destination_changed: true,
+        change_reason: dto.reason ?? null,
+      },
+    });
+  }
+
+  async markTransportArrived(dispatchId: string, _userId: string) {
+    const record = await this.getTransport(dispatchId);
+    return this.prisma.transportRecord.update({
+      where: { id: record.id },
+      data: { arrived_at: new Date() },
+    });
+  }
+
+  async completePatientHandover(dispatchId: string, _userId: string) {
+    const record = await this.getTransport(dispatchId);
+    return this.prisma.transportRecord.update({
+      where: { id: record.id },
+      data: { handover_completed_at: new Date() },
+    });
   }
 }

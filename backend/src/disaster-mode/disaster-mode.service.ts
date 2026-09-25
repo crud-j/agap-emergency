@@ -109,4 +109,21 @@ export class DisasterModeService {
     }
     return membership.organization_id;
   }
+
+  async broadcast(dto: { surgeId: string; message: string }, userId: string) {
+    const surge = await this.prisma.surge_incidents.findUnique({ where: { id: dto.surgeId } });
+    if (!surge) throw new NotFoundException('Surge incident not found');
+    if (surge.status !== 'ACTIVE') throw new BadRequestException('Surge is not active');
+    const respondersOnline = await this.prisma.user.findMany({
+      where: { role: 'RESPONDER', status: 'ACTIVE' },
+      select: { id: true },
+    });
+    return {
+      surgeId: dto.surgeId,
+      sentBy: userId,
+      recipientCount: respondersOnline.length,
+      message: dto.message,
+      sentAt: new Date(),
+    };
+  }
 }

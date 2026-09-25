@@ -11,6 +11,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { EmergencyAlertsService } from './emergency-alerts.service';
 import { SosAlertDto } from './dto/sos-alert.dto';
 import { Public } from '../common/decorators/public.decorator';
@@ -24,6 +25,7 @@ export class EmergencyAlertsController {
   @Post('sos')
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ burst: { ttl: 1000, limit: 1 }, sustained: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Trigger a one-button SOS emergency alert (guest OK)' })
   @ApiResponse({ status: 201, description: 'Incident created (or existing returned)' })
@@ -34,6 +36,7 @@ export class EmergencyAlertsController {
   @Post('shake')
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ burst: { ttl: 1000, limit: 1 }, sustained: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Trigger a shake-to-alert emergency (guest OK)' })
   async shake(@Body() dto: SosAlertDto, @Request() req: any) {

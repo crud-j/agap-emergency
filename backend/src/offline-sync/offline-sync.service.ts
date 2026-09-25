@@ -64,8 +64,9 @@ export class OfflineSyncService {
   }
 
   /**
-   * Flush a batch of offline events. Each event is deduplicated by client_event_id,
-   * so replays are idempotent and never create duplicate incidents.
+   * Flush a batch of offline events. Each event is deduplicated by client_event_id.
+   * All new events are dispatched as a single BullMQ batch job so the processor
+   * can replay them in order and report per-event success/failure.
    */
   async syncBatch(
     events: {
@@ -77,6 +78,7 @@ export class OfflineSyncService {
     userId?: string,
   ) {
     const results: { clientEventId: string; status: string; syncRecordId?: string }[] = [];
+    const batchEvents: Array<{ client_event_id: string; type: string; payload: Record<string, unknown> }> = [];
 
     for (const event of events) {
       const existing = await this.prisma.offline_event_queue.findUnique({
@@ -102,19 +104,11 @@ export class OfflineSyncService {
         },
       });
 
-      await this.syncQueue.add(
-        'sync',
-        {
-          syncRecordId: record.id,
-          idempotencyKey: event.clientEventId,
-          payload: event.payload,
-          attempt: 0,
-        },
-        {
-          attempts: MAX_OFFLINE_RETRY_ATTEMPTS,
-          backoff: { type: 'exponential', delay: OFFLINE_RETRY_BASE_DELAY_MS },
-        },
-      );
+      batchEvents.push({
+        client_event_id: event.clientEventId,
+        type: event.eventType,
+        payload: { ...event.payload, ...(userId !== undefined && { userId }) },
+      });
 
       results.push({
         clientEventId: event.clientEventId,
@@ -123,7 +117,71 @@ export class OfflineSyncService {
       });
     }
 
+    if (batchEvents.length > 0) {
+      await this.syncQueue.add(
+        'sync',
+        { events: batchEvents },
+        {
+          attempts: MAX_OFFLINE_RETRY_ATTEMPTS,
+          backoff: { type: 'exponential', delay: OFFLINE_RETRY_BASE_DELAY_MS },
+        },
+      );
+    }
+
     return { accepted: results.length, results };
+  }
+
+  /**
+   * Direct batch flush from mobile clients using the canonical snake_case event format.
+   * Deduplicated by client_event_id; emits a single BullMQ job for the whole batch.
+   */
+  async flush(
+    events: Array<{ clientEventId: string; type: string; payload: Record<string, unknown> }>,
+    userId?: string,
+  ) {
+    const results: { clientEventId: string; status: string }[] = [];
+    const batchEvents: Array<{ client_event_id: string; type: string; payload: Record<string, unknown> }> = [];
+
+    for (const event of events) {
+      const existing = await this.prisma.offline_event_queue.findUnique({
+        where: { client_event_id: event.clientEventId },
+      });
+      if (existing) {
+        results.push({ clientEventId: event.clientEventId, status: 'DUPLICATE_REJECTED' });
+        continue;
+      }
+
+      await this.prisma.offline_event_queue.create({
+        data: {
+          client_event_id: event.clientEventId,
+          user_id: userId ?? null,
+          event_type: event.type,
+          payload: event.payload as any,
+          sync_status: 'PENDING',
+          queued_at_device: new Date(),
+        },
+      });
+
+      batchEvents.push({
+        client_event_id: event.clientEventId,
+        type: event.type,
+        payload: { ...event.payload, ...(userId !== undefined && { userId }) },
+      });
+      results.push({ clientEventId: event.clientEventId, status: 'QUEUED' });
+    }
+
+    if (batchEvents.length > 0) {
+      await this.syncQueue.add(
+        'sync',
+        { events: batchEvents },
+        {
+          attempts: MAX_OFFLINE_RETRY_ATTEMPTS,
+          backoff: { type: 'exponential', delay: OFFLINE_RETRY_BASE_DELAY_MS },
+        },
+      );
+    }
+
+    return { accepted: batchEvents.length, results };
   }
 
   async getStatus(userId: string) {

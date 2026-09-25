@@ -3,6 +3,7 @@ export declare const RESPONDER_EVENTS: {
     readonly LOCATION_UPDATED: "responder.location_updated";
     readonly STATUS_CHANGED: "responder.status_changed";
     readonly AVAILABILITY_CHANGED: "responder.availability_changed";
+    readonly ETA_UPDATED: "responder.eta_updated";
 };
 export type ResponderEventName = (typeof RESPONDER_EVENTS)[keyof typeof RESPONDER_EVENTS];
 export interface ResponderLocationUpdatedPayload {

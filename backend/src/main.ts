@@ -14,8 +14,9 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
 
-  // Security headers
-  app.use(helmet());
+  // Security headers — disable CSP in dev so Swagger UI inline scripts are not blocked
+  const isProd = configService.get('NODE_ENV') === 'production';
+  app.use(helmet({ contentSecurityPolicy: isProd }));
   app.use(compression());
 
   // CORS

@@ -3,10 +3,13 @@ packages:
   - "frontend"
   - "mobile"
   - "shared"
+  - "tests"
 allowBuilds:
+  '@firebase/util': true
   '@nestjs/core': true
   '@prisma/client': true
   '@prisma/engines': true
   msgpackr-extract: true
   prisma: true
+  protobufjs: true
   unrs-resolver: true

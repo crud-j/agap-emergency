@@ -517,4 +517,78 @@ export class IncidentsService {
       orderBy: { handed_over_at: 'desc' },
     });
   }
+
+  async acknowledgeHandover(incidentId: string, userId: string) {
+    const handover = await this.prisma.incident_handovers.findFirst({
+      where: { incident_id: incidentId, to_user_id: userId, acknowledged_at: null },
+      orderBy: { handed_over_at: 'desc' },
+    });
+    if (!handover) throw new NotFoundException('Pending handover not found for this user');
+    return this.prisma.incident_handovers.update({
+      where: { id: handover.id },
+      data: { acknowledged_at: new Date() },
+    });
+  }
+
+  // ---- ICS extended (MOD-36) ----
+
+  async updateIcs(incidentId: string, dto: { objectives?: string[] }, _userId: string) {
+    const ics = await this.prisma.incident_command_structures.findUnique({
+      where: { incident_id: incidentId },
+    });
+    if (!ics) throw new NotFoundException('No ICS activated for incident');
+    return this.prisma.incident_command_structures.update({
+      where: { incident_id: incidentId },
+      data: { ...(dto.objectives !== undefined && { objectives: dto.objectives }) },
+    });
+  }
+
+  async deactivateIcs(incidentId: string, _userId: string) {
+    const ics = await this.prisma.incident_command_structures.findUnique({
+      where: { incident_id: incidentId },
+    });
+    if (!ics) throw new NotFoundException('No ICS activated for incident');
+    await this.prisma.ics_assignments.deleteMany({ where: { ics_id: ics.id } });
+    await this.prisma.incident_command_structures.delete({ where: { incident_id: incidentId } });
+    return { message: 'ICS deactivated' };
+  }
+
+  async removeIcsPosition(positionId: string, _userId: string) {
+    const assignment = await this.prisma.ics_assignments.findUnique({
+      where: { id: positionId },
+    });
+    if (!assignment) throw new NotFoundException('ICS position not found');
+    await this.prisma.ics_assignments.delete({ where: { id: positionId } });
+    return { message: 'ICS position removed' };
+  }
+
+  // ---- Assessment single read (MOD-37) ----
+
+  async getAssessment(assessmentId: string) {
+    const assessment = await this.prisma.on_scene_assessments.findUnique({
+      where: { id: assessmentId },
+    });
+    if (!assessment) throw new NotFoundException('Assessment not found');
+    return assessment;
+  }
+
+  // ---- Message read-marking (MOD-33) ----
+
+  async markMessageRead(messageId: string, userId: string) {
+    await this.prisma.message_reads.upsert({
+      where: { message_id_user_id: { message_id: messageId, user_id: userId } },
+      create: { message_id: messageId, user_id: userId },
+      update: { read_at: new Date() },
+    });
+    return { messageId, read: true };
+  }
+
+  // ---- Agency removal (MOD-34) ----
+
+  async removeAgency(incidentId: string, organizationId: string) {
+    await this.prisma.incident_agency_participants.deleteMany({
+      where: { incident_id: incidentId, organization_id: organizationId },
+    });
+    return { message: 'Agency removed from incident' };
+  }
 }

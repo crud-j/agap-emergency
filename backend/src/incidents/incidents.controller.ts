@@ -3,17 +3,22 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Request,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes } from '@nestjs/swagger';
 import { IncidentsService } from './incidents.service';
+import { MediaService, MULTER_MEMORY_STORAGE } from '../media/media.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
@@ -24,7 +29,10 @@ import { UserRole, IncidentStatus } from '@agap/shared';
 @ApiTags('incidents')
 @Controller({ path: 'incidents', version: '1' })
 export class IncidentsController {
-  constructor(private readonly incidentsService: IncidentsService) {}
+  constructor(
+    private readonly incidentsService: IncidentsService,
+    private readonly mediaService: MediaService,
+  ) {}
 
   @Post()
   @UseGuards(OptionalJwtAuthGuard)
@@ -80,21 +88,21 @@ export class IncidentsController {
   @Post(':id/attachments')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Attach media metadata to an incident' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: MULTER_MEMORY_STORAGE,
+      limits: { fileSize: 10_485_760 },
+    }),
+  )
+  @ApiOperation({ summary: 'Upload a photo or video attachment for an incident' })
+  @ApiResponse({ status: 201, description: 'Attachment uploaded and saved' })
   async addAttachment(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      fileName: string;
-      fileType: string;
-      storageBucket: string;
-      storageKey: string;
-      storageUrl?: string;
-      fileSizeBytes?: number;
-    },
+    @UploadedFile() file: Express.Multer.File,
     @Request() req: any,
   ) {
-    return this.incidentsService.addAttachment(id, body, req.user?.id);
+    return this.mediaService.uploadIncidentPhoto(file, id, req.user?.id);
   }
 
   @Get(':id/attachments')
@@ -360,5 +368,87 @@ export class IncidentsController {
   @ApiOperation({ summary: 'List incident handovers' })
   async listHandovers(@Param('id', ParseUUIDPipe) id: string) {
     return this.incidentsService.listHandovers(id);
+  }
+
+  @Patch(':id/handover/acknowledge')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Acknowledge incoming handover (MOD-44)' })
+  async acknowledgeHandover(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.incidentsService.acknowledgeHandover(id, req.user.id);
+  }
+
+  // ---- ICS extended ----
+
+  @Patch(':id/ics')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update ICS objectives/structure (MOD-36)' })
+  async updateIcs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { objectives?: string[] },
+    @Request() req: any,
+  ) {
+    return this.incidentsService.updateIcs(id, body, req.user.id);
+  }
+
+  @Post(':id/ics/deactivate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Deactivate ICS for incident (MOD-36)' })
+  async deactivateIcs(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.incidentsService.deactivateIcs(id, req.user.id);
+  }
+
+  @Delete(':id/ics/positions/:posId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Remove an ICS position assignment (MOD-36)' })
+  async removeIcsPosition(
+    @Param('posId', ParseUUIDPipe) posId: string,
+    @Request() req: any,
+  ) {
+    return this.incidentsService.removeIcsPosition(posId, req.user.id);
+  }
+
+  // ---- Assessment single read ----
+
+  @Get(':id/assessments/:aId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get a single on-scene assessment (MOD-37)' })
+  async getAssessment(@Param('aId', ParseUUIDPipe) aId: string) {
+    return this.incidentsService.getAssessment(aId);
+  }
+
+  // ---- Message read-marking ----
+
+  @Patch(':id/messages/:msgId/read')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Mark an incident message as read (MOD-33)' })
+  async markMessageRead(
+    @Param('msgId', ParseUUIDPipe) msgId: string,
+    @Request() req: any,
+  ) {
+    return this.incidentsService.markMessageRead(msgId, req.user.id);
+  }
+
+  // ---- Agency removal ----
+
+  @Delete(':id/agencies/:orgId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Remove a participating agency from incident (MOD-34)' })
+  async removeAgency(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('orgId', ParseUUIDPipe) orgId: string,
+  ) {
+    return this.incidentsService.removeAgency(id, orgId);
   }
 }

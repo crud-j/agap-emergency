@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { BullModule } from '@nestjs/bullmq';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -46,16 +47,8 @@ import { QUEUE_NAMES } from '@agap/shared';
       envFilePath: ['.env.local', '.env'],
     }),
     ThrottlerModule.forRoot([
-      {
-        name: 'short',
-        ttl: 1000,
-        limit: 10,
-      },
-      {
-        name: 'medium',
-        ttl: 60000,
-        limit: 100,
-      },
+      { name: 'burst', ttl: 1000, limit: 5 },
+      { name: 'sustained', ttl: 60000, limit: 30 },
     ]),
     BullModule.forRootAsync({
       useFactory: () => ({
@@ -98,5 +91,6 @@ import { QUEUE_NAMES } from '@agap/shared';
     HealthModule,
     JobsModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
