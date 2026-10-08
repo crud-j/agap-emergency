@@ -1,11 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsUUID } from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class WebAuthnAuthenticateBeginDto {
   @ApiPropertyOptional({
-    description: 'User UUID — if provided, restricts the ceremony to that user\'s registered passkeys. Omit for discoverable-credential (resident-key) flow.',
+    description:
+      "Email or phone number the user typed. The ceremony is scoped to that account's passkeys. Omit for a discoverable-credential (resident-key) flow.",
+    example: '+639171234567',
   })
   @IsOptional()
-  @IsUUID()
-  userId?: string;
+  @IsString()
+  @MaxLength(255)
+  identifier?: string;
 }

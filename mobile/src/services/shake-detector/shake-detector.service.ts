@@ -26,3 +26,5 @@ export class ShakeDetectorService {
     this.subscription = null;
   }
 }
+
+export { ShakeDetectorService as ShakeDetector };

@@ -213,6 +213,10 @@ pnpm --filter @agap/mobile android
 
 # iOS simulator (macOS only)
 pnpm --filter @agap/mobile ios
+cloudflared tunnel --url http://127.0.0.1:3000
+npx expo start --dev-client
+ngrok http 3000 --domain=benevolent-semirhythmically-tova.ngrok-free.dev
+curl -H "ngrok-skip-browser-warning: 1" https://benevolent-semirhythmically-tova.ngrok-free.dev/.well-known/assetlinks.json
 ```
 
 ### Run everything from root
@@ -383,6 +387,42 @@ announcement.published
 - **All consequential actions are auditable.** Audit logs are immutable — no UPDATE or DELETE.
 
 ---
+
+---
+Docker commands when backend code changes:
+
+# Rebuild only the backend image and restart its container
+docker compose up -d --build backend
+
+If you also changed Prisma schema and need migrations to run:
+
+# Rebuild backend, then run pending migrations
+---
+Docker commands when backend code changes:
+
+# Rebuild only the backend image and restart its container
+docker compose up -d --build backend
+
+If you also changed Prisma schema and need migrations to run:
+
+# Rebuild backend, then run pending migrations
+docker compose up -d --build backend
+docker compose exec backend npx prisma migrate deploy
+
+To check if it's running and see logs:
+
+# Tail backend logs
+docker compose logs -f backend
+
+# Check all container status
+docker compose ps
+
+Swagger will be at http://localhost:3002/api/docs when running via Docker (port 3002 → container 3000, as set in docker-compose.yml line 52).
+
+
+---
+
+
 
 ## Modules
 

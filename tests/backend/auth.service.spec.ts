@@ -52,11 +52,10 @@ describe('AuthService', () => {
   // ── Registration ──────────────────────────────────────────────────────────
 
   describe('register', () => {
-    it('creates a new user and returns access + refresh tokens', async () => {
+    it('creates a new user, issues an OTP, and returns only the safe user (no tokens)', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
       mockPrisma.user.create.mockResolvedValue({ ...baseUser, password_hash: 'hash' });
       mockPrisma.user_verifications.create.mockResolvedValue({});
-      mockPrisma.user_sessions.create.mockResolvedValue({});
 
       const result = await service.register({
         fullName: 'Juan dela Cruz',
@@ -65,9 +64,10 @@ describe('AuthService', () => {
         confirmPassword: 'SecurePass1!',
       });
 
-      expect(result.accessToken).toBe('access-token');
-      expect(result.refreshToken).toBeDefined();
+      expect(result).not.toHaveProperty('accessToken');
+      expect(result).not.toHaveProperty('refreshToken');
       expect(result.user).not.toHaveProperty('password_hash');
+      expect(mockPrisma.user_sessions.create).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException when passwords do not match', async () => {
@@ -277,6 +277,45 @@ describe('AuthService', () => {
       await expect(
         service.verifyOtp({ userId: 'user-1', token: '123456', type: 'PHONE' }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('verifyPhoneOtp', () => {
+    it('claims the pending OTP and returns tokens and the activated user', async () => {
+      const verification = {
+        id: 'v-1',
+        expires_at: new Date(Date.now() + 60_000),
+      };
+      const activatedUser = { ...baseUser, status: 'ACTIVE', is_phone_verified: true };
+      mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user_verifications.findFirst.mockResolvedValue(verification);
+      mockPrisma.user_verifications.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.user_sessions.create.mockResolvedValue({});
+      mockPrisma.user.update.mockResolvedValue(activatedUser);
+
+      const result = await service.verifyPhoneOtp('+639171234567', '123456');
+
+      expect(result.message).toBe('Phone verification successful');
+      expect(result.accessToken).toBe('access-token');
+      expect(result.refreshToken).toBeDefined();
+      expect(mockPrisma.user_verifications.updateMany).toHaveBeenCalledWith({
+        where: { id: 'v-1', status: 'PENDING' },
+        data: expect.objectContaining({ status: 'VERIFIED' }),
+      });
+      expect(mockPrisma.user_sessions.create).toHaveBeenCalled();
+    });
+
+    it('rejects a concurrent request that cannot claim an already-used OTP', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user_verifications.findFirst.mockResolvedValue({
+        id: 'v-1',
+        expires_at: new Date(Date.now() + 60_000),
+      });
+      mockPrisma.user_verifications.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.verifyPhoneOtp('+639171234567', '123456')).rejects.toThrow(UnauthorizedException);
+      expect(mockPrisma.user_sessions.create).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
   });
 

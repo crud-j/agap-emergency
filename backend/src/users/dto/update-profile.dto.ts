@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class UpdateProfileDto {
   @ApiPropertyOptional()
@@ -21,4 +21,19 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsString()
   fullAddress?: string;
+
+  @ApiPropertyOptional({ enum: ['small', 'medium', 'large'] })
+  @IsOptional()
+  @IsIn(['small', 'medium', 'large'])
+  textSize?: 'small' | 'medium' | 'large';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  highContrast?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  reducedMotion?: boolean;
 }

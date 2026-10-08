@@ -1,9 +1,59 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(NotificationsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+  ) {}
+
+  /**
+   * Persist an in-app notification, then push it to the recipient's private
+   * `user:{id}` room so their bell/badge updates live (MOD-16/MOD-42). The emit
+   * is best-effort: a WS failure must never lose the persisted notification, and
+   * the per-user room guarantees no other user can receive it.
+   */
+  async create(input: {
+    userId: string;
+    eventType: string;
+    body: string;
+    title?: string;
+    channel?: 'IN_APP' | 'PUSH' | 'SMS' | 'EMAIL';
+    incidentId?: string;
+    dataPayload?: Record<string, unknown>;
+  }) {
+    const notification = await this.prisma.notification.create({
+      data: {
+        recipient_user_id: input.userId,
+        incident_id: input.incidentId ?? null,
+        channel: (input.channel ?? 'IN_APP') as any,
+        event_type: input.eventType,
+        title: input.title ?? null,
+        body: input.body,
+        data_payload: (input.dataPayload ?? undefined) as any,
+      },
+    });
+
+    try {
+      this.realtime.notificationCreated({
+        notificationId: notification.id,
+        userId: input.userId,
+        type: input.eventType,
+        title: input.title ?? input.eventType,
+        ...(input.body ? { body: input.body } : {}),
+        ...(input.incidentId ? { incidentId: input.incidentId } : {}),
+        createdAt: notification.created_at.toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for notification.created: ${String(err)}`);
+    }
+
+    return notification;
+  }
 
   async findAll(userId: string, page = 1, perPage = 20) {
     const take = Math.min(perPage, 100);

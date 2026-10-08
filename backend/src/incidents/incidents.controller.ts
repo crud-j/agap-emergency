@@ -18,8 +18,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes } from '@nestjs/swagger';
 import { IncidentsService } from './incidents.service';
+import { AssessmentService } from './assessment/assessment.service';
 import { MediaService, MULTER_MEMORY_STORAGE } from '../media/media.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
+import { SubmitAssessmentDto } from './assessment/dto/submit-assessment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -32,6 +34,7 @@ export class IncidentsController {
   constructor(
     private readonly incidentsService: IncidentsService,
     private readonly mediaService: MediaService,
+    private readonly assessmentService: AssessmentService,
   ) {}
 
   @Post()
@@ -62,12 +65,28 @@ export class IncidentsController {
     });
   }
 
+  @Get('mine')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List incidents reported by the authenticated citizen (MOD-42)' })
+  async findMine(@Request() req: any) {
+    return this.incidentsService.listMine(req.user.id);
+  }
+
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get incident by ID' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.incidentsService.findById(id);
+  }
+
+  @Get(':id/detail')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Citizen-facing incident detail, ownership-scoped (MOD-42)' })
+  async citizenDetail(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.incidentsService.getCitizenDetail(id, req.user.id);
   }
 
   @Patch(':id/status')
@@ -184,6 +203,22 @@ export class IncidentsController {
     return this.incidentsService.markDuplicate(id, req.user.id, body?.masterIncidentId);
   }
 
+  @Post(':id/merge')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Merge an incident as a confirmed duplicate of a master (MOD-26). Advisory — a dispatcher confirms; never auto-merged.',
+  })
+  async merge(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { masterIncidentId: string },
+    @Request() req: any,
+  ) {
+    return this.incidentsService.mergeDuplicate(id, body.masterIncidentId, req.user.id);
+  }
+
   @Post(':id/resolution')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
@@ -227,27 +262,9 @@ export class IncidentsController {
     return this.incidentsService.submitFeedback(id, body, req.user.id);
   }
 
-  // ---- Messages ----
-
-  @Get(':id/messages')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'List incident messages' })
-  async listMessages(@Param('id', ParseUUIDPipe) id: string) {
-    return this.incidentsService.listMessages(id);
-  }
-
-  @Post(':id/messages')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Post an incident message' })
-  async postMessage(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { messageText: string },
-    @Request() req: any,
-  ) {
-    return this.incidentsService.postMessage(id, body.messageText, req.user.id);
-  }
+  // ---- Messages: retired. Incident chat now lives in the communications module
+  // (/v1/communications/:incidentId), which enforces participants-only access and
+  // strips sender identity (MOD-33 / CLAUDE.md rule 15). ----
 
   // ---- Multi-agency ----
 
@@ -294,6 +311,21 @@ export class IncidentsController {
     @Request() req: any,
   ) {
     return this.incidentsService.createAssessment(id, body, req.user.id);
+  }
+
+  @Post(':id/assessment')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Submit an on-scene patient assessment (MOD-37). All fields optional; emits incident.assessment_updated.',
+  })
+  async submitAssessment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitAssessmentDto,
+    @Request() req: any,
+  ) {
+    return this.assessmentService.submit(id, dto, req.user.id);
   }
 
   @Patch(':id/assessments/:aId')
@@ -425,18 +457,7 @@ export class IncidentsController {
     return this.incidentsService.getAssessment(aId);
   }
 
-  // ---- Message read-marking ----
-
-  @Patch(':id/messages/:msgId/read')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Mark an incident message as read (MOD-33)' })
-  async markMessageRead(
-    @Param('msgId', ParseUUIDPipe) msgId: string,
-    @Request() req: any,
-  ) {
-    return this.incidentsService.markMessageRead(msgId, req.user.id);
-  }
+  // ---- Message read-marking: retired → PATCH /v1/communications/:incidentId/messages/:messageId/read ----
 
   // ---- Agency removal ----
 

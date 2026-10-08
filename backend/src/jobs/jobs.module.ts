@@ -6,6 +6,7 @@ import { PrismaModule } from '../common/prisma/prisma.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { EmergencyAlertsModule } from '../emergency-alerts/emergency-alerts.module';
 import { LocationsModule } from '../locations/locations.module';
+import { MapsModule } from '../locations/maps/maps.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { QUEUE_NAMES } from '@agap/shared';
 import { NotificationProcessor } from './processors/notification.processor';
@@ -25,6 +26,7 @@ import { AnnouncementPushProcessor } from './processors/announcement-push.proces
     RealtimeModule,
     EmergencyAlertsModule,
     LocationsModule,
+    MapsModule,
     AnalyticsModule,
     ScheduleModule.forRoot(),
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),

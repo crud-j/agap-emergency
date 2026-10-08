@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, Ip } from '@nestjs/common';
+import { BadRequestException, Controller, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, ParseUUIDPipe, Ip } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -131,7 +131,9 @@ export class AuthController {
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ) {
-    return this.webAuthnService.beginRegistration(req.user.id, dto.deviceLabel, ip, userAgent);
+    // deviceLabel is accepted for API compatibility; it is persisted on /complete.
+    void dto;
+    return this.webAuthnService.beginRegistration(req.user.id, ip, userAgent);
   }
 
   @Post('passkey/register/complete')
@@ -157,6 +159,7 @@ export class AuthController {
 
   @Post('passkey/authenticate/begin')
   @Public()
+  @Throttle({ burst: { ttl: 60000, limit: 10 }, sustained: { ttl: 900000, limit: 30 } })
   @ApiOperation({ summary: 'Begin passkey authentication ceremony — returns options for the browser WebAuthn API' })
   @ApiResponse({ status: 201, description: 'Authentication options generated' })
   async passkeyAuthenticateBegin(
@@ -164,11 +167,12 @@ export class AuthController {
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ) {
-    return this.webAuthnService.beginAuthentication(dto.userId, ip, userAgent);
+    return this.webAuthnService.beginAuthentication(dto.identifier, ip, userAgent);
   }
 
   @Post('passkey/authenticate/complete')
   @Public()
+  @Throttle({ burst: { ttl: 60000, limit: 5 }, sustained: { ttl: 900000, limit: 10 } })
   @ApiOperation({ summary: 'Complete passkey authentication — verifies authenticator response and returns JWT tokens' })
   @ApiResponse({ status: 201, description: 'Authenticated via passkey' })
   async passkeyAuthenticateComplete(
@@ -191,7 +195,11 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Revoke a registered passkey' })
-  async passkeyRevokeCredential(@Request() req: any, @Param('id') credentialId: string) {
-    return this.webAuthnService.revokeCredential(req.user.id, credentialId);
+  async passkeyRevokeCredential(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) credentialId: string,
+    @Ip() ip: string,
+  ) {
+    return this.webAuthnService.revokeCredential(req.user.id, credentialId, ip);
   }
 }

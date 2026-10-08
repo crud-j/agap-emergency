@@ -1,10 +1,14 @@
 import 'dotenv/config';
 import {
   PrismaClient,
+  dispatch_status,
   facility_receiving_status,
   facility_type,
+  incident_category,
   incident_priority,
+  incident_status,
   organization_type,
+  resource_status,
   resource_type,
   user_role,
 } from '@prisma/client';
@@ -596,6 +600,90 @@ async function main() {
 
   console.log('  System configurations done');
 
+  // ── Demo dispatch (dev testing) ──────────────────────────────────────────────
+  // A ready-to-track scenario so the full dispatch → tracking flow can be tested
+  // without the Operations Center: a citizen-reported incident with ALPHA-1
+  // (MDRRMO Ambulance 1) already dispatched and responder1 crewed on it.
+  // Idempotent — fixed ids, so re-seeding never duplicates and never clobbers an
+  // in-progress test (status updates are preserved via empty `update`).
+
+  const ALPHA1_RESOURCE_ID = '00000000-0000-0000-0003-000000000001';
+  const DEMO_INCIDENT_ID = '00000000-0000-0000-0005-000000000001';
+  const DEMO_DISPATCH_ID = '00000000-0000-0000-0006-000000000001';
+
+  const demoCitizen = await prisma.user.upsert({
+    where: { email: 'citizen@demo.agap' },
+    update: {},
+    create: {
+      full_name: 'Demo Citizen',
+      email: 'citizen@demo.agap',
+      phone_number: '+639170000001',
+      password_hash: devHash,
+      role: user_role.CITIZEN,
+      is_email_verified: true,
+      barangay: 'Turo',
+    },
+  });
+
+  await prisma.incident.upsert({
+    where: { id: DEMO_INCIDENT_ID },
+    update: {},
+    create: {
+      id: DEMO_INCIDENT_ID,
+      public_reference: 'INC-2026-DEMO01',
+      category: incident_category.MEDICAL,
+      priority: incident_priority.HIGH,
+      status: incident_status.DISPATCHED,
+      description: 'Demo: chest pain, conscious and breathing. (Seeded test incident.)',
+      number_of_patients: 1,
+      dispatched_at: new Date(),
+      incident_reporters: {
+        create: {
+          user_id: demoCitizen.id,
+          is_guest: false,
+          reporter_name: 'Demo Citizen',
+          reporter_phone: '+639170000001',
+        },
+      },
+      incident_locations: {
+        create: {
+          latitude: 14.7969,
+          longitude: 120.9268,
+          formatted_address: 'Villa Zaragoza, Turo, Bocaue, Bulacan',
+          barangay: 'Turo',
+          municipality: 'Bocaue',
+          province: 'Bulacan',
+        },
+      },
+    },
+  });
+
+  await prisma.dispatches.upsert({
+    where: { id: DEMO_DISPATCH_ID },
+    update: {},
+    create: {
+      id: DEMO_DISPATCH_ID,
+      incident_id: DEMO_INCIDENT_ID,
+      resource_id: ALPHA1_RESOURCE_ID,
+      dispatcher_id: dispatcher1.id,
+      organization_id: mdrrmo.id,
+      status: dispatch_status.SENT,
+      sent_at: new Date(),
+      dispatch_notes: 'Demo dispatch — ALPHA-1 (MDRRMO Ambulance 1) to a medical call.',
+      dispatch_crew: {
+        create: { user_id: responder1.id, role_on_scene: 'Lead Responder' },
+      },
+    },
+  });
+
+  // Reflect the dispatch on the unit so it isn't offered as AVAILABLE again.
+  await prisma.resources.update({
+    where: { id: ALPHA1_RESOURCE_ID },
+    data: { status: resource_status.DISPATCHED, current_incident_id: DEMO_INCIDENT_ID },
+  });
+
+  console.log('  Demo dispatch done (ALPHA-1 -> INC-2026-DEMO01, crew: responder1)');
+
   // ── Summary ────────────────────────────────────────────────────────────────
 
   console.log('\nAGAP seed complete.');
@@ -604,6 +692,9 @@ async function main() {
   console.log('  Organizations: MDRRMO Bocaue, BFP Bocaue, Bocaue General Hospital');
   console.log('  Resources: 2 ambulances, 1 rescue boat, 1 fire truck, 1 rescue truck');
   console.log('  Facilities: BGH + 4 evacuation centers (Lolomboy, Bambang, Bunlo, Igulot)');
+  console.log('\n  Demo dispatch flow (ready to track end-to-end):');
+  console.log('    Rescuer : responder1@mdrrmo.bocaue.gov.ph /', DEV_PASSWORD, '(crewed on ALPHA-1)');
+  console.log('    Citizen : citizen@demo.agap /', DEV_PASSWORD, '(reporter of INC-2026-DEMO01)');
 }
 
 main()

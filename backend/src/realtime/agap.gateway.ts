@@ -11,7 +11,6 @@ import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import type { AgapWebSocketEvent, AgapEventName } from '@agap/shared';
-import { INCIDENT_EVENTS, RESPONDER_EVENTS } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 
 const DISPATCHER_ROLES = ['DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR', 'ORG_ADMINISTRATOR'];
@@ -50,9 +49,13 @@ export class AgapGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       const payload = this.jwtService.verify(token, { secret: process.env['JWT_SECRET'] ?? '' });
       client.data.user = payload;
+      // Every authenticated socket auto-joins its own user room so per-user
+      // events (e.g. notification.created) reach only that user.
+      if (payload.sub) client.join(`user:${payload.sub}`);
       this.logger.log(`Authenticated WS: ${client.id} (userId=${payload.sub}, role=${payload.role})`);
-    } catch {
-      this.logger.warn(`Invalid WS token, disconnecting: ${client.id}`);
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Invalid WS token, disconnecting: ${client.id} — ${reason}`);
       client.disconnect();
     }
   }
@@ -73,14 +76,21 @@ export class AgapGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (!DISPATCHER_ROLES.includes(user.role)) {
-      // Citizen / Responder / other: verify this incident belongs to them
+      // Non-staff may only join an incident room if they are a participant:
+      // the reporter, or an assigned responder (dispatch crew). This keeps the
+      // incident-scoped chat/events restricted to participants (MOD-33).
       const incident = await this.prisma.incident.findFirst({
         where: { id: data.incidentId },
         include: { incident_reporters: true },
       });
       const isOwner = incident?.incident_reporters?.user_id === user.sub;
-      if (!isOwner) {
-        client.emit('error', 'Forbidden: not your incident');
+      const isCrew = isOwner
+        ? false
+        : (await this.prisma.dispatch_crew.count({
+            where: { user_id: user.sub, dispatches: { incident_id: data.incidentId } },
+          })) > 0;
+      if (!isOwner && !isCrew) {
+        client.emit('error', 'Forbidden: not a participant of this incident');
         return;
       }
     }
@@ -132,5 +142,14 @@ export class AgapGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   emitToIncident<T>(event: AgapEventName, incidentId: string, payload: T): void {
     this.emit(event, payload, `incident:${incidentId}`);
+  }
+
+  emitToUser<T>(event: AgapEventName, userId: string, payload: T): void {
+    this.emit(event, payload, `user:${userId}`);
+  }
+
+  /** Broadcast to every connected (authenticated) client — e.g. public announcements. */
+  broadcast<T>(event: AgapEventName, payload: T): void {
+    this.emit(event, payload);
   }
 }

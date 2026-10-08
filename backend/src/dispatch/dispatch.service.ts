@@ -116,7 +116,26 @@ export class DispatchService {
 
     this.logger.log(`Dispatch ${dispatch.id} created by ${dispatcherId}`);
 
+    // persist → commit → emit (best-effort). The incident was transitioned to
+    // DISPATCHED inside the transaction above, so fan out: the assignment, the
+    // status change (which also carries the dedicated incident.dispatched
+    // milestone), and the dispatch record. A WS failure never affects dispatch.
     try {
+      const assignedAt = (dispatch.created_at ?? new Date()).toISOString();
+      this.realtime.incidentAssigned({
+        incidentId: dispatch.incident_id,
+        assignmentId: dispatch.id,
+        responderId: dto.initialCrewIds?.[0] ?? '',
+        responseUnitId: dispatch.resource_id,
+        assignedAt,
+      });
+      this.realtime.notifyIncidentStatusChanged({
+        incidentId: dispatch.incident_id,
+        previousStatus: incident.status as unknown as IncidentStatus,
+        newStatus: IncidentStatus.DISPATCHED,
+        changedAt: assignedAt,
+        changedBy: dispatcherId,
+      });
       this.realtime.notifyDispatchCreated(dispatch.incident_id, {
         dispatchId: dispatch.id,
         resourceId: dispatch.resource_id,
@@ -235,6 +254,17 @@ export class DispatchService {
         notes: `Triage: priority ${dto.priorityAssessment}. ${dto.notes ?? ''}`.trim(),
       },
     });
+
+    // Priority is an incident-record change (not a lifecycle status change), so
+    // broadcast incident.updated to refresh the ops queue chip live. Best-effort.
+    try {
+      this.realtime.incidentUpdated(dto.incidentId, {
+        priority: updated.priority,
+        reason: 'triage',
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for triage update: ${String(err)}`);
+    }
 
     return updated;
   }

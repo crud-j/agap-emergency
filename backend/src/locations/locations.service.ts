@@ -1,13 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { CaptureLocationDto } from './dto/capture-location.dto';
 import { TrackLocationDto } from './dto/track-location.dto';
+import { MapsService } from './maps/maps.service';
 import { QUEUE_NAMES } from '@agap/shared';
-import axios from 'axios';
 
 @Injectable()
 export class LocationsService {
@@ -16,7 +15,7 @@ export class LocationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
-    private readonly config: ConfigService,
+    private readonly maps: MapsService,
     @InjectQueue(QUEUE_NAMES.LOCATION_PROCESSING) private readonly locationProcessingQueue: Queue,
   ) {}
 
@@ -30,7 +29,7 @@ export class LocationsService {
       };
     }
 
-    return this.prisma.incident_locations.upsert({
+    const location = await this.prisma.incident_locations.upsert({
       where: { incident_id: dto.incidentId },
       create: {
         incident_id: dto.incidentId,
@@ -46,32 +45,51 @@ export class LocationsService {
         altitude_meters: dto.altitudeMeters ?? null,
       },
     });
+
+    // The incident's own location was set/updated (MOD-11/MOD-13) — push it to the
+    // ops map + the incident room. Best-effort; PostgreSQL remains the source of truth.
+    try {
+      this.realtime.incidentLocationUpdated({
+        incidentId: dto.incidentId,
+        lat: dto.latitude,
+        lng: dto.longitude,
+        ...(dto.accuracyMeters !== undefined ? { accuracy: dto.accuracyMeters } : {}),
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for incident location: ${String(err)}`);
+    }
+
+    return location;
   }
 
+  /**
+   * MOD-12 reverse geocoding via the provider-agnostic {@link MapsService}. The
+   * response keeps its snake_case wire shape for backward compatibility with the
+   * mobile/frontend clients.
+   */
   async reverseGeocode(lat: number, lng: number) {
-    try {
-      const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
-        params: { lat, lon: lng, format: 'json', 'accept-language': 'en', zoom: 18 },
-        headers: { 'User-Agent': 'AGAP Emergency System (agap@bocaue.gov.ph)' },
-        timeout: 5000,
-      });
-      const addr = response.data?.address ?? {};
-      const parts = [
-        addr.village ?? addr.suburb ?? addr.neighbourhood ?? addr.hamlet,
-        addr.town ?? addr.city ?? addr.municipality ?? 'Bocaue',
-        addr.state ?? 'Bulacan',
-      ].filter(Boolean);
-      return {
-        formatted_address: parts.join(', ') || null,
-        barangay: addr.village ?? addr.suburb ?? addr.neighbourhood ?? null,
-        municipality: addr.town ?? addr.city ?? 'Bocaue',
-        province: addr.state ?? 'Bulacan',
-        raw: response.data,
-      };
-    } catch (err) {
-      this.logger.warn(`Geocoding failed for ${lat},${lng}: ${String(err)}`);
-      return { formatted_address: null, barangay: null, municipality: 'Bocaue', province: 'Bulacan' };
-    }
+    const result = await this.maps.reverseGeocode({ lat, lng });
+    return {
+      formatted_address: result.formattedAddress,
+      barangay: result.barangay,
+      municipality: result.municipality,
+      province: result.province,
+      ...(result.raw !== undefined ? { raw: result.raw } : {}),
+    };
+  }
+
+  /** Safe, non-secret map configuration for clients (MOD-22 / mobile map views). */
+  getMapConfig() {
+    return this.maps.clientConfig();
+  }
+
+  /**
+   * Driving route + ETA between two points for the in-app route line (MOD-43).
+   * ETA is always a labeled estimate; a routing failure returns nulls.
+   */
+  getRouteBetween(fromLat: number, fromLng: number, toLat: number, toLng: number) {
+    return this.maps.route({ lat: fromLat, lng: fromLng }, { lat: toLat, lng: toLng });
   }
 
   async trackResponder(dto: TrackLocationDto, userId: string) {
@@ -170,21 +188,15 @@ export class LocationsService {
         return { eta_seconds: null, is_estimate: true, reason: 'No responder location' };
       }
 
-      const routingBase =
-        this.config.get<string>('MAP_PROVIDER_ROUTING_URL') ?? 'http://router.project-osrm.org';
-      const srcLng = Number(responderLoc.longitude);
-      const srcLat = Number(responderLoc.latitude);
-      const dstLng = Number(incidentLoc.longitude);
-      const dstLat = Number(incidentLoc.latitude);
-      const url = `${routingBase}/route/v1/driving/${srcLng},${srcLat};${dstLng},${dstLat}?overview=false`;
-
-      const response = await axios.get(url, { timeout: 5000 });
-      const duration = response.data?.routes?.[0]?.duration as number | undefined;
-      if (!duration) {
+      const route = await this.maps.route(
+        { lat: Number(responderLoc.latitude), lng: Number(responderLoc.longitude) },
+        { lat: Number(incidentLoc.latitude), lng: Number(incidentLoc.longitude) },
+      );
+      if (!route.durationSeconds) {
         return { eta_seconds: null, is_estimate: true };
       }
 
-      const etaSeconds = Math.round(duration);
+      const etaSeconds = route.durationSeconds;
       return {
         eta_seconds: etaSeconds,
         is_estimate: true,
@@ -207,6 +219,37 @@ export class LocationsService {
       if (row.user_id && !latest.has(row.user_id)) latest.set(row.user_id, row);
     }
     return Array.from(latest.values());
+  }
+
+  /**
+   * Latest recorded position for every responder active within the last 4 hours.
+   * Used by the ops map (MOD-22) to show all live responder dots without needing
+   * a specific incident ID. Returns the same shape as getResponderPositions.
+   */
+  async getAllResponderPositions() {
+    const since = new Date(Date.now() - 4 * 3_600_000);
+    const history = await this.prisma.location_history.findMany({
+      where: { user_id: { not: null }, recorded_at: { gte: since } },
+      orderBy: { recorded_at: 'desc' },
+      take: 500,
+      include: { users: { select: { full_name: true } } },
+    });
+    const latest = new Map<string, (typeof history)[number]>();
+    for (const row of history) {
+      if (row.user_id && !latest.has(row.user_id)) latest.set(row.user_id, row);
+    }
+    return Array.from(latest.values()).map((row) => ({
+      responderId: row.user_id,
+      responder_name: row.users?.full_name ?? null,
+      resource_name: null,
+      lat: Number(row.latitude),
+      lng: Number(row.longitude),
+      heading: row.heading_degrees != null ? Number(row.heading_degrees) : null,
+      speed: row.speed_kmh != null ? Number(row.speed_kmh) : null,
+      status: 'active',
+      incident_id: row.incident_id,
+      updated_at: row.recorded_at.toISOString(),
+    }));
   }
 
   async getResourceHistory(resourceId: string) {

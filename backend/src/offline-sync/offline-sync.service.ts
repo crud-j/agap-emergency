@@ -1,7 +1,6 @@
 ﻿import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { QUEUE_NAMES, MAX_OFFLINE_RETRY_ATTEMPTS, OFFLINE_RETRY_BASE_DELAY_MS } from '@agap/shared';
 import type { OfflineSyncJobData } from '../jobs/processors/offline-sync.processor';

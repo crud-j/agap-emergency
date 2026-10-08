@@ -37,7 +37,6 @@ import { CommunicationsModule } from './communications/communications.module';
 import { ResourcesModule } from './resources/resources.module';
 import { FleetModule } from './fleet/fleet.module';
 import { validateConfig } from './config/config.validation';
-import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
   imports: [

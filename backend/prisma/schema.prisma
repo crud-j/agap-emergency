@@ -25,6 +25,9 @@ model User {
   province                                                                 String?                        @default("Bulacan") @db.VarChar(100)
   full_address                                                             String?
   preferred_language                                                       String                         @default("fil") @db.VarChar(10)
+  text_size                                                                String                         @default("medium") @db.VarChar(10)
+  high_contrast                                                            Boolean                        @default(false)
+  reduced_motion                                                           Boolean                        @default(false)
   last_login_at                                                            DateTime?                      @db.Timestamptz(6)
   created_at                                                               DateTime                       @default(now()) @db.Timestamptz(6)
   updated_at                                                               DateTime                       @default(now()) @db.Timestamptz(6)
@@ -172,6 +175,7 @@ model Incident {
   hazard_flags                 String[]
   river_level_meters           Decimal?                       @db.Decimal(5, 2)
   surge_incident_id            String?                        @db.Uuid
+  duplicate_of_id              String?                        @db.Uuid
   is_surge_incident            Boolean                        @default(false)
   submitted_at                 DateTime                       @default(now()) @db.Timestamptz(6)
   received_at                  DateTime?                      @db.Timestamptz(6)
@@ -205,6 +209,8 @@ model Incident {
   incident_reporters           IncidentReporter?
   incident_resolutions         incident_resolutions?
   surge_incidents              surge_incidents?               @relation(fields: [surge_incident_id], references: [id], onUpdate: NoAction, map: "fk_surge_incident")
+  duplicate_of                 Incident?                      @relation("incident_duplicates", fields: [duplicate_of_id], references: [id], onUpdate: NoAction, map: "fk_incident_duplicate_of")
+  duplicates                   Incident[]                     @relation("incident_duplicates")
   location_history             location_history[]
   notifications                Notification[]
   offline_event_queue          offline_event_queue[]
@@ -219,6 +225,7 @@ model Incident {
 
   @@index([category], map: "idx_incidents_category")
   @@index([status, priority, submitted_at(sort: Desc)], map: "idx_incidents_composite")
+  @@index([duplicate_of_id], map: "idx_incidents_duplicate_of")
   @@index([priority], map: "idx_incidents_priority")
   @@index([public_reference], map: "idx_incidents_reference")
   @@index([status], map: "idx_incidents_status")

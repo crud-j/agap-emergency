@@ -20,24 +20,24 @@ export class AdministrationService {
     if (filters.role) where.role = filters.role as any;
     if (filters.status) where.status = filters.status as any;
 
-    const [data, total] = await this.prisma.$transaction([
-      this.prisma.user.findMany({
-        where,
-        select: {
-          id: true,
-          full_name: true,
-          email: true,
-          phone_number: true,
-          role: true,
-          status: true,
-          created_at: true,
-        },
-        orderBy: { created_at: 'desc' },
-        skip,
-        take: perPage,
-      }),
-      this.prisma.user.count({ where }),
-    ]);
+    // Sequential (not `$transaction([...])`): the batch form in Prisma 7 drops
+    // `skip: 0` and then rejects the query. A read list needs no transaction.
+    const data = await this.prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        full_name: true,
+        email: true,
+        phone_number: true,
+        role: true,
+        status: true,
+        created_at: true,
+      },
+      orderBy: { created_at: 'desc' },
+      skip,
+      take: perPage,
+    });
+    const total = await this.prisma.user.count({ where });
 
     return { data, meta: { total, page, perPage } };
   }

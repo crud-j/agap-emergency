@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { DispatchService } from './dispatch.service';
+import { ResourceMatchingService } from './resource-matching/resource-matching.service';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -24,7 +25,10 @@ import { UserRole } from '@agap/shared';
 @ApiBearerAuth()
 @Controller({ path: 'dispatch', version: '1' })
 export class DispatchController {
-  constructor(private readonly dispatchService: DispatchService) {}
+  constructor(
+    private readonly dispatchService: DispatchService,
+    private readonly resourceMatchingService: ResourceMatchingService,
+  ) {}
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -46,6 +50,29 @@ export class DispatchController {
   @ApiOperation({ summary: 'Get priority recommendation for an incident' })
   async priority(@Param('incidentId', ParseUUIDPipe) incidentId: string) {
     return this.dispatchService.getPriorityRecommendation(incidentId);
+  }
+
+  /**
+   * MOD-30 — Suitable Response Unit Recommendation.
+   * ASSISTIVE ONLY: returns a ranked list so the dispatcher can make the
+   * final decision. Never auto-assigns. (CLAUDE.md rule 8)
+   */
+  @Get('recommendations')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiOperation({
+    summary:
+      'Get ranked resource recommendations for an incident (MOD-30). Assistive only — dispatcher confirms.',
+  })
+  async recommendations(
+    @Query('incidentId', ParseUUIDPipe) incidentId: string,
+    @Request() req: any,
+  ) {
+    return this.resourceMatchingService.getRecommendations(
+      incidentId,
+      req.user.id,
+      req.user.role,
+    );
   }
 
   @Post('triage/:incidentId')

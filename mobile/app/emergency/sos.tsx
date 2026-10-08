@@ -17,7 +17,7 @@ export default function SOSScreen() {
           style: 'destructive',
           onPress: () => {
             startSOS();
-            router.push('/emergency/incident-type');
+            router.push('/emergency/location');
           },
         },
       ],

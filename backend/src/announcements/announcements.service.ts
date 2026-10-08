@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { SmsSubscribeDto } from './dto/sms-subscribe.dto';
@@ -14,6 +15,7 @@ export class AnnouncementsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
     @InjectQueue(QUEUE_NAMES.PUSH_NOTIFICATIONS) private readonly pushQueue: Queue,
@@ -86,6 +88,22 @@ export class AnnouncementsService {
       entityId: id,
       moduleId: 'MOD-53',
     });
+
+    // One-way public broadcast (MOD-53) to every connected client. Emitted after
+    // the status commit; best-effort and NEVER a dispatch channel. A WS failure
+    // must not affect the published record or the SMS/push fan-out below.
+    try {
+      this.realtime.announcementPublished({
+        announcementId: published.id,
+        title: published.title,
+        category: String(published.category),
+        severity: String(published.severity),
+        scope: String(published.scope),
+        publishedAt: (published.published_at ?? new Date()).toISOString(),
+      });
+    } catch (err) {
+      this.logger.error(`Realtime emit failed for announcement.published: ${String(err)}`);
+    }
 
     try {
       const subscribers = await this.prisma.sms_subscribers.findMany({

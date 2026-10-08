@@ -7,11 +7,10 @@
     "orientation": "portrait",
     "scheme": "agap",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "backgroundColor": "#0F172A"
-    },
+    "icon": "./assets/icons/agap-solo-icon.png",
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/icons/agap-solo-icon.png",
         "backgroundColor": "#0F172A"
       },
       "package": "com.agap.emergency",
@@ -32,7 +31,11 @@
         "NSLocationWhenInUseUsageDescription": "AGAP needs your location to report your emergency accurately.",
         "NSLocationAlwaysUsageDescription": "AGAP uses your location in the background for responder tracking.",
         "NSCameraUsageDescription": "AGAP uses the camera to capture evidence at the incident scene.",
-        "NSPhotoLibraryUsageDescription": "AGAP needs photo library access to attach images to incidents."
+        "NSPhotoLibraryUsageDescription": "AGAP needs photo library access to attach images to incidents.",
+        "LSApplicationQueriesSchemes": [
+          "waze",
+          "comgooglemaps"
+        ]
       }
     },
     "plugins": [
@@ -41,7 +44,16 @@
       "expo-notifications",
       "expo-secure-store",
       "expo-sensors",
-      "expo-camera"
-    ]
+      "expo-camera",
+      "@maplibre/maplibre-react-native",
+      "expo-audio",
+      "expo-font",
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a4b8b258-4898-4421-a2f2-ee8dee1c6102"
+      }
+    }
   }
 }

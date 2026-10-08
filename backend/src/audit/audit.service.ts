@@ -63,15 +63,15 @@ export class AuditService {
     if (filters.actorId) where.actor_id = filters.actorId;
     if (filters.entityType) where.entity_type = filters.entityType;
 
-    const [data, total] = await this.prisma.$transaction([
-      this.prisma.auditLog.findMany({
-        where,
-        orderBy: { occurred_at: 'desc' },
-        skip,
-        take: perPage,
-      }),
-      this.prisma.auditLog.count({ where }),
-    ]);
+    // Sequential (not `$transaction([...])`): the batch form in Prisma 7 drops
+    // `skip: 0` and then rejects the query. A read list needs no transaction.
+    const data = await this.prisma.auditLog.findMany({
+      where,
+      orderBy: { occurred_at: 'desc' },
+      skip,
+      take: perPage,
+    });
+    const total = await this.prisma.auditLog.count({ where });
 
     return { data, meta: { total, page, perPage } };
   }

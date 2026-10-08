@@ -3,17 +3,32 @@
 @tailwind utilities;
 
 :root {
-  --agap-red: #DC2626;
-  --agap-orange: #EA580C;
-  --agap-dark: #0F172A;
+  /* AGAP pearl/green design tokens — mirrors mobile/src/theme/tokens.ts */
+  --agap-pearl:       #F2F5F8;
+  --agap-green:       #0D6053;
+  --agap-green-soft:  #EEF7F4;
+  --agap-surface:     #EDF1F4;
+  --agap-text-main:   #1C2B3A;
+  --agap-text-mid:    #40536D;
+  --agap-text-sub:    #8795A3;
+  --agap-track:       #DCE3E9;
+  --agap-danger:      #D44858;
+  --agap-danger-soft: #FDF0F1;
+  --agap-amber:       #D97706;
+  --agap-amber-soft:  #FFFBEB;
+  --agap-info:        #3B82F6;
+  --agap-info-soft:   #EFF6FF;
+  --bevel-border:     rgba(168, 181, 193, 0.20);
+  --card-shadow:      0 4px 16px rgba(135, 149, 163, 0.09);
 }
 
 body {
-  @apply bg-slate-950 text-slate-100;
+  background-color: var(--agap-pearl);
+  color: var(--agap-text-main);
 }
 
-/* Priority color utilities */
-.priority-critical { @apply text-red-500 border-red-500; }
-.priority-high { @apply text-orange-500 border-orange-500; }
-.priority-medium { @apply text-yellow-500 border-yellow-500; }
-.priority-low { @apply text-green-500 border-green-500; }
+/* Priority color utilities — light-theme semantics */
+.priority-critical { color: #DC2626; }
+.priority-high     { color: #EA580C; }
+.priority-medium   { color: #CA8A04; }
+.priority-low      { color: #16A34A; }

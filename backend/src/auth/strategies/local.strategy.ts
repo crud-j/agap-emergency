@@ -6,11 +6,14 @@ import { AuthService } from '../auth.service';
 @Injectable()
 export class LocalStrategy extends PassportStrategy(Strategy) {
   constructor(private readonly authService: AuthService) {
-    super({ usernameField: 'email' });
+    // 'identifier' carries either an email or a phone number, so password login
+    // works for phone-only accounts (email-only usernameField previously failed
+    // with a bare 401 "Unauthorized" for phone logins).
+    super({ usernameField: 'identifier' });
   }
 
-  async validate(email: string, password: string) {
-    const user = await this.authService.validateUser(email, password);
+  async validate(identifier: string, password: string) {
+    const user = await this.authService.validateUser(identifier, password);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }

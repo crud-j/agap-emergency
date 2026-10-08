@@ -13,6 +13,7 @@ import { LocationsService } from './locations.service';
 import { CaptureLocationDto } from './dto/capture-location.dto';
 import { GeocodeDto } from './dto/geocode.dto';
 import { TrackLocationDto } from './dto/track-location.dto';
+import { RouteRequestDto } from './dto/route-request.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -31,10 +32,40 @@ export class LocationsController {
     return this.locationsService.capture(dto, req.user?.id);
   }
 
-  @Post('geocode')
+  @Get('map-config')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({
+    summary: 'Public map client configuration (guest OK)',
+    description:
+      'Returns the non-secret map config (provider, style URL, attribution) so ' +
+      'clients render maps without hardcoding a vendor. Driven by MAP_PROVIDER.',
+  })
+  mapConfig() {
+    return this.locationsService.getMapConfig();
+  }
+
+  @Post('route')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Reverse geocode coordinates' })
+  @ApiOperation({
+    summary: 'Driving route + ETA between two points (labeled estimate)',
+    description:
+      'Returns distance, duration, and the route polyline for the in-app route ' +
+      'line on the live tracking map (MOD-43). ETA is always an estimate.',
+  })
+  async route(@Body() dto: RouteRequestDto) {
+    return this.locationsService.getRouteBetween(dto.fromLat, dto.fromLng, dto.toLat, dto.toLng);
+  }
+
+  @Post('geocode')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Reverse geocode coordinates (guest OK)',
+    description:
+      'Resolves a human-readable address for the "Confirm Location" screen (MOD-12). ' +
+      'Guest-accessible so unauthenticated emergency reporting is never blocked (Rule 14).',
+  })
   async geocode(@Body() dto: GeocodeDto) {
     return this.locationsService.reverseGeocode(dto.latitude, dto.longitude);
   }
@@ -72,6 +103,15 @@ export class LocationsController {
   @ApiOperation({ summary: 'Responder positions for an incident' })
   async responders(@Param('incidentId', ParseUUIDPipe) incidentId: string) {
     return this.locationsService.getResponderPositions(incidentId);
+  }
+
+  @Get('responders')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Latest position for all active responders (ops map, MOD-22)' })
+  async allResponders() {
+    return this.locationsService.getAllResponderPositions();
   }
 
   @Get('history/:resourceId')

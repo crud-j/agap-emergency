@@ -7,8 +7,8 @@ import {
   StyleSheet,
   Dimensions,
   StatusBar,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { OnboardProgressbar } from '../../src/components/ui/onbrd-progressbar';
@@ -74,7 +74,7 @@ export default function OnboardingScreen() {
         <View style={styles.topBar}>
           <OnboardProgressbar currentStep={1} totalSteps={4} />
           <TouchableOpacity
-            onPress={() => router.push('/(auth)/login')}
+            onPress={() => router.push('/auth/login')}
             accessibilityRole="button"
             accessibilityLabel="Skip onboarding"
             style={styles.skipButton}
@@ -106,7 +106,7 @@ export default function OnboardingScreen() {
 
         {/* ── Continue button pinned to bottom ── */}
         <View style={styles.buttonBlock}>
-          <ContinueButton onPress={() => router.push('/onboarding/two')} />
+          <ContinueButton onPress={() => router.push('/onboarding/second-onbrd')} />
         </View>
       </View>
     </SafeAreaView>

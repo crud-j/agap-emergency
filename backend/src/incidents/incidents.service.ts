@@ -2,14 +2,17 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentStatusService } from './incident-status/incident-status.service';
 import { DuplicateDetectionService } from './duplicate-detection/duplicate-detection.service';
 import { PriorityService } from './priority/priority.service';
-import { IncidentStatus } from '@agap/shared';
+import { IncidentStatus, IncidentType, IncidentPriority } from '@agap/shared';
 import { Prisma, type Incident } from '@prisma/client';
 
 @Injectable()
@@ -21,6 +24,8 @@ export class IncidentsService {
     private readonly statusService: IncidentStatusService,
     private readonly duplicateService: DuplicateDetectionService,
     private readonly priorityService: PriorityService,
+    private readonly realtime: RealtimeService,
+    private readonly audit: AuditService,
   ) {}
 
   async create(dto: CreateIncidentDto, actorId?: string): Promise<Incident> {
@@ -42,6 +47,17 @@ export class IncidentsService {
     const priority = dto.priority ?? this.priorityService.recommend(dto.type);
     const reference = await this.generateReference();
 
+    // Merge citizen-supplied hazard observations + response need requests into one flags array.
+    const hazardFlags: string[] = [
+      ...(dto.hazards ?? []),
+      ...(dto.responseNeeds ?? []).map((n) => `DISPATCH:${n}`),
+    ];
+
+    // Map the affected-count bucket to a numeric estimate for priority scoring.
+    const numberOfPatients = dto.affectedCount
+      ? ({ '1': 1, '2-5': 3, '5+': 10 } as Record<string, number>)[dto.affectedCount] ?? null
+      : null;
+
     const incident = await this.prisma.$transaction(async (tx) => {
       const inc = await tx.incident.create({
         data: {
@@ -52,6 +68,8 @@ export class IncidentsService {
           description: dto.description ?? null,
           client_event_id: dto.idempotencyKey,
           trigger_method: 'MANUAL_REPORT' as any,
+          hazard_flags: hazardFlags,
+          ...(numberOfPatients !== null ? { number_of_patients: numberOfPatients } : {}),
         },
       });
 
@@ -65,7 +83,7 @@ export class IncidentsService {
         },
       });
 
-      if (dto.patient !== undefined) {
+      if (dto.patient != null) {
         await tx.incident_patients.create({
           data: {
             incident_id: inc.id,
@@ -74,6 +92,33 @@ export class IncidentsService {
             patient_name: dto.patient.name ?? null,
             approximate_age: dto.patient.age ?? null,
             sex: dto.patient.sex ?? null,
+          },
+        });
+      }
+
+      // Persist location record (MOD-11). Source reflects how the coordinates arrived.
+      if (dto.lat !== undefined && dto.lng !== undefined) {
+        const locationSource = dto.address ? 'GPS_WITH_ADDRESS' : 'GPS';
+        await tx.incident_locations.create({
+          data: {
+            incident_id: inc.id,
+            latitude: dto.lat,
+            longitude: dto.lng,
+            formatted_address: dto.address ?? null,
+            source: locationSource,
+          },
+        });
+      } else if (dto.address) {
+        // Reporter provided a manual landmark / street with no GPS coordinates.
+        // Store with sentinel coords that signal manual entry to the dispatcher.
+        // The dispatcher UI should flag these for manual map placement.
+        await tx.incident_locations.create({
+          data: {
+            incident_id: inc.id,
+            latitude: 0,
+            longitude: 0,
+            formatted_address: dto.address,
+            source: 'MANUAL',
           },
         });
       }
@@ -90,6 +135,24 @@ export class IncidentsService {
     });
 
     this.logger.log(`Incident created: ${incident.id} (${incident.public_reference})`);
+
+    // Push the new emergency to the Operations Center dashboard in real time
+    // (MOD-20/MOD-21). Best-effort — persistence already succeeded, so a realtime
+    // failure must never affect the incident (Reliability Rule).
+    try {
+      this.realtime.notifyIncidentCreated({
+        incidentId: incident.id,
+        type: incident.category as unknown as IncidentType,
+        priority: incident.priority as unknown as IncidentPriority,
+        status: incident.status as unknown as IncidentStatus,
+        location:
+          dto.lat !== undefined && dto.lng !== undefined ? { lat: dto.lat, lng: dto.lng } : null,
+        reportedAt: incident.submitted_at.toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for incident.created: ${String(err)}`);
+    }
+
     return incident;
   }
 
@@ -101,7 +164,9 @@ export class IncidentsService {
         incident_patients: true,
         incident_attachments: true,
         incident_events: { orderBy: { occurred_at: 'asc' } },
+        incident_locations: true,
         dispatches: true,
+        on_scene_assessments: { orderBy: { assessed_at: 'desc' } },
       },
     });
     if (!incident) throw new NotFoundException(`Incident ${id} not found`);
@@ -122,15 +187,19 @@ export class IncidentsService {
       where.status = params.status as any;
     }
 
-    const [data, total] = await this.prisma.$transaction([
-      this.prisma.incident.findMany({
-        where,
-        orderBy: { submitted_at: 'desc' },
-        skip,
-        take: perPage,
-      }),
-      this.prisma.incident.count({ where }),
-    ]);
+    // NOTE: run sequentially (not via `$transaction([...])`). Prisma 7 drops
+    // `skip: 0` during serialization and rejects the query with "Argument `skip`
+    // is missing". Omit `skip` entirely on the first page to avoid this.
+    const data = await this.prisma.incident.findMany({
+      where,
+      // Include location so the dispatch dashboard + map can place incidents
+      // without an N+1 fetch (MOD-21/MOD-22).
+      include: { incident_locations: true },
+      orderBy: { submitted_at: 'desc' },
+      ...(skip > 0 ? { skip } : {}),
+      take: perPage,
+    });
+    const total = await this.prisma.incident.count({ where });
 
     return {
       data,
@@ -145,6 +214,116 @@ export class IncidentsService {
     };
   }
 
+  // ---- Citizen-facing history (MOD-42) ----
+
+  /**
+   * Incidents reported by the authenticated citizen, newest first. DRAFTs are
+   * excluded — they were never submitted. Ownership is enforced through the
+   * reporter relation so a citizen only ever sees their own reports.
+   */
+  async listMine(userId: string) {
+    const incidents = await this.prisma.incident.findMany({
+      where: {
+        status: { not: IncidentStatus.DRAFT as any },
+        incident_reporters: { is: { user_id: userId } },
+      },
+      orderBy: { submitted_at: 'desc' },
+      include: { incident_locations: true },
+    });
+    return incidents.map((i) => this.toCitizenSummary(i));
+  }
+
+  private toCitizenSummary(i: any) {
+    const loc = i.incident_locations;
+    const address =
+      loc?.formatted_address ??
+      [loc?.barangay, loc?.municipality].filter(Boolean).join(', ') ??
+      null;
+    return {
+      id: i.id,
+      reference: i.public_reference,
+      type: i.category,
+      priority: i.priority,
+      status: i.status,
+      address: address || null,
+      description: i.description ?? null,
+      reportedAt: i.submitted_at,
+      updatedAt: i.updated_at,
+    };
+  }
+
+  /**
+   * Full citizen-facing detail for one incident. Ownership-scoped: only the
+   * reporting citizen may read it. Sensitive recipient data (phone numbers) is
+   * never returned — notifications expose only title, channel, and status.
+   */
+  async getCitizenDetail(incidentId: string, userId: string) {
+    const incident = await this.prisma.incident.findUnique({
+      where: { id: incidentId },
+      include: {
+        incident_reporters: true,
+        incident_locations: true,
+        incident_events: { orderBy: { occurred_at: 'asc' } },
+        incident_resolutions: true,
+        notifications: { orderBy: { created_at: 'asc' } },
+      },
+    });
+    if (!incident) throw new NotFoundException(`Incident ${incidentId} not found`);
+
+    const reporter = incident.incident_reporters;
+    if (!reporter || reporter.user_id !== userId) {
+      throw new ForbiddenException('You do not have access to this incident');
+    }
+
+    const loc = incident.incident_locations;
+    return {
+      id: incident.id,
+      reference: incident.public_reference,
+      type: incident.category,
+      priority: incident.priority,
+      status: incident.status,
+      description: incident.description ?? null,
+      numberOfPatients: incident.number_of_patients ?? null,
+      reportedAt: incident.submitted_at,
+      updatedAt: incident.updated_at,
+      reporter: {
+        name: reporter.reporter_name ?? null,
+        isGuest: reporter.is_guest,
+      },
+      location: loc
+        ? {
+            address: loc.formatted_address ?? null,
+            street: loc.street ?? null,
+            barangay: loc.barangay ?? null,
+            municipality: loc.municipality ?? null,
+            province: loc.province ?? null,
+            lat: loc.latitude != null ? Number(loc.latitude) : null,
+            lng: loc.longitude != null ? Number(loc.longitude) : null,
+          }
+        : null,
+      timeline: incident.incident_events.map((e) => ({
+        status: e.to_status,
+        at: e.occurred_at,
+        notes: e.notes ?? null,
+      })),
+      notifications: incident.notifications.map((n) => ({
+        title: n.title ?? n.event_type,
+        channel: n.channel,
+        status: n.status,
+        sentAt: n.sent_at ?? n.created_at,
+      })),
+      resolution: incident.incident_resolutions
+        ? {
+            outcome: incident.incident_resolutions.outcome,
+            disposition: incident.incident_resolutions.patient_disposition ?? null,
+            notes: incident.incident_resolutions.resolution_notes ?? null,
+            followUpRequired: incident.incident_resolutions.follow_up_required,
+            closedAt: incident.incident_resolutions.closed_at,
+          }
+        : null,
+    };
+  }
+
   async updateStatus(
     id: string,
     newStatus: IncidentStatus,
@@ -155,8 +334,8 @@ export class IncidentsService {
     const currentStatus = incident.status as unknown as IncidentStatus;
     this.statusService.validateTransition(currentStatus, newStatus);
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.incident.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.incident.update({
         where: { id },
         data: {
           status: newStatus as any,
@@ -180,8 +359,27 @@ export class IncidentsService {
         },
       });
 
-      return updated;
+      return result;
     });
+
+    // Fan the status change out to the ops dashboard + the citizen's incident room
+    // (MOD-20/MOD-42). This also emits the dedicated lifecycle event for milestone
+    // statuses (incident.dispatched/en_route/arrived/resolved/closed/cancelled).
+    // Best-effort — never undo the persisted transition.
+    try {
+      this.realtime.notifyIncidentStatusChanged({
+        incidentId: id,
+        previousStatus: currentStatus,
+        newStatus,
+        changedAt: new Date().toISOString(),
+        changedBy: actorId,
+        ...(reason ? { reason } : {}),
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for incident.status_changed: ${String(err)}`);
+    }
+
+    return updated;
   }
 
   private async generateReference(): Promise<string> {
@@ -208,7 +406,7 @@ export class IncidentsService {
     userId?: string,
   ) {
     await this.findById(incidentId);
-    return this.prisma.incidentAttachment.create({
+    const attachment = await this.prisma.incidentAttachment.create({
       data: {
         incident_id: incidentId,
         uploaded_by_id: userId ?? null,
@@ -220,6 +418,20 @@ export class IncidentsService {
         file_size_bytes: dto.fileSizeBytes ?? null,
       },
     });
+
+    // New evidence is an incident-record change — refresh the ops queue/drawer
+    // live (MOD-10/MOD-20). Best-effort; a WS failure never loses the upload.
+    try {
+      this.realtime.incidentUpdated(incidentId, {
+        change: 'attachment_added',
+        attachmentId: attachment.id,
+        fileType: attachment.file_type,
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for incident.updated (attachment): ${String(err)}`);
+    }
+
+    return attachment;
   }
 
   async listAttachments(incidentId: string) {
@@ -283,8 +495,9 @@ export class IncidentsService {
 
   async markFalseAlert(id: string, actorId: string, notes?: string) {
     const incident = await this.findById(id);
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.incident.update({
+    const previousStatus = incident.status as unknown as IncidentStatus;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.incident.update({
         where: { id },
         data: { status: IncidentStatus.FALSE_ALERT as any },
       });
@@ -305,12 +518,36 @@ export class IncidentsService {
           notes: notes ?? null,
         },
       });
-      return updated;
+      return result;
     });
+
+    // Tell the ops dashboard + citizen screen the incident was classified as a
+    // false alert. Best-effort — the persisted transition stands regardless.
+    try {
+      this.realtime.notifyIncidentStatusChanged({
+        incidentId: id,
+        previousStatus,
+        newStatus: IncidentStatus.FALSE_ALERT,
+        changedAt: new Date().toISOString(),
+        changedBy: actorId,
+        ...(notes ? { reason: notes } : {}),
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for false-alert status change: ${String(err)}`);
+    }
+
+    return updated;
   }
 
   async markDuplicate(id: string, actorId: string, masterIncidentId?: string) {
+    // When a master is named, use the full advisory-merge path (sets the
+    // duplicate_of_id link + audits). Otherwise just flag the status.
+    if (masterIncidentId) {
+      return this.mergeDuplicate(id, masterIncidentId, actorId);
+    }
+
     const incident = await this.findById(id);
+    const previousStatus = incident.status as unknown as IncidentStatus;
     const updated = await this.prisma.incident.update({
       where: { id },
       data: { status: IncidentStatus.DUPLICATE as any },
@@ -321,9 +558,93 @@ export class IncidentsService {
         from_status: incident.status as any,
         to_status: IncidentStatus.DUPLICATE as any,
         triggered_by_id: actorId,
-        notes: masterIncidentId ? `Duplicate of ${masterIncidentId}` : null,
       },
     });
+
+    try {
+      this.realtime.notifyIncidentStatusChanged({
+        incidentId: id,
+        previousStatus,
+        newStatus: IncidentStatus.DUPLICATE,
+        changedAt: new Date().toISOString(),
+        changedBy: actorId,
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for duplicate status change: ${String(err)}`);
+    }
+
+    return updated;
+  }
+
+  /**
+   * MOD-26 — merge an incident as a confirmed DUPLICATE of a master incident.
+   * ADVISORY action: this is only ever invoked by an explicit dispatcher
+   * decision (POST /incidents/:id/merge), never automatically. Sets
+   * status=DUPLICATE + duplicate_of_id, writes an immutable audit entry, and
+   * emits incident.status_changed (best-effort).
+   */
+  async mergeDuplicate(id: string, masterIncidentId: string, actorId: string): Promise<Incident> {
+    if (!masterIncidentId) {
+      throw new BadRequestException('masterIncidentId is required to merge a duplicate');
+    }
+    if (id === masterIncidentId) {
+      throw new BadRequestException('An incident cannot be merged into itself');
+    }
+
+    const incident = await this.findById(id);
+    const master = await this.prisma.incident.findUnique({ where: { id: masterIncidentId } });
+    if (!master) {
+      throw new NotFoundException(`Master incident ${masterIncidentId} not found`);
+    }
+
+    const previousStatus = incident.status as unknown as IncidentStatus;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.incident.update({
+        where: { id },
+        data: {
+          status: IncidentStatus.DUPLICATE as any,
+          duplicate_of_id: masterIncidentId,
+        },
+      });
+      await tx.incidentEvent.create({
+        data: {
+          incident_id: id,
+          from_status: incident.status as any,
+          to_status: IncidentStatus.DUPLICATE as any,
+          triggered_by_id: actorId,
+          notes: `Merged as duplicate of ${master.public_reference}`,
+        },
+      });
+      return result;
+    });
+
+    // Immutable audit trail (MOD-46). Best-effort — never blocks the merge.
+    await this.audit.log({
+      action: 'UPDATE',
+      actorId,
+      entityType: 'incident',
+      entityId: id,
+      moduleId: 'MOD-26',
+      incidentId: id,
+      oldValues: { status: previousStatus },
+      newValues: { status: IncidentStatus.DUPLICATE, duplicate_of_id: masterIncidentId },
+    });
+
+    // Distribute the change to the ops dashboard + citizen screen (best-effort).
+    try {
+      this.realtime.notifyIncidentStatusChanged({
+        incidentId: id,
+        previousStatus,
+        newStatus: IncidentStatus.DUPLICATE,
+        changedAt: new Date().toISOString(),
+        changedBy: actorId,
+        reason: `Duplicate of ${master.public_reference}`,
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for duplicate merge: ${String(err)}`);
+    }
+
     return updated;
   }
 
@@ -372,21 +693,9 @@ export class IncidentsService {
     });
   }
 
-  // ---- Messages (MOD-33) ----
-
-  async listMessages(id: string) {
-    return this.prisma.incident_messages.findMany({
-      where: { incident_id: id, is_deleted: false },
-      orderBy: { sent_at: 'asc' },
-    });
-  }
-
-  async postMessage(id: string, messageText: string, userId: string) {
-    await this.findById(id);
-    return this.prisma.incident_messages.create({
-      data: { incident_id: id, sender_id: userId, message_text: messageText },
-    });
-  }
+  // Incident chat (MOD-33) is served by CommunicationsService, which enforces
+  // participants-only access and strips sender identity. The former unguarded
+  // listMessages/postMessage here were retired to remove the bypass.
 
   // ---- Multi-agency (MOD-34) ----
 
@@ -570,17 +879,6 @@ export class IncidentsService {
     });
     if (!assessment) throw new NotFoundException('Assessment not found');
     return assessment;
-  }
-
-  // ---- Message read-marking (MOD-33) ----
-
-  async markMessageRead(messageId: string, userId: string) {
-    await this.prisma.message_reads.upsert({
-      where: { message_id_user_id: { message_id: messageId, user_id: userId } },
-      create: { message_id: messageId, user_id: userId },
-      update: { read_at: new Date() },
-    });
-    return { messageId, read: true };
   }
 
   // ---- Agency removal (MOD-34) ----

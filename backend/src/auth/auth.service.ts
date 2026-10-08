@@ -1,12 +1,16 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
@@ -20,14 +24,22 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
   ) {}
 
-  async validateUser(email: string, password: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+  async validateUser(identifier: string, password: string) {
+    // Look up by email or phone depending on what the client sent, so accounts
+    // registered with a phone number (email optional) can log in with a password.
+    const user = identifier?.includes('@')
+      ? await this.prisma.user.findUnique({ where: { email: identifier } })
+      : await this.prisma.user.findUnique({
+          where: { phone_number: this.normalizePhone(identifier) },
+        });
     if (!user || !user.password_hash) return null;
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return null;
@@ -61,40 +73,52 @@ export class AuthService {
       throw new BadRequestException('Passwords do not match');
     }
 
+    const phoneNumber = this.normalizePhone(dto.phoneNumber);
+
     const existing = await this.prisma.user.findUnique({
-      where: { phone_number: dto.phoneNumber },
+      where: { phone_number: phoneNumber },
     });
     if (existing) throw new BadRequestException('Phone number already registered');
+
+    if (dto.email) {
+      const emailExists = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (emailExists) throw new BadRequestException('Email already registered');
+    }
 
     const passwordHash = await this.hashPassword(dto.password);
 
     const user = await this.prisma.user.create({
       data: {
         full_name: dto.fullName,
-        phone_number: dto.phoneNumber,
+        phone_number: phoneNumber,
+        email: dto.email ?? null,
         password_hash: passwordHash,
         status: 'PENDING_VERIFICATION',
       },
     });
 
-    // Issue a 6-digit OTP for SMS verification (delivery not yet wired — MOD-17).
+    // Issue a 6-digit OTP and send it via the backend SMS gateway (MOD-17).
     const otp = this.generateOtp();
     await this.prisma.user_verifications.create({
       data: {
         user_id: user.id,
         verification_type: 'PHONE',
         token: otp,
+        status: 'PENDING',
         expires_at: new Date(Date.now() + 15 * 60 * 1000),
       },
     });
 
-    const { password_hash: _, ...safeUser } = user;
-    const { accessToken, refreshToken } = await this.login({
-      id: user.id,
-      email: user.email,
-      role: user.role,
+    this.logger.warn(`[DEV] Registration OTP for ${phoneNumber}: ${otp} (expires in 15 min)`);
+    // Enqueue delivery. When Textbee is not configured the SMS processor logs
+    // and no-ops — registration must never fail because SMS delivery cannot run.
+    await this.smsQueue.add('otp-sms', {
+      phone: phoneNumber,
+      message: `Your AGAP verification code is ${otp}. Expires in 15 minutes. Do not share this code.`,
     });
-    return { user: safeUser, accessToken, refreshToken };
+
+    const { password_hash: _, ...safeUser } = user;
+    return { user: safeUser };
   }
 
   async registerGuest(dto: RegisterGuestDto) {
@@ -207,14 +231,17 @@ export class AuthService {
 
     // Do not reveal whether the account exists.
     if (user) {
+      const resetOtp = this.generateOtp();
       await this.prisma.user_verifications.create({
         data: {
           user_id: user.id,
           verification_type: 'PHONE',
-          token: this.generateOtp(),
+          token: resetOtp,
+          status: 'PENDING',
           expires_at: new Date(Date.now() + 15 * 60 * 1000),
         },
       });
+      this.logger.warn(`[DEV] Password reset OTP for ${dto.phoneNumber}: ${resetOtp} (expires in 15 min)`);
     }
 
     return { message: 'If the account exists, a reset OTP has been sent via SMS' };
@@ -270,7 +297,8 @@ export class AuthService {
     return { message: 'Password changed' };
   }
 
-  async loginPhone(phoneNumber: string) {
+  async loginPhone(rawPhoneNumber: string) {
+    const phoneNumber = this.normalizePhone(rawPhoneNumber);
     const user = await this.prisma.user.findUnique({ where: { phone_number: phoneNumber } });
 
     if (user) {
@@ -286,10 +314,12 @@ export class AuthService {
           user_id: user.id,
           verification_type: 'PHONE',
           token: otp,
+          status: 'PENDING',
           expires_at: new Date(Date.now() + 10 * 60 * 1000),
         },
       });
 
+      this.logger.warn(`[DEV] Login OTP for ${phoneNumber}: ${otp} (expires in 10 min)`);
       await this.smsQueue.add('otp-sms', {
         phone: phoneNumber,
         message: `Your AGAP login code is ${otp}. Expires in 10 minutes. Do not share this code.`,
@@ -301,27 +331,159 @@ export class AuthService {
   }
 
   async verifyPhoneOtp(phoneNumber: string, code: string) {
+    try {
+      return await this.verifyPhoneOtpInternal(phoneNumber, code);
+    } catch (err) {
+      // Preserve genuine domain outcomes (invalid OTP, expired, user not found)
+      // as-is. Everything else here is an infrastructure failure — most notably
+      // "Server has closed the connection" from a dropped Postgres client.
+      // Surfacing it as 503 stops the mobile client from mislabelling a DB
+      // outage as an "invalid or expired code".
+      if (err instanceof HttpException) throw err;
+      if (this.isDatabaseConnectivityError(err)) {
+        this.logger.error(
+          `[OTP verify] database connectivity failure: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        throw new ServiceUnavailableException(
+          'Verification service is temporarily unavailable. Please try again in a moment.',
+        );
+      }
+      throw err;
+    }
+  }
+
+  private isDatabaseConnectivityError(err: unknown): boolean {
+    // Initialization / panic / unknown-request errors are always infrastructure.
+    if (
+      err instanceof Prisma.PrismaClientInitializationError ||
+      err instanceof Prisma.PrismaClientRustPanicError ||
+      err instanceof Prisma.PrismaClientUnknownRequestError
+    ) {
+      return true;
+    }
+    // A KnownRequestError is usually a *query* problem (e.g. P2002 unique
+    // violation) — NOT an outage. Only the P1xxx connection codes and P2024
+    // (pool timeout) indicate connectivity, so classify narrowly.
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      const connectionCodes = ['P1000', 'P1001', 'P1002', 'P1008', 'P1010', 'P1017', 'P2024'];
+      if (connectionCodes.includes(err.code)) return true;
+    }
+    const message = err instanceof Error ? err.message.toLowerCase() : '';
+    return (
+      message.includes('closed the connection') ||
+      message.includes('connection terminated') ||
+      message.includes('econnrefused') ||
+      message.includes('econnreset') ||
+      message.includes('connection timeout') ||
+      message.includes('connection pool')
+    );
+  }
+
+  private async verifyPhoneOtpInternal(rawPhoneNumber: string, code: string) {
+    const phoneNumber = this.normalizePhone(rawPhoneNumber);
     const user = await this.prisma.user.findUnique({ where: { phone_number: phoneNumber } });
     if (!user) throw new UnauthorizedException('Invalid OTP');
 
-    const verification = await this.prisma.user_verifications.findFirst({
-      where: {
-        user_id: user.id,
-        verification_type: 'PHONE',
-        token: code,
-        status: 'PENDING',
-        expires_at: { gt: new Date() },
-      },
-      orderBy: { created_at: 'desc' },
-    });
-    if (!verification) throw new UnauthorizedException('Invalid or expired OTP');
+    const payload = { sub: user.id, email: user.email, role: user.role };
+    const accessToken = this.jwtService.sign(payload);
+    const refreshToken = this.generateRefreshToken();
 
-    await this.prisma.user_verifications.update({
-      where: { id: verification.id },
-      data: { status: 'VERIFIED', verified_at: new Date() },
+    const updatedUser = await this.prisma.$transaction(async (tx) => {
+      const verification = await tx.user_verifications.findFirst({
+        where: {
+          user_id: user.id,
+          verification_type: 'PHONE',
+          token: code,
+          status: 'PENDING',
+        },
+        orderBy: { created_at: 'desc' },
+      });
+
+      this.logger.log(
+        `[OTP verify] found=${!!verification}` +
+          (verification
+            ? ` expires_at=${String(verification.expires_at)} now=${new Date().toISOString()}`
+            : ` no PENDING record for phone=${phoneNumber} code=${code}`),
+      );
+
+      if (!verification) throw new UnauthorizedException('Invalid OTP');
+
+      // Safe comparison: handles both Date objects and ISO strings Prisma may return.
+      const expiresMs = new Date(verification.expires_at as any).getTime();
+      if (isNaN(expiresMs) || expiresMs < Date.now()) {
+        this.logger.warn(`[OTP verify] expired: expiresMs=${expiresMs} now=${Date.now()}`);
+        throw new UnauthorizedException('OTP has expired');
+      }
+
+      // Claim the OTP conditionally. Concurrent requests may both read PENDING,
+      // but only one can change that row from PENDING to VERIFIED.
+      const claimed = await tx.user_verifications.updateMany({
+        where: { id: verification.id, status: 'PENDING' },
+        data: { status: 'VERIFIED', verified_at: new Date() },
+      });
+      if (claimed.count !== 1) throw new UnauthorizedException('Invalid OTP');
+
+      await tx.user_sessions.create({
+        data: {
+          user_id: user.id,
+          token_hash: this.hashToken(accessToken),
+          refresh_token_hash: this.hashToken(refreshToken),
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      return tx.user.update({
+        where: { id: user.id },
+        data: { is_phone_verified: true, status: 'ACTIVE' },
+        select: {
+          id: true,
+          full_name: true,
+          email: true,
+          phone_number: true,
+          role: true,
+          status: true,
+          is_guest: true,
+          is_email_verified: true,
+          is_phone_verified: true,
+          barangay: true,
+          municipality: true,
+          province: true,
+          full_address: true,
+          preferred_language: true,
+          text_size: true,
+          high_contrast: true,
+          reduced_motion: true,
+          profile_completeness: true,
+          last_login_at: true,
+          created_at: true,
+        },
+      });
     });
 
-    return this.login({ id: user.id, email: user.email, role: user.role });
+    return {
+      message: 'Phone verification successful',
+      accessToken,
+      refreshToken,
+      user: updatedUser,
+    };
+  }
+
+  /**
+   * Canonicalise a Philippine mobile number to E.164 (+63XXXXXXXXXX) so that a
+   * number stored at registration always matches at login/verify regardless of
+   * how the client formatted it: 09171234567 / 9171234567 / 639171234567 /
+   * +639171234567 all collapse to +639171234567. This is the single source of
+   * truth — clients may send any of these forms.
+   */
+  private normalizePhone(input: string): string {
+    if (!input) return input;
+    let digits = input.trim().replace(/[\s()-]/g, '');
+    if (digits.startsWith('+')) digits = digits.slice(1);
+    digits = digits.replace(/\D/g, '');
+    if (digits.startsWith('0')) digits = '63' + digits.slice(1); // 09XX… → 639XX…
+    else if (digits.startsWith('9')) digits = '63' + digits;      // 9XX…  → 639XX…
+    // already starts with 63 → leave as-is
+    return '+' + digits;
   }
 
   private generateOtp(): string {

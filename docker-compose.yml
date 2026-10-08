@@ -54,6 +54,10 @@ services:
       - .:/app
       - agap_node_modules:/app/node_modules
       - agap_backend_node_modules:/app/backend/node_modules
+      # Isolate the container's compiled output so a host-side `nest build`/watch
+      # and the container's watch never write to the same dist and corrupt it
+      # (which caused "Cannot find module './auth/auth.module'").
+      - agap_backend_dist:/app/backend/dist
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +93,7 @@ volumes:
   agap_redis_data:
   agap_node_modules:
   agap_backend_node_modules:
+  agap_backend_dist:
   minio_data:
 
 networks:

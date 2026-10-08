@@ -33,6 +33,9 @@ export const CreateIncidentSchema = z.object({
       isUnknown: z.boolean().default(false),
     })
     .optional(),
+  affectedCount: z.string().max(20).optional(),
+  hazards: z.array(z.string().max(200)).max(20).optional(),
+  responseNeeds: z.array(z.string().max(100)).max(10).optional(),
 });
 
 export type CreateIncidentInput = z.infer<typeof CreateIncidentSchema>;

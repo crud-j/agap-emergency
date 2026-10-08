@@ -6,7 +6,10 @@ import { IncidentStatusService } from './incident-status/incident-status.service
 import { DuplicateDetectionService } from './duplicate-detection/duplicate-detection.service';
 import { PriorityService } from './priority/priority.service';
 import { TriageService } from './triage/triage.service';
+import { AssessmentService } from './assessment/assessment.service';
 import { MediaModule } from '../media/media.module';
+import { RealtimeModule } from '../realtime/realtime.module';
+import { AuditModule } from '../audit/audit.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
@@ -14,6 +17,8 @@ import { QUEUE_NAMES } from '@agap/shared';
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.AUDIT_PROCESSING }),
     MediaModule,
+    RealtimeModule,
+    AuditModule,
   ],
   controllers: [IncidentsController],
   providers: [
@@ -22,6 +27,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     DuplicateDetectionService,
     PriorityService,
     TriageService,
+    AssessmentService,
   ],
   exports: [IncidentsService, IncidentStatusService],
 })

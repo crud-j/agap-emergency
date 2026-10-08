@@ -17,10 +17,10 @@ describe('AuditService', () => {
 
   it('writes audit log entry', async () => {
     mockPrisma.auditLog.create.mockResolvedValue({});
-    await service.log({ action: AuditAction.INCIDENT_CREATED, actorId: 'user-1' });
+    await service.log({ action: AuditAction.CREATE, actorId: 'user-1' });
     expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ action: AuditAction.INCIDENT_CREATED }),
+        data: expect.objectContaining({ action: AuditAction.CREATE }),
       }),
     );
   });
@@ -28,7 +28,7 @@ describe('AuditService', () => {
   it('does not throw when audit log write fails', async () => {
     mockPrisma.auditLog.create.mockRejectedValue(new Error('DB error'));
     await expect(
-      service.log({ action: AuditAction.INCIDENT_CREATED }),
+      service.log({ action: AuditAction.CREATE }),
     ).resolves.not.toThrow();
   });
 });

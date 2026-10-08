@@ -5,9 +5,16 @@
   "scripts": {
     "test": "jest --config jest.config.ts",
     "test:cov": "jest --config jest.config.ts --coverage",
-    "test:watch": "jest --config jest.config.ts --watch"
+    "test:watch": "jest --config jest.config.ts --watch",
+    "test:mobile": "jest --config mobile/jest.config.ts",
+    "test:mobile:watch": "jest --config mobile/jest.config.ts --watch"
   },
   "devDependencies": {
+    "react": "19.2.3",
+    "react-test-renderer": "19.2.3",
+    "@types/react": "~19.2.2",
+    "@types/react-test-renderer": "^19.0.0",
+    "zod": "^3.23.0",
     "@nestjs/bullmq": "^10.2.0",
     "@nestjs/common": "^10.4.0",
     "@nestjs/config": "^3.2.0",

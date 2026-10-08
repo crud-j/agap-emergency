@@ -20,6 +20,7 @@ export const INCIDENT_EVENTS = {
   CLOSED: 'incident.closed',
   ESCALATED: 'incident.escalated',
   CANCELLED: 'incident.cancelled',
+  MESSAGE_CREATED: 'message.created',
 } as const;
 
 export type IncidentEventName = (typeof INCIDENT_EVENTS)[keyof typeof INCIDENT_EVENTS];
@@ -56,4 +57,19 @@ export interface IncidentAssignedPayload {
   responderId: string;
   responseUnitId: string;
   assignedAt: string;
+}
+
+/**
+ * Incident-scoped chat message (MOD-33). Carries only a role-based sender label —
+ * never a reporter's/bystander's personal identity (CLAUDE.md rule 15).
+ */
+export interface IncidentMessagePayload {
+  id: string;
+  incidentId: string;
+  senderId: string;
+  senderRole: string;
+  senderLabel: string;
+  messageText: string;
+  attachmentId: string | null;
+  sentAt: string;
 }

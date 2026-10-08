@@ -1,11 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Job } from 'bullmq';
-import axios from 'axios';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
+import { MapsService } from '../../locations/maps/maps.service';
 
 export interface EtaRefreshJobData {
   dispatchId: string;
@@ -21,9 +20,9 @@ export class EtaRefreshProcessor extends WorkerHost {
   private readonly logger = new Logger(EtaRefreshProcessor.name);
 
   constructor(
-    private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
+    private readonly maps: MapsService,
   ) {
     super();
   }
@@ -33,19 +32,17 @@ export class EtaRefreshProcessor extends WorkerHost {
     this.logger.log(`Processing ETA refresh for dispatch ${dispatchId}`);
 
     try {
-      const routingBase =
-        this.config.get<string>('MAP_PROVIDER_ROUTING_URL') ?? 'http://router.project-osrm.org';
-      const url = `${routingBase}/route/v1/driving/${responderLng},${responderLat};${incidentLng},${incidentLat}?overview=false`;
+      const route = await this.maps.route(
+        { lat: responderLat, lng: responderLng },
+        { lat: incidentLat, lng: incidentLng },
+      );
 
-      const response = await axios.get(url, { timeout: 5000 });
-      const duration = response.data?.routes?.[0]?.duration as number | undefined;
-
-      if (!duration) {
-        this.logger.warn(`OSRM returned no duration for dispatch ${dispatchId}`);
+      if (!route.durationSeconds) {
+        this.logger.warn(`Routing returned no duration for dispatch ${dispatchId}`);
         return;
       }
 
-      const etaSeconds = Math.round(duration);
+      const etaSeconds = route.durationSeconds;
       const estimatedAt = new Date(Date.now() + etaSeconds * 1000);
 
       // Update TransportRecord if one exists for this dispatch (dispatches has no ETA field)

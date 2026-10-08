@@ -55,6 +55,9 @@ export declare const CreateIncidentSchema: z.ZodObject<{
         sex?: "unknown" | "male" | "female" | "other" | undefined;
         isUnknown?: boolean | undefined;
     }>>;
+    affectedCount: z.ZodOptional<z.ZodString>;
+    hazards: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    responseNeeds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
 }, "strip", z.ZodTypeAny, {
     type: IncidentType;
     idempotencyKey: string;
@@ -75,6 +78,9 @@ export declare const CreateIncidentSchema: z.ZodObject<{
         age?: number | undefined;
         sex?: "unknown" | "male" | "female" | "other" | undefined;
     } | undefined;
+    affectedCount?: string | undefined;
+    hazards?: string[] | undefined;
+    responseNeeds?: string[] | undefined;
 }, {
     type: IncidentType;
     idempotencyKey: string;
@@ -95,6 +101,9 @@ export declare const CreateIncidentSchema: z.ZodObject<{
         sex?: "unknown" | "male" | "female" | "other" | undefined;
         isUnknown?: boolean | undefined;
     } | undefined;
+    affectedCount?: string | undefined;
+    hazards?: string[] | undefined;
+    responseNeeds?: string[] | undefined;
 }>;
 export type CreateIncidentInput = z.infer<typeof CreateIncidentSchema>;
 //# sourceMappingURL=incident.validation.d.ts.map

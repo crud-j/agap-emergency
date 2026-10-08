@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsEnum,
   IsNumber,
   IsOptional,
@@ -7,8 +8,8 @@ import {
   IsBoolean,
   IsInt,
   Max,
-  Min,
   MaxLength,
+  Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IncidentType, IncidentPriority, ReporterType } from '@agap/shared';
@@ -102,4 +103,22 @@ export class CreateIncidentDto {
   @ApiPropertyOptional()
   @IsOptional()
   patient?: PatientDto;
+
+  @ApiPropertyOptional({ description: 'Affected count bucket from citizen: "1", "2-5", "5+", "unknown"' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  affectedCount?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Human-readable hazard strings from quick prompts' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  hazards?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'Requested response types: ambulance, fire_truck, rescue_boat, police' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  responseNeeds?: string[];
 }
