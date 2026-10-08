@@ -32,7 +32,7 @@ Install the following tools before starting.
 ## 1. Clone the repository
 
 ```bash
-git clone https://github.com/<org>/AGAPSYSTEM-Backend-Frontend.git agap-emergency
+git clone https://github.com/crud-j/agap-emergency.git agap-emergency
 cd agap-emergency
 ```
 
