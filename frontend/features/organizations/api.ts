@@ -2,26 +2,34 @@ import { api } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import type { PaginatedResult } from '@agap/shared';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Response types (snake_case — Prisma serialization) ─────────────────────
 
 export interface Organization {
   id: string;
   name: string;
-  org_type: string;
-  phone: string | null;
+  short_name: string | null;
+  organization_type: string;
+  barangay: string | null;
+  contact_number: string | null;
   email: string | null;
   address: string | null;
   is_active: boolean;
   created_at: string;
 }
 
-export interface UpdateOrganizationBody {
-  name?: string;
-  phone?: string;
+// ─── Request bodies (camelCase — matches NestJS DTO) ─────────────────────────
+
+export interface CreateOrgBody {
+  name: string;
+  shortName?: string;
+  organizationType: string;
+  barangay?: string;
+  contactNumber?: string;
   email?: string;
   address?: string;
-  isActive?: boolean;
 }
+
+export type UpdateOrgBody = Partial<CreateOrgBody> & { isActive?: boolean };
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
@@ -41,6 +49,10 @@ export function fetchOrganization(id: string): Promise<Organization> {
   return api.get(`/organizations/${id}`, getToken());
 }
 
-export function updateOrganization(id: string, body: UpdateOrganizationBody): Promise<Organization> {
+export function createOrganization(body: CreateOrgBody): Promise<Organization> {
+  return api.post('/organizations', body, getToken());
+}
+
+export function updateOrganization(id: string, body: UpdateOrgBody): Promise<Organization> {
   return api.patch(`/organizations/${id}`, body, getToken());
 }

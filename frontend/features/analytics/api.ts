@@ -3,83 +3,62 @@ import { getToken } from '@/lib/auth';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface AnalyticsOverview {
-  total_incidents: number;
-  active_incidents: number;
-  resolved_today: number;
-  avg_response_time_minutes: number | null;
-  avg_on_scene_time_minutes: number | null;
-  sla_compliance_rate: number | null;
-  incidents_by_status: Record<string, number>;
-  incidents_by_category: Record<string, number>;
-  incidents_by_priority: Record<string, number>;
+export interface ResponseTimeGroup {
+  category: string;
+  _avg: {
+    acknowledge_duration_secs: number | null;
+    dispatch_duration_secs: number | null;
+    response_duration_secs: number | null;
+    total_duration_secs: number | null;
+  };
+  _count: { _all: number };
 }
 
-export interface ResponseTimeStat {
-  date: string;
-  avg_acknowledge_minutes: number | null;
-  avg_dispatch_minutes: number | null;
-  avg_on_scene_minutes: number | null;
-  count: number;
+export interface VolumeData {
+  byCategory: Array<{ category: string; _count: { _all: number } }>;
+  byStatus: Array<{ status: string; _count: { _all: number } }>;
 }
 
-export interface VolumeStat {
-  label: string;
-  count: number;
-  percentage: number;
-}
-
-export interface SlaStats {
+export interface SlaComplianceData {
   total: number;
-  within_sla: number;
-  breached: number;
-  compliance_rate: number;
-  by_priority: Record<string, { within: number; breached: number }>;
+  acknowledgeSlaMet: number;
+  dispatchSlaMet: number;
+  acknowledgeCompliancePct: number;
+  dispatchCompliancePct: number;
 }
 
-export interface AnalyticsParams {
-  from?: string;
-  to?: string;
-  groupBy?: 'day' | 'week' | 'month';
-  category?: string;
-  barangay?: string;
+export interface FalseAlertRateData {
+  totalIncidents: number;
+  falseAlerts: number;
+  ratePct: number;
+}
+
+export interface DailySummaryData {
+  date: string;
+  total: number;
+  byCategory: Array<{ category: string; _count: { _all: number } }>;
+  byStatus: Array<{ status: string; _count: { _all: number } }>;
 }
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
-export function fetchAnalyticsOverview(params?: AnalyticsParams): Promise<AnalyticsOverview> {
-  const qs = new URLSearchParams();
-  if (params?.from)    qs.set('from', params.from);
-  if (params?.to)      qs.set('to', params.to);
-  if (params?.category) qs.set('category', params.category);
-  return api.get(`/analytics/overview?${qs}`, getToken());
+export function fetchResponseTimes(): Promise<ResponseTimeGroup[]> {
+  return api.get('/analytics/response-times', getToken());
 }
 
-export function fetchResponseTimes(params?: AnalyticsParams): Promise<ResponseTimeStat[]> {
-  const qs = new URLSearchParams();
-  if (params?.from)    qs.set('from', params.from);
-  if (params?.to)      qs.set('to', params.to);
-  if (params?.groupBy) qs.set('groupBy', params.groupBy);
-  return api.get(`/analytics/response-times?${qs}`, getToken());
+export function fetchVolume(): Promise<VolumeData> {
+  return api.get('/analytics/volume', getToken());
 }
 
-export function fetchVolumeByCategory(params?: AnalyticsParams): Promise<VolumeStat[]> {
-  const qs = new URLSearchParams();
-  if (params?.from) qs.set('from', params.from);
-  if (params?.to)   qs.set('to', params.to);
-  return api.get(`/analytics/volume/category?${qs}`, getToken());
+export function fetchSlaCompliance(): Promise<SlaComplianceData> {
+  return api.get('/analytics/sla-compliance', getToken());
 }
 
-export function fetchVolumeByBarangay(params?: AnalyticsParams): Promise<VolumeStat[]> {
-  const qs = new URLSearchParams();
-  if (params?.from) qs.set('from', params.from);
-  if (params?.to)   qs.set('to', params.to);
-  return api.get(`/analytics/volume/barangay?${qs}`, getToken());
+export function fetchFalseAlertRate(): Promise<FalseAlertRateData> {
+  return api.get('/analytics/false-alert-rate', getToken());
 }
 
-export function fetchSlaStats(params?: AnalyticsParams): Promise<SlaStats> {
-  const qs = new URLSearchParams();
-  if (params?.from) qs.set('from', params.from);
-  if (params?.to)   qs.set('to', params.to);
-  return api.get(`/analytics/sla?${qs}`, getToken());
+export function fetchDailySummary(date?: string): Promise<DailySummaryData> {
+  const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+  return api.get(`/analytics/daily${qs}`, getToken());
 }

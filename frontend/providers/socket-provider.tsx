@@ -2,6 +2,7 @@
 
 import { useEffect, type JSX, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import type { PaginatedResult } from '@agap/shared';
 import { connectSocket, joinOps, onIncidentEvent } from '@/lib/websocket';
 import { getToken } from '@/lib/auth';
 import type {
@@ -16,6 +17,13 @@ import type {
 } from '@agap/shared';
 import type { IncidentListItem } from '@/features/incidents/api';
 import type { LiveResponderPosition } from '@/features/map/api';
+import type { Resource, FleetItem } from '@/features/resources/api';
+
+interface ResourceStatusChangedPayload {
+  resourceId: string;
+  newStatus: string;
+  previousStatus?: string;
+}
 
 interface SocketProviderProps {
   children: ReactNode;
@@ -189,6 +197,37 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       () => qc.invalidateQueries({ queryKey: ['announcements'] }),
     );
 
+    // ─── resource.status_changed (MOD-28) ────────────────────────────────────
+    // Patch resource status in-place on the fleet board and resource registry
+    // so the availability board reflects operational status changes within ~1s.
+    const offResourceStatus = onIncidentEvent<ResourceStatusChangedPayload>(
+      'resource.status_changed',
+      ({ resourceId, newStatus }) => {
+        const patchStatus = <T extends { id: string; status: string }>(list: T[]): T[] =>
+          list.map((r) => (r.id === resourceId ? { ...r, status: newStatus } : r));
+
+        qc.setQueriesData<PaginatedResult<Resource> | Resource[]>(
+          { queryKey: ['resources'], exact: false },
+          (old) => {
+            if (!old) return old;
+            if (Array.isArray(old)) return patchStatus(old);
+            return { ...old, data: patchStatus(old.data) };
+          },
+        );
+
+        qc.setQueriesData<PaginatedResult<FleetItem> | FleetItem[]>(
+          { queryKey: ['fleet'], exact: false },
+          (old) => {
+            if (!old) return old;
+            if (Array.isArray(old)) return patchStatus(old);
+            return { ...old, data: patchStatus(old.data) };
+          },
+        );
+
+        qc.invalidateQueries({ queryKey: ['available-units'] });
+      },
+    );
+
     return () => {
       offStatus();
       offCreated();
@@ -201,6 +240,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       offResponderLoc();
       offResponderStatus();
       offAnnouncement();
+      offResourceStatus();
     };
   }, [qc]);
 

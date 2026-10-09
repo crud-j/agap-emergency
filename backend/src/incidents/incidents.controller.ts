@@ -19,6 +19,10 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes } from '@nestjs/swagger';
 import { IncidentsService } from './incidents.service';
 import { AssessmentService } from './assessment/assessment.service';
+import { IncidentHandoverService } from './incident-handover/incident-handover.service';
+import { TransportService } from './transport/transport.service';
+import { StartTransportDto } from './transport/dto/start-transport.dto';
+import { RecordArrivalDto } from './transport/dto/record-arrival.dto';
 import { MediaService, MULTER_MEMORY_STORAGE } from '../media/media.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { SubmitAssessmentDto } from './assessment/dto/submit-assessment.dto';
@@ -35,6 +39,8 @@ export class IncidentsController {
     private readonly incidentsService: IncidentsService,
     private readonly mediaService: MediaService,
     private readonly assessmentService: AssessmentService,
+    private readonly handoverService: IncidentHandoverService,
+    private readonly transportService: TransportService,
   ) {}
 
   @Post()
@@ -277,14 +283,26 @@ export class IncidentsController {
     return this.incidentsService.listAgencies(id);
   }
 
+  @Get(':id/agencies/available')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List organizations not yet participating (optionally filtered by type, e.g. BFP) (MOD-34)' })
+  async listAvailableAgencies(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('orgType') orgType?: string,
+  ) {
+    return this.incidentsService.listAvailableAgencies(id, orgType);
+  }
+
   @Post(':id/agencies')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Add a participating agency' })
+  @ApiOperation({ summary: 'Add a participating agency (MOD-34)' })
   async addAgency(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { organizationId: string },
+    @Body() body: { organizationId: string; roleInIncident?: string },
     @Request() req: any,
   ) {
     return this.incidentsService.addAgency(id, body.organizationId, req.user.id);
@@ -369,46 +387,116 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Assign an ICS position' })
+  @ApiOperation({ summary: 'Assign an ICS position (MOD-36)' })
   async addIcsPosition(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: { userId: string; position: string; organizationId?: string },
+    @Request() req: any,
   ) {
-    return this.incidentsService.addIcsPosition(id, body);
+    return this.incidentsService.addIcsPosition(id, body, req.user.id);
   }
 
-  // ---- Handover ----
+  @Post(':id/ics/assign-ic')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Assign the Incident Commander (shortcut for INCIDENT_COMMANDER position) (MOD-36)' })
+  async assignIncidentCommander(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { userId: string; organizationId?: string },
+    @Request() req: any,
+  ) {
+    return this.incidentsService.addIcsPosition(
+      id,
+      { ...body, position: 'INCIDENT_COMMANDER' },
+      req.user.id,
+    );
+  }
+
+  // ---- Handover (MOD-44) ----
 
   @Post(':id/handover')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create an incident handover' })
+  @ApiOperation({ summary: 'Create an incident handover record — transfers situational awareness to incoming operator (MOD-44)' })
   async createHandover(
     @Param('id', ParseUUIDPipe) id: string,
     @Body()
-    body: { toUserId: string; situationSummary: string; pendingActions?: string[] },
+    body: { toUserId: string; situationSummary: string; pendingActions?: string[]; resourcesInField?: Record<string, unknown> },
     @Request() req: any,
   ) {
-    return this.incidentsService.createHandover(id, body, req.user.id);
+    return this.handoverService.create(id, body, req.user.id);
   }
 
   @Get(':id/handover')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'List incident handovers' })
+  @ApiOperation({ summary: 'List handover records for incident, newest first (MOD-44)' })
   async listHandovers(@Param('id', ParseUUIDPipe) id: string) {
-    return this.incidentsService.listHandovers(id);
+    return this.handoverService.list(id);
   }
 
   @Patch(':id/handover/acknowledge')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Acknowledge incoming handover (MOD-44)' })
+  @ApiOperation({ summary: 'Acknowledge the pending incoming handover (MOD-44)' })
   async acknowledgeHandover(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
-    return this.incidentsService.acknowledgeHandover(id, req.user.id);
+    return this.handoverService.acknowledge(id, req.user.id);
+  }
+
+  // ---- Transport (MOD-40) ----
+
+  @Get(':id/transport')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER, UserRole.HOSPITAL_USER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List transport records for an incident (MOD-40)' })
+  async listTransports(@Param('id', ParseUUIDPipe) id: string) {
+    return this.transportService.listTransports(id);
+  }
+
+  @Post(':id/transport')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Start transport — transitions incident to TRANSPORTING and emits incident.transporting (MOD-40)' })
+  async startTransport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: StartTransportDto,
+    @Request() req: any,
+  ) {
+    return this.transportService.startTransport(id, dto, req.user.id);
+  }
+
+  @Patch(':id/transport/:transportId/arrive')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Record facility arrival — emits incident.facility_arrival (MOD-40)' })
+  async recordArrival(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('transportId', ParseUUIDPipe) transportId: string,
+    @Body() dto: RecordArrivalDto,
+    @Request() req: any,
+  ) {
+    return this.transportService.recordArrival(id, transportId, dto, req.user.id);
+  }
+
+  @Patch(':id/transport/:transportId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update transport record — destination change or ETA update (MOD-40)' })
+  async updateTransport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('transportId', ParseUUIDPipe) transportId: string,
+    @Body() body: { destinationId?: string; estimatedArrivalAt?: string; changeReason?: string },
+    @Request() req: any,
+  ) {
+    return this.transportService.updateTransport(id, transportId, body, req.user.id);
   }
 
   // ---- ICS extended ----
@@ -469,7 +557,8 @@ export class IncidentsController {
   async removeAgency(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('orgId', ParseUUIDPipe) orgId: string,
+    @Request() req: any,
   ) {
-    return this.incidentsService.removeAgency(id, orgId);
+    return this.incidentsService.removeAgency(id, orgId, req.user.id);
   }
 }

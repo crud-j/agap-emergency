@@ -12,6 +12,11 @@ function buildPrisma() {
     incidentReporter: {
       findUnique: jest.fn().mockResolvedValue({ user_id: REPORTER }),
     },
+    // The service resolves crew membership in two steps (Prisma 7 safe):
+    // dispatches.findMany for the incident, then dispatch_crew.findFirst.
+    dispatches: {
+      findMany: jest.fn().mockResolvedValue([{ id: 'd-1' }]),
+    },
     dispatch_crew: {
       findFirst: jest.fn().mockImplementation(({ where }: any) =>
         Promise.resolve(where.user_id === CREW ? { id: 'dc-1' } : null),

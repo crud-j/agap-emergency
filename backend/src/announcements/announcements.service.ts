@@ -21,6 +21,41 @@ export class AnnouncementsService {
     @InjectQueue(QUEUE_NAMES.PUSH_NOTIFICATIONS) private readonly pushQueue: Queue,
   ) {}
 
+  async findAllForPublisher(filters: {
+    status?: string;
+    category?: string;
+    page?: number;
+    perPage?: number;
+  }) {
+    const page = filters.page ?? 1;
+    const perPage = Math.min(filters.perPage ?? 20, 100);
+    const skip = (page - 1) * perPage;
+
+    const where: Prisma.AnnouncementWhereInput = {};
+    if (filters.status) where.status = filters.status as any;
+    if (filters.category) where.category = filters.category as any;
+
+    const data = await this.prisma.announcement.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      skip,
+      take: perPage,
+    });
+    const total = await this.prisma.announcement.count({ where });
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        perPage,
+        totalPages: Math.ceil(total / perPage),
+        hasNext: page * perPage < total,
+        hasPrev: page > 1,
+      },
+    };
+  }
+
   async findPublished(filters: { category?: string; barangay?: string }) {
     const where: Prisma.AnnouncementWhereInput = { status: 'PUBLISHED' };
     if (filters.category) where.category = filters.category as any;

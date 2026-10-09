@@ -1,13 +1,18 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateResourceDto } from './dto/create-resource.dto';
 import { UpdateResourceStatusDto } from './dto/update-resource-status.dto';
 import { ResourceRequestDto } from './dto/resource-request.dto';
+import { AuditAction } from '@agap/shared';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ResourcesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async findAll(filters: { status?: string; type?: string; orgId?: string }) {
     const where: Prisma.resourcesWhereInput = { is_active: true };
@@ -102,7 +107,6 @@ export class ResourcesService {
   async recommend(incidentId: string) {
     const incident = await this.prisma.incident.findUnique({ where: { id: incidentId } });
     if (!incident) throw new NotFoundException('Incident not found');
-    // Placeholder ranking; real PostGIS distance scoring is a later step.
     const available = await this.prisma.resources.findMany({
       where: { status: 'AVAILABLE', is_active: true },
       orderBy: { created_at: 'asc' },
@@ -111,8 +115,34 @@ export class ResourcesService {
     return available.map((r, i) => ({ rank: i + 1, resource: r }));
   }
 
-  async createRequest(dto: ResourceRequestDto, requestingOrgId: string) {
-    return this.prisma.resourceRequest.create({
+  // ── MOD-35 Mutual Aid Resource Requests ──────────────────────────────────────
+
+  async listRequests(params: { incidentId?: string; orgId?: string; status?: string }) {
+    const where: Prisma.ResourceRequestWhereInput = {};
+    if (params.incidentId) where.incident_id = params.incidentId;
+    if (params.status) where.status = params.status as any;
+    if (params.orgId) {
+      where.OR = [
+        { requesting_org_id: params.orgId },
+        { providing_org_id: params.orgId },
+      ];
+    }
+    return this.prisma.resourceRequest.findMany({
+      where,
+      orderBy: { requested_at: 'desc' },
+      include: {
+        organizations_resource_requests_requesting_org_idToorganizations: {
+          select: { id: true, name: true, short_name: true },
+        },
+        organizations_resource_requests_providing_org_idToorganizations: {
+          select: { id: true, name: true, short_name: true },
+        },
+      },
+    });
+  }
+
+  async createRequest(dto: ResourceRequestDto, requestingOrgId: string, actorId?: string) {
+    const request = await this.prisma.resourceRequest.create({
       data: {
         incident_id: dto.incidentId,
         requesting_org_id: requestingOrgId,
@@ -123,21 +153,60 @@ export class ResourcesService {
         request_notes: dto.requestNotes ?? null,
       },
     });
+
+    void this.audit.log({
+      action: AuditAction.CREATE,
+      ...(actorId && { actorId }),
+      entityType: 'resource_request',
+      entityId: request.id,
+      moduleId: 'MOD-35',
+      incidentId: dto.incidentId,
+      newValues: {
+        requesting_org_id: requestingOrgId,
+        resource_type: dto.resourceType,
+        quantity: request.quantity,
+        priority: String(request.priority),
+      },
+    });
+
+    return request;
   }
 
-  async respondToRequest(requestId: string, accept: boolean, notes?: string) {
+  async respondToRequest(
+    requestId: string,
+    accept: boolean,
+    notes?: string,
+    actorId?: string,
+    providingOrgId?: string,
+  ) {
     const request = await this.prisma.resourceRequest.findUnique({
       where: { id: requestId },
     });
     if (!request) throw new NotFoundException('Resource request not found');
-    return this.prisma.resourceRequest.update({
+
+    const newStatus = accept ? 'ACCEPTED' : 'REJECTED';
+    const updated = await this.prisma.resourceRequest.update({
       where: { id: requestId },
       data: {
-        status: accept ? 'ACCEPTED' : 'REJECTED',
+        status: newStatus as any,
         response_notes: notes ?? null,
+        ...(providingOrgId && { providing_org_id: providingOrgId }),
         ...(accept && { fulfilled_at: new Date() }),
       },
     });
+
+    void this.audit.log({
+      action: AuditAction.UPDATE,
+      ...(actorId && { actorId }),
+      entityType: 'resource_request',
+      entityId: requestId,
+      moduleId: 'MOD-35',
+      incidentId: request.incident_id,
+      oldValues: { status: String(request.status) },
+      newValues: { status: newStatus, response_notes: notes ?? null },
+    });
+
+    return updated;
   }
 
   /** Resolve the actor's primary organization for outbound resource requests. */

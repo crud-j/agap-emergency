@@ -4,7 +4,10 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '..',
   testMatch: ['**/test/**/*.spec.ts'],
-  transform: { '^.+\\.(t|j)s$': 'ts-jest' },
+  // isolatedModules = per-file transpile (no cross-file type-checking). Types are
+  // enforced by `pnpm typecheck`/`build`; here it cuts suite time from minutes to
+  // seconds and silences ts-jest's hybrid-module (Node16/Next) warning.
+  transform: { '^.+\\.(t|j)s$': ['ts-jest', { isolatedModules: true }] },
   collectCoverageFrom: ['src/**/*.(t|j)s'],
   coverageDirectory: '../coverage',
   testEnvironment: 'node',

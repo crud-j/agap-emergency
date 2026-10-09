@@ -59,6 +59,25 @@ export interface IncidentAssignedPayload {
   assignedAt: string;
 }
 
+/** MOD-40 — responder begins transporting patient(s) to a facility. */
+export interface IncidentTransportingPayload {
+  incidentId: string;
+  transportId: string;
+  dispatchId: string;
+  destinationId: string | null;
+  destinationName: string | null;
+  patientId: string | null;
+  transportStartedAt: string;
+}
+
+/** MOD-40 — ambulance/unit arrives at the receiving facility. */
+export interface IncidentFacilityArrivalPayload {
+  incidentId: string;
+  transportId: string;
+  destinationId: string | null;
+  arrivedAt: string;
+}
+
 /**
  * Incident-scoped chat message (MOD-33). Carries only a role-based sender label —
  * never a reporter's/bystander's personal identity (CLAUDE.md rule 15).

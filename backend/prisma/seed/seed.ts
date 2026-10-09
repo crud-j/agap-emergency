@@ -156,6 +156,37 @@ async function main() {
     },
   });
 
+  const orgAdmin = await prisma.user.upsert({
+    where: { email: 'orgadmin@mdrrmo.bocaue.gov.ph' },
+    update: {},
+    create: {
+      full_name: 'Elena Villanueva',
+      email: 'orgadmin@mdrrmo.bocaue.gov.ph',
+      phone_number: '+639171234009',
+      password_hash: devHash,
+      role: user_role.ORG_ADMINISTRATOR,
+      is_email_verified: true,
+      barangay: 'Poblacion',
+    },
+  });
+
+  // Bystander — a demo account for the "report for someone else" flow. Real
+  // bystanders never need an account (CLAUDE.md rule 14); this exists only so
+  // Ops can exercise every role end-to-end.
+  const bystander = await prisma.user.upsert({
+    where: { email: 'bystander@demo.agap' },
+    update: {},
+    create: {
+      full_name: 'Demo Bystander',
+      email: 'bystander@demo.agap',
+      phone_number: '+639170000002',
+      password_hash: devHash,
+      role: user_role.BYSTANDER,
+      is_email_verified: true,
+      barangay: 'Wakas',
+    },
+  });
+
   console.log('  Users done');
 
   // ── Organizations ──────────────────────────────────────────────────────────
@@ -224,6 +255,7 @@ async function main() {
     { org: mdrrmo.id, user: supervisor.id },
     { org: mdrrmo.id, user: responder1.id },
     { org: mdrrmo.id, user: responder2.id },
+    { org: mdrrmo.id, user: orgAdmin.id },
     { org: bfp.id, user: responder3.id },
     { org: hospitalOrg.id, user: hospitalUser.id },
   ];
@@ -501,6 +533,76 @@ async function main() {
 
   console.log('  Resources done');
 
+  // ── Resource Capabilities (MOD-29 capability matrix) ─────────────────────────
+  // Capability names mirror CAPABILITY_MATRIX in
+  // backend/src/dispatch/resource-matching/resource-matching.service.ts so the
+  // suitable-unit recommender (MOD-30) produces meaningful matches against the
+  // seeded units.
+
+  const CAPABILITY_DEFS: Array<{ name: string; category: string; description: string }> = [
+    { name: 'MEDICAL_RESPONSE', category: 'MEDICAL', description: 'Emergency medical response (EMT/BLS)' },
+    { name: 'FIRST_AID',        category: 'MEDICAL', description: 'Basic first aid' },
+    { name: 'PATIENT_TRANSPORT',category: 'MEDICAL', description: 'Patient transport to a receiving facility' },
+    { name: 'ROAD_RESCUE',      category: 'RESCUE',  description: 'Vehicular extrication / road crash rescue' },
+    { name: 'SEARCH_AND_RESCUE',category: 'RESCUE',  description: 'Search and rescue operations' },
+    { name: 'ROPE_RESCUE',      category: 'RESCUE',  description: 'Technical rope / high-angle rescue' },
+    { name: 'WATER_RESCUE',     category: 'FLOOD',   description: 'Swift-water and flood rescue' },
+    { name: 'BOAT_OPERATION',   category: 'FLOOD',   description: 'Rescue boat operation' },
+    { name: 'FIREFIGHTING',     category: 'FIRE',    description: 'Structural firefighting' },
+    { name: 'FIRE_SUPPRESSION', category: 'FIRE',    description: 'Fire suppression and containment' },
+    { name: 'RESCUE',           category: 'RESCUE',  description: 'General rescue capability' },
+    { name: 'HAZMAT',           category: 'INDUSTRIAL', description: 'Hazardous materials response' },
+    { name: 'HEAVY_EQUIPMENT',  category: 'DEBRIS',  description: 'Heavy clearing equipment operation' },
+  ];
+
+  const capabilityIdByName = new Map<string, string>();
+  for (const cap of CAPABILITY_DEFS) {
+    const row = await prisma.resource_capabilities.upsert({
+      where: { name: cap.name },
+      update: {},
+      create: { name: cap.name, category: cap.category, description: cap.description },
+    });
+    capabilityIdByName.set(cap.name, row.id);
+  }
+
+  // Assign verified capabilities to each seeded unit.
+  const RES_ALPHA1 = '00000000-0000-0000-0003-000000000001';
+  const RES_ALPHA2 = '00000000-0000-0000-0003-000000000002';
+  const RES_BRAVO1 = '00000000-0000-0000-0003-000000000003';
+  const RES_CHARLIE1 = '00000000-0000-0000-0003-000000000004';
+  const RES_CHARLIE2 = '00000000-0000-0000-0003-000000000005';
+
+  const capabilityAssignments: Array<{ resource: string; caps: string[] }> = [
+    { resource: RES_ALPHA1,   caps: ['MEDICAL_RESPONSE', 'FIRST_AID', 'PATIENT_TRANSPORT'] },
+    { resource: RES_ALPHA2,   caps: ['MEDICAL_RESPONSE', 'FIRST_AID', 'PATIENT_TRANSPORT', 'ROAD_RESCUE'] },
+    { resource: RES_BRAVO1,   caps: ['WATER_RESCUE', 'BOAT_OPERATION', 'SEARCH_AND_RESCUE'] },
+    { resource: RES_CHARLIE1, caps: ['FIREFIGHTING', 'FIRE_SUPPRESSION', 'RESCUE', 'HAZMAT'] },
+    { resource: RES_CHARLIE2, caps: ['SEARCH_AND_RESCUE', 'ROPE_RESCUE', 'ROAD_RESCUE', 'RESCUE'] },
+  ];
+
+  for (const assignment of capabilityAssignments) {
+    for (const capName of assignment.caps) {
+      const capId = capabilityIdByName.get(capName);
+      if (!capId) continue;
+      await prisma.resource_capability_assignments.upsert({
+        where: {
+          resource_id_capability_id: {
+            resource_id: assignment.resource,
+            capability_id: capId,
+          },
+        },
+        update: {},
+        create: {
+          resource_id: assignment.resource,
+          capability_id: capId,
+          is_verified: true,
+        },
+      });
+    }
+  }
+
+  console.log('  Resource capabilities done (13 capabilities, 5 units mapped — MOD-29)');
+
   // ── SLA Policies ───────────────────────────────────────────────────────────
 
   const slaPolicies = [
@@ -684,6 +786,151 @@ async function main() {
 
   console.log('  Demo dispatch done (ALPHA-1 -> INC-2026-DEMO01, crew: responder1)');
 
+  // ── Demo incidents across all categories ─────────────────────────────────────
+  // One incident per remaining Bocaue category, spread across the lifecycle so the
+  // dashboard, map, triage queue, and analytics are demo-able without manual entry.
+  // Idempotent (fixed ids, empty update) so re-seeding never duplicates.
+
+  const now = Date.now();
+  const minsAgo = (m: number) => new Date(now - m * 60_000);
+
+  interface DemoIncidentSpec {
+    id: string;
+    reference: string;
+    category: incident_category;
+    priority: incident_priority;
+    status: incident_status;
+    description: string;
+    patients: number;
+    reporter: { userId?: string; isGuest: boolean; name: string; phone: string };
+    location: { lat: number; lng: number; address: string; barangay: string };
+    stamps?: Record<string, Date>;
+  }
+
+  const demoIncidents: DemoIncidentSpec[] = [
+    {
+      id: '00000000-0000-0000-0005-000000000002',
+      reference: 'INC-2026-DEMO02',
+      category: incident_category.ROAD_ACCIDENT,
+      priority: incident_priority.HIGH,
+      status: incident_status.SUBMITTED,
+      description: 'Demo: motorcycle vs tricycle along MacArthur Highway, two persons down.',
+      patients: 2,
+      reporter: { isGuest: true, name: 'Roadside Bystander', phone: '+639170000010' },
+      location: { lat: 14.7260, lng: 120.9420, address: 'MacArthur Highway, Lolomboy, Bocaue, Bulacan', barangay: 'Lolomboy' },
+      stamps: { submitted_at: minsAgo(4) },
+    },
+    {
+      id: '00000000-0000-0000-0005-000000000003',
+      reference: 'INC-2026-DEMO03',
+      category: incident_category.FLOOD,
+      priority: incident_priority.HIGH,
+      status: incident_status.ACKNOWLEDGED,
+      description: 'Demo: rising floodwater trapping a family on a rooftop near the river.',
+      patients: 4,
+      reporter: { userId: demoCitizen.id, isGuest: false, name: 'Demo Citizen', phone: '+639170000001' },
+      location: { lat: 14.7319, lng: 120.9253, address: 'Riverside, Bunlo, Bocaue, Bulacan', barangay: 'Bunlo' },
+      stamps: { submitted_at: minsAgo(18), received_at: minsAgo(16), acknowledged_at: minsAgo(14) },
+    },
+    {
+      id: '00000000-0000-0000-0005-000000000004',
+      reference: 'INC-2026-DEMO04',
+      category: incident_category.RESCUE,
+      priority: incident_priority.MEDIUM,
+      status: incident_status.ON_SCENE,
+      description: 'Demo: person stranded on collapsed footbridge, conscious.',
+      patients: 1,
+      reporter: { isGuest: true, name: 'Barangay Tanod', phone: '+639170000011' },
+      location: { lat: 14.7097, lng: 120.9500, address: 'Creek crossing, Igulot, Bocaue, Bulacan', barangay: 'Igulot' },
+      stamps: { submitted_at: minsAgo(40), received_at: minsAgo(38), acknowledged_at: minsAgo(36), assessed_at: minsAgo(34), dispatched_at: minsAgo(30), en_route_at: minsAgo(28), on_scene_at: minsAgo(15) },
+    },
+    {
+      id: '00000000-0000-0000-0005-000000000005',
+      reference: 'INC-2026-DEMO05',
+      category: incident_category.FIRE,
+      priority: incident_priority.CRITICAL,
+      status: incident_status.DISPATCHED,
+      description: 'Demo: structure fire at a fireworks storage facility, risk of secondary explosions.',
+      patients: 0,
+      reporter: { isGuest: true, name: 'Factory Guard', phone: '+639170000012' },
+      location: { lat: 14.7950, lng: 120.9450, address: 'Fireworks compound, Bundukan, Bocaue, Bulacan', barangay: 'Bundukan' },
+      stamps: { submitted_at: minsAgo(9), received_at: minsAgo(8), acknowledged_at: minsAgo(7), assessed_at: minsAgo(6), dispatched_at: minsAgo(4) },
+    },
+    {
+      id: '00000000-0000-0000-0005-000000000006',
+      reference: 'INC-2026-DEMO06',
+      category: incident_category.INDUSTRIAL,
+      priority: incident_priority.HIGH,
+      status: incident_status.ASSESSED,
+      description: 'Demo: chemical spill at a manufacturing plant, fumes reported.',
+      patients: 3,
+      reporter: { isGuest: true, name: 'Plant Supervisor', phone: '+639170000013' },
+      location: { lat: 14.7650, lng: 120.9200, address: 'Industrial zone, Biñang 1st, Bocaue, Bulacan', barangay: 'Biñang 1st' },
+      stamps: { submitted_at: minsAgo(22), received_at: minsAgo(20), acknowledged_at: minsAgo(18), assessed_at: minsAgo(12) },
+    },
+    {
+      id: '00000000-0000-0000-0005-000000000007',
+      reference: 'INC-2026-DEMO07',
+      category: incident_category.DEBRIS,
+      priority: incident_priority.LOW,
+      status: incident_status.RESOLVED,
+      description: 'Demo: fallen tree blocking a barangay road after a storm; cleared.',
+      patients: 0,
+      reporter: { isGuest: true, name: 'Resident', phone: '+639170000014' },
+      location: { lat: 14.7847, lng: 120.9103, address: 'Barangay road, Bambang, Bocaue, Bulacan', barangay: 'Bambang' },
+      stamps: { submitted_at: minsAgo(180), received_at: minsAgo(178), acknowledged_at: minsAgo(176), assessed_at: minsAgo(170), dispatched_at: minsAgo(160), en_route_at: minsAgo(155), on_scene_at: minsAgo(140), resolved_at: minsAgo(90) },
+    },
+    {
+      id: '00000000-0000-0000-0005-000000000008',
+      reference: 'INC-2026-DEMO08',
+      category: incident_category.OTHER,
+      priority: incident_priority.MEDIUM,
+      status: incident_status.RECEIVED,
+      description: 'Demo: missing elderly resident last seen near the public market.',
+      patients: 1,
+      reporter: { userId: bystander.id, isGuest: false, name: 'Demo Bystander', phone: '+639170000002' },
+      location: { lat: 14.7969, lng: 120.9268, address: 'Public market, Poblacion, Bocaue, Bulacan', barangay: 'Poblacion' },
+      stamps: { submitted_at: minsAgo(6), received_at: minsAgo(3) },
+    },
+  ];
+
+  for (const spec of demoIncidents) {
+    await prisma.incident.upsert({
+      where: { id: spec.id },
+      update: {},
+      create: {
+        id: spec.id,
+        public_reference: spec.reference,
+        category: spec.category,
+        priority: spec.priority,
+        status: spec.status,
+        description: spec.description,
+        number_of_patients: spec.patients,
+        ...spec.stamps,
+        incident_reporters: {
+          create: {
+            ...(spec.reporter.userId ? { user_id: spec.reporter.userId } : {}),
+            is_guest: spec.reporter.isGuest,
+            reporter_name: spec.reporter.name,
+            reporter_phone: spec.reporter.phone,
+          },
+        },
+        incident_locations: {
+          create: {
+            latitude: spec.location.lat,
+            longitude: spec.location.lng,
+            formatted_address: spec.location.address,
+            barangay: spec.location.barangay,
+            municipality: 'Bocaue',
+            province: 'Bulacan',
+          },
+        },
+      },
+    });
+  }
+
+  console.log(`  Demo incidents done (${demoIncidents.length} across all categories)`);
+
   // ── Summary ────────────────────────────────────────────────────────────────
 
   console.log('\nAGAP seed complete.');
@@ -691,7 +938,19 @@ async function main() {
   console.log('  Dev password (all other users):', DEV_PASSWORD);
   console.log('  Organizations: MDRRMO Bocaue, BFP Bocaue, Bocaue General Hospital');
   console.log('  Resources: 2 ambulances, 1 rescue boat, 1 fire truck, 1 rescue truck');
+  console.log('  Capabilities: 13 (MOD-29) assigned to all 5 units');
   console.log('  Facilities: BGH + 4 evacuation centers (Lolomboy, Bambang, Bunlo, Igulot)');
+  console.log('  Incidents: 8 demo incidents spanning every category + lifecycle stage');
+  console.log('\n  One account per role (dev password above unless noted):');
+  console.log('    SYSTEM_ADMINISTRATOR   : admin@agap.local (INITIAL_ADMIN_PASSWORD)');
+  console.log('    DISPATCHER             : dispatcher1@mdrrmo.bocaue.gov.ph');
+  console.log('    SUPERVISOR             : supervisor@mdrrmo.bocaue.gov.ph');
+  console.log('    RESPONDER              : responder1@mdrrmo.bocaue.gov.ph');
+  console.log('    HOSPITAL_USER          : receiving@bocauehospital.gov.ph');
+  console.log('    ORG_ADMINISTRATOR      : orgadmin@mdrrmo.bocaue.gov.ph');
+  console.log('    ANNOUNCEMENTS_PUBLISHER: announcements@lgu.bocaue.gov.ph');
+  console.log('    CITIZEN                : citizen@demo.agap');
+  console.log('    BYSTANDER              : bystander@demo.agap');
   console.log('\n  Demo dispatch flow (ready to track end-to-end):');
   console.log('    Rescuer : responder1@mdrrmo.bocaue.gov.ph /', DEV_PASSWORD, '(crewed on ALPHA-1)');
   console.log('    Citizen : citizen@demo.agap /', DEV_PASSWORD, '(reporter of INC-2026-DEMO01)');

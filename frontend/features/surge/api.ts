@@ -16,14 +16,33 @@ export interface SurgeState {
 }
 
 export interface ActivateSurgeBody {
-  reason: string;
+  name: string;
+  description?: string;
+  category: string;
   affectedBarangays?: string[];
-  massCasualty?: boolean;
+  bocaueRiverLevel?: number;
+}
+
+export interface TriageTag {
+  id: string;
+  surge_id: string;
+  patient_id: string | null;
+  incident_id: string | null;
+  triage_color: string;
+  triage_notes: string | null;
+  tagged_by_id: string;
+  tagged_at: string;
+}
+
+export interface SurgeResource {
+  id: string;
+  name: string;
+  resource_type: string;
+  status: string;
 }
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
-// Backend returns { active: boolean, surge: surge_incidents | null }
 interface BackendSurgeStatus {
   active: boolean;
   surge: {
@@ -53,10 +72,22 @@ export async function fetchSurgeState(): Promise<SurgeState> {
   };
 }
 
-export function activateSurge(body: ActivateSurgeBody): Promise<SurgeState> {
+export function activateSurge(body: ActivateSurgeBody): Promise<unknown> {
   return api.post('/disaster-mode/activate', body, getToken());
 }
 
-export function deactivateSurge(): Promise<SurgeState> {
-  return api.post('/disaster-mode/deactivate', {}, getToken());
+export function deactivateSurge(surgeId: string): Promise<unknown> {
+  return api.post('/disaster-mode/deactivate', { surgeId }, getToken());
+}
+
+export function fetchTriageTags(): Promise<TriageTag[]> {
+  return api.get('/disaster-mode/triage', getToken());
+}
+
+export function fetchSurgeResources(): Promise<SurgeResource[]> {
+  return api.get('/disaster-mode/resources', getToken());
+}
+
+export function sendSurgeBroadcast(body: { surgeId: string; message: string }): Promise<unknown> {
+  return api.post('/disaster-mode/broadcast', body, getToken());
 }

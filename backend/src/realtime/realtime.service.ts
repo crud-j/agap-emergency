@@ -21,6 +21,24 @@ import type {
   NotificationCreatedPayload,
 } from '@agap/shared';
 
+// MOD-40 transport payloads defined locally to avoid requiring a shared rebuild.
+interface IncidentTransportingPayload {
+  incidentId: string;
+  transportId: string;
+  dispatchId: string;
+  destinationId: string | null;
+  destinationName: string | null;
+  patientId: string | null;
+  transportStartedAt: string;
+}
+
+interface IncidentFacilityArrivalPayload {
+  incidentId: string;
+  transportId: string;
+  destinationId: string | null;
+  arrivedAt: string;
+}
+
 /**
  * Lifecycle statuses that also fan out a dedicated event in addition to the
  * generic `incident.status_changed`. Clients can subscribe to the specific name
@@ -125,6 +143,22 @@ export class RealtimeService {
     this.safe('incidentHandover', () => {
       this.gateway.emitToOps(INCIDENT_EVENTS.HANDOVER, envelope);
       this.gateway.emitToIncident(INCIDENT_EVENTS.HANDOVER, incidentId, envelope);
+    });
+  }
+
+  // ── MOD-40 Transport ───────────────────────────────────────────────────────
+
+  incidentTransporting(payload: IncidentTransportingPayload): void {
+    this.safe('incidentTransporting', () => {
+      this.gateway.emitToOps(INCIDENT_EVENTS.TRANSPORTING, payload);
+      this.gateway.emitToIncident(INCIDENT_EVENTS.TRANSPORTING, payload.incidentId, payload);
+    });
+  }
+
+  facilityArrival(payload: IncidentFacilityArrivalPayload): void {
+    this.safe('facilityArrival', () => {
+      this.gateway.emitToOps(INCIDENT_EVENTS.FACILITY_ARRIVAL, payload);
+      this.gateway.emitToIncident(INCIDENT_EVENTS.FACILITY_ARRIVAL, payload.incidentId, payload);
     });
   }
 

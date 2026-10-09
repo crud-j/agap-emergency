@@ -3,11 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchAdminUsers,
-  fetchAdminUser,
-  updateAdminUser,
   fetchSystemHealth,
+  fetchSystemConfig,
+  changeUserRole,
+  activateUser,
+  deactivateUser,
+  deleteUser,
+  upsertSystemConfig,
   type AdminUserListParams,
-  type UpdateUserBody,
 } from './api';
 
 export function useAdminUsers(params?: AdminUserListParams) {
@@ -18,31 +21,56 @@ export function useAdminUsers(params?: AdminUserListParams) {
   });
 }
 
-export function useAdminUser(id: string | null) {
-  return useQuery({
-    queryKey: ['admin-user', id],
-    queryFn: () => fetchAdminUser(id!),
-    enabled: !!id,
-  });
-}
-
-export function useUpdateAdminUser() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: UpdateUserBody }) =>
-      updateAdminUser(id, body),
-    onSuccess: (_data, { id }) => {
-      qc.invalidateQueries({ queryKey: ['admin-users'] });
-      qc.invalidateQueries({ queryKey: ['admin-user', id] });
-    },
-  });
-}
-
 export function useSystemHealth() {
   return useQuery({
     queryKey: ['system-health'],
     queryFn: fetchSystemHealth,
     staleTime: 30_000,
     refetchInterval: 60_000,
+  });
+}
+
+export function useSystemConfig() {
+  return useQuery({
+    queryKey: ['system-config'],
+    queryFn: fetchSystemConfig,
+    staleTime: 60_000,
+  });
+}
+
+function useUserMutation(fn: (id: string) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+  });
+}
+
+export function useChangeUserRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, role }: { id: string; role: string }) => changeUserRole(id, role),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+  });
+}
+
+export function useActivateUser() {
+  return useUserMutation(activateUser);
+}
+
+export function useDeactivateUser() {
+  return useUserMutation(deactivateUser);
+}
+
+export function useDeleteUser() {
+  return useUserMutation(deleteUser);
+}
+
+export function useUpsertConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, value }: { key: string; value: unknown }) =>
+      upsertSystemConfig(key, value),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['system-config'] }),
   });
 }

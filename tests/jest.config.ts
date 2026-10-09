@@ -13,6 +13,9 @@ const config: Config = {
     }],
   },
   testEnvironment: 'node',
+  // bcrypt at 12 rounds (auth specs) is CPU-bound and can exceed the 5s default
+  // when suites run in parallel on a loaded machine.
+  testTimeout: 30_000,
   moduleNameMapper: {
     '^@backend/(.*)$': '<rootDir>/../backend/src/$1',
     '^@agap/shared$': '<rootDir>/../shared/src/index.ts',

@@ -2,50 +2,49 @@
 
 import { useQuery } from '@tanstack/react-query';
 import {
-  fetchAnalyticsOverview,
   fetchResponseTimes,
-  fetchVolumeByCategory,
-  fetchVolumeByBarangay,
-  fetchSlaStats,
-  type AnalyticsParams,
+  fetchVolume,
+  fetchSlaCompliance,
+  fetchFalseAlertRate,
+  fetchDailySummary,
 } from './api';
 
-export function useAnalyticsOverview(params?: AnalyticsParams) {
+export function useResponseTimes() {
   return useQuery({
-    queryKey: ['analytics-overview', params],
-    queryFn: () => fetchAnalyticsOverview(params),
+    queryKey: ['analytics-response-times'],
+    queryFn: fetchResponseTimes,
     staleTime: 60_000,
   });
 }
 
-export function useResponseTimes(params?: AnalyticsParams) {
+export function useVolume() {
   return useQuery({
-    queryKey: ['analytics-response-times', params],
-    queryFn: () => fetchResponseTimes(params),
+    queryKey: ['analytics-volume'],
+    queryFn: fetchVolume,
     staleTime: 60_000,
   });
 }
 
-export function useVolumeByCategory(params?: AnalyticsParams) {
+export function useSlaCompliance() {
   return useQuery({
-    queryKey: ['analytics-volume-category', params],
-    queryFn: () => fetchVolumeByCategory(params),
+    queryKey: ['analytics-sla-compliance'],
+    queryFn: fetchSlaCompliance,
     staleTime: 60_000,
   });
 }
 
-export function useVolumeByBarangay(params?: AnalyticsParams) {
+export function useFalseAlertRate() {
   return useQuery({
-    queryKey: ['analytics-volume-barangay', params],
-    queryFn: () => fetchVolumeByBarangay(params),
+    queryKey: ['analytics-false-alert-rate'],
+    queryFn: fetchFalseAlertRate,
     staleTime: 60_000,
   });
 }
 
-export function useSlaStats(params?: AnalyticsParams) {
+export function useDailySummary(date?: string) {
   return useQuery({
-    queryKey: ['analytics-sla', params],
-    queryFn: () => fetchSlaStats(params),
+    queryKey: ['analytics-daily', date],
+    queryFn: () => fetchDailySummary(date),
     staleTime: 60_000,
   });
 }

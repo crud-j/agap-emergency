@@ -5,6 +5,9 @@ import {
   fetchSurgeState,
   activateSurge,
   deactivateSurge,
+  fetchTriageTags,
+  fetchSurgeResources,
+  sendSurgeBroadcast,
   type ActivateSurgeBody,
 } from './api';
 
@@ -28,7 +31,30 @@ export function useActivateSurge() {
 export function useDeactivateSurge() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: deactivateSurge,
+    mutationFn: (surgeId: string) => deactivateSurge(surgeId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['surge-state'] }),
+  });
+}
+
+export function useTriageTags() {
+  return useQuery({
+    queryKey: ['surge-triage'],
+    queryFn: fetchTriageTags,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useSurgeResources() {
+  return useQuery({
+    queryKey: ['surge-resources'],
+    queryFn: fetchSurgeResources,
+    staleTime: 30_000,
+  });
+}
+
+export function useSurgeBroadcast() {
+  return useMutation({
+    mutationFn: (body: { surgeId: string; message: string }) => sendSurgeBroadcast(body),
   });
 }

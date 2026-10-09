@@ -6,19 +6,22 @@ import type { PaginatedResult } from '@agap/shared';
 
 export interface Announcement {
   id: string;
-  public_reference: string;
   title: string;
-  body: string;
+  body: string | null;
   category: string;
   severity: string;
   scope: string;
-  status: string;
+  status: 'DRAFT' | 'SCHEDULED' | 'PUBLISHED' | 'ARCHIVED' | 'SUPERSEDED';
   scheduled_at: string | null;
   published_at: string | null;
   archived_at: string | null;
+  publish_now: boolean;
+  target_barangays: string[];
+  sms_sent_count: number | null;
+  publisher_id: string | null;
+  organization_id: string | null;
   created_at: string;
-  author_id: string;
-  author?: { full_name: string | null };
+  updated_at: string;
 }
 
 export interface AnnouncementListParams {
@@ -34,17 +37,31 @@ export interface CreateAnnouncementBody {
   category: string;
   severity: string;
   scope: string;
-  scheduledAt?: string;
+  targetBarangays?: string[];
 }
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
-export function fetchAnnouncements(params?: AnnouncementListParams): Promise<PaginatedResult<Announcement>> {
+/** Publisher view — returns all statuses (drafts, scheduled, published, archived). */
+export function fetchAnnouncementsForPublisher(
+  params?: AnnouncementListParams,
+): Promise<PaginatedResult<Announcement>> {
   const qs = new URLSearchParams();
   if (params?.status)   qs.set('status', params.status);
   if (params?.category) qs.set('category', params.category);
   if (params?.page)     qs.set('page', String(params.page));
   if (params?.perPage)  qs.set('perPage', String(params.perPage));
+  return api.get(`/announcements/publisher/all?${qs}`, getToken());
+}
+
+/** Public feed — published only (used by mobile / citizen feed). */
+export function fetchPublishedAnnouncements(params?: {
+  category?: string;
+  barangay?: string;
+}): Promise<Announcement[]> {
+  const qs = new URLSearchParams();
+  if (params?.category) qs.set('category', params.category);
+  if (params?.barangay) qs.set('barangay', params.barangay);
   return api.get(`/announcements?${qs}`, getToken());
 }
 
@@ -57,9 +74,20 @@ export function createAnnouncement(body: CreateAnnouncementBody): Promise<Announ
 }
 
 export function publishAnnouncement(id: string): Promise<Announcement> {
-  return api.patch(`/announcements/${id}/publish`, {}, getToken());
+  return api.post(`/announcements/${id}/publish`, {}, getToken());
+}
+
+export function scheduleAnnouncement(id: string, scheduledAt: string): Promise<Announcement> {
+  return api.post(`/announcements/${id}/schedule`, { scheduledAt }, getToken());
 }
 
 export function archiveAnnouncement(id: string): Promise<Announcement> {
-  return api.patch(`/announcements/${id}/archive`, {}, getToken());
+  return api.post(`/announcements/${id}/archive`, {}, getToken());
+}
+
+export function updateAnnouncement(
+  id: string,
+  body: Partial<CreateAnnouncementBody>,
+): Promise<Announcement> {
+  return api.patch(`/announcements/${id}`, body, getToken());
 }

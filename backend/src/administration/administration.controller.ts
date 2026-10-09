@@ -29,16 +29,20 @@ export class AdministrationController {
   @Get('users')
   @ApiOperation({ summary: 'List all users' })
   async findAllUsers(
-    @Query('page') page?: number,
-    @Query('perPage') perPage?: number,
+    @Query('page') page?: string,
+    @Query('perPage') perPage?: string,
     @Query('role') role?: string,
     @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('organizationId') organizationId?: string,
   ) {
     return this.administrationService.findAllUsers({
       ...(page !== undefined && { page: +page }),
       ...(perPage !== undefined && { perPage: +perPage }),
       ...(role && { role }),
       ...(status && { status }),
+      ...(search && { search }),
+      ...(organizationId && { organizationId }),
     });
   }
 

@@ -702,18 +702,47 @@ export class IncidentsService {
   async listAgencies(id: string) {
     return this.prisma.incident_agency_participants.findMany({
       where: { incident_id: id },
+      include: { organizations: { select: { id: true, name: true, short_name: true, organization_type: true } } },
+    });
+  }
+
+  async listAvailableAgencies(incidentId: string, orgType?: string) {
+    const existing = await this.prisma.incident_agency_participants.findMany({
+      where: { incident_id: incidentId },
+      select: { organization_id: true },
+    });
+    const excludeIds = existing.map((p) => p.organization_id);
+    return this.prisma.organization.findMany({
+      where: {
+        is_active: true,
+        ...(orgType && { organization_type: orgType as any }),
+        ...(excludeIds.length > 0 && { NOT: { id: { in: excludeIds } } }),
+      },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, short_name: true, organization_type: true, contact_number: true },
     });
   }
 
   async addAgency(id: string, organizationId: string, userId: string) {
     await this.findById(id);
-    return this.prisma.incident_agency_participants.create({
+    const participant = await this.prisma.incident_agency_participants.create({
       data: {
         incident_id: id,
         organization_id: organizationId,
         invited_by_id: userId,
       },
     });
+    void this.audit.log({
+      action: 'CREATE',
+      actorId: userId,
+      entityType: 'incident_agency_participant',
+      entityId: participant.id,
+      moduleId: 'MOD-34',
+      incidentId: id,
+      newValues: { organization_id: organizationId },
+    });
+    this.realtime.incidentUpdated(id, { agencyAdded: organizationId });
+    return participant;
   }
 
   // ---- On-scene assessments (MOD-37) ----
@@ -765,19 +794,34 @@ export class IncidentsService {
 
   // ---- ICS support (MOD-36) ----
 
-  async activateIcs(id: string, objectives: string[], _userId: string) {
+  async activateIcs(id: string, objectives: string[], userId: string) {
     await this.findById(id);
-    return this.prisma.incident_command_structures.upsert({
+    const ics = await this.prisma.incident_command_structures.upsert({
       where: { incident_id: id },
       create: { incident_id: id, objectives: objectives ?? [] },
       update: { objectives: objectives ?? [] },
     });
+    void this.audit.log({
+      action: 'CREATE',
+      actorId: userId,
+      entityType: 'incident_command_structure',
+      entityId: ics.id,
+      moduleId: 'MOD-36',
+      incidentId: id,
+      newValues: { objectives },
+    });
+    this.realtime.incidentUpdated(id, { icsActivated: true, objectives });
+    return ics;
   }
 
   async getIcs(id: string) {
     const ics = await this.prisma.incident_command_structures.findUnique({
       where: { incident_id: id },
-      include: { ics_assignments: true },
+      include: {
+        ics_assignments: {
+          include: { users: { select: { id: true, full_name: true, role: true } } },
+        },
+      },
     });
     if (!ics) throw new NotFoundException('No ICS activated for incident');
     return ics;
@@ -786,12 +830,13 @@ export class IncidentsService {
   async addIcsPosition(
     id: string,
     dto: { userId: string; position: string; organizationId?: string },
+    actorId?: string,
   ) {
     const ics = await this.prisma.incident_command_structures.findUnique({
       where: { incident_id: id },
     });
     if (!ics) throw new NotFoundException('No ICS activated for incident');
-    return this.prisma.ics_assignments.create({
+    const assignment = await this.prisma.ics_assignments.create({
       data: {
         ics_id: ics.id,
         user_id: dto.userId,
@@ -799,6 +844,17 @@ export class IncidentsService {
         organization_id: dto.organizationId ?? null,
       },
     });
+    void this.audit.log({
+      action: 'CREATE',
+      actorId: actorId ?? dto.userId,
+      entityType: 'ics_assignment',
+      entityId: assignment.id,
+      moduleId: 'MOD-36',
+      incidentId: id,
+      newValues: { position: dto.position, assigned_user: dto.userId },
+    });
+    this.realtime.incidentUpdated(id, { icsPositionAdded: dto.position, userId: dto.userId });
+    return assignment;
   }
 
   // ---- Handover (MOD-44) ----
@@ -841,33 +897,64 @@ export class IncidentsService {
 
   // ---- ICS extended (MOD-36) ----
 
-  async updateIcs(incidentId: string, dto: { objectives?: string[] }, _userId: string) {
+  async updateIcs(incidentId: string, dto: { objectives?: string[] }, userId: string) {
     const ics = await this.prisma.incident_command_structures.findUnique({
       where: { incident_id: incidentId },
     });
     if (!ics) throw new NotFoundException('No ICS activated for incident');
-    return this.prisma.incident_command_structures.update({
+    const updated = await this.prisma.incident_command_structures.update({
       where: { incident_id: incidentId },
       data: { ...(dto.objectives !== undefined && { objectives: dto.objectives }) },
     });
+    void this.audit.log({
+      action: 'UPDATE',
+      actorId: userId,
+      entityType: 'incident_command_structure',
+      entityId: ics.id,
+      moduleId: 'MOD-36',
+      incidentId,
+      newValues: dto as Record<string, unknown>,
+    });
+    this.realtime.incidentUpdated(incidentId, { icsUpdated: true });
+    return updated;
   }
 
-  async deactivateIcs(incidentId: string, _userId: string) {
+  async deactivateIcs(incidentId: string, userId: string) {
     const ics = await this.prisma.incident_command_structures.findUnique({
       where: { incident_id: incidentId },
     });
     if (!ics) throw new NotFoundException('No ICS activated for incident');
     await this.prisma.ics_assignments.deleteMany({ where: { ics_id: ics.id } });
     await this.prisma.incident_command_structures.delete({ where: { incident_id: incidentId } });
+    void this.audit.log({
+      action: 'DELETE',
+      actorId: userId,
+      entityType: 'incident_command_structure',
+      entityId: ics.id,
+      moduleId: 'MOD-36',
+      incidentId,
+    });
+    this.realtime.incidentUpdated(incidentId, { icsDeactivated: true });
     return { message: 'ICS deactivated' };
   }
 
-  async removeIcsPosition(positionId: string, _userId: string) {
+  async removeIcsPosition(positionId: string, userId: string) {
     const assignment = await this.prisma.ics_assignments.findUnique({
       where: { id: positionId },
+      include: { incident_command_structures: { select: { incident_id: true } } },
     });
     if (!assignment) throw new NotFoundException('ICS position not found');
     await this.prisma.ics_assignments.delete({ where: { id: positionId } });
+    const incidentId = assignment.incident_command_structures?.incident_id;
+    void this.audit.log({
+      action: 'DELETE',
+      actorId: userId,
+      entityType: 'ics_assignment',
+      entityId: positionId,
+      moduleId: 'MOD-36',
+      incidentId,
+      oldValues: { position: assignment.position },
+    });
     return { message: 'ICS position removed' };
   }
 
@@ -883,10 +970,19 @@ export class IncidentsService {
 
   // ---- Agency removal (MOD-34) ----
 
-  async removeAgency(incidentId: string, organizationId: string) {
+  async removeAgency(incidentId: string, organizationId: string, actorId?: string) {
     await this.prisma.incident_agency_participants.deleteMany({
       where: { incident_id: incidentId, organization_id: organizationId },
     });
+    void this.audit.log({
+      action: 'DELETE',
+      ...(actorId && { actorId }),
+      entityType: 'incident_agency_participant',
+      moduleId: 'MOD-34',
+      incidentId,
+      oldValues: { organization_id: organizationId },
+    });
+    this.realtime.incidentUpdated(incidentId, { agencyRemoved: organizationId });
     return { message: 'Agency removed from incident' };
   }
 }

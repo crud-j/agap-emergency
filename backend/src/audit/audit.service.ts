@@ -53,6 +53,8 @@ export class AuditService {
     action?: string;
     actorId?: string;
     entityType?: string;
+    from?: string;
+    to?: string;
   }) {
     const page = filters.page ?? 1;
     const perPage = Math.min(filters.perPage ?? 50, 200);
@@ -62,6 +64,12 @@ export class AuditService {
     if (filters.action) where.action = filters.action as any;
     if (filters.actorId) where.actor_id = filters.actorId;
     if (filters.entityType) where.entity_type = filters.entityType;
+    if (filters.from || filters.to) {
+      where.occurred_at = {
+        ...(filters.from && { gte: new Date(filters.from) }),
+        ...(filters.to && { lte: new Date(filters.to) }),
+      };
+    }
 
     // Sequential (not `$transaction([...])`): the batch form in Prisma 7 drops
     // `skip: 0` and then rejects the query. A read list needs no transaction.

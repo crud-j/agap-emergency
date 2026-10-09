@@ -52,6 +52,25 @@ export class AnnouncementsController {
     return this.announcementsService.unsubscribe(body.phoneNumber);
   }
 
+  @Get('publisher/all')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ANNOUNCEMENTS_PUBLISHER, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List all announcements for publisher view (includes drafts)' })
+  async findAllForPublisher(
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('page') page?: string,
+    @Query('perPage') perPage?: string,
+  ) {
+    return this.announcementsService.findAllForPublisher({
+      ...(status && { status }),
+      ...(category && { category }),
+      ...(page !== undefined && { page: +page }),
+      ...(perPage !== undefined && { perPage: +perPage }),
+    });
+  }
+
   @Get(':id')
   @Public()
   @ApiOperation({ summary: 'Get an announcement' })

@@ -58,22 +58,70 @@ export class ResourcesController {
     return this.resourcesService.recommend(incidentId);
   }
 
-  @Post('request')
+  @Get('requests')
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'List mutual-aid resource requests (MOD-35); filter by incidentId, orgId, status' })
+  async listRequests(
+    @Query('incidentId') incidentId?: string,
+    @Query('orgId') orgId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.resourcesService.listRequests({
+      ...(incidentId && { incidentId }),
+      ...(orgId && { orgId }),
+      ...(status && { status }),
+    });
+  }
+
+  @Post('requests')
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
-  @ApiOperation({ summary: 'Create a mutual-aid resource request' })
+  @ApiOperation({ summary: 'Create a mutual-aid resource request (MOD-35)' })
   async createRequest(@Body() dto: ResourceRequestDto, @Request() req: any) {
     const orgId = await this.resourcesService.resolveOrgForUser(req.user.id);
-    return this.resourcesService.createRequest(dto, orgId);
+    return this.resourcesService.createRequest(dto, orgId, req.user.id);
+  }
+
+  @Patch('requests/:id/approve')
+  @Roles(UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'Approve a resource request — providing org accepts and fulfills (MOD-35)' })
+  async approveRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { notes?: string },
+    @Request() req: any,
+  ) {
+    const providingOrgId = await this.resourcesService.resolveOrgForUser(req.user.id);
+    return this.resourcesService.respondToRequest(id, true, body.notes, req.user.id, providingOrgId);
+  }
+
+  @Patch('requests/:id/deny')
+  @Roles(UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'Deny a resource request (MOD-35)' })
+  async denyRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { notes?: string },
+    @Request() req: any,
+  ) {
+    return this.resourcesService.respondToRequest(id, false, body.notes, req.user.id);
+  }
+
+  // Keep old /request routes as aliases for backwards compat with existing callers
+  @Post('request')
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Create a mutual-aid resource request (deprecated — use /requests)' })
+  async createRequestLegacy(@Body() dto: ResourceRequestDto, @Request() req: any) {
+    const orgId = await this.resourcesService.resolveOrgForUser(req.user.id);
+    return this.resourcesService.createRequest(dto, orgId, req.user.id);
   }
 
   @Patch('request/:id/respond')
   @Roles(UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
-  @ApiOperation({ summary: 'Respond to a resource request' })
-  async respondToRequest(
+  @ApiOperation({ summary: 'Respond to a resource request (deprecated — use /requests/:id/approve or /deny)' })
+  async respondToRequestLegacy(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: { accept: boolean; notes?: string },
+    @Request() req: any,
   ) {
-    return this.resourcesService.respondToRequest(id, body.accept, body.notes);
+    return this.resourcesService.respondToRequest(id, body.accept, body.notes, req.user.id);
   }
 
   @Get(':id')

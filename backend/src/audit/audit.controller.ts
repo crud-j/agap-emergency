@@ -29,6 +29,8 @@ export class AuditController {
     @Query('action') action?: string,
     @Query('actorId') actorId?: string,
     @Query('entityType') entityType?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     return this.auditService.findAll({
       ...(page !== undefined && { page: +page }),
@@ -36,6 +38,8 @@ export class AuditController {
       ...(action && { action }),
       ...(actorId && { actorId }),
       ...(entityType && { entityType }),
+      ...(from && { from }),
+      ...(to && { to }),
     });
   }
 

@@ -235,5 +235,55 @@ describe('EmergencyAlertsService', () => {
       const smsCall = mockSmsQueue.add.mock.calls[0]?.[1] as any;
       expect(smsCall?.message?.length).toBeLessThanOrEqual(160);
     });
+
+    it('SMS payload follows the dual-path format AGAP|REF|lat,lng|ts|TYPE|C:Y', async () => {
+      await service.createFromSos(
+        {
+          incidentType: IncidentType.ROAD_ACCIDENT,
+          clientEventId: 'evt-sms-fmt',
+          latitude: 14.7997,
+          longitude: 120.8847,
+        },
+        'SOS_BUTTON',
+      );
+
+      const smsCall = mockSmsQueue.add.mock.calls[0]?.[1] as any;
+      const message: string = smsCall.message;
+
+      // AGAP | INC-YYYY-NNNNNN | lat,lng (4dp) | unix-ts | CATEGORY | C:Y|C:N
+      expect(message).toMatch(
+        /^AGAP\|INC-\d{4}-[A-Z0-9]+\|-?\d+\.\d{4},-?\d+\.\d{4}\|\d+\|[A-Z_]+\|C:[YN]$/,
+      );
+
+      const parts = message.split('|');
+      expect(parts).toHaveLength(6);
+      expect(parts[0]).toBe('AGAP');
+      expect(parts[5]).toBe('C:Y'); // coordinates were supplied
+      expect(message.length).toBeLessThanOrEqual(160);
+    });
+
+    it('SMS payload marks C:N when no coordinates are supplied', async () => {
+      await service.createFromSos(
+        { incidentType: IncidentType.FLOOD, clientEventId: 'evt-sms-nocoords' },
+        'SOS_BUTTON',
+      );
+
+      const smsCall = mockSmsQueue.add.mock.calls[0]?.[1] as any;
+      const message: string = smsCall.message;
+      expect(message.endsWith('|C:N')).toBe(true);
+      expect(message.length).toBeLessThanOrEqual(160);
+    });
+
+    it('still returns the incident when the SMS enqueue throws — SMS never blocks an incident', async () => {
+      mockSmsQueue.add.mockRejectedValueOnce(new Error('queue down'));
+
+      const result = await service.createFromSos(
+        { incidentType: IncidentType.MEDICAL, clientEventId: 'evt-sms-throw' },
+        'SOS_BUTTON',
+        'user-1',
+      );
+
+      expect(result.incident.id).toBe('inc-sos-1');
+    });
   });
 });

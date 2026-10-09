@@ -4,8 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchOrganizations,
   fetchOrganization,
+  createOrganization,
   updateOrganization,
-  type UpdateOrganizationBody,
+  type CreateOrgBody,
+  type UpdateOrgBody,
 } from './api';
 
 export function useOrganizations(params?: { orgType?: string; page?: number; perPage?: number }) {
@@ -25,10 +27,18 @@ export function useOrganization(id: string | null) {
   });
 }
 
+export function useCreateOrganization() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateOrgBody) => createOrganization(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['organizations'] }),
+  });
+}
+
 export function useUpdateOrganization() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: UpdateOrganizationBody }) =>
+    mutationFn: ({ id, body }: { id: string; body: UpdateOrgBody }) =>
       updateOrganization(id, body),
     onSuccess: (_data, { id }) => {
       qc.invalidateQueries({ queryKey: ['organizations'] });

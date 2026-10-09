@@ -7,10 +7,11 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
-import { IncidentStatus, QUEUE_NAMES } from '@agap/shared';
+import { AuditAction, IncidentStatus, QUEUE_NAMES } from '@agap/shared';
 import { Prisma } from '@prisma/client';
 
 const DISPATCHABLE_STATUSES = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
@@ -21,6 +22,7 @@ export class DispatchService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
     private readonly realtime: RealtimeService,
     @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue: Queue,
   ) {}
@@ -116,6 +118,17 @@ export class DispatchService {
 
     this.logger.log(`Dispatch ${dispatch.id} created by ${dispatcherId}`);
 
+    // Audit — DISPATCH is the most consequential operational action (MOD-46/31).
+    void this.audit.log({
+      action: AuditAction.DISPATCH,
+      actorId: dispatcherId,
+      entityId: dispatch.id,
+      entityType: 'dispatch',
+      moduleId: 'MOD-31',
+      incidentId: dto.incidentId,
+      newValues: { resourceId: dto.resourceId, crewIds: dto.initialCrewIds ?? [] },
+    });
+
     // persist → commit → emit (best-effort). The incident was transitioned to
     // DISPATCHED inside the transaction above, so fan out: the assignment, the
     // status change (which also carries the dedicated incident.dispatched
@@ -191,6 +204,16 @@ export class DispatchService {
       this.logger.warn(`Realtime emit failed for dispatch cancel: ${String(err)}`);
     }
 
+    void this.audit.log({
+      action: AuditAction.UPDATE,
+      actorId: _userId,
+      entityId: id,
+      entityType: 'dispatch',
+      moduleId: 'MOD-31',
+      incidentId: dispatch.incident_id,
+      newValues: { status: 'CANCELLED' },
+    });
+
     return updated;
   }
 
@@ -207,16 +230,33 @@ export class DispatchService {
     );
   }
 
-  async addCrew(dispatchId: string, userId: string) {
+  async addCrew(dispatchId: string, userId: string, actorId?: string) {
     await this.findById(dispatchId);
-    return this.prisma.dispatch_crew.create({
+    const crew = await this.prisma.dispatch_crew.create({
       data: { dispatch_id: dispatchId, user_id: userId },
     });
+    void this.audit.log({
+      action: AuditAction.UPDATE,
+      actorId: actorId ?? userId,
+      entityId: dispatchId,
+      entityType: 'dispatch',
+      moduleId: 'MOD-31',
+      newValues: { addedCrewUserId: userId },
+    });
+    return crew;
   }
 
-  async removeCrew(dispatchId: string, crewUserId: string) {
+  async removeCrew(dispatchId: string, crewUserId: string, actorId?: string) {
     await this.prisma.dispatch_crew.deleteMany({
       where: { dispatch_id: dispatchId, user_id: crewUserId },
+    });
+    void this.audit.log({
+      action: AuditAction.DELETE,
+      actorId: actorId ?? crewUserId,
+      entityId: dispatchId,
+      entityType: 'dispatch',
+      moduleId: 'MOD-31',
+      newValues: { removedCrewUserId: crewUserId },
     });
   }
 
@@ -253,6 +293,16 @@ export class DispatchService {
         triggered_by_role: 'DISPATCHER',
         notes: `Triage: priority ${dto.priorityAssessment}. ${dto.notes ?? ''}`.trim(),
       },
+    });
+
+    void this.audit.log({
+      action: AuditAction.UPDATE,
+      actorId: userId,
+      entityId: dto.incidentId,
+      entityType: 'incident',
+      moduleId: 'MOD-25',
+      incidentId: dto.incidentId,
+      newValues: { priority: dto.priorityAssessment },
     });
 
     // Priority is an incident-record change (not a lifecycle status change), so

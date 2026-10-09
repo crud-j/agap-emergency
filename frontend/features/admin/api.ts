@@ -10,34 +10,32 @@ export interface AdminUser {
   full_name: string | null;
   phone_number: string | null;
   role: string;
-  is_active: boolean;
-  organization_id: string | null;
+  status: string;
   created_at: string;
   last_login_at: string | null;
 }
 
 export interface SystemHealth {
-  status: 'ok' | 'degraded' | 'down';
-  database: 'ok' | 'error';
-  redis: 'ok' | 'error';
-  queues: Record<string, { active: number; waiting: number; failed: number }>;
-  uptime_seconds: number;
-  version: string;
+  database: 'ok' | 'error' | 'unknown';
+  redis: 'ok' | 'error' | 'unknown';
+  timestamp: string;
+}
+
+export interface SystemConfigEntry {
+  id: string;
+  config_key: string;
+  config_value: unknown;
+  updated_by_id: string | null;
+  updated_at: string;
 }
 
 export interface AdminUserListParams {
   role?: string;
+  status?: string;
   organizationId?: string;
-  isActive?: boolean;
   search?: string;
   page?: number;
   perPage?: number;
-}
-
-export interface UpdateUserBody {
-  role?: string;
-  isActive?: boolean;
-  organizationId?: string | null;
 }
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
@@ -45,22 +43,40 @@ export interface UpdateUserBody {
 export function fetchAdminUsers(params?: AdminUserListParams): Promise<PaginatedResult<AdminUser>> {
   const qs = new URLSearchParams();
   if (params?.role)           qs.set('role', params.role);
+  if (params?.status)         qs.set('status', params.status);
   if (params?.organizationId) qs.set('organizationId', params.organizationId);
-  if (params?.isActive !== undefined) qs.set('isActive', String(params.isActive));
   if (params?.search)         qs.set('search', params.search);
   if (params?.page)           qs.set('page', String(params.page));
   if (params?.perPage)        qs.set('perPage', String(params.perPage));
-  return api.get(`/admin/users?${qs}`, getToken());
-}
-
-export function fetchAdminUser(id: string): Promise<AdminUser> {
-  return api.get(`/admin/users/${id}`, getToken());
-}
-
-export function updateAdminUser(id: string, body: UpdateUserBody): Promise<AdminUser> {
-  return api.patch(`/admin/users/${id}`, body, getToken());
+  return api.get(`/administration/users?${qs}`, getToken());
 }
 
 export function fetchSystemHealth(): Promise<SystemHealth> {
-  return api.get('/admin/health', getToken());
+  return api.get('/administration/health', getToken());
+}
+
+export function fetchSystemConfig(): Promise<SystemConfigEntry[]> {
+  return api.get('/administration/config', getToken());
+}
+
+// ─── Mutations ────────────────────────────────────────────────────────────────
+
+export function changeUserRole(id: string, role: string): Promise<AdminUser> {
+  return api.patch(`/administration/users/${id}/role`, { role }, getToken());
+}
+
+export function activateUser(id: string): Promise<AdminUser> {
+  return api.patch(`/administration/users/${id}/activate`, {}, getToken());
+}
+
+export function deactivateUser(id: string): Promise<AdminUser> {
+  return api.patch(`/administration/users/${id}/deactivate`, {}, getToken());
+}
+
+export function deleteUser(id: string): Promise<void> {
+  return api.delete(`/administration/users/${id}`, getToken());
+}
+
+export function upsertSystemConfig(key: string, value: unknown): Promise<SystemConfigEntry> {
+  return api.put(`/administration/config/${key}`, { value }, getToken());
 }

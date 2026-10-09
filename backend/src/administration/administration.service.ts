@@ -11,6 +11,8 @@ export class AdministrationService {
     perPage?: number;
     role?: string;
     status?: string;
+    search?: string;
+    organizationId?: string;
   }) {
     const page = filters.page ?? 1;
     const perPage = Math.min(filters.perPage ?? 20, 100);
@@ -19,6 +21,17 @@ export class AdministrationService {
     const where: Prisma.UserWhereInput = {};
     if (filters.role) where.role = filters.role as any;
     if (filters.status) where.status = filters.status as any;
+    if (filters.organizationId) {
+      where.organization_memberships = { some: { organization_id: filters.organizationId, is_active: true } };
+    }
+    if (filters.search) {
+      const term = filters.search.trim();
+      where.OR = [
+        { full_name: { contains: term, mode: 'insensitive' } },
+        { email: { contains: term, mode: 'insensitive' } },
+        { phone_number: { contains: term, mode: 'insensitive' } },
+      ];
+    }
 
     // Sequential (not `$transaction([...])`): the batch form in Prisma 7 drops
     // `skip: 0` and then rejects the query. A read list needs no transaction.
@@ -32,6 +45,7 @@ export class AdministrationService {
         role: true,
         status: true,
         created_at: true,
+        last_login_at: true,
       },
       orderBy: { created_at: 'desc' },
       skip,
@@ -39,7 +53,17 @@ export class AdministrationService {
     });
     const total = await this.prisma.user.count({ where });
 
-    return { data, meta: { total, page, perPage } };
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        perPage,
+        totalPages: Math.ceil(total / perPage),
+        hasNext: page * perPage < total,
+        hasPrev: page > 1,
+      },
+    };
   }
 
   async changeRole(userId: string, newRole: string, actorId: string) {

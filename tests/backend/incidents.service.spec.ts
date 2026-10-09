@@ -6,6 +6,8 @@ import { IncidentStatusService } from '@backend/incidents/incident-status/incide
 import { DuplicateDetectionService } from '@backend/incidents/duplicate-detection/duplicate-detection.service';
 import { PriorityService } from '@backend/incidents/priority/priority.service';
 import { PrismaService } from '@backend/common/prisma/prisma.service';
+import { RealtimeService } from '@backend/realtime/realtime.service';
+import { AuditService } from '@backend/audit/audit.service';
 import { IncidentStatus, IncidentType, ReporterType } from '@agap/shared';
 import { createMockPrisma } from './helpers/prisma.mock';
 
@@ -42,6 +44,14 @@ describe('IncidentsService', () => {
   beforeEach(async () => {
     mockPrisma = createMockPrisma();
     mockDuplicateService = { findNearbyRecent: jest.fn().mockResolvedValue(null) };
+    // RealtimeService + AuditService are best-effort side channels — mock them so
+    // DI resolves. Their failure must never block an incident (asserted below).
+    const mockRealtime = {
+      notifyIncidentCreated: jest.fn(),
+      notifyIncidentStatusChanged: jest.fn(),
+      incidentUpdated: jest.fn(),
+    };
+    const mockAudit = { log: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,6 +60,8 @@ describe('IncidentsService', () => {
         PriorityService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: DuplicateDetectionService, useValue: mockDuplicateService },
+        { provide: RealtimeService, useValue: mockRealtime },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
 
@@ -194,8 +206,10 @@ describe('IncidentsService', () => {
 
   describe('findAll', () => {
     it('returns paginated results with metadata', async () => {
-      const items = [mockIncident];
-      mockPrisma.$transaction.mockResolvedValue([items, 1]);
+      // findAll runs sequentially (findMany + count), not $transaction — Prisma 7
+      // drops `skip: 0` inside a transaction array. Mock the two calls directly.
+      mockPrisma.incident.findMany.mockResolvedValue([mockIncident]);
+      mockPrisma.incident.count.mockResolvedValue(1);
 
       const result = await service.findAll({ page: 1, perPage: 20 });
 
