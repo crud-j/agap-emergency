@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React, { Component, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar,
 } from 'react-native';
@@ -19,7 +19,6 @@ const LiveTrackingMap = React.lazy(
   () => import('@/src/components/tracking/live-tracking-map'),
 );
 
-const MAP_AVAILABLE       = isNativeMapAvailable();
 const MAPLIBRE_DEMO_STYLE = 'https://demotiles.maplibre.org/style.json';
 
 const CARD_SHADOW = {
@@ -35,7 +34,7 @@ const BEVEL = 'rgba(168,181,193,0.20)';
 // ─── Error boundary for MapLibre ─────────────────────────────────────────────
 
 class MapErrorBoundary extends Component<
-  { children: React.ReactNode },
+  { children: React.ReactNode; onReset?: () => void },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -46,6 +45,12 @@ class MapErrorBoundary extends Component<
         <View style={styles.mapFallback}>
           <Ionicons name="map-outline" size={36} color="#8795A3" />
           <Text style={styles.muted}>Map failed to render on this device.</Text>
+          <TouchableOpacity
+            style={styles.boundaryRetryBtn}
+            onPress={() => this.props.onReset?.()}
+          >
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       );
     }
@@ -65,6 +70,9 @@ export default function MapScreen() {
   const router = useRouter();
   const token  = useAuthStore((s) => s.accessToken);
 
+  const mapAvailable = useMemo(() => isNativeMapAvailable(), []);
+  const [boundaryKey, setBoundaryKey] = useState(0);
+
   const {
     activeAssignments,
     acceptedAwaitingProgressAssignments,
@@ -79,6 +87,8 @@ export default function MapScreen() {
     queryKey: ['map-config'],
     queryFn: () => getMapConfig(token ?? undefined),
     staleTime: 5 * 60 * 1000,
+    retry: 0,
+    gcTime: 30 * 60 * 1000,
   });
 
   const isActive          = activeAssignments.length > 0;
@@ -106,8 +116,8 @@ export default function MapScreen() {
       : null;
 
   const route = useRouteLine(
-    MAP_AVAILABLE && isActive ? responderPoint : null,
-    MAP_AVAILABLE && isActive ? destination : null,
+    mapAvailable && isActive ? responderPoint : null,
+    mapAvailable && isActive ? destination : null,
   );
 
   // Use any non-null styleUrl from the backend; fall back to demo only when null.
@@ -207,8 +217,11 @@ export default function MapScreen() {
       <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
 
       {/* Map area */}
-      {MAP_AVAILABLE ? (
-        <MapErrorBoundary>
+      {mapAvailable ? (
+        <MapErrorBoundary
+          key={boundaryKey}
+          onReset={() => setBoundaryKey((k) => k + 1)}
+        >
           <React.Suspense
             fallback={
               <View style={[styles.mapArea, styles.mapFallback]}>
@@ -317,8 +330,9 @@ const styles = StyleSheet.create({
   fallbackTitle:  { fontSize: 17, fontWeight: '700', color: '#1C2B3A', textAlign: 'center' },
   fallbackSub:    { fontSize: 13, color: '#8795A3', textAlign: 'center', lineHeight: 20 },
   muted:          { color: '#8795A3', textAlign: 'center', fontSize: 13, marginTop: 8 },
-  retryBtn:       { marginTop: 12, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
-  retryText:      { color: '#FFFFFF', fontWeight: '700' },
+  retryBtn:           { marginTop: 12, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
+  boundaryRetryBtn:   { marginTop: 16, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
+  retryText:          { color: '#FFFFFF', fontWeight: '700' },
   missionBtn:     { marginTop: 16, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
   missionBtnText: { color: '#FFFFFF', fontWeight: '700' },
 
