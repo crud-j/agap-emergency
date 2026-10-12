@@ -4,7 +4,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { MapProvider } from '@agap/shared';
 import { getIncidentStatus } from '@/src/services/api/incidents.api';
 import { getMapConfig } from '@/src/services/api/locations.api';
 import { useAuthStore } from '@/src/stores/auth.store';
@@ -69,12 +68,10 @@ export default function TrackingScreen() {
     MAP_AVAILABLE ? incidentPoint : null,
   );
 
-  // Mapbox styles use mapbox:// sources that MapLibre can't resolve, so only use
-  // a styleUrl when the provider is MapLibre; otherwise the OSS demo style.
-  const styleUrl =
-    mapConfig?.provider === MapProvider.MAPLIBRE && mapConfig.styleUrl
-      ? mapConfig.styleUrl
-      : MAPLIBRE_DEMO_STYLE;
+  // Use any non-null styleUrl from the backend; fall back to demo only when null.
+  // (The provider check was removed — Mapbox styleUrls now correctly return null
+  //  since mapbox:// sources are not resolvable by @maplibre/maplibre-react-native.)
+  const styleUrl = mapConfig?.styleUrl ?? MAPLIBRE_DEMO_STYLE;
 
   const status = live.status ?? incident?.status ?? '—';
 
@@ -123,6 +120,8 @@ export default function TrackingScreen() {
                 incident={incidentPoint}
                 responder={responderPoint}
                 routeGeometry={route.geometry}
+                pitch={20}
+                supports3dBuildings={mapConfig?.supports3dBuildings ?? false}
               />
             </React.Suspense>
           </MapErrorBoundary>

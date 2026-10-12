@@ -49,6 +49,12 @@ export interface AvailableOrg {
 
 // ─── Handover Types (MOD-44) ─────────────────────────────────────────────────
 
+export interface HandoverUser {
+  id: string;
+  full_name: string | null;
+  role: string;
+}
+
 export interface HandoverRecord {
   id: string;
   incident_id: string;
@@ -59,6 +65,9 @@ export interface HandoverRecord {
   resources_in_field: Record<string, unknown> | null;
   handed_over_at: string;
   acknowledged_at: string | null;
+  // Relations included by HandoverService.list()
+  users_incident_handovers_from_user_idTousers?: HandoverUser | null;
+  users_incident_handovers_to_user_idTousers?: HandoverUser | null;
 }
 
 // ─── Mutual Aid Types (MOD-35) ───────────────────────────────────────────────

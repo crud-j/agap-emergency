@@ -39,9 +39,8 @@ export function useAcknowledgeEscalation() {
 export function useResolveEscalation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, resolution }: { id: string; resolution?: string }) =>
-      resolveEscalation(id, resolution),
-    onSuccess: (_data, { id }) => {
+    mutationFn: (id: string) => resolveEscalation(id),
+    onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: ['escalations'] });
       qc.invalidateQueries({ queryKey: ['escalation', id] });
     },

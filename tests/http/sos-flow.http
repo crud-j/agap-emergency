@@ -1,0 +1,485 @@
+# ============================================================
+# AGAP — SOS Emergency Flow  |  REST Client (.http)
+# ============================================================
+# Compatible with:
+#   VS Code  → install "REST Client" extension (humao.rest-client)
+#   JetBrains → built-in HTTP Client (no plugin needed)
+#
+# HOW TO USE:
+#   1. Run the backend:   cd backend && pnpm start:dev
+#   2. Seed the database: cd backend && pnpm prisma db seed
+#   3. Open this file → click "Send Request" above each ### block
+#   4. Run steps top-to-bottom — each step uses real seeded data
+#
+# Swagger UI (all endpoints, live try-it):
+#   http://localhost:3000/api/docs  →  "alerts" and "incidents" tag groups
+#
+# ── SEEDED ACCOUNTS (dev password for all): AgapDev2026! ───
+#   CITIZEN        citizen@demo.agap
+#   BYSTANDER      bystander@demo.agap
+#   DISPATCHER     dispatcher1@mdrrmo.bocaue.gov.ph
+#   SUPERVISOR     supervisor@mdrrmo.bocaue.gov.ph
+#   RESPONDER      responder1@mdrrmo.bocaue.gov.ph
+#   HOSPITAL_USER  receiving@bocauehospital.gov.ph
+#   SYSTEM_ADMIN   admin@agap.local  (password: ChangeThisPasswordImmediately!)
+#
+# ── SEEDED DEMO INCIDENTS ───────────────────────────────────
+#   INC-2026-DEMO01  00000000-0000-0000-0005-000000000001  MEDICAL      DISPATCHED
+#   INC-2026-DEMO02  00000000-0000-0000-0005-000000000002  ROAD_ACCIDENT SUBMITTED
+#   INC-2026-DEMO03  00000000-0000-0000-0005-000000000003  FLOOD        ACKNOWLEDGED
+#   INC-2026-DEMO04  00000000-0000-0000-0005-000000000004  RESCUE       ON_SCENE
+#   INC-2026-DEMO05  00000000-0000-0000-0005-000000000005  FIRE         DISPATCHED
+#   INC-2026-DEMO06  00000000-0000-0000-0005-000000000006  INDUSTRIAL   ASSESSED
+#   INC-2026-DEMO07  00000000-0000-0000-0005-000000000007  DEBRIS       RESOLVED
+#   INC-2026-DEMO08  00000000-0000-0000-0005-000000000008  OTHER        RECEIVED
+#
+# ── SEEDED RESOURCES ────────────────────────────────────────
+#   ALPHA-1   00000000-0000-0000-0003-000000000001  MDRRMO Ambulance 1   (DISPATCHED → DEMO01)
+#   ALPHA-2   00000000-0000-0000-0003-000000000002  MDRRMO Ambulance 2   (AVAILABLE)
+#   BRAVO-1   00000000-0000-0000-0003-000000000003  MDRRMO Rescue Boat   (AVAILABLE)
+#   CHARLIE-1 00000000-0000-0000-0003-000000000004  BFP Fire Truck       (AVAILABLE)
+#   CHARLIE-2 00000000-0000-0000-0003-000000000005  BFP Rescue Truck     (AVAILABLE)
+#
+# ── SEEDED FACILITIES ───────────────────────────────────────
+#   Bocaue General Hospital        00000000-0000-0000-0002-000000000001
+#   Lolomboy Evacuation Center     00000000-0000-0000-0002-000000000002
+#   Bambang Evacuation Center      00000000-0000-0000-0002-000000000003
+#   Bunlo Barangay Hall            00000000-0000-0000-0002-000000000004
+#   Igulot Evacuation Center       00000000-0000-0000-0002-000000000005
+#
+# ── SEEDED ORGANIZATIONS ────────────────────────────────────
+#   MDRRMO Bocaue  00000000-0000-0000-0001-000000000001
+#   BFP Bocaue     00000000-0000-0000-0001-000000000002
+#   BGH            00000000-0000-0000-0001-000000000003
+# ============================================================
+
+@baseUrl    = http://localhost:3000
+@ct         = application/json
+@devPwd     = AgapDev2026!
+
+# Paste JWT here after running Step 0
+@citizenToken     = REPLACE_AFTER_STEP_0_CITIZEN
+@dispatcherToken  = REPLACE_AFTER_STEP_0_DISPATCHER
+@responderToken   = REPLACE_AFTER_STEP_0_RESPONDER
+
+
+###############################################################
+# STEP 0 — Login (get JWT tokens per role)
+###############################################################
+
+### 0-A. Login as Citizen (reporter of DEMO01, Turo barangay)
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: {{ct}}
+
+{
+  "email": "citizen@demo.agap",
+  "password": "{{devPwd}}"
+}
+# ► Copy accessToken → paste into @citizenToken above
+
+
+### 0-B. Login as Dispatcher (Juan dela Cruz — MDRRMO)
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: {{ct}}
+
+{
+  "email": "dispatcher1@mdrrmo.bocaue.gov.ph",
+  "password": "{{devPwd}}"
+}
+# ► Copy accessToken → paste into @dispatcherToken above
+
+
+### 0-C. Login as Responder (Jose Mendoza — crewed on ALPHA-1, Lolomboy)
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: {{ct}}
+
+{
+  "email": "responder1@mdrrmo.bocaue.gov.ph",
+  "password": "{{devPwd}}"
+}
+# ► Copy accessToken → paste into @responderToken above
+
+
+###############################################################
+# STEP 1 — SOS Button  (POST /api/v1/emergency-alerts/sos)
+#
+# Tables written:
+#   alert_triggers   — raw trigger log
+#   Incident         — status = SUBMITTED
+#   IncidentReporter — who pressed the button
+# Rate limit: 1 req/sec burst · 10 req/min sustained
+###############################################################
+
+### 1-A. Guest SOS — minimum required payload (no auth, no account)
+# Simulates a bystander from the Poblacion area — only incidentType required
+POST {{baseUrl}}/api/v1/emergency-alerts/sos
+Content-Type: {{ct}}
+
+{
+  "clientEventId": "test-guest-sos-poblacion-001",
+  "incidentType": "MEDICAL"
+}
+# ► Expected 201:
+#   { "incidentId": "<uuid>", "publicReference": "INC-2026-XXXXXX", "status": "SUBMITTED" }
+
+
+### 1-B. Authenticated Citizen SOS — GPS + patient details (Turo barangay)
+# Uses real Turo GPS coordinates (near Villa Zaragoza, same location as DEMO01)
+POST {{baseUrl}}/api/v1/emergency-alerts/sos
+Content-Type: {{ct}}
+Authorization: Bearer {{citizenToken}}
+
+{
+  "clientEventId": "test-citizen-sos-turo-002",
+  "incidentType": "MEDICAL",
+  "latitude": 14.7969,
+  "longitude": 120.9268,
+  "accuracyMeters": 8.5,
+  "consciousnessState": "UNCONSCIOUS",
+  "breathingStatus": "DIFFICULTY",
+  "description": "Person collapsed near Villa Zaragoza, Turo — not responding",
+  "reporterName": "Demo Citizen",
+  "reporterPhone": "+639170000001",
+  "patientIsReporter": false,
+  "patientIsUnknown": true,
+  "numberOfPatients": 1
+}
+
+
+### 1-C. SOS — FLOOD category (Bunlo barangay — real flood-prone area)
+# Bunlo is a flood-prone barangay; river level note included
+POST {{baseUrl}}/api/v1/emergency-alerts/sos
+Content-Type: {{ct}}
+
+{
+  "clientEventId": "test-flood-sos-bunlo-003",
+  "incidentType": "FLOOD",
+  "latitude": 14.7319,
+  "longitude": 120.9253,
+  "accuracyMeters": 15.0,
+  "description": "Floodwater rising fast along riverbank in Bunlo — family of 4 on second floor",
+  "numberOfPatients": 4,
+  "patientIsUnknown": true
+}
+
+
+### 1-D. SOS — FIRE category (Bundukan barangay — fireworks industry zone)
+POST {{baseUrl}}/api/v1/emergency-alerts/sos
+Content-Type: {{ct}}
+
+{
+  "clientEventId": "test-fire-sos-bundukan-004",
+  "incidentType": "FIRE",
+  "latitude": 14.7950,
+  "longitude": 120.9450,
+  "accuracyMeters": 12.0,
+  "description": "Structure fire near fireworks compound in Bundukan, smoke visible from street",
+  "numberOfPatients": 0,
+  "patientIsUnknown": false
+}
+
+
+### 1-E. SOS — ROAD_ACCIDENT (MacArthur Highway, Lolomboy)
+# Same location as seeded DEMO02
+POST {{baseUrl}}/api/v1/emergency-alerts/sos
+Content-Type: {{ct}}
+
+{
+  "clientEventId": "test-road-sos-lolomboy-005",
+  "incidentType": "ROAD_ACCIDENT",
+  "latitude": 14.7260,
+  "longitude": 120.9420,
+  "accuracyMeters": 10.0,
+  "description": "Two motorcycles collided along MacArthur Highway near Lolomboy junction",
+  "reporterName": "Roadside Bystander",
+  "reporterPhone": "+639170000010",
+  "numberOfPatients": 2,
+  "patientIsUnknown": true
+}
+
+
+### 1-F. Shake-to-Alert (same DTO — different endpoint)
+POST {{baseUrl}}/api/v1/emergency-alerts/shake
+Content-Type: {{ct}}
+Authorization: Bearer {{citizenToken}}
+
+{
+  "clientEventId": "test-shake-turo-006",
+  "incidentType": "MEDICAL",
+  "latitude": 14.7969,
+  "longitude": 120.9268,
+  "accuracyMeters": 20.0
+}
+
+
+###############################################################
+# STEP 1 — IDEMPOTENCY TEST
+# Same clientEventId → must return the same incident, never a duplicate
+###############################################################
+
+### 1-G. Duplicate submission — same clientEventId as 1-A, different incidentType
+# Expected: 201 with the SAME incidentId from 1-A (no new record created)
+POST {{baseUrl}}/api/v1/emergency-alerts/sos
+Content-Type: {{ct}}
+
+{
+  "clientEventId": "test-guest-sos-poblacion-001",
+  "incidentType": "FIRE"
+}
+
+
+###############################################################
+# STEP 2 — Get status of a new SOS
+# Use incidentId returned from Step 1 (citizen-facing, no auth)
+###############################################################
+
+@newIncidentId = REPLACE_WITH_INCIDENT_ID_FROM_STEP_1
+
+### 2-A. Citizen-facing status (no auth required)
+GET {{baseUrl}}/api/v1/incidents/{{newIncidentId}}/status
+
+
+### 2-B. Full incident detail (auth required)
+GET {{baseUrl}}/api/v1/incidents/{{newIncidentId}}
+Authorization: Bearer {{citizenToken}}
+
+
+### 2-C. Event timeline (status transitions log)
+GET {{baseUrl}}/api/v1/incidents/{{newIncidentId}}/events
+Authorization: Bearer {{citizenToken}}
+
+
+###############################################################
+# STEP 3 — Dispatcher workflow on a SUBMITTED incident
+# Uses seeded DEMO02 (ROAD_ACCIDENT, SUBMITTED — ready to process)
+###############################################################
+
+@demo02 = 00000000-0000-0000-0005-000000000002
+
+### 3-A. Get dispatcher queue (all SUBMITTED incidents)
+GET {{baseUrl}}/api/v1/incidents?status=SUBMITTED&page=1&perPage=20
+Authorization: Bearer {{dispatcherToken}}
+
+
+### 3-B. Get full details of DEMO02 (before acknowledging)
+GET {{baseUrl}}/api/v1/incidents/{{demo02}}
+Authorization: Bearer {{dispatcherToken}}
+
+
+### 3-C. Acknowledge DEMO02 (SUBMITTED → ACKNOWLEDGED)
+PATCH {{baseUrl}}/api/v1/incidents/{{demo02}}/acknowledge
+Authorization: Bearer {{dispatcherToken}}
+
+
+### 3-D. Assess DEMO02 (ACKNOWLEDGED → ASSESSED)
+PATCH {{baseUrl}}/api/v1/incidents/{{demo02}}/assess
+Authorization: Bearer {{dispatcherToken}}
+
+
+###############################################################
+# STEP 4 — Dispatcher workflow on a pre-assessed incident
+# Uses seeded DEMO06 (INDUSTRIAL, ASSESSED — ready to dispatch)
+###############################################################
+
+@demo06 = 00000000-0000-0000-0005-000000000006
+
+### 4-A. Get DEMO06 detail (INDUSTRIAL, ASSESSED — chemical spill at Biñang 1st)
+GET {{baseUrl}}/api/v1/incidents/{{demo06}}
+Authorization: Bearer {{dispatcherToken}}
+
+
+### 4-B. Update status to DISPATCH_PENDING
+PATCH {{baseUrl}}/api/v1/incidents/{{demo06}}/status
+Content-Type: {{ct}}
+Authorization: Bearer {{dispatcherToken}}
+
+{
+  "status": "DISPATCH_PENDING",
+  "reason": "Reviewing available HAZMAT resources"
+}
+
+
+###############################################################
+# STEP 5 — Photo Attachment  (POST /api/v1/incidents/:id/attachments)
+# Auth required · multipart/form-data · max 10 MB
+#
+# Table written: IncidentAttachment
+###############################################################
+
+### 5-A. Upload photo to DEMO01 (curl — easiest for binary files)
+# Run this in your terminal (not in REST Client):
+#
+# curl -X POST http://localhost:3000/api/v1/incidents/00000000-0000-0000-0005-000000000001/attachments \
+#   -H "Authorization: Bearer <citizenToken>" \
+#   -F "file=@/path/to/your/photo.jpg"
+
+
+### 5-B. List existing attachments for DEMO01
+GET {{baseUrl}}/api/v1/incidents/00000000-0000-0000-0005-000000000001/attachments
+Authorization: Bearer {{citizenToken}}
+
+
+###############################################################
+# STEP 6 — Responder workflow
+# DEMO01 is DISPATCHED with responder1 crewed on ALPHA-1
+# Dispatch ID: 00000000-0000-0000-0006-000000000001
+###############################################################
+
+@demo01 = 00000000-0000-0000-0005-000000000001
+
+### 6-A. Responder: submit on-scene assessment for DEMO01
+POST {{baseUrl}}/api/v1/incidents/{{demo01}}/assessment
+Content-Type: {{ct}}
+Authorization: Bearer {{responderToken}}
+
+{
+  "patientId": null,
+  "pulseBpm": 92,
+  "respiratoryRate": 18,
+  "oxygenSaturation": 96,
+  "consciousnessState": "CONSCIOUS",
+  "breathingStatus": "NORMAL",
+  "visibleInjuries": ["CHEST_PAIN"],
+  "interventions": ["O2_ADMINISTERED"],
+  "assessmentNotes": "Patient is alert, complaint of chest tightness. BP taken, vitals stable."
+}
+
+
+### 6-B. Start transport to Bocaue General Hospital
+# Facility ID: 00000000-0000-0000-0002-000000000001 (Bocaue General Hospital)
+POST {{baseUrl}}/api/v1/incidents/{{demo01}}/transport
+Content-Type: {{ct}}
+Authorization: Bearer {{responderToken}}
+
+{
+  "dispatchId": "00000000-0000-0000-0006-000000000001",
+  "destinationId": "00000000-0000-0000-0002-000000000001",
+  "estimatedArrivalAt": "2026-10-10T10:15:00.000Z"
+}
+
+
+###############################################################
+# STEP 7 — Cancel within grace window
+# Use an alertTriggerId from a new SOS (Step 1 response)
+###############################################################
+
+@alertTriggerId = REPLACE_WITH_ALERT_TRIGGER_ID_FROM_STEP_1
+
+### 7. Cancel alert (must be within cancel_deadline_at — seeded window: 10 seconds)
+POST {{baseUrl}}/api/v1/emergency-alerts/{{alertTriggerId}}/cancel
+Content-Type: {{ct}}
+Authorization: Bearer {{citizenToken}}
+
+{}
+
+
+###############################################################
+# STEP 8 — Offline queue flush
+# Simulates a device reconnecting after being offline in a flood zone
+###############################################################
+
+### 8. Flush an offline-queued SOS event
+POST {{baseUrl}}/api/v1/offline-sync/flush
+Content-Type: {{ct}}
+Authorization: Bearer {{citizenToken}}
+
+{
+  "events": [
+    {
+      "clientEventId": "test-offline-queue-bunlo-007",
+      "eventType": "EMERGENCY_SOS",
+      "queuedAtDevice": "2026-10-10T08:00:00.000Z",
+      "payload": {
+        "incidentType": "FLOOD",
+        "latitude": 14.7319,
+        "longitude": 120.9253,
+        "description": "Queued while offline — rising water in Bunlo, family trapped"
+      }
+    }
+  ]
+}
+# ► Expected: { "processed": 1, "duplicates": 0, "failed": 0 }
+
+### 8-B. Flush with duplicate (same clientEventId) — must be rejected, not double-processed
+POST {{baseUrl}}/api/v1/offline-sync/flush
+Content-Type: {{ct}}
+Authorization: Bearer {{citizenToken}}
+
+{
+  "events": [
+    {
+      "clientEventId": "test-offline-queue-bunlo-007",
+      "eventType": "EMERGENCY_SOS",
+      "queuedAtDevice": "2026-10-10T08:00:00.000Z",
+      "payload": {
+        "incidentType": "FLOOD",
+        "latitude": 14.7319,
+        "longitude": 120.9253,
+        "description": "Queued while offline — rising water in Bunlo, family trapped"
+      }
+    }
+  ]
+}
+# ► Expected: { "processed": 0, "duplicates": 1, "failed": 0 }
+
+
+###############################################################
+# READ-ONLY — Browse seeded data (no state changes)
+###############################################################
+
+### R-1. All incidents across the dashboard queue
+GET {{baseUrl}}/api/v1/incidents?page=1&perPage=20
+Authorization: Bearer {{dispatcherToken}}
+
+
+### R-2. DEMO03 — FLOOD, ACKNOWLEDGED (Bunlo riverside — ready to dispatch)
+GET {{baseUrl}}/api/v1/incidents/00000000-0000-0000-0005-000000000003
+Authorization: Bearer {{dispatcherToken}}
+
+
+### R-3. DEMO05 — FIRE, DISPATCHED (Bundukan fireworks compound — CRITICAL)
+GET {{baseUrl}}/api/v1/incidents/00000000-0000-0000-0005-000000000005
+Authorization: Bearer {{dispatcherToken}}
+
+
+### R-4. DEMO07 — DEBRIS, RESOLVED (Bambang — full lifecycle completed)
+GET {{baseUrl}}/api/v1/incidents/00000000-0000-0000-0005-000000000007
+Authorization: Bearer {{dispatcherToken}}
+
+
+### R-5. Incident event timeline for DEMO04 (RESCUE → ON_SCENE — all transitions logged)
+GET {{baseUrl}}/api/v1/incidents/00000000-0000-0000-0005-000000000004/events
+Authorization: Bearer {{dispatcherToken}}
+
+
+### R-6. Citizen's own incident list (only sees their own reports)
+GET {{baseUrl}}/api/v1/incidents/mine
+Authorization: Bearer {{citizenToken}}
+
+
+###############################################################
+# QUICK REFERENCE — All SOS-related endpoints
+###############################################################
+# Method  Endpoint                                      Auth      Description
+# ──────────────────────────────────────────────────────────────────────────
+# POST    /api/v1/emergency-alerts/sos                 Optional  SOS button trigger
+# POST    /api/v1/emergency-alerts/shake               Optional  Shake-to-alert trigger
+# POST    /api/v1/emergency-alerts/:id/cancel          Optional  Cancel within grace window
+# GET     /api/v1/emergency-alerts/:id/status          Optional  Alert status
+# POST    /api/v1/incidents                            Optional  Manual incident report
+# GET     /api/v1/incidents                            DISPATCHER List all incidents
+# GET     /api/v1/incidents/mine                       CITIZEN   Own incidents only
+# GET     /api/v1/incidents/:id                        Required  Full incident detail
+# GET     /api/v1/incidents/:id/status                 Optional  Citizen-facing status
+# GET     /api/v1/incidents/:id/events                 Required  Status transition log
+# PATCH   /api/v1/incidents/:id/status                 DISPATCHER Update status
+# PATCH   /api/v1/incidents/:id/acknowledge            DISPATCHER SUBMITTED → ACKNOWLEDGED
+# PATCH   /api/v1/incidents/:id/assess                 DISPATCHER ACKNOWLEDGED → ASSESSED
+# POST    /api/v1/incidents/:id/attachments            Required  Upload photo (multipart)
+# GET     /api/v1/incidents/:id/attachments            Required  List attachments
+# POST    /api/v1/incidents/:id/assessment             RESPONDER On-scene patient assessment
+# POST    /api/v1/incidents/:id/transport              RESPONDER Start transport to facility
+# POST    /api/v1/offline-sync/flush                   Required  Flush offline queue
+# ──────────────────────────────────────────────────────────────────────────
+# Swagger UI:  http://localhost:3000/api/docs
+###############################################################

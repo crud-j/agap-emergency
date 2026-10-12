@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { useIncidentStore } from '../../src/stores/incident.store';
 import { getIncidentHistoryDetail, type IncidentHistoryDetail } from '../../src/services/api/incidents.api';
+import { useIncidentTracking } from '../../src/hooks/useIncidentTracking';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -315,6 +316,58 @@ function Timeline({ events }: { events: StatusEvent[] }) {
   );
 }
 
+// ─── Live Tracking Card ───────────────────────────────────────────────────────
+
+function LiveTrackingCard({
+  incidentId,
+  status,
+  onTrackPress,
+}: {
+  incidentId: string;
+  status: string;
+  onTrackPress: () => void;
+}) {
+  const live = useIncidentTracking(incidentId, status);
+
+  const showEta = live.etaSeconds != null && live.etaSeconds > 0;
+  const etaMins = showEta ? Math.max(1, Math.ceil(live.etaSeconds! / 60)) : null;
+
+  return (
+    <TouchableOpacity
+      style={styles.liveCard}
+      activeOpacity={0.85}
+      onPress={onTrackPress}
+      accessibilityRole="button"
+      accessibilityLabel="Track responder live on a map"
+    >
+      <View style={styles.liveCardLeft}>
+        <View style={styles.liveIconWrap}>
+          <Ionicons name="navigate" size={20} color={C.white} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <View style={styles.liveRow}>
+            <View style={[styles.liveDot, { backgroundColor: live.connected ? '#4ADE80' : '#9CA3AF' }]} />
+            <Text style={styles.liveLabel}>
+              {live.connected ? 'Live tracking active' : 'Tracking'}
+            </Text>
+          </View>
+          {showEta ? (
+            <Text style={styles.liveEta}>
+              Responder ~{etaMins} min away
+              <Text style={styles.liveEstimate}> (estimate)</Text>
+            </Text>
+          ) : live.responder ? (
+            <Text style={styles.liveEta}>Responder location updated</Text>
+          ) : (
+            <Text style={styles.liveEta}>Tap to open live map</Text>
+          )}
+        </View>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.7)" />
+    </TouchableOpacity>
+  );
+}
+
 // ─── Cancel Button ────────────────────────────────────────────────────────────
 
 function CancelButton({ onPress }: { onPress: () => void }) {
@@ -482,18 +535,13 @@ export default function IncidentDetailScreen() {
             {/* Current status */}
             <StatusCard incident={incident} />
 
-            {/* Live tracking — map + responder ETA, only while the incident is active */}
-            {isActiveIncident && (
-              <TouchableOpacity
-                style={styles.trackBtn}
-                activeOpacity={0.85}
-                onPress={() => router.push(`/tracking/${id}` as any)}
-                accessibilityRole="button"
-                accessibilityLabel="Track responder live on a map"
-              >
-                <Ionicons name="navigate" size={18} color={C.white} style={{ marginRight: 8 }} />
-                <Text style={styles.trackBtnText}>Track Live</Text>
-              </TouchableOpacity>
+            {/* Live tracking card — shows real-time ETA and opens the full map */}
+            {isActiveIncident && id && (
+              <LiveTrackingCard
+                incidentId={id}
+                status={incident.status}
+                onTrackPress={() => router.push(`/tracking/${id}` as any)}
+              />
             )}
 
             {/* Progress track — only shown for active incidents */}
@@ -683,16 +731,29 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: { fontSize: 15, fontWeight: '700', color: C.danger },
 
-  // ─── Track Live ─────────────────────────────────────────────────────────────
+  // ─── Live Tracking Card ──────────────────────────────────────────────────────
 
-  trackBtn: {
+  liveCard: {
     marginBottom: 12,
-    minHeight: 52, borderRadius: 16,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    padding: 16,
+    borderRadius: 20,
     backgroundColor: C.primary,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     ...CARD_SHADOW,
+    shadowColor: '#094A3E',
+    shadowOpacity: 0.22,
   },
-  trackBtnText: { fontSize: 15, fontWeight: '800', color: C.white },
+  liveCardLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  liveIconWrap: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  liveRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
+  liveDot: { width: 8, height: 8, borderRadius: 4 },
+  liveLabel: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.80)', textTransform: 'uppercase', letterSpacing: 0.4 },
+  liveEta: { fontSize: 15, fontWeight: '800', color: C.white },
+  liveEstimate: { fontSize: 12, fontWeight: '500', color: 'rgba(255,255,255,0.65)' },
 
   // ─── Hotline ──────────────────────────────────────────────────────────────────
 

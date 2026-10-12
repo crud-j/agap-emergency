@@ -1,19 +1,27 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/src/stores/auth.store';
-import { getMyAssignments, type Assignment } from '@/src/services/api/responders.api';
+import type { Assignment } from '@/src/services/api/responders.api';
+import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
 import { categoryIcon, categoryColor, priorityColor, titleCase } from '@/src/lib/incident-visuals';
 
 const STATUS_COLOR: Record<string, string> = {
-  PENDING: '#F59E0B',
-  SENT: '#F59E0B',
-  ACCEPTED: '#3B82F6',
-  EN_ROUTE: '#22D3EE',
-  ON_SCENE: '#34D399',
-  TRANSPORTING: '#A78BFA',
+  PENDING:      '#D97706',
+  SENT:         '#D97706',
+  ACCEPTED:     '#3B82F6',
+  EN_ROUTE:     '#0891B2',
+  ON_SCENE:     '#0D6053',
+  TRANSPORTING: '#7C3AED',
+};
+
+const CARD_SHADOW = {
+  shadowColor: '#8795A3',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.09,
+  shadowRadius: 12,
+  elevation: 3,
 };
 
 /**
@@ -22,48 +30,48 @@ const STATUS_COLOR: Record<string, string> = {
  */
 export default function AssignmentsScreen() {
   const router = useRouter();
-  const token = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
-
-  const { data, isLoading, isError, isRefetching, refetch } = useQuery({
-    queryKey: ['responder-assignments'],
-    queryFn: () => getMyAssignments(token as string),
-    enabled: !!token,
-    refetchInterval: 15000,
-  });
-
-  const assignments = data ?? [];
+  const { assignments, isLoading, isError, isRefreshing, refetch } = useResponderAssignments();
   const activeCount = assignments.length;
   const firstName = user?.full_name?.split(' ')[0] ?? 'Responder';
+  const initials = (user?.full_name?.charAt(0) ?? 'R').toUpperCase();
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* On-duty header */}
+      <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
+
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
+            <Text style={styles.avatarText}>{initials}</Text>
             <View style={styles.onDutyDot} />
           </View>
           <View>
             <Text style={styles.greeting}>On duty, {firstName}</Text>
             <Text style={styles.subtitle}>
-              {activeCount > 0 ? `${activeCount} active assignment${activeCount > 1 ? 's' : ''}` : 'Standing by'}
+              {activeCount > 0
+                ? `${activeCount} active assignment${activeCount > 1 ? 's' : ''}`
+                : 'Standing by'}
             </Text>
           </View>
         </View>
         <TouchableOpacity style={styles.refreshBtn} onPress={() => refetch()} accessibilityLabel="Refresh">
-          {isRefetching ? <ActivityIndicator color="#34D399" /> : <Ionicons name="refresh" size={20} color="#CBD5E1" />}
+          {isRefreshing
+            ? <ActivityIndicator color="#0D6053" />
+            : <Ionicons name="refresh" size={20} color="#8795A3" />}
         </TouchableOpacity>
       </View>
 
       {isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator color="#34D399" />
+          <ActivityIndicator color="#0D6053" size="large" />
         </View>
       ) : isError ? (
         <View style={styles.center}>
-          <View style={styles.emptyIcon}><Ionicons name="cloud-offline-outline" size={36} color="#64748B" /></View>
+          <View style={styles.emptyIcon}>
+            <Ionicons name="cloud-offline-outline" size={36} color="#8795A3" />
+          </View>
           <Text style={styles.muted}>Could not load assignments.</Text>
           <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()}>
             <Text style={styles.retryText}>Retry</Text>
@@ -71,7 +79,9 @@ export default function AssignmentsScreen() {
         </View>
       ) : assignments.length === 0 ? (
         <View style={styles.center}>
-          <View style={styles.emptyIcon}><Ionicons name="shield-checkmark-outline" size={40} color="#334155" /></View>
+          <View style={styles.emptyIcon}>
+            <Ionicons name="shield-checkmark-outline" size={40} color="#8795A3" />
+          </View>
           <Text style={styles.muted}>No active assignments</Text>
           <Text style={styles.mutedSmall}>You'll be notified the moment you're dispatched.</Text>
         </View>
@@ -80,9 +90,14 @@ export default function AssignmentsScreen() {
           data={assignments}
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: 16, paddingTop: 8 }}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#34D399" />}
+          refreshControl={
+            <RefreshControl refreshing={isRefreshing} onRefresh={refetch} tintColor="#0D6053" />
+          }
           renderItem={({ item }) => (
-            <AssignmentCard item={item} onPress={() => router.push(`/responder/assignment/${item.id}` as never)} />
+            <AssignmentCard
+              item={item}
+              onPress={() => router.push(`/responder/assignment/${item.id}` as never)}
+            />
           )}
         />
       )}
@@ -91,18 +106,17 @@ export default function AssignmentsScreen() {
 }
 
 function AssignmentCard({ item, onPress }: { item: Assignment; onPress: () => void }) {
-  const incident = item.incidents;
-  const unit = item.resources;
-  const cat = incident?.category;
-  const accent = categoryColor(cat);
-  const statusColor = STATUS_COLOR[item.status] ?? '#64748B';
-  const prioColor = priorityColor(incident?.priority);
-  const address =
+  const incident    = item.incidents;
+  const unit        = item.resources;
+  const cat         = incident?.category;
+  const accent      = categoryColor(cat);
+  const statusColor = STATUS_COLOR[item.status] ?? '#8795A3';
+  const prioColor   = priorityColor(incident?.priority);
+  const address     =
     incident?.incident_locations?.formatted_address ??
     ([incident?.incident_locations?.barangay, incident?.incident_locations?.municipality]
       .filter(Boolean)
-      .join(', ') ||
-      'Location pending');
+      .join(', ') || 'Location pending');
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
@@ -112,12 +126,12 @@ function AssignmentCard({ item, onPress }: { item: Assignment; onPress: () => vo
       <View style={styles.cardBody}>
         <View style={styles.cardTop}>
           <View style={styles.unitRow}>
-            <View style={[styles.catIcon, { backgroundColor: `${accent}22` }]}>
+            <View style={[styles.catIcon, { backgroundColor: `${accent}18` }]}>
               <Ionicons name={categoryIcon(cat)} size={16} color={accent} />
             </View>
             <Text style={styles.unit}>{unit?.call_sign ?? unit?.name ?? 'Unit'}</Text>
           </View>
-          <View style={[styles.statusPill, { backgroundColor: `${statusColor}22` }]}>
+          <View style={[styles.statusPill, { backgroundColor: `${statusColor}15` }]}>
             <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
             <Text style={[styles.statusText, { color: statusColor }]}>{titleCase(item.status)}</Text>
           </View>
@@ -132,9 +146,9 @@ function AssignmentCard({ item, onPress }: { item: Assignment; onPress: () => vo
         </View>
 
         <View style={styles.addrRow}>
-          <Ionicons name="location-outline" size={14} color="#64748B" style={{ marginRight: 4 }} />
+          <Ionicons name="location-outline" size={14} color="#8795A3" style={{ marginRight: 4 }} />
           <Text style={styles.addr} numberOfLines={1}>{address}</Text>
-          <Ionicons name="chevron-forward" size={16} color="#475569" />
+          <Ionicons name="chevron-forward" size={16} color="#8795A3" />
         </View>
       </View>
     </TouchableOpacity>
@@ -142,56 +156,66 @@ function AssignmentCard({ item, onPress }: { item: Assignment; onPress: () => vo
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B1220' },
+  container: { flex: 1, backgroundColor: '#F2F5F8' },
 
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 10, paddingBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(168,181,193,0.20)',
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: {
     width: 46, height: 46, borderRadius: 23, backgroundColor: '#0D6053',
     alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#0D6053', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4,
   },
-  avatarText: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  avatarText: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
   onDutyDot: {
     position: 'absolute', right: -1, bottom: -1, width: 14, height: 14, borderRadius: 7,
-    backgroundColor: '#34D399', borderWidth: 2.5, borderColor: '#0B1220',
+    backgroundColor: '#0D6053', borderWidth: 2.5, borderColor: '#FFFFFF',
   },
-  greeting: { fontSize: 18, fontWeight: '800', color: '#F8FAFC' },
-  subtitle: { fontSize: 13, color: '#94A3B8', marginTop: 1 },
-  refreshBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1E293B' },
+  greeting: { fontSize: 18, fontWeight: '800', color: '#1C2B3A' },
+  subtitle: { fontSize: 13, color: '#8795A3', marginTop: 1 },
+  refreshBtn: {
+    width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#EDF1F4',
+    borderWidth: 1, borderColor: 'rgba(168,181,193,0.20)',
+  },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 6 },
   emptyIcon: {
-    width: 84, height: 84, borderRadius: 42, backgroundColor: '#111C2E',
+    width: 84, height: 84, borderRadius: 42, backgroundColor: '#EDF1F4',
     alignItems: 'center', justifyContent: 'center', marginBottom: 10,
+    borderWidth: 1, borderColor: 'rgba(168,181,193,0.20)',
   },
-  muted: { color: '#CBD5E1', fontSize: 16, fontWeight: '600' },
-  mutedSmall: { color: '#64748B', fontSize: 13, textAlign: 'center' },
+  muted: { color: '#1C2B3A', fontSize: 16, fontWeight: '600' },
+  mutedSmall: { color: '#8795A3', fontSize: 13, textAlign: 'center' },
   retryBtn: { marginTop: 14, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
-  retryText: { color: '#fff', fontWeight: '700' },
+  retryText: { color: '#FFFFFF', fontWeight: '700' },
 
   card: {
-    flexDirection: 'row', backgroundColor: '#111C2E', borderRadius: 18, marginBottom: 12,
-    overflow: 'hidden', borderWidth: 1, borderColor: '#1E293B',
+    flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 18, marginBottom: 12,
+    overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(168,181,193,0.20)',
+    ...CARD_SHADOW,
   },
   accent: { width: 5 },
   cardBody: { flex: 1, padding: 15 },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   unitRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   catIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  unit: { fontSize: 16, fontWeight: '800', color: '#F8FAFC', letterSpacing: 0.3 },
+  unit: { fontSize: 16, fontWeight: '800', color: '#1C2B3A', letterSpacing: 0.3 },
   statusPill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusText: { fontSize: 11, fontWeight: '800' },
 
-  type: { fontSize: 17, fontWeight: '700', color: '#E2E8F0', marginBottom: 8 },
+  type: { fontSize: 17, fontWeight: '700', color: '#1C2B3A', marginBottom: 8 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   prioTag: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   prioText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
-  ref: { fontSize: 12, fontFamily: 'monospace', color: '#64748B' },
+  ref: { fontSize: 12, fontFamily: 'monospace', color: '#8795A3' },
 
   addrRow: { flexDirection: 'row', alignItems: 'center' },
-  addr: { fontSize: 13, color: '#94A3B8', flex: 1 },
+  addr: { fontSize: 13, color: '#40536D', flex: 1 },
 });

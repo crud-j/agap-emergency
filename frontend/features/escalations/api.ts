@@ -1,53 +1,57 @@
 import { api } from '@/lib/api';
 import { getToken } from '@/lib/auth';
-import type { PaginatedResult } from '@agap/shared';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types (match the `escalations` Prisma model) ──────────────────────────────
+
+export interface EscalationIncident {
+  id: string;
+  public_reference: string;
+  category: string;
+  priority: string;
+  status: string;
+}
 
 export interface Escalation {
   id: string;
   incident_id: string;
-  escalation_type: string;
+  sla_policy_id: string | null;
+  escalation_level: string;
+  /** ACTIVE | ACKNOWLEDGED | RESOLVED | CANCELLED */
   status: string;
-  reason: string | null;
-  created_at: string;
+  triggered_reason: string;
+  sla_breach_at: string;
+  notified_user_id: string | null;
   acknowledged_at: string | null;
   resolved_at: string | null;
-  created_by: string | null;
-  incident?: {
-    id: string;
-    public_reference: string;
-    category: string;
-    priority: string;
-  };
+  created_at: string;
+  incidents?: EscalationIncident | null;
 }
 
 export interface EscalationListParams {
   status?: string;
   incidentId?: string;
-  page?: number;
-  perPage?: number;
 }
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
+// GET /escalations returns a plain array (no pagination).
 
-export function fetchEscalations(params?: EscalationListParams): Promise<PaginatedResult<Escalation>> {
+export function fetchEscalations(params?: EscalationListParams): Promise<Escalation[]> {
   const qs = new URLSearchParams();
   if (params?.status)     qs.set('status', params.status);
   if (params?.incidentId) qs.set('incidentId', params.incidentId);
-  if (params?.page)       qs.set('page', String(params.page));
-  if (params?.perPage)    qs.set('perPage', String(params.perPage));
-  return api.get(`/escalations?${qs}`, getToken());
+  const q = qs.toString();
+  return api.get(`/escalations${q ? `?${q}` : ''}`, getToken());
 }
 
 export function fetchEscalation(id: string): Promise<Escalation> {
   return api.get(`/escalations/${id}`, getToken());
 }
 
+// Backend uses POST for both state transitions.
 export function acknowledgeEscalation(id: string): Promise<Escalation> {
-  return api.patch(`/escalations/${id}/acknowledge`, {}, getToken());
+  return api.post(`/escalations/${id}/acknowledge`, {}, getToken());
 }
 
-export function resolveEscalation(id: string, resolution?: string): Promise<Escalation> {
-  return api.patch(`/escalations/${id}/resolve`, { resolution }, getToken());
+export function resolveEscalation(id: string): Promise<Escalation> {
+  return api.post(`/escalations/${id}/resolve`, {}, getToken());
 }

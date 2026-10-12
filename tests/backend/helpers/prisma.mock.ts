@@ -49,9 +49,11 @@ export function createMockPrisma() {
     },
     dispatches: {
       create: jest.fn(),
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
       findMany: jest.fn(),
       update: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
     },
     resources: {
       findUnique: jest.fn(),
@@ -64,9 +66,18 @@ export function createMockPrisma() {
     },
     dispatch_crew: {
       create: jest.fn(),
+      createMany: jest.fn(),
       findMany: jest.fn(),
     },
+    responderAvailability: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    location_history: {
+      create: jest.fn(),
+    },
     $transaction: jest.fn(),
+    $queryRaw: jest.fn().mockResolvedValue([]),
     $connect: jest.fn().mockResolvedValue(undefined),
     $disconnect: jest.fn().mockResolvedValue(undefined),
   };

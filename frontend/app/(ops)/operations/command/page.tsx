@@ -4,6 +4,7 @@ import { useState, type JSX } from 'react';
 import {
   Siren, Target, Plus, Trash2, CheckCircle2,
   XCircle, Users, ChevronDown, AlertTriangle, Shield,
+  ClipboardList, ArrowRightLeft, Check,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,
@@ -22,8 +23,11 @@ import {
   useDeactivateIcs,
   useAddIcsPosition,
   useRemoveIcsPosition,
+  useHandovers,
+  useCreateHandover,
+  useAcknowledgeHandover,
 } from '@/features/incidents/command-hooks';
-import type { IcsAssignment } from '@/features/incidents/command';
+import type { IcsAssignment, HandoverRecord } from '@/features/incidents/command';
 import { cn } from '@/lib/utils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -411,6 +415,219 @@ function IcsPanel({ incidentId }: { incidentId: string }): JSX.Element {
   );
 }
 
+// ─── Create Handover dialog (MOD-44) ───────────────────────────────────────────
+
+function CreateHandoverDialog({
+  incidentId,
+  open,
+  onClose,
+}: {
+  incidentId: string;
+  open: boolean;
+  onClose: () => void;
+}): JSX.Element {
+  const [toUserId, setToUserId] = useState('');
+  const [summary, setSummary] = useState('');
+  const [actionsText, setActionsText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const create = useCreateHandover();
+
+  async function handleConfirm() {
+    if (!toUserId.trim() || !summary.trim()) {
+      setError('Incoming operator and situation summary are required.');
+      return;
+    }
+    const pendingActions = actionsText.split('\n').map((s) => s.trim()).filter(Boolean);
+    try {
+      setError(null);
+      await create.mutateAsync({
+        incidentId,
+        data: {
+          toUserId: toUserId.trim(),
+          situationSummary: summary.trim(),
+          ...(pendingActions.length > 0 && { pendingActions }),
+        },
+      });
+      setToUserId(''); setSummary(''); setActionsText('');
+      onClose();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Handover failed.');
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowRightLeft size={16} className="text-agap-green" />
+            Hand Over Incident
+          </DialogTitle>
+          <DialogDescription>
+            Transfer this incident to the incoming operator with a situation summary and open actions.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
+              Incoming operator (User ID) <span className="text-agap-danger">*</span>
+            </label>
+            <input
+              type="text"
+              value={toUserId}
+              onChange={(e) => setToUserId(e.target.value)}
+              placeholder="User UUID"
+              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
+              Situation summary <span className="text-agap-danger">*</span>
+            </label>
+            <textarea
+              rows={3}
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              placeholder="Current status, patient condition, agencies on scene…"
+              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green resize-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
+              Pending actions <span className="text-agap-textSub font-normal normal-case">(one per line, optional)</span>
+            </label>
+            <textarea
+              rows={3}
+              value={actionsText}
+              onChange={(e) => setActionsText(e.target.value)}
+              placeholder="Confirm ETA with receiving hospital.&#10;Request additional rescue boat."
+              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green resize-none"
+            />
+          </div>
+          {error && <p className="text-xs text-agap-danger">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={create.isPending} onClick={handleConfirm}>
+            Hand over
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Handover Panel (MOD-44) ────────────────────────────────────────────────────
+
+function handoverName(u?: { full_name: string | null; id: string } | null): string {
+  if (!u) return '—';
+  return u.full_name ?? u.id.slice(0, 8);
+}
+
+function HandoverPanel({ incidentId }: { incidentId: string }): JSX.Element {
+  const user = useAuthUser();
+  const { data: handovers, isLoading } = useHandovers(incidentId);
+  const acknowledge = useAcknowledgeHandover();
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const list = handovers ?? [];
+  // The incoming operator (current user) can acknowledge their own pending handover.
+  const myPending = list.find(
+    (h) => h.acknowledged_at == null && h.to_user_id === user?.id,
+  );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h3 className="text-sm font-bold text-agap-textMain flex items-center gap-1.5">
+          <ArrowRightLeft size={15} className="text-agap-textSub" />
+          Incident Handovers
+          <Badge variant="muted" className="ml-1">{list.length}</Badge>
+        </h3>
+        <div className="flex items-center gap-2">
+          {myPending && (
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={acknowledge.isPending}
+              onClick={() => acknowledge.mutate(incidentId)}
+            >
+              <Check size={14} /> Acknowledge handover
+            </Button>
+          )}
+          <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
+            <ArrowRightLeft size={14} /> Hand over
+          </Button>
+        </div>
+      </div>
+
+      {acknowledge.isError && (
+        <p className="mb-2 rounded-xl bg-agap-dangerSoft px-4 py-2 text-xs text-agap-danger">
+          {(acknowledge.error as Error)?.message ?? 'Could not acknowledge — no pending handover for you.'}
+        </p>
+      )}
+
+      {isLoading ? (
+        <Skeleton className="h-24 rounded-2xl" />
+      ) : list.length === 0 ? (
+        <div className="rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white shadow-card">
+          <EmptyState
+            icon={ArrowRightLeft}
+            title="No handovers yet"
+            description="Record a shift transfer so the incoming operator has full context."
+          />
+        </div>
+      ) : (
+        <ol className="space-y-3">
+          {list.map((h: HandoverRecord) => {
+            const acked = h.acknowledged_at != null;
+            return (
+              <li key={h.id} className="rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white p-4 shadow-card">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm text-agap-textMain">
+                    <span className="font-semibold">{handoverName(h.users_incident_handovers_from_user_idTousers)}</span>
+                    <ArrowRightLeft size={13} className="text-agap-textSub" />
+                    <span className="font-semibold">{handoverName(h.users_incident_handovers_to_user_idTousers)}</span>
+                  </div>
+                  <Badge variant={acked ? 'green' : 'amber'}>
+                    {acked ? 'Acknowledged' : 'Pending'}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-sm text-agap-textMid">{h.situation_summary}</p>
+                {h.pending_actions.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1 flex items-center gap-1">
+                      <ClipboardList size={12} /> Pending actions
+                    </p>
+                    <ul className="space-y-1">
+                      {h.pending_actions.map((a, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-agap-textMain">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-agap-amber shrink-0" />
+                          {a}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <p className="mt-2 text-[11px] text-agap-textSub">
+                  Handed over {fmtTs(h.handed_over_at)}
+                  {acked && h.acknowledged_at && ` · acknowledged ${fmtTs(h.acknowledged_at)}`}
+                </p>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+
+      <CreateHandoverDialog
+        incidentId={incidentId}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CommandPage(): JSX.Element {
@@ -497,9 +714,12 @@ export default function CommandPage(): JSX.Element {
         )}
       </div>
 
-      {/* ICS panel */}
+      {/* ICS panel + Handover panel */}
       {selectedId ? (
-        <IcsPanel incidentId={selectedId} />
+        <>
+          <IcsPanel incidentId={selectedId} />
+          <HandoverPanel incidentId={selectedId} />
+        </>
       ) : (
         <div className="rounded-2xl bg-white border border-[rgba(168,181,193,0.20)] shadow-card">
           <EmptyState

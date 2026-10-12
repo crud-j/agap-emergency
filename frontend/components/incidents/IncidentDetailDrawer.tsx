@@ -1,19 +1,24 @@
 'use client';
 
-import { type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import Link from 'next/link';
 import {
-  MapPin, User, Users, FileText, Image as ImageIcon, Activity, Sparkles, AlertTriangle, HeartPulse, MessageSquare,
+  MapPin, User, Users, FileText, Image as ImageIcon, Activity, Sparkles,
+  AlertTriangle, HeartPulse, MessageSquare, CheckCircle2,
 } from 'lucide-react';
 import { IncidentChatPanel } from './IncidentChatPanel';
 import {
   Drawer, DrawerContent, DrawerHeader, DrawerBody, DrawerFooter, DrawerTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   PriorityBadge, StatusChip, Button, Skeleton, EmptyState, EtaLabel,
 } from '@/components/ui';
-import { useIncident, useUpdateIncidentStatus } from '@/features/incidents/hooks';
+import {
+  useIncident, useUpdateIncidentStatus, useCreateResolution, useCloseIncident,
+} from '@/features/incidents/hooks';
 import { usePriorityRecommendation } from '@/features/dispatch/hooks';
 import { categoryIcon, titleCase, timeAgo } from '@/lib/incident-format';
-import type { IncidentDetail } from '@/features/incidents/api';
+import type { IncidentDetail, IncidentAttachment } from '@/features/incidents/api';
 
 const TERMINAL = ['CLOSED', 'CANCELLED', 'FALSE_ALERT', 'DUPLICATE', 'UNABLE_TO_RESPOND', 'REFERRED'];
 
@@ -261,36 +266,8 @@ function IncidentDetailBody({ incident }: { incident: IncidentDetail }): JSX.Ele
         </Section>
       )}
 
-      {/* Media */}
-      {attachments.length > 0 && (
-        <Section icon={ImageIcon} title={`Media (${attachments.length})`}>
-          <div className="flex flex-wrap gap-2">
-            {attachments.map((a) =>
-              a.storage_url && a.file_type?.startsWith('image/') ? (
-                <a key={a.id} href={a.storage_url} target="_blank" rel="noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={a.storage_url}
-                    alt={a.file_name}
-                    className="h-20 w-20 rounded-lg border border-[rgba(168,181,193,0.20)] object-cover"
-                  />
-                </a>
-              ) : (
-                <a
-                  key={a.id}
-                  href={a.storage_url ?? '#'}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded-lg border border-[rgba(168,181,193,0.20)] bg-agap-surface text-agap-textSub"
-                >
-                  <FileText size={18} />
-                  <span className="max-w-full truncate px-1 text-[10px]">{a.file_name}</span>
-                </a>
-              ),
-            )}
-          </div>
-        </Section>
-      )}
+      {/* Citizen Photo Reference (MOD-10) — read-only preview of photos submitted from the mobile app */}
+      <CitizenPhotoStrip attachments={attachments} />
 
       {/* Timeline */}
       <Section icon={FileText} title="Timeline">
@@ -356,7 +333,12 @@ function PriorityRecommendationChip({
 
 function StatusActionFooter({ incident }: { incident: IncidentDetail }): JSX.Element | null {
   const update = useUpdateIncidentStatus();
+  const [resolveOpen, setResolveOpen] = useState(false);
   const actions = statusActions(incident.status);
+
+  // RESOLVED → CLOSED must capture an outcome first (MOD-45).
+  const isResolved = incident.status === 'RESOLVED';
+
   if (actions.length === 0) {
     return (
       <DrawerFooter>
@@ -375,19 +357,227 @@ function StatusActionFooter({ incident }: { incident: IncidentDetail }): JSX.Ele
         </p>
       )}
       <div className="flex justify-end gap-2">
-        {actions.map((a) => (
-          <Button
-            key={a.to}
-            variant={a.variant === 'danger' ? 'danger' : 'primary'}
-            size="sm"
-            loading={update.isPending && update.variables?.status === a.to}
-            onClick={() => update.mutate({ id: incident.id, status: a.to })}
-          >
-            {a.label}
+        {isResolved ? (
+          <Button variant="primary" size="sm" onClick={() => setResolveOpen(true)}>
+            <CheckCircle2 size={14} className="mr-1.5" /> Resolve &amp; Close
           </Button>
-        ))}
+        ) : (
+          actions.map((a) => (
+            <Button
+              key={a.to}
+              variant={a.variant === 'danger' ? 'danger' : 'primary'}
+              size="sm"
+              loading={update.isPending && update.variables?.status === a.to}
+              onClick={() => update.mutate({ id: incident.id, status: a.to })}
+            >
+              {a.label}
+            </Button>
+          ))
+        )}
       </div>
+
+      {isResolved && (
+        <ResolutionDialog
+          incidentId={incident.id}
+          open={resolveOpen}
+          onOpenChange={setResolveOpen}
+        />
+      )}
     </DrawerFooter>
+  );
+}
+
+// ─── Resolution dialog (MOD-45) ─────────────────────────────────────────────────
+
+const RESOLUTION_OUTCOMES = [
+  'RESOLVED_SUCCESSFULLY',
+  'PATIENT_TRANSPORTED',
+  'PATIENT_TREATED_ON_SCENE',
+  'HAZARD_CONTAINED',
+  'RESCUE_COMPLETED',
+  'NO_ACTION_REQUIRED',
+  'REFERRED_TO_OTHER_AGENCY',
+  'OTHER',
+] as const;
+
+const PATIENT_DISPOSITIONS = [
+  'TREATED_ON_SCENE',
+  'TRANSPORTED_TO_HOSPITAL',
+  'TRANSPORTED_TO_EVACUATION_CENTER',
+  'REFUSED_TRANSPORT',
+  'DECEASED_ON_SCENE',
+  'TRANSFERRED_TO_OTHER_AGENCY',
+  'UNABLE_TO_LOCATE',
+  'NO_PATIENT_FOUND',
+  'OTHER',
+] as const;
+
+const NO_DISPOSITION = '__none__';
+
+/**
+ * Captures the incident outcome, patient disposition, and notes (MOD-45), then
+ * records the resolution and closes the incident. Resolution persists even if
+ * the subsequent close fails, so the outcome is never lost.
+ */
+function ResolutionDialog({
+  incidentId, open, onOpenChange,
+}: {
+  incidentId: string;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}): JSX.Element {
+  const [outcome, setOutcome] = useState('');
+  const [disposition, setDisposition] = useState(NO_DISPOSITION);
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const createResolution = useCreateResolution();
+  const close = useCloseIncident();
+  const pending = createResolution.isPending || close.isPending;
+
+  function handleOpen(next: boolean) {
+    if (next) {
+      setOutcome(''); setDisposition(NO_DISPOSITION); setNotes(''); setError(null);
+    }
+    onOpenChange(next);
+  }
+
+  async function handleSubmit() {
+    if (!outcome) { setError('Select an outcome.'); return; }
+    setError(null);
+    try {
+      await createResolution.mutateAsync({
+        id: incidentId,
+        body: {
+          outcome,
+          ...(disposition !== NO_DISPOSITION && { patientDisposition: disposition }),
+          ...(notes.trim() && { resolutionNotes: notes.trim() }),
+        },
+      });
+      await close.mutateAsync({ id: incidentId });
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not record resolution.');
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-agap-green" /> Resolve &amp; Close Incident
+          </DialogTitle>
+          <DialogDescription>
+            Record the outcome and patient disposition before closing. This is kept for analytics and audit.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-1">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-agap-textMain">
+              Outcome <span className="text-agap-danger">*</span>
+            </label>
+            <Select value={outcome} onValueChange={setOutcome}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select outcome" /></SelectTrigger>
+              <SelectContent>
+                {RESOLUTION_OUTCOMES.map((o) => (
+                  <SelectItem key={o} value={o}>{titleCase(o)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-agap-textMain">Patient disposition</label>
+            <Select value={disposition} onValueChange={setDisposition}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Not applicable" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_DISPOSITION}>Not applicable</SelectItem>
+                {PATIENT_DISPOSITIONS.map((d) => (
+                  <SelectItem key={d} value={d}>{titleCase(d)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-agap-textMain">Resolution notes</label>
+            <textarea
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Summary, follow-up needs, handover details…"
+              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green resize-none"
+            />
+          </div>
+
+          {error && (
+            <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger">{error}</p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
+          <Button variant="primary" size="sm" loading={pending} onClick={() => void handleSubmit()}>
+            Resolve &amp; Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Citizen Photo Strip (MOD-10) ────────────────────────────────────────────
+
+/**
+ * Read-only preview of photos/videos submitted by the citizen from the mobile
+ * app. The data arrives embedded in the incident detail fetch — no extra query.
+ * Returns null when the citizen didn't capture any media.
+ */
+function CitizenPhotoStrip({ attachments }: { attachments: IncidentAttachment[] }): JSX.Element | null {
+  if (attachments.length === 0) return null;
+
+  return (
+    <Section icon={ImageIcon} title={`Citizen Photo Reference (${attachments.length})`}>
+      <div className="flex flex-wrap gap-2">
+        {attachments.map((a) =>
+          a.storage_url && a.file_type?.startsWith('image/') ? (
+            <a
+              key={a.id}
+              href={a.storage_url}
+              target="_blank"
+              rel="noreferrer"
+              title={`${a.file_name} · submitted ${timeAgo(a.uploaded_at)}`}
+              className="group relative overflow-hidden rounded-xl border border-[rgba(168,181,193,0.20)] transition-shadow hover:shadow-md"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={a.storage_url}
+                alt={a.file_name}
+                className="h-24 w-24 object-cover"
+              />
+              <span className="absolute bottom-0 left-0 right-0 bg-black/40 px-1.5 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                {timeAgo(a.uploaded_at)}
+              </span>
+            </a>
+          ) : (
+            <a
+              key={a.id}
+              href={a.storage_url ?? '#'}
+              target="_blank"
+              rel="noreferrer"
+              title={a.file_name}
+              className="flex h-24 w-24 flex-col items-center justify-center gap-1.5 rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface text-agap-textSub transition-colors hover:bg-agap-surface/80"
+            >
+              <FileText size={20} />
+              <span className="max-w-[80px] truncate px-1 text-[10px] font-medium">{a.file_name}</span>
+              <span className="text-[9px]">{timeAgo(a.uploaded_at)}</span>
+            </a>
+          ),
+        )}
+      </div>
+    </Section>
   );
 }
 

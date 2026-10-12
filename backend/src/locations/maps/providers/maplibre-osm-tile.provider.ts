@@ -20,11 +20,16 @@ export class MapLibreOsmTileProvider implements TileProvider {
   clientConfig(): MapClientConfig {
     const styleUrl =
       this.config.get<string>('MAP_STYLE_URL') || 'https://demotiles.maplibre.org/style.json';
+    // Building extrusion requires an OpenMapTiles-schema style with height/min_height data.
+    // The maplibre.org demo style has no building data; any custom MAP_STYLE_URL is assumed
+    // to be an OpenMapTiles-compatible style (e.g. MapTiler Streets, self-hosted tileserver-gl).
+    const isCustomStyle = !!this.config.get<string>('MAP_STYLE_URL');
     return {
       provider: MapProvider.MAPLIBRE,
       styleUrl,
       attribution: '© OpenStreetMap contributors',
       staticMapSupported: false,
+      supports3dBuildings: isCustomStyle,
     };
   }
 }

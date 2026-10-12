@@ -48,6 +48,14 @@ services:
       NODE_ENV: development
       DATABASE_URL: postgresql://agap_user:agap_password@postgres:5432/agap_db?schema=public
       REDIS_URL: redis://redis:6379
+      # Object storage — s3rver container on the Docker network.
+      # STORAGE_ENDPOINT is used by the S3 SDK (internal); PUBLIC_STORAGE_URL is
+      # stored in the DB so browsers can load uploaded photos directly.
+      STORAGE_ENDPOINT: http://minio:9000
+      PUBLIC_STORAGE_URL: http://localhost:9000
+      STORAGE_BUCKET: agap-media
+      STORAGE_ACCESS_KEY: agap-dev-key
+      STORAGE_SECRET_KEY: agap-dev-secret
     ports:
       - "3002:3000"
     volumes:

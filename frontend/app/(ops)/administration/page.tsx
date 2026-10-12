@@ -4,7 +4,7 @@ import { useState, type JSX } from 'react';
 import {
   Users, Shield, Activity, Search, ChevronLeft, ChevronRight,
   UserCheck, UserX, Trash2, Edit, Lock, CheckCircle2, XCircle,
-  Database, Cpu, Clock, Settings,
+  Database, Cpu, Clock, Settings, KeyRound, Plus,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,
@@ -26,6 +26,12 @@ import {
   useUpsertConfig,
 } from '@/features/admin/hooks';
 import type { AdminUser, AdminUserListParams } from '@/features/admin/api';
+import {
+  usePermissions,
+  useRolePermissions,
+  useGrantPermission,
+  useRevokePermission,
+} from '@/features/admin/permissions-hooks';
 import { cn } from '@/lib/utils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -37,7 +43,7 @@ const USER_ROLES = [
 
 const USER_STATUSES = ['ACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED', 'DEACTIVATED'] as const;
 const PER_PAGE = 20;
-type AdminTab = 'users' | 'health' | 'config';
+type AdminTab = 'users' | 'permissions' | 'health' | 'config';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -585,6 +591,117 @@ function ConfigTab(): JSX.Element {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+// ─── Roles & Permissions Tab (MOD-47) ──────────────────────────────────────────
+
+function PermissionsTab(): JSX.Element {
+  const [role, setRole] = useState<string>('DISPATCHER');
+
+  const { data: allPermissions, isLoading: permsLoading } = usePermissions();
+  const { data: rolePerms, isLoading: roleLoading } = useRolePermissions(role);
+  const grant = useGrantPermission();
+  const revoke = useRevokePermission();
+
+  // Set of permission IDs currently granted to the selected role.
+  const grantedIds = new Set((rolePerms ?? []).map((rp) => rp.permission_id));
+
+  // Group the catalog by module for a scannable matrix.
+  const grouped = (() => {
+    const map = new Map<string, typeof allPermissions>();
+    for (const p of allPermissions ?? []) {
+      const key = p.module_id ?? 'GENERAL';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(p);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  })();
+
+  function toggle(permissionId: string, granted: boolean) {
+    if (granted) revoke.mutate({ role, permissionId });
+    else grant.mutate({ role, permissionId });
+  }
+
+  const busyId =
+    (grant.isPending && grant.variables?.permissionId) ||
+    (revoke.isPending && revoke.variables?.permissionId) ||
+    null;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-agap-textMain flex items-center gap-2">
+            <KeyRound size={18} className="text-agap-green" /> Role Permissions
+          </h2>
+          <p className="text-sm text-agap-textSub mt-0.5">
+            Grant or revoke capabilities for a role. Changes take effect on the user&apos;s next request.
+          </p>
+        </div>
+        <div className="w-56">
+          <Select value={role} onValueChange={setRole}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select role" /></SelectTrigger>
+            <SelectContent>
+              {USER_ROLES.map((r) => (
+                <SelectItem key={r} value={r}>{titleCase(r)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {(grant.isError || revoke.isError) && (
+        <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger">
+          {((grant.error ?? revoke.error) as Error)?.message ?? 'Could not update permission.'}
+        </p>
+      )}
+
+      {permsLoading || roleLoading ? (
+        <div className="space-y-3">
+          <Skeleton className="h-28 rounded-2xl" />
+          <Skeleton className="h-28 rounded-2xl" />
+        </div>
+      ) : grouped.length === 0 ? (
+        <EmptyState icon={KeyRound} title="No permissions defined" description="The permission catalog is empty." />
+      ) : (
+        <div className="space-y-4">
+          {grouped.map(([moduleId, perms]) => (
+            <div key={moduleId} className="rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white shadow-card overflow-hidden">
+              <div className="bg-agap-surface px-4 py-2.5 border-b border-[rgba(168,181,193,0.20)]">
+                <span className="text-xs font-bold uppercase tracking-wide text-agap-textSub">{moduleId}</span>
+              </div>
+              <ul className="divide-y divide-[rgba(168,181,193,0.14)]">
+                {(perms ?? []).map((p) => {
+                  const granted = grantedIds.has(p.id);
+                  const busy = busyId === p.id;
+                  return (
+                    <li key={p.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-agap-textMain font-mono text-sm truncate">{p.name}</p>
+                        {p.description && <p className="text-xs text-agap-textSub truncate">{p.description}</p>}
+                      </div>
+                      <Button
+                        variant={granted ? 'secondary' : 'primary'}
+                        size="sm"
+                        loading={busy}
+                        onClick={() => toggle(p.id, granted)}
+                      >
+                        {granted ? (
+                          <><XCircle size={13} className="mr-1" /> Revoke</>
+                        ) : (
+                          <><Plus size={13} className="mr-1" /> Grant</>
+                        )}
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdministrationPage(): JSX.Element {
   const user = useAuthUser();
   const authorized = hasRole(user, 'SYSTEM_ADMINISTRATOR');
@@ -592,6 +709,7 @@ export default function AdministrationPage(): JSX.Element {
 
   const tabs: { key: AdminTab; label: string; icon: typeof Users }[] = [
     { key: 'users', label: 'Users', icon: Users },
+    { key: 'permissions', label: 'Roles & Permissions', icon: KeyRound },
     { key: 'health', label: 'System Health', icon: Activity },
     { key: 'config', label: 'Configuration', icon: Settings },
   ];
@@ -649,6 +767,7 @@ export default function AdministrationPage(): JSX.Element {
 
       {/* Content */}
       {tab === 'users' && <UsersTab />}
+      {tab === 'permissions' && <PermissionsTab />}
       {tab === 'health' && <HealthTab />}
       {tab === 'config' && <ConfigTab />}
     </div>

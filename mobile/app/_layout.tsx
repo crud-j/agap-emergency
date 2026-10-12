@@ -1,14 +1,35 @@
 import '../global.css';
 import { useEffect } from 'react';
+import { AppState } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from '../src/stores/auth.store';
 import { useAccessibilityStore } from '../src/stores/accessibility.store';
 import { homeRouteForRole } from '../src/lib/role-routing';
+import { useNetworkSync } from '../src/hooks/useNetworkSync';
+import { OfflineBanner } from '../src/components/ui/OfflineBanner';
+
+// Wire React Native's AppState into TanStack Query's focus manager so
+// refetchOnWindowFocus works when the app comes back to the foreground.
+focusManager.setEventListener((handleFocus) => {
+  const sub = AppState.addEventListener('change', (state) => {
+    handleFocus(state === 'active');
+  });
+  return () => sub.remove();
+});
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
+  defaultOptions: {
+    queries: {
+      // 3 retries with exponential backoff (1 s → 2 s → 4 s) so brief backend
+      // startup windows don't permanently strand queries in error state.
+      retry: 3,
+      retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 10_000),
+      staleTime: 30_000,
+    },
+  },
 });
 
 const PUBLIC_SEGMENTS = ['auth', 'onboarding'];
@@ -20,6 +41,7 @@ function AuthGuard() {
   const user = useAuthStore((s) => s.user);
   const loadAccessibility = useAccessibilityStore((s) => s.loadFromStorage);
   const accessibilityLoaded = useAccessibilityStore((s) => s.isLoaded);
+  useNetworkSync();
 
   useEffect(() => {
     loadFromStorage();
@@ -42,18 +64,22 @@ function AuthGuard() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <QueryClientProvider client={queryClient}>
-        <AuthGuard />
-        <Stack screenOptions={{ headerShown: false }}>
-          {/* Tab screens swap instantly (no transition) so the bottom nav feels
-              like a tab bar rather than a stack push. Other routes keep the
-              default animation. */}
-          <Stack.Screen name="home/index" options={{ animation: 'none' }} />
-          <Stack.Screen name="incidents/index" options={{ animation: 'none' }} />
-          <Stack.Screen name="announcements/index" options={{ animation: 'none' }} />
-          <Stack.Screen name="profile/index" options={{ animation: 'none' }} />
-        </Stack>
-      </QueryClientProvider>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthGuard />
+          <Stack screenOptions={{ headerShown: false }}>
+            {/* Tab screens swap instantly (no transition) so the bottom nav feels
+                like a tab bar rather than a stack push. Other routes keep the
+                default animation. */}
+            <Stack.Screen name="home/index" options={{ animation: 'none' }} />
+            <Stack.Screen name="incidents/index" options={{ animation: 'none' }} />
+            <Stack.Screen name="announcements/index" options={{ animation: 'none' }} />
+            <Stack.Screen name="profile/index" options={{ animation: 'none' }} />
+          </Stack>
+          {/* Global offline indicator — position:absolute overlay, never blocks taps */}
+          <OfflineBanner />
+        </QueryClientProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

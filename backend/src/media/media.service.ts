@@ -18,19 +18,24 @@ export class MediaService {
   private readonly bucket: string;
   private readonly endpoint: string;
 
+  private readonly publicUrl: string;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {
     this.endpoint = this.config.get<string>('STORAGE_ENDPOINT', 'http://localhost:9000');
     this.bucket = this.config.get<string>('STORAGE_BUCKET', 'agap-media');
+    // PUBLIC_STORAGE_URL is the browser-accessible base URL for stored files.
+    // Separate from STORAGE_ENDPOINT so Docker internal URLs don't leak into the DB.
+    this.publicUrl = this.config.get<string>('PUBLIC_STORAGE_URL', this.endpoint);
 
     this.s3 = new S3Client({
       endpoint: this.endpoint,
       region: this.config.get<string>('STORAGE_REGION', 'us-east-1'),
       credentials: {
-        accessKeyId: this.config.get<string>('STORAGE_ACCESS_KEY', ''),
-        secretAccessKey: this.config.get<string>('STORAGE_SECRET_KEY', ''),
+        accessKeyId: this.config.get<string>('STORAGE_ACCESS_KEY', 'devkey'),
+        secretAccessKey: this.config.get<string>('STORAGE_SECRET_KEY', 'devsecret'),
       },
       forcePathStyle: true,
     });
@@ -41,6 +46,8 @@ export class MediaService {
     incidentId: string,
     uploadedById?: string,
   ) {
+    if (!file) throw new BadRequestException('No file provided.');
+
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       throw new BadRequestException(
         `Unsupported file type "${file.mimetype}". Allowed: ${[...ALLOWED_MIME_TYPES].join(', ')}`,
@@ -66,7 +73,8 @@ export class MediaService {
       }),
     );
 
-    const storageUrl = `${this.endpoint}/${this.bucket}/${key}`;
+    // Use publicUrl (PUBLIC_STORAGE_URL) so browsers can load the image directly.
+    const storageUrl = `${this.publicUrl}/${this.bucket}/${key}`;
 
     const attachment = await this.prisma.incidentAttachment.create({
       data: {

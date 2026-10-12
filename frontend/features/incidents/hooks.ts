@@ -12,8 +12,11 @@ import {
   mergeIncident,
   submitAssessment,
   updateIncidentStatus,
+  createResolution,
+  fetchResolution,
   type IncidentListParams,
   type SubmitAssessmentBody,
+  type CreateResolutionBody,
 } from './api';
 
 export function useIncidents(params?: IncidentListParams) {
@@ -94,6 +97,22 @@ export function useMergeIncident() {
   );
 }
 
+export function useIncidentResolution(id: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['incident-resolution', id],
+    queryFn: () => fetchResolution(id!),
+    enabled: !!id && enabled,
+    retry: false, // 404 before a resolution exists is normal
+  });
+}
+
+export function useCreateResolution() {
+  return useIncidentMutation<{ id: string; body: CreateResolutionBody }>(
+    ({ id, body }) => createResolution(id, body),
+    ({ id }) => id,
+  );
+}
+
 export function useSubmitAssessment() {
   const qc = useQueryClient();
   return useMutation({
@@ -104,3 +123,4 @@ export function useSubmitAssessment() {
     },
   });
 }
+

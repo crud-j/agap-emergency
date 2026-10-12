@@ -59,4 +59,5 @@ export const api = {
 
   delete: <T = void>(path: string, token?: string) =>
     request<T>(path, { method: 'DELETE', headers: authHeaders(token) }),
+
 };

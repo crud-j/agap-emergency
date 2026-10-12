@@ -77,6 +77,8 @@ model User {
   webauthn_authentication_log                                              webauthn_authentication_log[]
   webauthn_challenges                                                      webauthn_challenges[]
   webauthn_credentials                                                     webauthn_credentials[]
+  responder_availability_user                                              ResponderAvailability?          @relation("responderAvailabilityUser")
+  responder_availability_changes                                           ResponderAvailability[]         @relation("responderAvailabilityChangedBy")
 
   @@index([barangay], map: "idx_users_barangay")
   @@index([created_at(sort: Desc)], map: "idx_users_created_at")
@@ -1104,6 +1106,21 @@ model resources {
   @@index([resource_type], map: "idx_resources_type")
 }
 
+model ResponderAvailability {
+  user_id       String                      @id @db.Uuid
+  status        ResponderAvailabilityStatus @default(OFF_DUTY)
+  changed_at    DateTime                    @default(now()) @db.Timestamptz(6)
+  changed_by_id String                      @db.Uuid
+  source        String                      @default("SELF_SERVICE") @db.VarChar(40)
+  created_at    DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime                    @updatedAt @db.Timestamptz(6)
+  user          User                        @relation("responderAvailabilityUser", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  changed_by    User                        @relation("responderAvailabilityChangedBy", fields: [changed_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([status], map: "idx_responder_availability_status")
+  @@map("responder_availability")
+}
+
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model risk_areas {
   id                     String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
@@ -1580,6 +1597,14 @@ enum resource_type {
   MOTORCYCLE_RESPONDER
   COMMAND_VEHICLE
   OTHER
+}
+
+enum ResponderAvailabilityStatus {
+  AVAILABLE
+  OFF_DUTY
+  UNAVAILABLE
+
+  @@map("responder_availability_status")
 }
 
 enum surge_status {

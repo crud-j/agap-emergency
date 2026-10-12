@@ -4,3 +4,4 @@ export * from './constants/index';
 export * from './events/index';
 export * from './validation/index';
 export * from './maps/index';
+export { ResponderAvailability } from './enums/responder-availability.enum';

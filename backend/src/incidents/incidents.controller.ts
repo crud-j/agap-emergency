@@ -16,7 +16,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { IncidentsService } from './incidents.service';
 import { AssessmentService } from './assessment/assessment.service';
 import { IncidentHandoverService } from './incident-handover/incident-handover.service';
@@ -25,6 +25,7 @@ import { StartTransportDto } from './transport/dto/start-transport.dto';
 import { RecordArrivalDto } from './transport/dto/record-arrival.dto';
 import { MediaService, MULTER_MEMORY_STORAGE } from '../media/media.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
+import { UpdateIncidentStatusDto } from './dto/update-incident-status.dto';
 import { SubmitAssessmentDto } from './assessment/dto/submit-assessment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
@@ -99,13 +100,13 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update incident status' })
+  @ApiOperation({ summary: 'Update incident status (MOD-15)' })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { status: IncidentStatus; reason?: string },
+    @Body() dto: UpdateIncidentStatusDto,
     @Request() req: any,
   ) {
-    return this.incidentsService.updateStatus(id, body.status, req.user.id, body.reason);
+    return this.incidentsService.updateStatus(id, dto.status, req.user.id, dto.reason);
   }
 
   // ---- Attachments ----
@@ -120,8 +121,16 @@ export class IncidentsController {
       limits: { fileSize: 10_485_760 },
     }),
   )
-  @ApiOperation({ summary: 'Upload a photo or video attachment for an incident' })
-  @ApiResponse({ status: 201, description: 'Attachment uploaded and saved' })
+  @ApiOperation({ summary: 'Upload a photo or video attachment for an incident (MOD-10)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary', description: 'JPEG/PNG/WebP image or MP4 video (max 10 MB)' } },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Attachment record created; storage_url is the public download URL' })
+  @HttpCode(HttpStatus.CREATED)
   async addAttachment(
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File,

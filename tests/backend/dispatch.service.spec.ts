@@ -5,6 +5,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { DispatchService } from '@backend/dispatch/dispatch.service';
 import { PrismaService } from '@backend/common/prisma/prisma.service';
 import { RealtimeService } from '@backend/realtime/realtime.service';
+import { AuditService } from '@backend/audit/audit.service';
 import { QUEUE_NAMES, IncidentStatus } from '@agap/shared';
 import { createMockPrisma } from './helpers/prisma.mock';
 
@@ -13,6 +14,7 @@ describe('DispatchService', () => {
   let mockPrisma: ReturnType<typeof createMockPrisma>;
   let mockNotificationQueue: { add: jest.Mock };
   let mockRealtimeService: { emitToRoom: jest.Mock; broadcastIncidentUpdate: jest.Mock };
+  let mockAudit: { log: jest.Mock };
 
   const acknowledgedIncident = {
     id: 'inc-1',
@@ -48,12 +50,16 @@ describe('DispatchService', () => {
     mockPrisma = createMockPrisma();
     mockNotificationQueue = { add: jest.fn().mockResolvedValue({}) };
     mockRealtimeService = { emitToRoom: jest.fn(), broadcastIncidentUpdate: jest.fn() };
+    // AuditService is a best-effort side channel (fire-and-forget). Mock it so DI
+    // resolves; its failure must never block a dispatch.
+    mockAudit = { log: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DispatchService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RealtimeService, useValue: mockRealtimeService },
+        { provide: AuditService, useValue: mockAudit },
         { provide: getQueueToken(QUEUE_NAMES.NOTIFICATIONS), useValue: mockNotificationQueue },
       ],
     }).compile();

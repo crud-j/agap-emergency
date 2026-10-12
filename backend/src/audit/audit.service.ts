@@ -23,6 +23,31 @@ export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * Fail-closed audit write for use inside an interactive Prisma transaction.
+   * Any write failure propagates, rolling back the caller's transaction.
+   * Use for security-critical state changes (e.g. duty availability).
+   */
+  async logInTransaction(
+    tx: Prisma.TransactionClient,
+    entry: AuditLogEntry,
+  ): Promise<void> {
+    await tx.auditLog.create({
+      data: {
+        action: entry.action as any,
+        actor_id: entry.actorId,
+        actor_role: entry.actorRole as any,
+        entity_id: entry.entityId,
+        entity_type: entry.entityType,
+        module_id: entry.moduleId,
+        incident_id: entry.incidentId,
+        old_values: entry.oldValues as any,
+        new_values: entry.newValues as any,
+        ip_address: entry.ipAddress,
+      } as any,
+    });
+  }
+
+  /**
    * INSERT-ONLY. Audit logs are immutable — there is no update or delete path.
    * A write failure must never block the originating operation.
    */

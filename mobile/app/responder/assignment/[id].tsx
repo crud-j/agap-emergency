@@ -11,13 +11,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { MapProvider } from '@agap/shared';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/src/stores/auth.store';
 import {
   getAssignment,
   acceptAssignment,
   updateAssignmentStatus,
+  getIncidentIcs,
+  getHandovers,
+  acknowledgeHandover,
 } from '@/src/services/api/responders.api';
 import { getMapConfig } from '@/src/services/api/locations.api';
 import { useResponderLocationShare } from '@/src/hooks/useResponderLocationShare';
@@ -105,10 +107,7 @@ export default function AssignmentDetailScreen() {
 
   const route = useRouteLine(MAP_AVAILABLE ? myPoint : null, MAP_AVAILABLE ? citizenPoint : null);
 
-  const styleUrl =
-    mapConfig?.provider === MapProvider.MAPLIBRE && mapConfig.styleUrl
-      ? mapConfig.styleUrl
-      : MAPLIBRE_DEMO_STYLE;
+  const styleUrl = mapConfig?.styleUrl ?? MAPLIBRE_DEMO_STYLE;
 
   const action = nextAction(status);
 
@@ -167,6 +166,9 @@ export default function AssignmentDetailScreen() {
                     incident={citizenPoint}
                     responder={myPoint}
                     routeGeometry={route.geometry}
+                    pitch={shareEnabled && myPoint != null ? 50 : 0}
+                    navigationHeading={shareEnabled && myPoint?.heading != null ? myPoint.heading : null}
+                    supports3dBuildings={mapConfig?.supports3dBuildings ?? false}
                   />
                 </React.Suspense>
               </MapErrorBoundary>
@@ -263,6 +265,16 @@ export default function AssignmentDetailScreen() {
                 <Ionicons name="chevron-forward" size={18} color="#64748B" style={{ marginLeft: 'auto' }} />
               </TouchableOpacity>
             )}
+
+            {/* Incident Command structure (MOD-36) — read-only viewer. */}
+            {data.incident_id && token && (
+              <IcsViewerSection incidentId={data.incident_id} token={token} />
+            )}
+
+            {/* Incident handovers (MOD-44) — view + acknowledge an inbound handover. */}
+            {data.incident_id && token && (
+              <HandoverSection incidentId={data.incident_id} token={token} />
+            )}
           </ScrollView>
 
           {action && (
@@ -314,6 +326,195 @@ function InfoRow({
     </View>
   );
 }
+
+function positionLabel(pos: string): string {
+  switch (pos) {
+    case 'INCIDENT_COMMANDER':         return 'Incident Commander';
+    case 'OPERATIONS_SECTION_CHIEF':   return 'Operations Chief';
+    case 'LOGISTICS_SECTION_CHIEF':    return 'Logistics Chief';
+    case 'PLANNING_SECTION_CHIEF':     return 'Planning Chief';
+    case 'SAFETY_OFFICER':             return 'Safety Officer';
+    case 'PUBLIC_INFORMATION_OFFICER': return 'PIO';
+    case 'LIAISON_OFFICER':            return 'Liaison Officer';
+    default:                           return titleCase(pos);
+  }
+}
+
+/** MOD-36 — read-only ICS structure for the responding crew. Renders nothing
+ *  until ICS is activated (the backend 404s, surfaced here as isError). */
+function IcsViewerSection({ incidentId, token }: { incidentId: string; token: string }) {
+  const { data: ics, isError } = useQuery({
+    queryKey: ['incident-ics', incidentId],
+    queryFn: () => getIncidentIcs(incidentId, token),
+    enabled: !!incidentId && !!token,
+    retry: false,
+    refetchInterval: 30000,
+  });
+
+  if (isError || !ics) return null;
+  const active = ics.ics_assignments.filter((a) => !a.relieved_at);
+
+  return (
+    <View style={cmdStyles.section}>
+      <View style={cmdStyles.sectionHead}>
+        <Ionicons name="git-network" size={16} color="#34D399" style={{ marginRight: 8 }} />
+        <Text style={cmdStyles.sectionTitle}>Incident Command</Text>
+        <View style={[cmdStyles.pill, { backgroundColor: ics.deactivated_at ? '#64748B33' : '#0D605333' }]}>
+          <Text style={cmdStyles.pillText}>{ics.deactivated_at ? 'Deactivated' : 'Active'}</Text>
+        </View>
+      </View>
+
+      {ics.objectives.length > 0 && (
+        <View style={{ marginTop: 8 }}>
+          <Text style={cmdStyles.subLabel}>Objectives</Text>
+          {ics.objectives.map((obj, i) => (
+            <View key={i} style={cmdStyles.bulletRow}>
+              <View style={cmdStyles.bullet} />
+              <Text style={cmdStyles.bodyText}>{obj}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      <View style={{ marginTop: 10 }}>
+        <Text style={cmdStyles.subLabel}>Command positions</Text>
+        {active.length === 0 ? (
+          <Text style={cmdStyles.mutedText}>No positions assigned.</Text>
+        ) : (
+          active.map((a) => (
+            <View key={a.id} style={cmdStyles.posRow}>
+              <Text style={[
+                cmdStyles.posName,
+                a.position === 'INCIDENT_COMMANDER' && { color: '#FCA5A5' },
+              ]}>
+                {positionLabel(a.position)}
+              </Text>
+              <Text style={cmdStyles.posUser}>
+                {a.users?.full_name ?? a.users?.id?.slice(0, 8) ?? '—'}
+              </Text>
+            </View>
+          ))
+        )}
+      </View>
+    </View>
+  );
+}
+
+/** MOD-44 — handovers for this incident. The responder can acknowledge a
+ *  handover addressed to them; creation happens from the ops console. */
+function HandoverSection({ incidentId, token }: { incidentId: string; token: string }) {
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const qc = useQueryClient();
+  const { data: handovers } = useQuery({
+    queryKey: ['incident-handovers', incidentId],
+    queryFn: () => getHandovers(incidentId, token),
+    enabled: !!incidentId && !!token,
+    refetchInterval: 20000,
+  });
+
+  const ack = useMutation({
+    mutationFn: () => acknowledgeHandover(incidentId, token),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['incident-handovers', incidentId] }),
+    onError: () => Alert.alert('Could not acknowledge', 'No pending handover is addressed to you.'),
+  });
+
+  const list = handovers ?? [];
+  if (list.length === 0) return null;
+
+  const myPending = list.find((h) => h.acknowledged_at == null && h.to_user_id === currentUserId);
+
+  return (
+    <View style={cmdStyles.section}>
+      <View style={cmdStyles.sectionHead}>
+        <Ionicons name="swap-horizontal" size={16} color="#34D399" style={{ marginRight: 8 }} />
+        <Text style={cmdStyles.sectionTitle}>Handovers</Text>
+      </View>
+
+      {list.slice(0, 3).map((h) => {
+        const acked = h.acknowledged_at != null;
+        return (
+          <View key={h.id} style={cmdStyles.handoverCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={cmdStyles.posUser}>
+                {(h.users_incident_handovers_from_user_idTousers?.full_name
+                  ?? h.from_user_id.slice(0, 8))} → {(h.users_incident_handovers_to_user_idTousers?.full_name
+                  ?? h.to_user_id.slice(0, 8))}
+              </Text>
+              <View style={[cmdStyles.pill, { backgroundColor: acked ? '#0D605333' : '#B4530922' }]}>
+                <Text style={[cmdStyles.pillText, { color: acked ? '#34D399' : '#FBBF24' }]}>
+                  {acked ? 'Acknowledged' : 'Pending'}
+                </Text>
+              </View>
+            </View>
+            <Text style={[cmdStyles.bodyText, { marginTop: 6 }]}>{h.situation_summary}</Text>
+            {h.pending_actions.length > 0 && (
+              <View style={{ marginTop: 6 }}>
+                {h.pending_actions.map((a, i) => (
+                  <View key={i} style={cmdStyles.bulletRow}>
+                    <View style={[cmdStyles.bullet, { backgroundColor: '#FBBF24' }]} />
+                    <Text style={cmdStyles.bodyText}>{a}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        );
+      })}
+
+      {myPending && (
+        <TouchableOpacity
+          style={cmdStyles.ackBtn}
+          onPress={() => ack.mutate()}
+          disabled={ack.isPending}
+          activeOpacity={0.85}
+        >
+          {ack.isPending ? (
+            <ActivityIndicator color="#0B1220" />
+          ) : (
+            <>
+              <Ionicons name="checkmark-circle" size={18} color="#0B1220" style={{ marginRight: 8 }} />
+              <Text style={cmdStyles.ackText}>Acknowledge handover</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+const cmdStyles = StyleSheet.create({
+  section: {
+    marginTop: 14, padding: 14, borderRadius: 16,
+    backgroundColor: '#0F1B2E', borderWidth: 1, borderColor: '#1E293B',
+  },
+  sectionHead: { flexDirection: 'row', alignItems: 'center' },
+  sectionTitle: { flex: 1, fontSize: 15, fontWeight: '800', color: '#F8FAFC' },
+  subLabel: {
+    fontSize: 11, fontWeight: '700', color: '#64748B',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4,
+  },
+  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 3 },
+  bullet: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#34D399', marginTop: 6, marginRight: 8 },
+  bodyText: { flex: 1, fontSize: 13, color: '#CBD5E1', lineHeight: 18 },
+  mutedText: { fontSize: 13, color: '#64748B' },
+  posRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1E293B',
+  },
+  posName: { fontSize: 13, fontWeight: '700', color: '#F8FAFC' },
+  posUser: { fontSize: 13, color: '#CBD5E1' },
+  pill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999, marginLeft: 8 },
+  pillText: { fontSize: 11, fontWeight: '700', color: '#34D399' },
+  handoverCard: {
+    marginTop: 10, padding: 12, borderRadius: 12,
+    backgroundColor: '#0B1220', borderWidth: 1, borderColor: '#1E293B',
+  },
+  ackBtn: {
+    marginTop: 12, height: 46, borderRadius: 12, backgroundColor: '#34D399',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+  },
+  ackText: { fontSize: 15, fontWeight: '800', color: '#0B1220' },
+});
 
 function formatKm(meters: number | null): string {
   if (meters == null) return '—';

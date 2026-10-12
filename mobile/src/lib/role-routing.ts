@@ -6,6 +6,6 @@ import { UserRole } from '@agap/shared';
  * existing auth system — no separate login for rescuers.
  */
 export function homeRouteForRole(role?: string | null): string {
-  if (role === UserRole.RESPONDER) return '/responder/assignments';
+  if (role === UserRole.RESPONDER) return '/responder/home';
   return '/home';
 }

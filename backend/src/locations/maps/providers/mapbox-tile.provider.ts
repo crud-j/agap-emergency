@@ -34,11 +34,13 @@ export class MapboxTileProvider implements TileProvider {
     const token = this.token();
     return {
       provider: MapProvider.MAPBOX,
-      styleUrl: token
-        ? `https://api.mapbox.com/styles/v1/mapbox/streets-v12?access_token=${token}`
-        : null,
+      // mapbox:// sources are not resolvable by @maplibre/maplibre-react-native without
+      // the Mapbox Maps SDK. Return null so clients fall back to their demo style rather
+      // than silently ignoring a URL they cannot render. Static image API is unaffected.
+      styleUrl: null,
       attribution: '© Mapbox © OpenStreetMap',
       staticMapSupported: Boolean(token),
+      supports3dBuildings: false,
     };
   }
 }

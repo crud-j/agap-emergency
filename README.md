@@ -217,6 +217,8 @@ cloudflared tunnel --url http://127.0.0.1:3000
 npx expo start --dev-client
 ngrok http 3000 --domain=benevolent-semirhythmically-tova.ngrok-free.dev
 curl -H "ngrok-skip-browser-warning: 1" https://benevolent-semirhythmically-tova.ngrok-free.dev/.well-known/assetlinks.json
+
+$token = (curl.exe -s -X POST http://localhost:3000/v1/auth/login -H "Content-Type: application/json" -d '{\"identifier\":\"citizen@demo.agap\",\"password\":\"AgapDev2026!\"}' | ConvertFrom-Json).accessToken; curl.exe -X GET http://localhost:3000/v1/incidents/mine -H "Authorization: Bearer $token"
 ```
 
 ### Run everything from root

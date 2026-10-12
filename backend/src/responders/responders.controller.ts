@@ -12,6 +12,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { RespondersService } from './responders.service';
 import { UpdateAssignmentStatusDto } from './dto/update-assignment-status.dto';
+import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { DeclineAssignmentDto } from './dto/decline-assignment.dto';
 import { TrackLocationDto } from '../locations/dto/track-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -33,6 +34,22 @@ export class RespondersController {
     return this.respondersService.findAll({});
   }
 
+  @Get('me')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER)
+  @ApiOperation({ summary: 'Get my responder summary (identity + availability + active count)' })
+  async getMySummary(@Request() req: any) {
+    return this.respondersService.getMySummary(req.user.id);
+  }
+
+  @Patch('me/availability')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER)
+  @ApiOperation({ summary: 'Update my personal duty availability' })
+  async updateMyAvailability(@Request() req: any, @Body() dto: UpdateAvailabilityDto) {
+    return this.respondersService.updateMyAvailability(req.user.id, dto);
+  }
+
   @Get('me/assignments')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESPONDER)
@@ -42,10 +59,11 @@ export class RespondersController {
   }
 
   @Get('assignments/:id')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Get an assignment' })
-  async getAssignment(@Param('id', ParseUUIDPipe) id: string) {
-    return this.respondersService.getAssignment(id);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER)
+  @ApiOperation({ summary: 'Get a specific assignment (crew-member only)' })
+  async getAssignment(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.respondersService.getAssignment(id, req.user.id);
   }
 
   @Post('assignments/:id/accept')
@@ -71,7 +89,7 @@ export class RespondersController {
   @Patch('assignments/:id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESPONDER)
-  @ApiOperation({ summary: 'Update assignment status' })
+  @ApiOperation({ summary: 'Update assignment status (EN_ROUTE, ON_SCENE, etc.)' })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Request() req: any,
@@ -83,7 +101,7 @@ export class RespondersController {
   @Post('location')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESPONDER)
-  @ApiOperation({ summary: 'Push my location' })
+  @ApiOperation({ summary: 'Push my current location for an active incident' })
   async pushLocation(@Body() dto: TrackLocationDto, @Request() req: any) {
     return this.respondersService.pushLocation(dto, req.user.id);
   }

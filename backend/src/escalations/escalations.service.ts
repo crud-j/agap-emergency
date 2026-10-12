@@ -12,6 +12,14 @@ export class EscalationsService {
     private readonly realtime: RealtimeService,
   ) {}
 
+  // Incident summary joined onto every escalation so the ops list (MOD-41) can
+  // show the reference/category/priority without an extra fetch per row.
+  private static readonly INCIDENT_SELECT = {
+    incidents: {
+      select: { id: true, public_reference: true, category: true, priority: true, status: true },
+    },
+  };
+
   async findAll(filters: { status?: string; incidentId?: string }) {
     const where: Prisma.EscalationWhereInput = {};
     if (filters.status) where.status = filters.status as any;
@@ -19,11 +27,15 @@ export class EscalationsService {
     return this.prisma.escalation.findMany({
       where,
       orderBy: { created_at: 'desc' },
+      include: EscalationsService.INCIDENT_SELECT,
     });
   }
 
   async findById(id: string) {
-    const escalation = await this.prisma.escalation.findUnique({ where: { id } });
+    const escalation = await this.prisma.escalation.findUnique({
+      where: { id },
+      include: EscalationsService.INCIDENT_SELECT,
+    });
     if (!escalation) throw new NotFoundException('Escalation not found');
     return escalation;
   }

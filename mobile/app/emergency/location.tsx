@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import * as Location from 'expo-location';
+import { captureBestFix } from '@/src/services/gps/gps.service';
 import { useIncidentStore } from '@/src/stores/incident.store';
 import { useAuthStore } from '@/src/stores/auth.store';
 import {
@@ -23,6 +23,7 @@ import {
   type ReverseGeocodeResult,
 } from '@/src/services/api/locations.api';
 import { OnboardProgressbar } from '@/src/components/ui/onbrd-progressbar';
+import { AccessibleText } from '@/src/components/accessibility';
 import { MapProvider, type MapClientConfig } from '@agap/shared';
 
 const TEAL = '#0D6053';
@@ -40,6 +41,7 @@ const FALLBACK_MAP_CONFIG: MapClientConfig = {
   styleUrl: null,
   attribution: '© Mapbox © OpenStreetMap',
   staticMapSupported: Boolean(MAPBOX_TOKEN),
+  supports3dBuildings: false,
 };
 
 /**
@@ -102,27 +104,24 @@ export default function LocationScreen() {
 
   async function locate() {
     setGpsStatus('locating');
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setGpsStatus('denied');
-        return;
-      }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const next = {
-        lat: loc.coords.latitude,
-        lng: loc.coords.longitude,
-        accuracy: loc.coords.accuracy ?? undefined,
-      };
-      setCoords(next);
-      // Persist immediately so the report carries GPS even if the user taps
-      // Continue before reverse geocoding finishes.
-      setLocation(next);
-      setGpsStatus('ready');
-      resolveAddress(next.lat, next.lng, next.accuracy);
-    } catch {
-      setGpsStatus('error');
+    // Reusable MOD-11 capture: handles permission, best-of-N sampling, and a
+    // bounded timeout. Returns a typed outcome — it never throws.
+    const outcome = await captureBestFix();
+    if (outcome.status !== 'ready') {
+      setGpsStatus(outcome.status); // 'denied' | 'error'
+      return;
     }
+    const next = {
+      lat: outcome.fix.lat,
+      lng: outcome.fix.lng,
+      accuracy: outcome.fix.accuracy,
+    };
+    setCoords(next);
+    // Persist immediately so the report carries GPS even if the user taps
+    // Continue before reverse geocoding finishes.
+    setLocation(next);
+    setGpsStatus('ready');
+    resolveAddress(next.lat, next.lng, next.accuracy);
   }
 
   async function resolveAddress(lat: number, lng: number, accuracy?: number) {
@@ -192,10 +191,10 @@ export default function LocationScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Getting your location...</Text>
-        <Text style={styles.subtitle}>
+        <AccessibleText style={styles.title}>Getting your location...</AccessibleText>
+        <AccessibleText style={styles.subtitle} tone="muted">
           We're capturing your current location to help send the nearest responders.
-        </Text>
+        </AccessibleText>
 
         {/* Map preview */}
         <View style={styles.mapCard}>

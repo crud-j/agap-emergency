@@ -4,18 +4,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchHospitals,
   fetchHospital,
-  fetchFacilities,
-  fetchFacility,
-  fetchHospitalReferrals,
-  acceptReferral,
-  divertReferral,
+  fetchNearbyHospitals,
+  fetchReferralsForHospital,
+  createHospital,
+  updateHospital,
+  acknowledgeReferral,
+  markReferralArrived,
+  type CreateHospitalBody,
 } from './api';
 
-export function useHospitals(active?: boolean) {
+export function useHospitals() {
   return useQuery({
-    queryKey: ['hospitals', { active }],
-    queryFn: () => fetchHospitals(active),
-    staleTime: 60_000,
+    queryKey: ['hospitals'],
+    queryFn: fetchHospitals,
+    staleTime: 30_000,
   });
 }
 
@@ -24,52 +26,58 @@ export function useHospital(id: string | null) {
     queryKey: ['hospital', id],
     queryFn: () => fetchHospital(id!),
     enabled: !!id,
-    staleTime: 60_000,
   });
 }
 
-export function useFacilities() {
+export function useNearbyHospitals(lat: number | null, lng: number | null) {
   return useQuery({
-    queryKey: ['facilities'],
-    queryFn: fetchFacilities,
-    staleTime: 60_000,
+    queryKey: ['hospitals', 'nearby', lat, lng],
+    queryFn: () => fetchNearbyHospitals(lat!, lng!),
+    enabled: lat != null && lng != null,
   });
 }
 
-export function useFacility(id: string | null) {
+export function useHospitalReferrals(hospitalId: string | null) {
   return useQuery({
-    queryKey: ['facility', id],
-    queryFn: () => fetchFacility(id!),
-    enabled: !!id,
-    staleTime: 60_000,
+    queryKey: ['hospital-referrals', hospitalId],
+    queryFn: () => fetchReferralsForHospital(hospitalId!),
+    enabled: !!hospitalId,
+    refetchInterval: 20_000,
   });
 }
 
-export function useHospitalReferrals(params?: {
-  incidentId?: string;
-  hospitalId?: string;
-  status?: string;
-}) {
-  return useQuery({
-    queryKey: ['hospital-referrals', params],
-    queryFn: () => fetchHospitalReferrals(params),
-    staleTime: 30_000,
-  });
-}
-
-export function useAcceptReferral() {
+export function useCreateHospital() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (referralId: string) => acceptReferral(referralId),
+    mutationFn: (body: CreateHospitalBody) => createHospital(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hospitals'] }),
+  });
+}
+
+export function useUpdateHospital() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<CreateHospitalBody> }) =>
+      updateHospital(id, body),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: ['hospitals'] });
+      qc.invalidateQueries({ queryKey: ['hospital', id] });
+    },
+  });
+}
+
+export function useAcknowledgeReferral() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (refId: string) => acknowledgeReferral(refId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hospital-referrals'] }),
   });
 }
 
-export function useDivertReferral() {
+export function useMarkReferralArrived() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ referralId, reason }: { referralId: string; reason: string }) =>
-      divertReferral(referralId, reason),
+    mutationFn: (refId: string) => markReferralArrived(refId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hospital-referrals'] }),
   });
 }

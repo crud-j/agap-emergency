@@ -702,6 +702,79 @@ async function main() {
 
   console.log('  System configurations done');
 
+  // ── Permissions & role mappings (MOD-47) ─────────────────────────────────────
+  // The permissions catalog that the Roles & Permissions admin screen grants and
+  // revokes. Without this seed the catalog is empty and the screen has nothing to
+  // manage. Idempotent: upsert on the unique `name`.
+
+  const PERMISSION_DEFS: Array<{ name: string; module: string; description: string }> = [
+    { name: 'incident.view',        module: 'MOD-14', description: 'View incident records' },
+    { name: 'incident.acknowledge', module: 'MOD-15', description: 'Acknowledge a received incident' },
+    { name: 'incident.assess',      module: 'MOD-25', description: 'Assess / validate an incident' },
+    { name: 'incident.dispatch',    module: 'MOD-31', description: 'Move an incident to dispatch' },
+    { name: 'incident.resolve',     module: 'MOD-45', description: 'Record an incident resolution' },
+    { name: 'incident.close',       module: 'MOD-45', description: 'Close an incident' },
+    { name: 'dispatch.create',      module: 'MOD-31', description: 'Authorize and create a dispatch' },
+    { name: 'dispatch.cancel',      module: 'MOD-31', description: 'Cancel or reassign a dispatch' },
+    { name: 'escalation.ack',       module: 'MOD-41', description: 'Acknowledge an SLA escalation' },
+    { name: 'escalation.resolve',   module: 'MOD-41', description: 'Resolve an SLA escalation' },
+    { name: 'handover.create',      module: 'MOD-44', description: 'Create an incident handover' },
+    { name: 'handover.ack',         module: 'MOD-44', description: 'Acknowledge an incident handover' },
+    { name: 'referral.coordinate',  module: 'MOD-38', description: 'Coordinate hospital receiving / referrals' },
+    { name: 'resource.manage',      module: 'MOD-27', description: 'Manage resources and fleet' },
+    { name: 'mutualaid.request',    module: 'MOD-35', description: 'Request mutual-aid resources' },
+    { name: 'mutualaid.approve',    module: 'MOD-35', description: 'Approve or deny mutual-aid requests' },
+    { name: 'medical.view',         module: 'MOD-48', description: 'View patient medical profile (audited)' },
+    { name: 'announcement.publish', module: 'MOD-53', description: 'Publish municipal announcements' },
+    { name: 'audit.view',           module: 'MOD-46', description: 'View the audit trail' },
+    { name: 'admin.users.manage',   module: 'MOD-49', description: 'Manage user accounts' },
+    { name: 'admin.permissions.manage', module: 'MOD-47', description: 'Grant / revoke role permissions' },
+    { name: 'admin.config.manage',  module: 'MOD-49', description: 'Manage system configuration' },
+  ];
+
+  const permissionIdByName = new Map<string, string>();
+  for (const p of PERMISSION_DEFS) {
+    const row = await prisma.permissions.upsert({
+      where: { name: p.name },
+      update: { description: p.description, module_id: p.module },
+      create: { name: p.name, description: p.description, module_id: p.module },
+    });
+    permissionIdByName.set(p.name, row.id);
+  }
+
+  const DISPATCHER_PERMS = [
+    'incident.view', 'incident.acknowledge', 'incident.assess', 'incident.dispatch',
+    'dispatch.create', 'dispatch.cancel', 'referral.coordinate',
+    'handover.create', 'handover.ack', 'mutualaid.request', 'medical.view',
+  ];
+  const SUPERVISOR_PERMS = [
+    ...DISPATCHER_PERMS, 'incident.resolve', 'incident.close',
+    'escalation.ack', 'escalation.resolve', 'mutualaid.approve', 'audit.view',
+  ];
+  const ROLE_PERMS: Partial<Record<user_role, string[]>> = {
+    [user_role.DISPATCHER]: DISPATCHER_PERMS,
+    [user_role.SUPERVISOR]: SUPERVISOR_PERMS,
+    [user_role.RESPONDER]: ['incident.view', 'handover.ack', 'medical.view'],
+    [user_role.HOSPITAL_USER]: ['incident.view', 'referral.coordinate'],
+    [user_role.ANNOUNCEMENTS_PUBLISHER]: ['announcement.publish'],
+    [user_role.ORG_ADMINISTRATOR]: ['resource.manage', 'admin.users.manage', 'audit.view'],
+    [user_role.SYSTEM_ADMINISTRATOR]: PERMISSION_DEFS.map((p) => p.name),
+  };
+
+  for (const [role, names] of Object.entries(ROLE_PERMS)) {
+    for (const name of names ?? []) {
+      const permission_id = permissionIdByName.get(name);
+      if (!permission_id) continue;
+      await prisma.role_permissions.upsert({
+        where: { role_permission_id: { role: role as user_role, permission_id } },
+        update: {},
+        create: { role: role as user_role, permission_id },
+      });
+    }
+  }
+
+  console.log(`  Permissions done (${PERMISSION_DEFS.length} permissions mapped across roles — MOD-47)`);
+
   // ── Demo dispatch (dev testing) ──────────────────────────────────────────────
   // A ready-to-track scenario so the full dispatch → tracking flow can be tested
   // without the Operations Center: a citizen-reported incident with ALPHA-1

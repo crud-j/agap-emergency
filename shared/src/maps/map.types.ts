@@ -66,4 +66,7 @@ export interface MapClientConfig {
   attribution: string;
   /** Whether the backend can produce static map image URLs for this provider. */
   staticMapSupported: boolean;
+  /** True when the active tile style has OpenMapTiles-format building height data,
+   *  enabling the fill-extrusion 3D buildings layer in the mobile map. */
+  supports3dBuildings: boolean;
 }

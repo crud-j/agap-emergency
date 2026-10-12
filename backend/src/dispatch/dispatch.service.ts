@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,6 +17,8 @@ import { AuditAction, IncidentStatus, QUEUE_NAMES } from '@agap/shared';
 import { Prisma } from '@prisma/client';
 
 const DISPATCHABLE_STATUSES = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
+
+type AvailabilityRow = { user_id: string; status: string };
 
 @Injectable()
 export class DispatchService {
@@ -84,11 +88,30 @@ export class DispatchService {
       });
 
       if (dto.initialCrewIds?.length) {
+        // Lock all target availability rows in sorted UUID order to prevent
+        // deadlocks when multiple dispatches target overlapping responders.
+        const sorted = [...new Set(dto.initialCrewIds)].sort();
+        const locked = await tx.$queryRaw<AvailabilityRow[]>(
+          Prisma.sql`
+            SELECT user_id, status::text AS status
+            FROM "responder_availability"
+            WHERE user_id = ANY(ARRAY[${Prisma.join(sorted)}]::uuid[])
+            ORDER BY user_id
+            FOR UPDATE
+          `,
+        );
+
+        if (locked.length !== sorted.length) {
+          throw new InternalServerErrorException('AVAILABILITY_RECORD_MISSING');
+        }
+
+        const unavailable = locked.find((r) => r.status !== 'AVAILABLE');
+        if (unavailable) {
+          throw new ConflictException('RESPONDER_NOT_AVAILABLE');
+        }
+
         await tx.dispatch_crew.createMany({
-          data: dto.initialCrewIds.map((uid) => ({
-            dispatch_id: created.id,
-            user_id: uid,
-          })),
+          data: sorted.map((uid) => ({ dispatch_id: created.id, user_id: uid })),
           skipDuplicates: true,
         });
       }
@@ -232,9 +255,30 @@ export class DispatchService {
 
   async addCrew(dispatchId: string, userId: string, actorId?: string) {
     await this.findById(dispatchId);
-    const crew = await this.prisma.dispatch_crew.create({
-      data: { dispatch_id: dispatchId, user_id: userId },
+
+    const crew = await this.prisma.$transaction(async (tx) => {
+      // Lock the responder's availability row before adding to crew.
+      const locked = await tx.$queryRaw<AvailabilityRow[]>`
+        SELECT user_id, status::text AS status
+        FROM "responder_availability"
+        WHERE user_id = ${userId}::uuid
+        FOR UPDATE
+      `;
+
+      const [crewRow] = locked;
+      if (!crewRow) {
+        throw new InternalServerErrorException('AVAILABILITY_RECORD_MISSING');
+      }
+
+      if (crewRow.status !== 'AVAILABLE') {
+        throw new ConflictException('RESPONDER_NOT_AVAILABLE');
+      }
+
+      return tx.dispatch_crew.create({
+        data: { dispatch_id: dispatchId, user_id: userId },
+      });
     });
+
     void this.audit.log({
       action: AuditAction.UPDATE,
       actorId: actorId ?? userId,

@@ -137,6 +137,36 @@ export function closeIncident(id: string, notes?: string): Promise<IncidentDetai
   return api.patch(`/incidents/${id}/close`, { notes }, getToken());
 }
 
+// ─── Resolution (MOD-45) ─────────────────────────────────────────────────────
+
+export interface IncidentResolution {
+  id: string;
+  incident_id: string;
+  closed_by_id: string;
+  outcome: string;
+  patient_disposition: string | null;
+  resolution_notes: string | null;
+  follow_up_required: boolean;
+  follow_up_notes: string | null;
+  closed_at: string;
+}
+
+export interface CreateResolutionBody {
+  outcome: string;
+  patientDisposition?: string;
+  resolutionNotes?: string;
+}
+
+/** Record the incident outcome + patient disposition (MOD-45). One row per
+ *  incident (incident_id is unique); call before closing. */
+export function createResolution(id: string, body: CreateResolutionBody): Promise<IncidentResolution> {
+  return api.post(`/incidents/${id}/resolution`, body, getToken());
+}
+
+export function fetchResolution(id: string): Promise<IncidentResolution> {
+  return api.get(`/incidents/${id}/resolution`, getToken());
+}
+
 export function cancelIncident(id: string, reason: string): Promise<IncidentDetail> {
   return api.patch(`/incidents/${id}/cancel`, { reason }, getToken());
 }
@@ -169,3 +199,4 @@ export function mergeIncident(id: string, masterIncidentId: string): Promise<Inc
 export function submitAssessment(incidentId: string, body: SubmitAssessmentBody): Promise<IncidentAssessment> {
   return api.post(`/incidents/${incidentId}/assessment`, body, getToken());
 }
+

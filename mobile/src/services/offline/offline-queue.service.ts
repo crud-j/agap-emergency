@@ -47,9 +47,10 @@ export class OfflineQueueService {
 
   static async processQueue(
     submitFn: (payload: CreateIncidentInput) => Promise<{ id: string }>,
-  ): Promise<void> {
+  ): Promise<{ submittedIds: string[] }> {
     const queue = await this.getQueue();
     const remaining: QueuedIncident[] = [];
+    const submittedIds: string[] = [];
 
     for (const item of queue) {
       if (item.attempts >= MAX_OFFLINE_RETRY_ATTEMPTS) {
@@ -69,8 +70,8 @@ export class OfflineQueueService {
       }
 
       try {
-        await submitFn(item.payload);
-        // Successfully submitted — remove from queue
+        const result = await submitFn(item.payload);
+        submittedIds.push(result.id);
       } catch {
         item.attempts += 1;
         item.lastAttemptAt = Date.now();
@@ -80,6 +81,7 @@ export class OfflineQueueService {
     }
 
     await this.saveQueue(remaining);
+    return { submittedIds };
   }
 
   static async getPending(): Promise<QueuedIncident[]> {

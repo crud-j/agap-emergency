@@ -35,9 +35,15 @@ export async function uploadIncidentPhoto(
   token: string,
 ): Promise<void> {
   const name = uri.split('/').pop() || `incident-${Date.now()}.jpg`;
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const MIME: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    png: 'image/png', webp: 'image/webp', mp4: 'video/mp4',
+  };
+  const type = MIME[ext] ?? 'image/jpeg';
   const form = new FormData();
   // React Native FormData file shape.
-  form.append('file', { uri, name, type: 'image/jpeg' } as unknown as Blob);
+  form.append('file', { uri, name, type } as unknown as Blob);
 
   const res = await fetch(`${API_BASE}/v1/incidents/${incidentId}/attachments`, {
     method: 'POST',

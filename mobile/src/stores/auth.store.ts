@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import type { SafeUser, AuthTokens } from '../services/api/auth.api';
+import { useIncidentStore } from './incident.store';
 
 // NOTE: expo-secure-store rejects keys that are not /^[\w.-]+$/ (alphanumeric,
 // "_", ".", "-"). Colons are INVALID and make setItemAsync throw, which would
@@ -76,5 +77,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       SecureStore.deleteItemAsync(KEYS.user),
     ]);
     set({ accessToken: null, refreshToken: null, user: null, isAuthenticated: false });
+    useIncidentStore.getState().reset();
   },
 }));

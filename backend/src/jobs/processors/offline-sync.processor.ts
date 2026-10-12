@@ -2,6 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { QUEUE_NAMES } from '@agap/shared';
+import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmergencyAlertsService } from '../../emergency-alerts/emergency-alerts.service';
 import { LocationsService } from '../../locations/locations.service';
 import { SosAlertDto } from '../../emergency-alerts/dto/sos-alert.dto';
@@ -29,6 +30,7 @@ export class OfflineSyncProcessor extends WorkerHost {
   private readonly logger = new Logger(OfflineSyncProcessor.name);
 
   constructor(
+    private readonly prisma: PrismaService,
     private readonly emergencyAlertsService: EmergencyAlertsService,
     private readonly locationsService: LocationsService,
   ) {
@@ -44,6 +46,10 @@ export class OfflineSyncProcessor extends WorkerHost {
       try {
         switch (event.type) {
           case 'SOS':
+          case 'INCIDENT_SUBMIT':
+            // INCIDENT_SUBMIT is written by the legacy queueSync() path; its payload
+            // shape matches SosAlertDto. clientEventId is the idempotency key — the
+            // backend deduplicates so a replayed event never creates a second incident.
             await this.emergencyAlertsService.createFromSos(
               { ...event.payload, clientEventId: event.client_event_id } as unknown as SosAlertDto,
               'SOS_BUTTON',
@@ -66,11 +72,26 @@ export class OfflineSyncProcessor extends WorkerHost {
           default:
             this.logger.warn(`Unknown offline event type "${event.type}" for ${event.client_event_id}`);
         }
+
+        // Mark the queue record as successfully synced so getStatus() reflects reality.
+        await this.prisma.offline_event_queue.updateMany({
+          where: { client_event_id: event.client_event_id, sync_status: 'PENDING' },
+          data: { sync_status: 'SYNCED', processed_at: new Date() },
+        });
         processed++;
       } catch (err) {
         this.logger.error(
           `Offline event failed (${event.type}/${event.client_event_id}): ${String(err)}`,
         );
+        // Persist the failure so users and operators can see which events need attention.
+        await this.prisma.offline_event_queue.updateMany({
+          where: { client_event_id: event.client_event_id, sync_status: 'PENDING' },
+          data: { sync_status: 'FAILED', error_message: String(err) },
+        }).catch((updateErr) => {
+          this.logger.warn(
+            `Could not persist failure status for ${event.client_event_id}: ${String(updateErr)}`,
+          );
+        });
         failed++;
       }
     }
