@@ -93,13 +93,18 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
     );
 
     // ─── incident.created ────────────────────────────────────────────────────
-    // We don't have all fields, so invalidate to let the list refetch.
+    // Log incoming events and refresh the incident-related query caches.
     const offCreated = onIncidentEvent<IncidentCreatedPayload>(
       'incident.created',
-      () => {
-        qc.invalidateQueries({ queryKey: ['incidents'] });
-        qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
-        qc.invalidateQueries({ queryKey: ['incident-locations'] });
+      (payload) => {
+        console.log(
+          '[AGAP WS] incident.created received:',
+          payload,
+        );
+
+        void qc.invalidateQueries({ queryKey: ['incidents'] });
+        void qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
+        void qc.invalidateQueries({ queryKey: ['incident-locations'] });
       },
     );
 

@@ -1,3 +1,4 @@
+
 import { api } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import type { PaginatedResult } from '@agap/shared';
@@ -42,26 +43,30 @@ export interface CreateAnnouncementBody {
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
-/** Publisher view — returns all statuses (drafts, scheduled, published, archived). */
+/** Publisher view — returns all statuses. */
 export function fetchAnnouncementsForPublisher(
   params?: AnnouncementListParams,
 ): Promise<PaginatedResult<Announcement>> {
   const qs = new URLSearchParams();
-  if (params?.status)   qs.set('status', params.status);
+
+  if (params?.status) qs.set('status', params.status);
   if (params?.category) qs.set('category', params.category);
-  if (params?.page)     qs.set('page', String(params.page));
-  if (params?.perPage)  qs.set('perPage', String(params.perPage));
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.perPage) qs.set('perPage', String(params.perPage));
+
   return api.get(`/announcements/publisher/all?${qs}`, getToken());
 }
 
-/** Public feed — published only (used by mobile / citizen feed). */
+/** Public feed — published announcements only. */
 export function fetchPublishedAnnouncements(params?: {
   category?: string;
   barangay?: string;
 }): Promise<Announcement[]> {
   const qs = new URLSearchParams();
+
   if (params?.category) qs.set('category', params.category);
   if (params?.barangay) qs.set('barangay', params.barangay);
+
   return api.get(`/announcements?${qs}`, getToken());
 }
 
@@ -69,7 +74,9 @@ export function fetchAnnouncement(id: string): Promise<Announcement> {
   return api.get(`/announcements/${id}`, getToken());
 }
 
-export function createAnnouncement(body: CreateAnnouncementBody): Promise<Announcement> {
+export function createAnnouncement(
+  body: CreateAnnouncementBody,
+): Promise<Announcement> {
   return api.post('/announcements', body, getToken());
 }
 
@@ -77,8 +84,15 @@ export function publishAnnouncement(id: string): Promise<Announcement> {
   return api.post(`/announcements/${id}/publish`, {}, getToken());
 }
 
-export function scheduleAnnouncement(id: string, scheduledAt: string): Promise<Announcement> {
-  return api.post(`/announcements/${id}/schedule`, { scheduledAt }, getToken());
+export function scheduleAnnouncement(
+  id: string,
+  scheduledAt: string,
+): Promise<Announcement> {
+  return api.post(
+    `/announcements/${id}/schedule`,
+    { scheduledAt },
+    getToken(),
+  );
 }
 
 export function archiveAnnouncement(id: string): Promise<Announcement> {

@@ -1,4 +1,20 @@
-import { BadRequestException, Controller, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, ParseUUIDPipe, Ip } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Request,
+  Headers,
+  Get,
+  Delete,
+  Param,
+  ParseUUIDPipe,
+  Ip,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -27,6 +43,20 @@ export class AuthController {
     private readonly webAuthnService: WebAuthnService,
   ) {}
 
+  private readonly refreshCookieName = 'agap_refresh_token';
+
+  private refreshCookieOptions() {
+    const isProd = process.env.NODE_ENV === 'production';
+
+    return {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'strict' as const,
+      path: '/v1/auth',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    };
+  }
+
   @Post('register')
   @Public()
   @Throttle({ burst: { ttl: 60000, limit: 5 }, sustained: { ttl: 900000, limit: 10 } })
@@ -48,8 +78,20 @@ export class AuthController {
   @UseGuards(AuthGuard('local'))
   @Throttle({ burst: { ttl: 60000, limit: 5 }, sustained: { ttl: 900000, limit: 10 } })
   @ApiOperation({ summary: 'Login with email/password' })
-  async login(@Request() req: any) {
-    return this.authService.login(req.user);
+  async login(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.login(req.user);
+    const { refreshToken, ...response } = result;
+
+    res.cookie(
+      this.refreshCookieName,
+      refreshToken,
+      this.refreshCookieOptions(),
+    );
+
+    return response;
   }
 
   @Post('login/phone')
@@ -63,17 +105,47 @@ export class AuthController {
   @Post('refresh')
   @Public()
   @ApiOperation({ summary: 'Rotate access + refresh tokens' })
-  async refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshToken(dto.refreshToken);
+  async refresh(
+    @Request() req: any,
+    @Body() dto: RefreshTokenDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const refreshToken =
+      req.cookies?.[this.refreshCookieName] ?? dto?.refreshToken;
+
+    if (!refreshToken) {
+      res.clearCookie(this.refreshCookieName, this.refreshCookieOptions());
+      throw new UnauthorizedException('Refresh token is missing');
+    }
+
+    const result = await this.authService.refreshToken(refreshToken);
+    const { refreshToken: newRefreshToken, ...response } = result;
+
+    res.cookie(
+      this.refreshCookieName,
+      newRefreshToken,
+      this.refreshCookieOptions(),
+    );
+
+    return response;
   }
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Revoke current session' })
-  async logout(@Request() req: any, @Headers('authorization') auth?: string) {
-    const token = auth?.replace('Bearer ', '');
-    return this.authService.logout(req.user.id, token);
+  async logout(
+    @Request() req: any,
+    @Headers('authorization') auth: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const token = auth?.replace(/^Bearer\s+/i, '');
+
+    const result = await this.authService.logout(req.user.id, token);
+
+    res.clearCookie(this.refreshCookieName, this.refreshCookieOptions());
+
+    return result;
   }
 
   @Post('verify/email')
@@ -131,7 +203,6 @@ export class AuthController {
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ) {
-    // deviceLabel is accepted for API compatibility; it is persisted on /complete.
     void dto;
     return this.webAuthnService.beginRegistration(req.user.id, ip, userAgent);
   }
@@ -173,7 +244,7 @@ export class AuthController {
   @Post('passkey/authenticate/complete')
   @Public()
   @Throttle({ burst: { ttl: 60000, limit: 5 }, sustained: { ttl: 900000, limit: 10 } })
-  @ApiOperation({ summary: 'Complete passkey authentication — verifies authenticator response and returns JWT tokens' })
+  @ApiOperation({ summary: 'Complete passkey authentication ceremony — verifies authenticator response and returns JWT tokens' })
   @ApiResponse({ status: 201, description: 'Authenticated via passkey' })
   async passkeyAuthenticateComplete(
     @Body() dto: WebAuthnAuthenticateCompleteDto,

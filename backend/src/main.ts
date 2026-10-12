@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import { AppModule } from './app.module';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -19,6 +20,7 @@ async function bootstrap() {
   const isProd = configService.get('NODE_ENV') === 'production';
   app.use(helmet({ contentSecurityPolicy: isProd }));
   app.use(compression());
+  app.use(cookieParser());
 
   // CORS
   const corsOrigin = configService.get<string>('CORS_ORIGIN', 'http://localhost:3001');

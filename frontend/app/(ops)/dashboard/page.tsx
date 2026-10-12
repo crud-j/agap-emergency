@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 
 import { useMemo, type JSX } from 'react';
 import Link from 'next/link';
@@ -10,12 +10,13 @@ import {
   PriorityBadge, StatusChip, EmptyState, SkeletonRow, Button,
 } from '@/components/ui';
 import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
+import { ActivityStream } from '@/components/dashboard/ActivityStream';
 import { useWsState } from '@/lib/use-ws-state';
 import { useIncidents } from '@/features/incidents/hooks';
 import { useAvailableResources } from '@/features/resources/hooks';
 import { useResponders } from '@/features/responders/hooks';
 import { useSurgeState } from '@/features/surge/hooks';
-import { useAnnouncements } from '@/features/announcements/hooks';
+import { usePublishedAnnouncements } from '@/features/announcements/hooks';
 import {
   ACTIVE_STATUSES, DISPATCHABLE_STATUSES, categoryIcon, timeAgo, titleCase,
 } from '@/lib/incident-format';
@@ -31,9 +32,8 @@ const RECENT_LIMIT = 8;
  * underlying caches fresh (incident.*, dispatch.*, responder.*, announcement.*),
  * so tiles and the feed update within ~1s of a backend event — no manual refresh.
  *
- * Never silently fails (CLAUDE.md / plan guardrail 12): the live WS state is
- * shown in the header, each tile falls back to "—" on error, and a retry strip
- * surfaces any failed query.
+ * Never silently fails: the live WS state is shown in the header, each tile
+ * falls back to "—" on error, and a retry strip surfaces any failed query.
  */
 export default function DashboardPage(): JSX.Element {
   const wsState = useWsState();
@@ -44,7 +44,7 @@ export default function DashboardPage(): JSX.Element {
   const availableQuery = useAvailableResources();
   const respondersQuery = useResponders({ perPage: 100 });
   const surgeQuery = useSurgeState();
-  const announcementsQuery = useAnnouncements({ status: 'PUBLISHED' });
+  const announcementsQuery = usePublishedAnnouncements();
 
   const incidents: IncidentListItem[] = incidentsQuery.data?.data ?? [];
   const responders = respondersQuery.data?.data ?? [];
@@ -54,14 +54,17 @@ export default function DashboardPage(): JSX.Element {
     () => incidents.filter((i) => ACTIVE_STATUSES.includes(i.status)).length,
     [incidents],
   );
+
   const pendingDispatchCount = useMemo(
     () => incidents.filter((i) => DISPATCHABLE_STATUSES.includes(i.status)).length,
     [incidents],
   );
+
   const onSceneCount = useMemo(
     () => responders.filter((r) => r.status === 'ON_SCENE').length,
     [responders],
   );
+
   const availableCount = available.length;
 
   const recent = useMemo(
@@ -73,15 +76,16 @@ export default function DashboardPage(): JSX.Element {
   );
 
   const surge = surgeQuery.data;
+
   const criticalAnnouncement = useMemo(
     () =>
-      (announcementsQuery.data?.data ?? []).find(
+      (announcementsQuery.data ?? []).find(
         (a) => a.severity === 'CRITICAL' && a.status === 'PUBLISHED',
       ) ?? null,
     [announcementsQuery.data],
   );
 
-  // ─── Never silently fail: collect failed queries for a retry strip ──────────
+  // Never silently fail: collect failed queries for a retry strip.
   const failures = [
     { label: 'incidents', q: incidentsQuery },
     { label: 'available units', q: availableQuery },
@@ -98,7 +102,9 @@ export default function DashboardPage(): JSX.Element {
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-agap-textMain">Operations Dashboard</h1>
+          <h1 className="text-2xl font-extrabold text-agap-textMain">
+            Operations Dashboard
+          </h1>
           <p className="mt-1 text-sm text-agap-textSub">
             Bocaue MDRRMO · live emergency operations overview
           </p>
@@ -110,13 +116,19 @@ export default function DashboardPage(): JSX.Element {
       {surge?.is_active && (
         <CriticalBanner
           icon={<Siren size={20} />}
-          title={surge.mass_casualty ? 'Mass-Casualty Surge Mode Active' : 'Disaster Surge Mode Active'}
+          title={
+            surge.mass_casualty
+              ? 'Mass-Casualty Surge Mode Active'
+              : 'Disaster Surge Mode Active'
+          }
           detail={[
             surge.activation_reason,
             surge.affected_barangays.length
               ? `Affected: ${surge.affected_barangays.join(', ')}`
               : null,
-            `${surge.active_incident_count} active incident${surge.active_incident_count === 1 ? '' : 's'}`,
+            `${surge.active_incident_count} active incident${
+              surge.active_incident_count === 1 ? '' : 's'
+            }`,
           ]
             .filter(Boolean)
             .join(' · ')}
@@ -124,6 +136,7 @@ export default function DashboardPage(): JSX.Element {
           cta="Open surge console"
         />
       )}
+
       {criticalAnnouncement && (
         <CriticalBanner
           icon={<Megaphone size={20} />}
@@ -140,7 +153,8 @@ export default function DashboardPage(): JSX.Element {
           <div className="flex items-center gap-2 text-sm text-agap-danger">
             <AlertCircle size={16} className="shrink-0" />
             <span>
-              Couldn&apos;t load {failures.map((f) => f.label).join(', ')}. Data shown may be incomplete.
+              Couldn't load {failures.map((f) => f.label).join(', ')}. Data shown
+              may be incomplete.
             </span>
           </div>
           <Button variant="danger" size="sm" onClick={retryAll}>
@@ -152,7 +166,10 @@ export default function DashboardPage(): JSX.Element {
 
       {/* KPI tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Link href="/operations/incidents" className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green">
+        <Link
+          href="/operations/incidents"
+          className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
+        >
           <StatCard
             label="Active Incidents"
             value={incidentsQuery.isError ? '—' : activeCount}
@@ -161,7 +178,11 @@ export default function DashboardPage(): JSX.Element {
             loading={incidentsQuery.isLoading}
           />
         </Link>
-        <Link href="/operations/fleet" className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green">
+
+        <Link
+          href="/operations/fleet"
+          className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
+        >
           <StatCard
             label="Responders On-Scene"
             value={respondersQuery.isError ? '—' : onSceneCount}
@@ -170,7 +191,11 @@ export default function DashboardPage(): JSX.Element {
             loading={respondersQuery.isLoading}
           />
         </Link>
-        <Link href="/operations/fleet" className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green">
+
+        <Link
+          href="/operations/fleet"
+          className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
+        >
           <StatCard
             label="Units Available"
             value={availableQuery.isError ? '—' : availableCount}
@@ -179,7 +204,11 @@ export default function DashboardPage(): JSX.Element {
             loading={availableQuery.isLoading}
           />
         </Link>
-        <Link href="/operations/dispatch" className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green">
+
+        <Link
+          href="/operations/dispatch"
+          className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
+        >
           <StatCard
             label="Pending Dispatch"
             value={incidentsQuery.isError ? '—' : pendingDispatchCount}
@@ -194,7 +223,10 @@ export default function DashboardPage(): JSX.Element {
       <Card padding="none" className="overflow-hidden">
         <CardHeader className="mb-0 px-5 pt-5">
           <CardTitle>Recent Incidents</CardTitle>
-          <Link href="/operations/incidents" className="text-sm font-semibold text-agap-green hover:underline">
+          <Link
+            href="/operations/incidents"
+            className="text-sm font-semibold text-agap-green hover:underline"
+          >
             View all
           </Link>
         </CardHeader>
@@ -208,7 +240,11 @@ export default function DashboardPage(): JSX.Element {
               title="Couldn't load incidents"
               description="The incident feed is unavailable. Check your connection and retry."
               action={
-                <Button variant="secondary" size="sm" onClick={() => void incidentsQuery.refetch()}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void incidentsQuery.refetch()}
+                >
                   <RefreshCw size={14} />
                   Retry
                 </Button>
@@ -224,13 +260,20 @@ export default function DashboardPage(): JSX.Element {
           )}
         </div>
       </Card>
+
+      {/* New: real events from the existing Socket.IO connection */}
+      <ActivityStream />
     </div>
   );
 }
 
 // ─── Recent incident row ──────────────────────────────────────────────────────
 
-function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element {
+function IncidentRow({
+  incident,
+}: {
+  incident: IncidentListItem;
+}): JSX.Element {
   const Icon = categoryIcon(incident.category);
   const location =
     incident.incident_locations?.barangay ??
@@ -251,7 +294,9 @@ function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element 
           <span className="truncate text-sm font-bold text-agap-textMain tabular-nums">
             {incident.public_reference}
           </span>
-          <span className="text-xs text-agap-textSub">{titleCase(incident.category)}</span>
+          <span className="text-xs text-agap-textSub">
+            {titleCase(incident.category)}
+          </span>
         </div>
         <p className="truncate text-xs text-agap-textSub">
           {location ?? 'Location pending'}
@@ -270,7 +315,11 @@ function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element 
 // ─── Critical banner ──────────────────────────────────────────────────────────
 
 function CriticalBanner({
-  icon, title, detail, href, cta,
+  icon,
+  title,
+  detail,
+  href,
+  cta,
 }: {
   icon: JSX.Element;
   title: string;
@@ -285,7 +334,11 @@ function CriticalBanner({
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold text-agap-danger">{title}</p>
-        {detail && <p className="mt-0.5 line-clamp-2 text-sm text-agap-textMid">{detail}</p>}
+        {detail && (
+          <p className="mt-0.5 line-clamp-2 text-sm text-agap-textMid">
+            {detail}
+          </p>
+        )}
       </div>
       <Link
         href={href}

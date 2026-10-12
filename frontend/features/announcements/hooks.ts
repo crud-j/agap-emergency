@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchAnnouncementsForPublisher,
+  fetchPublishedAnnouncements,
   fetchAnnouncement,
   createAnnouncement,
   publishAnnouncement,
@@ -12,12 +13,21 @@ import {
   type AnnouncementListParams,
   type CreateAnnouncementBody,
 } from './api';
+import { hasRole, useAuthUser } from '@/lib/use-auth';
 
-export function useAnnouncements(params?: AnnouncementListParams) {
+export function useAnnouncements(
+  params?: AnnouncementListParams,
+  enabled = true,
+) {
+  const user = useAuthUser();
+
   return useQuery({
     queryKey: ['announcements', 'publisher', params],
     queryFn: () => fetchAnnouncementsForPublisher(params),
     staleTime: 30_000,
+    enabled:
+      enabled &&
+      hasRole(user, 'ANNOUNCEMENTS_PUBLISHER', 'SYSTEM_ADMINISTRATOR'),
   });
 }
 
@@ -28,6 +38,17 @@ export function useAnnouncement(id: string | null) {
     enabled: !!id,
   });
 }
+
+
+export function usePublishedAnnouncements(enabled = true) {
+  return useQuery({
+    queryKey: ['announcements', 'public'],
+    queryFn: () => fetchPublishedAnnouncements(),
+    staleTime: 30_000,
+    enabled,
+  });
+}
+
 
 export function useCreateAnnouncement() {
   const qc = useQueryClient();

@@ -1,5 +1,6 @@
 'use client';
 
+
 import { useState, type ReactElement } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -17,8 +18,9 @@ export default function LoginPage(): ReactElement {
     setLoading(true);
     try {
       const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
-      const res = await fetch(`${apiBase}/v1/auth/login`, {
+     const res = await fetch(`${apiBase}/v1/auth/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: email, password }),
       });

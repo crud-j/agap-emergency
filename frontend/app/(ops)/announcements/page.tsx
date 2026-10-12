@@ -16,6 +16,7 @@ import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { titleCase } from '@/lib/incident-format';
 import {
   useAnnouncements,
+  usePublishedAnnouncements,
   useCreateAnnouncement,
   usePublishAnnouncement,
   useScheduleAnnouncement,
@@ -350,12 +351,32 @@ export default function AnnouncementsPage(): JSX.Element {
   const [scheduleTarget, setScheduleTarget] = useState<Announcement | null>(null);
 
   const params = activeTab === 'ALL' ? {} : { status: activeTab };
-  const { data, isLoading } = useAnnouncements(params);
+
+  const publisherQuery = useAnnouncements(params, canPublish);
+  const publicQuery = usePublishedAnnouncements(!canPublish);
+
+  const isLoading = canPublish
+    ? publisherQuery.isLoading
+    : publicQuery.isLoading;
+
+  const data = canPublish ? publisherQuery.data : null;
+
+  const rows: Announcement[] = canPublish
+    ? data?.data ?? []
+    : publicQuery.data ?? [];
+
+  const total = canPublish
+    ? data?.meta.total ?? 0
+    : rows.length;
+
+  const totalPages = canPublish
+    ? data?.meta.totalPages ?? 0
+    : 1;
 
   const publish = usePublishAnnouncement();
   const archive = useArchiveAnnouncement();
 
-  const rows: Announcement[] = data?.data ?? [];
+
 
   // ─── Columns ─────────────────────────────────────────────────────────────
 
@@ -563,14 +584,19 @@ export default function AnnouncementsPage(): JSX.Element {
       />
 
       {/* Pagination */}
-      {data && data.meta.totalPages > 1 && (
-        <div className="flex items-center justify-between pt-2">
+      {total > 0 && (
+        <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-agap-textSub">
-            Page {data.meta.page} of {data.meta.totalPages}
+            {total} announcement{total !== 1 ? 's' : ''}
+            {canPublish && activeTab !== 'ALL'
+              ? ` · ${titleCase(activeTab)}`
+              : ''}
           </p>
           <div className="flex items-center gap-1.5">
             <Info size={12} className="text-agap-textSub" />
-            <span className="text-xs text-agap-textSub">Showing {rows.length} of {data.meta.total}</span>
+            <span className="text-xs text-agap-textSub">
+              Showing {rows.length} of {data?.meta.total ?? 0}
+            </span>
           </div>
         </div>
       )}
