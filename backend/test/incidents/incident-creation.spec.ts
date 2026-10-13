@@ -6,6 +6,7 @@ import { PriorityService } from '../../src/incidents/priority/priority.service';
 import { PrismaService } from '../../src/common/prisma/prisma.service';
 import { RealtimeService } from '../../src/realtime/realtime.service';
 import { AuditService } from '../../src/audit/audit.service';
+import { EmergencyContactNotificationService } from '../../src/emergency-contacts/emergency-contact-notification.service';
 import { IncidentType, IncidentStatus, IncidentPriority, ReporterType } from '@agap/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -63,6 +64,7 @@ describe('IncidentsService', () => {
         // WebSocket distribution is best-effort and out of scope here — stub it.
         { provide: RealtimeService, useValue: { notifyIncidentCreated: jest.fn() } },
         { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: EmergencyContactNotificationService, useValue: { notifyContactsOfIncident: jest.fn() } },
       ],
     }).compile();
 
@@ -124,6 +126,32 @@ describe('IncidentsService', () => {
       });
 
       expect(result).toBeDefined();
+    });
+
+    it('rejects coordinates outside Bocaue without creating an incident', async () => {
+      await expect(
+        service.create({
+          type: IncidentType.MEDICAL,
+          idempotencyKey: uuidv4(),
+          lat: 14.765,
+          lng: 120.906,
+        }),
+      ).rejects.toThrow('Incident location must be within Bocaue Municipality, Bulacan.');
+
+      expect(mockPrisma.incident.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('requires latitude and longitude to be provided together', async () => {
+      await expect(
+        service.create({
+          type: IncidentType.MEDICAL,
+          idempotencyKey: uuidv4(),
+          lat: 14.7969,
+        }),
+      ).rejects.toThrow('Latitude and longitude must be provided together.');
+
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('separates reporter and patient correctly', async () => {

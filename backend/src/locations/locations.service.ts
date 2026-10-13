@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -6,7 +6,7 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { CaptureLocationDto } from './dto/capture-location.dto';
 import { TrackLocationDto } from './dto/track-location.dto';
 import { MapsService } from './maps/maps.service';
-import { QUEUE_NAMES } from '@agap/shared';
+import { isCoordinateInBocaue, QUEUE_NAMES } from '@agap/shared';
 
 @Injectable()
 export class LocationsService {
@@ -19,7 +19,15 @@ export class LocationsService {
     @InjectQueue(QUEUE_NAMES.LOCATION_PROCESSING) private readonly locationProcessingQueue: Queue,
   ) {}
 
+  private assertBocaueCoordinate(latitude: number, longitude: number): void {
+    if (!isCoordinateInBocaue(latitude, longitude)) {
+      throw new BadRequestException('Location must be within Bocaue Municipality, Bulacan.');
+    }
+  }
+
   async capture(dto: CaptureLocationDto, _userId?: string) {
+    this.assertBocaueCoordinate(dto.latitude, dto.longitude);
+
     if (!dto.incidentId) {
       // Standalone capture without an incident: echo back the point.
       return {
@@ -69,6 +77,7 @@ export class LocationsService {
    * mobile/frontend clients.
    */
   async reverseGeocode(lat: number, lng: number) {
+    this.assertBocaueCoordinate(lat, lng);
     const result = await this.maps.reverseGeocode({ lat, lng });
     return {
       formatted_address: result.formattedAddress,
@@ -89,10 +98,14 @@ export class LocationsService {
    * ETA is always a labeled estimate; a routing failure returns nulls.
    */
   getRouteBetween(fromLat: number, fromLng: number, toLat: number, toLng: number) {
+    this.assertBocaueCoordinate(fromLat, fromLng);
+    this.assertBocaueCoordinate(toLat, toLng);
     return this.maps.route({ lat: fromLat, lng: fromLng }, { lat: toLat, lng: toLng });
   }
 
   async trackResponder(dto: TrackLocationDto, userId: string) {
+    this.assertBocaueCoordinate(dto.latitude, dto.longitude);
+
     const record = await this.prisma.location_history.create({
       data: {
         incident_id: dto.incidentId,

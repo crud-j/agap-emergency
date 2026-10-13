@@ -12,7 +12,7 @@ import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentStatusService } from './incident-status/incident-status.service';
 import { DuplicateDetectionService } from './duplicate-detection/duplicate-detection.service';
 import { PriorityService } from './priority/priority.service';
-import { IncidentStatus, IncidentType, IncidentPriority } from '@agap/shared';
+import { IncidentStatus, IncidentType, IncidentPriority, isCoordinateInBocaue } from '@agap/shared';
 import { Prisma, type Incident } from '@prisma/client';
 import { EmergencyContactNotificationService } from '../emergency-contacts/emergency-contact-notification.service';
 
@@ -31,6 +31,13 @@ export class IncidentsService {
   ) {}
 
   async create(dto: CreateIncidentDto, actorId?: string): Promise<Incident> {
+    if ((dto.lat === undefined) !== (dto.lng === undefined)) {
+      throw new BadRequestException('Latitude and longitude must be provided together.');
+    }
+    if (dto.lat !== undefined && dto.lng !== undefined && !isCoordinateInBocaue(dto.lat, dto.lng)) {
+      throw new BadRequestException('Incident location must be within Bocaue Municipality, Bulacan.');
+    }
+
     const existing = await this.prisma.incident.findFirst({
       where: { client_event_id: dto.idempotencyKey },
     });

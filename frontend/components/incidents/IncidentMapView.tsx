@@ -2,12 +2,11 @@
 
 import { useEffect, type JSX } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup, Tooltip, useMap } from 'react-leaflet';
+import { isCoordinateInBocaue } from '@agap/shared';
 import 'leaflet/dist/leaflet.css';
 import { titleCase, timeAgo } from '@/lib/incident-format';
 import type { LiveResponderPosition } from '@/features/map/api';
-
-// Bocaue municipal center.
-const BOCAUE: [number, number] = [14.7969, 120.9268];
+import { BOCAUE_CENTER, BOCAUE_MAP_OPTIONS, BocaueMapBoundary } from '@/components/map/BocaueMapBoundary';
 
 /**
  * Flood-prone barangays (CLAUDE.md Bocaue Operational Context). Coordinates are
@@ -20,6 +19,9 @@ const FLOOD_PRONE: Array<{ name: string; center: [number, number]; radiusM: numb
   { name: 'Igulot',   center: [14.7097, 120.9500], radiusM: 850 },
   { name: 'Bambang',  center: [14.7847, 120.9103], radiusM: 900 },
 ];
+const IN_BOUNDS_FLOOD_PRONE = FLOOD_PRONE.filter(({ center: [lat, lng] }) =>
+  isCoordinateInBocaue(lat, lng),
+);
 
 const PRIORITY_HEX: Record<string, string> = {
   CRITICAL: '#DC2626',
@@ -45,7 +47,12 @@ function coordsOf(i: MapIncident): [number, number] | null {
   const lat = Number(i.lat);
   const lng = Number(i.lng);
   // (0,0) is the sentinel for address-only / manual entries — not mappable.
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    (lat === 0 && lng === 0) ||
+    !isCoordinateInBocaue(lat, lng)
+  ) return null;
   return [lat, lng];
 }
 
@@ -76,15 +83,16 @@ interface IncidentMapViewProps {
  */
 export function IncidentMapView({ incidents, responders, selectedId, onSelect }: IncidentMapViewProps): JSX.Element {
   return (
-    <MapContainer center={BOCAUE} zoom={13} className="h-full w-full" style={{ background: '#F2F5F8' }}>
+    <MapContainer center={BOCAUE_CENTER} zoom={13} {...BOCAUE_MAP_OPTIONS} className="h-full w-full" style={{ background: '#F2F5F8' }}>
       <TileLayer
-        attribution='&copy; OpenStreetMap contributors'
+        attribution='&copy; OpenStreetMap contributors · Bocaue boundary: <a href="https://www.geoboundaries.org/">geoBoundaries</a> (<a href="https://creativecommons.org/licenses/by/3.0/igo/">CC BY 3.0 IGO</a>)'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <BocaueMapBoundary />
       <MapController incidents={incidents} selectedId={selectedId} />
 
       {/* Flood-prone barangay advisory overlays */}
-      {FLOOD_PRONE.map((b) => (
+      {IN_BOUNDS_FLOOD_PRONE.map((b) => (
         <Circle
           key={b.name}
           center={b.center}
@@ -135,7 +143,7 @@ export function IncidentMapView({ incidents, responders, selectedId, onSelect }:
 
       {/* Live responder markers */}
       {responders.map((r) => {
-        if (r.lat == null || r.lng == null) return null;
+        if (r.lat == null || r.lng == null || !isCoordinateInBocaue(r.lat, r.lng)) return null;
         return (
           <CircleMarker
             key={r.responderId}

@@ -2,11 +2,10 @@
 
 import { type JSX } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup, Tooltip } from 'react-leaflet';
+import { isCoordinateInBocaue } from '@agap/shared';
 import 'leaflet/dist/leaflet.css';
 import type { HeatmapPoint, RiskArea } from '@/features/risk/api';
-
-// Bocaue municipal center — same as IncidentMapView.
-const BOCAUE: [number, number] = [14.7969, 120.9268];
+import { BOCAUE_CENTER, BOCAUE_MAP_OPTIONS, BocaueMapBoundary } from '@/components/map/BocaueMapBoundary';
 
 // Approximate barangay centroids for Bocaue (used for heatmap placement).
 // Coordinates are advisory — not authoritative boundary data.
@@ -75,30 +74,34 @@ export function RiskHeatmapView({ heatmap, floodZones, riskAreas }: Props): JSX.
     const key = h.barangay!.toUpperCase();
     const coords = BARANGAY_COORDS[key] ?? null;
     return { ...h, coords };
-  }).filter((p): p is typeof p & { coords: [number, number] } => p.coords !== null);
+  }).filter((p): p is typeof p & { coords: [number, number] } =>
+    p.coords !== null && isCoordinateInBocaue(p.coords[0], p.coords[1]),
+  );
 
   // Also plot flood zones that have PostGIS geometry (use barangay centroid fallback)
   const floodZonePoints = floodZones.map((fz) => {
     if (!fz.barangay) return null;
     const key = fz.barangay.toUpperCase();
     const coords = BARANGAY_COORDS[key] ?? null;
-    return coords ? { ...fz, coords } : null;
+    return coords && isCoordinateInBocaue(coords[0], coords[1]) ? { ...fz, coords } : null;
   }).filter(Boolean) as Array<RiskArea & { coords: [number, number] }>;
 
   return (
     <MapContainer
-      center={BOCAUE}
+      center={BOCAUE_CENTER}
       zoom={13}
+      {...BOCAUE_MAP_OPTIONS}
       style={{ height: '100%', width: '100%', borderRadius: '1rem' }}
       scrollWheelZoom
     >
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · Bocaue boundary: <a href="https://www.geoboundaries.org/">geoBoundaries</a> (<a href="https://creativecommons.org/licenses/by/3.0/igo/">CC BY 3.0 IGO</a>)'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <BocaueMapBoundary />
 
       {/* Flood-prone barangay overlays (advisory) */}
-      {FLOOD_OVERLAYS.map((fo) => (
+      {FLOOD_OVERLAYS.filter(({ center: [lat, lng] }) => isCoordinateInBocaue(lat, lng)).map((fo) => (
         <Circle
           key={fo.name}
           center={fo.center}
@@ -110,7 +113,7 @@ export function RiskHeatmapView({ heatmap, floodZones, riskAreas }: Props): JSX.
       ))}
 
       {/* Industrial / fireworks zones */}
-      {INDUSTRIAL_OVERLAYS.map((io) => (
+      {INDUSTRIAL_OVERLAYS.filter(({ center: [lat, lng] }) => isCoordinateInBocaue(lat, lng)).map((io) => (
         <Circle
           key={io.name}
           center={io.center}
@@ -167,7 +170,7 @@ export function RiskHeatmapView({ heatmap, floodZones, riskAreas }: Props): JSX.
         .map((ra) => {
           const key = ra.barangay!.toUpperCase();
           const coords = BARANGAY_COORDS[key];
-          if (!coords) return null;
+          if (!coords || !isCoordinateInBocaue(coords[0], coords[1])) return null;
           return (
             <CircleMarker
               key={ra.id}
