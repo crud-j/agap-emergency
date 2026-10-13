@@ -10,6 +10,11 @@ export function getSocket(): Socket {
     socket = io(`${WS_URL}/agap`, {
       autoConnect: false,
       transports: ['websocket'],
+      // Slow down reconnection retries so the browser console isn't flooded when
+      // the backend is temporarily down. Starts at 2s, caps at 30s (6× the default 5s).
+      reconnectionDelay: 2_000,
+      reconnectionDelayMax: 30_000,
+      randomizationFactor: 0.3,
     });
   }
   return socket;

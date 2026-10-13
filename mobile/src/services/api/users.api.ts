@@ -1,4 +1,5 @@
 import type { TextSize } from '../../stores/accessibility.store';
+import { apiFetch } from './http';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -13,16 +14,9 @@ export async function updateUserPreferences(
   dto: UpdatePreferencesDto,
   token: string,
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/v1/users/me`, {
+  await apiFetch(`${API_BASE}/v1/users/me`, {
     method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(dto),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as any).message ?? `HTTP ${res.status}`);
-  }
 }

@@ -1,23 +1,11 @@
+import { apiFetch, ApiError } from './http';
+
+export { ApiError };
+
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
-export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    const message = Array.isArray(err.message) ? err.message.join(', ') : err.message;
-    throw new ApiError(message ?? `HTTP ${res.status}`, res.status);
-  }
-  return res.json();
+function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  return apiFetch<T>(`${API_BASE}${path}`, options);
 }
 
 export interface AuthTokens {

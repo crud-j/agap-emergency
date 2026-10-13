@@ -1,3 +1,5 @@
+import { apiFetch } from './http';
+
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 /**
@@ -15,25 +17,10 @@ export interface IncidentMessage {
   sender_label: string;
 }
 
-async function authFetch<T>(path: string, token: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(options.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `HTTP ${res.status}`);
-  }
-  const text = await res.text();
-  return (text ? JSON.parse(text) : undefined) as T;
-}
-
 export function getIncidentMessages(incidentId: string, token: string): Promise<IncidentMessage[]> {
-  return authFetch<IncidentMessage[]>(`/v1/communications/${incidentId}`, token);
+  return apiFetch(`${API_BASE}/v1/communications/${incidentId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
 export function sendIncidentMessage(
@@ -41,8 +28,9 @@ export function sendIncidentMessage(
   messageText: string,
   token: string,
 ): Promise<IncidentMessage> {
-  return authFetch<IncidentMessage>(`/v1/communications/${incidentId}`, token, {
+  return apiFetch(`${API_BASE}/v1/communications/${incidentId}`, {
     method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ messageText }),
   });
 }

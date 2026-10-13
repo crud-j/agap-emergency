@@ -78,7 +78,9 @@ export default function AssignmentDetailScreen() {
   const { data: mapConfig } = useQuery({
     queryKey: ['map-config'],
     queryFn: () => getMapConfig(token ?? undefined),
+    enabled: MAP_AVAILABLE,
     staleTime: 5 * 60 * 1000,
+    retry: false,
   });
 
   const incident = data?.incidents ?? null;

@@ -86,8 +86,9 @@ export default function MapScreen() {
   const { data: mapConfig } = useQuery({
     queryKey: ['map-config'],
     queryFn: () => getMapConfig(token ?? undefined),
+    enabled: mapAvailable,
     staleTime: 5 * 60 * 1000,
-    retry: 0,
+    retry: false,
     gcTime: 30 * 60 * 1000,
   });
 

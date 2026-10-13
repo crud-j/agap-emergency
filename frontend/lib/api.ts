@@ -11,12 +11,16 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  // Destructure headers out first so the spread below doesn't overwrite them.
+  // Without this, `...options` re-inserts options.headers AFTER the merged object,
+  // stripping Content-Type from every POST/PATCH/PUT and breaking DTO validation.
+  const { headers: extraHeaders, ...restOptions } = options ?? {};
   const res = await fetch(`${API_BASE}/v1${path}`, {
     headers: {
       'Content-Type': 'application/json',
-      ...options?.headers,
+      ...(extraHeaders as Record<string, string>),
     },
-    ...options,
+    ...restOptions,
   });
 
   if (!res.ok) {

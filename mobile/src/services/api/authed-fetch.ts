@@ -1,5 +1,6 @@
 import { refreshAuthToken } from './auth.api';
 import { useAuthStore } from '../../stores/auth.store';
+import { defaultHeaders, NetworkError } from './http';
 
 // Deduplicates concurrent 401s so only one token exchange is in flight at a time.
 let pendingRefresh: Promise<boolean> | null = null;
@@ -22,17 +23,25 @@ async function doRefresh(): Promise<boolean> {
 
 /**
  * Drop-in fetch wrapper for authenticated endpoints. Reads the access token
- * from the auth store, injects the Authorization header, and on 401 attempts
- * one transparent token refresh before retrying. Calls logout and throws if
- * the refresh itself fails so callers surface a proper error state.
+ * from the auth store, injects the Authorization header (plus the ngrok bypass
+ * header so dev tunnels don't intercept the request), and on 401 attempts one
+ * transparent token refresh before retrying. Throws NetworkError on connectivity
+ * failure and re-throws on refresh failure so callers get a proper error state.
  */
 export async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const buildHeaders = (token: string | null) => ({
-    ...init.headers,
+  const buildHeaders = (token: string | null): Record<string, string> => ({
+    ...defaultHeaders(),
+    ...(init.headers as Record<string, string> | undefined),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   });
 
-  const res = await fetch(url, { ...init, headers: buildHeaders(useAuthStore.getState().accessToken) });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, headers: buildHeaders(useAuthStore.getState().accessToken) });
+  } catch (err) {
+    throw new NetworkError(err);
+  }
+
   if (res.status !== 401) return res;
 
   if (!pendingRefresh) {
@@ -42,5 +51,9 @@ export async function authedFetch(url: string, init: RequestInit = {}): Promise<
   const refreshed = await pendingRefresh;
   if (!refreshed) throw new Error('Session expired. Please log in again.');
 
-  return fetch(url, { ...init, headers: buildHeaders(useAuthStore.getState().accessToken) });
+  try {
+    return await fetch(url, { ...init, headers: buildHeaders(useAuthStore.getState().accessToken) });
+  } catch (err) {
+    throw new NetworkError(err);
+  }
 }

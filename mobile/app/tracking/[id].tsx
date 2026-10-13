@@ -43,10 +43,14 @@ export default function TrackingScreen() {
     enabled: !!id,
   });
 
+  // Only needed when the map can actually render. Skipping saves a network
+  // round-trip (+ up to 3 retries) whenever the native module is absent.
   const { data: mapConfig } = useQuery({
     queryKey: ['map-config'],
     queryFn: () => getMapConfig(token ?? undefined),
+    enabled: MAP_AVAILABLE,
     staleTime: 5 * 60 * 1000,
+    retry: false,
   });
 
   const live = useIncidentTracking(id, incident?.status ?? null);

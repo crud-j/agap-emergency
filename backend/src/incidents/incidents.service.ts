@@ -14,6 +14,7 @@ import { DuplicateDetectionService } from './duplicate-detection/duplicate-detec
 import { PriorityService } from './priority/priority.service';
 import { IncidentStatus, IncidentType, IncidentPriority } from '@agap/shared';
 import { Prisma, type Incident } from '@prisma/client';
+import { EmergencyContactNotificationService } from '../emergency-contacts/emergency-contact-notification.service';
 
 @Injectable()
 export class IncidentsService {
@@ -26,6 +27,7 @@ export class IncidentsService {
     private readonly priorityService: PriorityService,
     private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
+    private readonly contactNotification: EmergencyContactNotificationService,
   ) {}
 
   async create(dto: CreateIncidentDto, actorId?: string): Promise<Incident> {
@@ -151,6 +153,16 @@ export class IncidentsService {
       });
     } catch (err) {
       this.logger.warn(`Realtime emit failed for incident.created: ${String(err)}`);
+    }
+
+    // MOD-16: notify reporter's emergency contacts (best-effort, registered users only).
+    if (actorId) {
+      void this.contactNotification.notifyContactsOfIncident(
+        actorId,
+        incident.id,
+        incident.public_reference,
+        String(incident.category),
+      );
     }
 
     return incident;
