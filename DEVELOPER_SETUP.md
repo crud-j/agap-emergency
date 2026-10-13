@@ -54,12 +54,17 @@ During setup, note the password you set for the `postgres` superuser and the por
 After installation, open **pgAdmin** or **psql** and run:
 
 ```sql
-CREATE USER agap_user WITH PASSWORD 'agap_password';
+CREATE USER agap_user WITH PASSWORD 'Zxqk3zvkhfad';
 CREATE DATABASE agap_db OWNER agap_user;
 \c agap_db
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- Confirm PostGIS is available to this PostgreSQL server:
+SELECT name, default_version, installed_version
+FROM pg_available_extensions
+WHERE name = 'postgis';
 ```
 
 > PostGIS must be installed separately on Windows. Download the **Stack Builder** that ships
@@ -190,7 +195,7 @@ cd backend
 pnpm prisma migrate dev
 
 # Seed the database with initial roles, admin account, and test data
-pnpm prisma db seed
+pnpm prisma db seed  
 ```
 
 ---
@@ -305,8 +310,25 @@ IPv6 `::1` first; PostgreSQL's TCP listener may not accept that, causing a silen
 
 ### `prisma migrate dev` fails with "extension does not exist"
 
-PostGIS is not installed. Re-read step 2 and install the PostGIS extension for your
-PostgreSQL version before running migrations.
+Install PostGIS for the exact PostgreSQL server/version you connect to, then confirm
+`pg_available_extensions` lists `postgis`. Installing PostGIS for a different local
+PostgreSQL installation does not make it available to the server at your `DATABASE_URL`.
+
+If the error says PostGIS has no installation script or update path for version `3.6.1`,
+the installed PostGIS package does not provide that exact extension version. The AGAP
+migration uses the server's default available PostGIS version; do not pin an extension
+version in the migration or schema. To create the database from scratch in pgAdmin's
+Query Tool, run [backend/prisma/agap_database.sql](./backend/prisma/agap_database.sql)
+against an empty database. This manual setup does not record Prisma migration history;
+afterward, from the `backend` directory, record the migrations already included in the
+script before running future Prisma migrations:
+
+```powershell
+pnpm exec prisma migrate resolve --applied 20260921044125_init
+pnpm exec prisma migrate resolve --applied 20260925070703_add_accessibility_prefs
+pnpm exec prisma migrate resolve --applied 20261007000000_add_incident_duplicate_of
+pnpm exec prisma migrate resolve --applied 20261011000000_add_responder_availability
+```
 
 ### Redis connection refused
 
