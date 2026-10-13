@@ -1,5 +1,5 @@
 -- CreateExtension
-CREATE EXTENSION IF NOT EXISTS "postgis" WITH VERSION "3.6.1";
+CREATE EXTENSION IF NOT EXISTS "postgis";
 
 -- CreateExtension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
