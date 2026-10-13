@@ -56,4 +56,3 @@ mobile/android/app/build/
 # Agent / IDE skill dirs — contain symlinks that break EAS Build packaging on Windows
 .agents/
 .windsurf/
-docs/

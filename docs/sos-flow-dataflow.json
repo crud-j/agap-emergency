@@ -1,0 +1,353 @@
+{
+  "meta": {
+    "title": "AGAP SOS Emergency Flow — Data Flow Reference",
+    "description": "Documents every table, field, and relationship touched during a citizen SOS trigger. Covers the 4-step capture sequence: SOS Button → Location → What's Happening → Add More Details.",
+    "modules": ["MOD-06", "MOD-09", "MOD-10", "MOD-11", "MOD-12", "MOD-14", "MOD-15", "MOD-19"],
+    "architecturalRules": [
+      "Incident record is persisted to PostgreSQL BEFORE any background job",
+      "Optional fields (GPS, photo, medical) must NEVER block emergency submission",
+      "Reporter and patient are always separate records",
+      "Unknown patient is fully valid — never blocks dispatch",
+      "Offline retries are idempotent — same client_event_id = same incident, never a duplicate"
+    ],
+    "lastUpdated": "2026-10-10"
+  },
+
+  "flow": [
+    {
+      "step": 1,
+      "name": "SOS Button Pressed",
+      "module": "MOD-06",
+      "trigger": "Citizen taps the SOS button in mobile/app/emergency/sos.tsx",
+      "description": "The moment the button is pressed, a client_event_id (UUID) is generated on-device as the idempotency key. The app simultaneously fires the data path (HTTPS) and the SMS path (Textbee). If both fail, the event is saved to the local offline queue.",
+      "sequence": [
+        "1a. Generate client_event_id on-device (UUID v4)",
+        "1b. Attempt HTTPS POST to /api/v1/alerts",
+        "1c. Attempt SMS via Textbee in parallel (payload < 160 chars)",
+        "1d. If both fail → save to offline_event_queue",
+        "1e. On reconnect → flush queue using original client_event_id"
+      ],
+      "smsPayloadFormat": "AGAP|INC-2026-001234|14.5995,120.9842|1754179200|FIRE|C:Y",
+      "tables": {
+        "alert_triggers": {
+          "purpose": "Raw log of every trigger event before an Incident is confirmed",
+          "required": true,
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated", "notes": "Primary key" },
+            "incident_id": { "type": "UUID", "source": "server", "notes": "FK to Incident; linked after Incident is created" },
+            "user_id": { "type": "UUID", "source": "JWT", "notes": "Nullable — guest reporters have no user_id" },
+            "trigger_method": { "type": "enum", "source": "mobile", "values": ["SOS_BUTTON", "SHAKE_GESTURE", "MANUAL_REPORT", "DISPATCHER_CREATED", "SYSTEM_GENERATED"], "notes": "SOS_BUTTON for this flow" },
+            "client_event_id": { "type": "string (100)", "source": "mobile (UUID)", "notes": "UNIQUE — idempotency key generated on-device at trigger time" },
+            "device_info": { "type": "JSON", "source": "mobile", "notes": "Optional; OS, app version, model" },
+            "shake_magnitude": { "type": "Decimal(6,3)", "source": "mobile sensors", "notes": "Only populated for SHAKE_GESTURE triggers" },
+            "latitude": { "type": "Decimal(10,7)", "source": "Expo Location", "notes": "Best-available at trigger moment; may be refined later" },
+            "longitude": { "type": "Decimal(10,7)", "source": "Expo Location", "notes": "Best-available at trigger moment" },
+            "accuracy_meters": { "type": "Decimal(8,2)", "source": "Expo Location", "notes": "GPS accuracy radius" },
+            "triggered_at": { "type": "Timestamptz", "source": "server (now())", "notes": "Server-side timestamp of receipt" },
+            "cancel_deadline_at": { "type": "Timestamptz", "source": "server", "notes": "Countdown window for false-alert cancellation (MOD-08)" },
+            "was_cancelled": { "type": "Boolean", "source": "server", "notes": "Set to true if user cancels within deadline" },
+            "cancellation_reason": { "type": "enum", "source": "mobile", "values": ["ACCIDENTAL_TRIGGER", "SITUATION_RESOLVED", "DUPLICATE_REPORT", "WRONG_APP", "TEST", "OTHER"], "notes": "Only populated if was_cancelled = true" },
+            "cancelled_at": { "type": "Timestamptz", "source": "server", "notes": "Nullable; when cancellation was processed" }
+          }
+        },
+        "Incident": {
+          "purpose": "Central business object — created synchronously, before any background job",
+          "required": true,
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated", "notes": "Internal PK; never exposed in API" },
+            "public_reference": { "type": "string (30)", "source": "server-generated", "notes": "e.g. INC-2026-001234 — this is what citizens and dispatchers see" },
+            "trigger_method": { "type": "enum", "source": "mobile", "notes": "Mirrors alert_triggers.trigger_method" },
+            "client_event_id": { "type": "string (100)", "source": "mobile", "notes": "UNIQUE — links Incident back to alert_triggers; enables dedup" },
+            "category": { "type": "enum", "source": "mobile (step 3)", "values": ["MEDICAL", "ROAD_ACCIDENT", "FLOOD", "RESCUE", "FIRE", "INDUSTRIAL", "DEBRIS", "OTHER"], "notes": "Captured in 'What's Happening' step" },
+            "priority": { "type": "enum", "source": "server (auto-assigned)", "values": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "notes": "Default MEDIUM; MOD-24 may upgrade based on category/signals" },
+            "status": { "type": "enum", "source": "server", "values": ["SUBMITTED"], "notes": "Always starts at SUBMITTED on citizen trigger" },
+            "consciousness_state": { "type": "enum", "source": "mobile (step 3)", "values": ["CONSCIOUS", "UNCONSCIOUS", "ALTERED", "UNKNOWN"], "notes": "Default UNKNOWN if not provided" },
+            "breathing_status": { "type": "enum", "source": "mobile (step 3)", "values": ["NORMAL", "DIFFICULTY", "NOT_BREATHING", "UNKNOWN"], "notes": "Default UNKNOWN if not provided" },
+            "description": { "type": "string", "source": "mobile (step 3)", "notes": "Free-text situation description; optional" },
+            "number_of_patients": { "type": "SmallInt", "source": "mobile (step 3)", "notes": "Default 1; optional" },
+            "hazard_flags": { "type": "string[]", "source": "mobile (step 3)", "notes": "e.g. ['GAS_LEAK', 'CROWD']; optional array" },
+            "river_level_meters": { "type": "Decimal(5,2)", "source": "mobile (step 3)", "notes": "Only relevant for FLOOD category; Bocaue River critical = 11.50m" },
+            "submitted_at": { "type": "Timestamptz", "source": "server (now())", "notes": "Immutable — the official submission timestamp" },
+            "received_at": { "type": "Timestamptz", "source": "server", "notes": "Set when dispatcher acknowledges receipt" },
+            "created_at": { "type": "Timestamptz", "source": "server (now())", "notes": "Auto" },
+            "updated_at": { "type": "Timestamptz", "source": "server (now())", "notes": "Auto-updated on every change" }
+          }
+        },
+        "IncidentReporter": {
+          "purpose": "Who pressed the button — always separate from the patient record",
+          "required": true,
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated" },
+            "incident_id": { "type": "UUID", "source": "server", "notes": "1-to-1 FK to Incident; UNIQUE constraint" },
+            "user_id": { "type": "UUID", "source": "JWT", "notes": "Nullable — guest reporters have no AGAP account" },
+            "is_guest": { "type": "Boolean", "source": "mobile/JWT", "notes": "true if user is unauthenticated bystander" },
+            "reporter_name": { "type": "string (255)", "source": "mobile or user profile", "notes": "Optional; populated from profile for registered users" },
+            "reporter_phone": { "type": "string (20)", "source": "mobile or user profile", "notes": "Optional; used for dispatcher callback" },
+            "contact_callback": { "type": "string (20)", "source": "mobile", "notes": "Alternative callback number provided at trigger time" },
+            "created_at": { "type": "Timestamptz", "source": "server (now())" }
+          }
+        },
+        "offline_event_queue": {
+          "purpose": "Local queue when both data + SMS paths fail; flushed on reconnect",
+          "required": false,
+          "condition": "Only written if HTTPS POST and SMS both fail (connectivity loss in flood zones, etc.)",
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated" },
+            "client_event_id": { "type": "string (100)", "source": "mobile", "notes": "UNIQUE — same key as alert_triggers; prevents double-processing" },
+            "user_id": { "type": "UUID", "source": "JWT", "notes": "Nullable for guests" },
+            "event_type": { "type": "string (100)", "source": "mobile", "notes": "e.g. 'EMERGENCY_SOS'" },
+            "payload": { "type": "JSON", "source": "mobile", "notes": "Full incident payload exactly as it would have been sent" },
+            "device_info": { "type": "JSON", "source": "mobile", "notes": "OS, connectivity state at queue time" },
+            "queued_at_device": { "type": "Timestamptz", "source": "mobile clock", "notes": "When the event was queued on-device (may differ from server received_at)" },
+            "received_at_server": { "type": "Timestamptz", "source": "server (now())", "notes": "When the server received the flushed event" },
+            "sync_status": { "type": "enum", "source": "server", "values": ["PENDING", "SYNCED", "FAILED", "DUPLICATE_REJECTED"], "notes": "DUPLICATE_REJECTED when client_event_id already exists" },
+            "incident_id": { "type": "UUID", "source": "server", "notes": "Linked after successful processing" },
+            "processed_at": { "type": "Timestamptz", "source": "server", "notes": "When the backend processed the queued event" },
+            "error_message": { "type": "string", "source": "server", "notes": "Populated on FAILED status" }
+          }
+        }
+      }
+    },
+
+    {
+      "step": 2,
+      "name": "Getting Your Location",
+      "module": "MOD-11 + MOD-12",
+      "trigger": "Expo Location API captures GPS coordinates; backend reverse-geocodes to barangay/address",
+      "description": "GPS capture happens in parallel with SOS trigger. The coordinates are attached to the Incident as incident_locations. If GPS is unavailable, the Incident is still submitted — location is optional and must never block dispatch.",
+      "optional": true,
+      "optionalNote": "Missing GPS must never block Incident creation or dispatch (Architectural Rule #5)",
+      "tables": {
+        "incident_locations": {
+          "purpose": "The pinned GPS location of the emergency — one record per Incident",
+          "required": false,
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated" },
+            "incident_id": { "type": "UUID", "source": "server", "notes": "UNIQUE FK to Incident — one location per incident" },
+            "latitude": { "type": "Decimal(10,7)", "source": "Expo Location", "notes": "Required if record exists" },
+            "longitude": { "type": "Decimal(10,7)", "source": "Expo Location", "notes": "Required if record exists" },
+            "accuracy_meters": { "type": "Decimal(8,2)", "source": "Expo Location", "notes": "GPS fix quality indicator" },
+            "altitude_meters": { "type": "Decimal(8,2)", "source": "Expo Location", "notes": "Optional; useful for multi-storey buildings" },
+            "point": { "type": "geography (PostGIS)", "source": "server-computed", "notes": "Derived from lat/lng; enables ST_DWithin proximity queries" },
+            "formatted_address": { "type": "string", "source": "server (reverse geocoding)", "notes": "Human-readable address; MOD-12 geocoding" },
+            "street": { "type": "string (255)", "source": "server (reverse geocoding)" },
+            "barangay": { "type": "string (100)", "source": "server (reverse geocoding)", "notes": "Critical for Bocaue barangay-level dispatch routing" },
+            "municipality": { "type": "string (100)", "source": "server (reverse geocoding)", "notes": "Defaults to Bocaue" },
+            "province": { "type": "string (100)", "source": "server (reverse geocoding)", "notes": "Defaults to Bulacan" },
+            "geocoding_confidence": { "type": "Decimal(3,2)", "source": "server (geocoding provider)", "notes": "0.00–1.00 confidence score" },
+            "captured_at": { "type": "Timestamptz", "source": "server (now())" },
+            "source": { "type": "string (50)", "source": "mobile", "values": ["GPS", "NETWORK", "MANUAL"], "notes": "Defaults to GPS" }
+          }
+        },
+        "location_history": {
+          "purpose": "Ongoing location breadcrumbs for live tracking (MOD-13) — written continuously after initial capture",
+          "required": false,
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated" },
+            "incident_id": { "type": "UUID", "source": "server" },
+            "user_id": { "type": "UUID", "source": "JWT", "notes": "Reporter or responder location" },
+            "resource_id": { "type": "UUID", "source": "server", "notes": "FK to resources (ambulance/vehicle)" },
+            "latitude": { "type": "Decimal(10,7)", "source": "Expo Location (continuous)" },
+            "longitude": { "type": "Decimal(10,7)", "source": "Expo Location (continuous)" },
+            "accuracy_meters": { "type": "Decimal(8,2)", "source": "Expo Location" },
+            "speed_kmh": { "type": "Decimal(6,2)", "source": "Expo Location", "notes": "Vehicle speed for ETA calculations" },
+            "heading_degrees": { "type": "Decimal(5,2)", "source": "Expo Location", "notes": "0–360 compass heading" },
+            "point": { "type": "geography (PostGIS)", "source": "server-computed", "notes": "GiST-indexed for fast proximity lookups" },
+            "recorded_at": { "type": "Timestamptz", "source": "server (now())" }
+          }
+        }
+      }
+    },
+
+    {
+      "step": 3,
+      "name": "What's Happening",
+      "module": "MOD-09",
+      "trigger": "Citizen selects emergency category and fills in situation details in mobile/app/emergency/incident-details.tsx",
+      "description": "The citizen selects an emergency category and provides additional context. These fields update the Incident record and create an incident_details child record. Patient information is captured separately in incident_patients — patient identity is never assumed from the reporter.",
+      "tables": {
+        "Incident": {
+          "purpose": "Top-level fields updated at this step",
+          "required": true,
+          "updatedFields": {
+            "category": { "type": "enum", "source": "mobile (user selection)", "values": ["MEDICAL", "ROAD_ACCIDENT", "FLOOD", "RESCUE", "FIRE", "INDUSTRIAL", "DEBRIS", "OTHER"] },
+            "description": { "type": "string", "source": "mobile (free text)", "notes": "Brief situation description from citizen" },
+            "consciousness_state": { "type": "enum", "source": "mobile (user selection)", "values": ["CONSCIOUS", "UNCONSCIOUS", "ALTERED", "UNKNOWN"] },
+            "breathing_status": { "type": "enum", "source": "mobile (user selection)", "values": ["NORMAL", "DIFFICULTY", "NOT_BREATHING", "UNKNOWN"] },
+            "number_of_patients": { "type": "SmallInt", "source": "mobile (user input)", "notes": "Citizen's estimate of number of people needing help" },
+            "hazard_flags": { "type": "string[]", "source": "mobile (multi-select)", "notes": "e.g. ['GAS_LEAK', 'CROWD', 'ELECTRIC_HAZARD']" },
+            "river_level_meters": { "type": "Decimal(5,2)", "source": "mobile (user input)", "notes": "Only shown for FLOOD category; Bocaue River critical = 11.50m" }
+          }
+        },
+        "incident_details": {
+          "purpose": "Extended incident-specific detail fields — one-to-one with Incident",
+          "required": false,
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated" },
+            "incident_id": { "type": "UUID", "source": "server", "notes": "UNIQUE FK — one details record per incident" },
+            "subcategory": { "type": "string (100)", "source": "mobile (user selection)", "notes": "e.g. 'CARDIAC_ARREST' under MEDICAL, 'VEHICLE_COLLISION' under ROAD_ACCIDENT" },
+            "people_affected": { "type": "SmallInt", "source": "mobile (user input)", "notes": "Default 1; total people in area affected (may be > patients)" },
+            "property_damage": { "type": "Boolean", "source": "mobile (toggle)", "notes": "Is there visible property damage?" },
+            "fire_spreading": { "type": "Boolean", "source": "mobile (toggle)", "notes": "Only shown for FIRE/INDUSTRIAL category" },
+            "road_blocked": { "type": "Boolean", "source": "mobile (toggle)", "notes": "Relevant for ROAD_ACCIDENT and FLOOD" },
+            "water_level_note": { "type": "string (255)", "source": "mobile (free text)", "notes": "Narrative water level description for FLOOD category" },
+            "additional_notes": { "type": "string", "source": "mobile (free text)", "notes": "Any other details the citizen provides" },
+            "first_aid_guide_id": { "type": "UUID", "source": "server (auto-matched)", "notes": "FK to first_aid_guides — system links a relevant guide based on category" },
+            "submitted_at": { "type": "Timestamptz", "source": "server (now())" }
+          }
+        },
+        "incident_patients": {
+          "purpose": "Patient record(s) — always kept separate from IncidentReporter",
+          "required": false,
+          "criticalRule": "Reporter ≠ Patient — NEVER auto-link the reporter as a patient. Unknown patient is valid and must never block dispatch.",
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated" },
+            "incident_id": { "type": "UUID", "source": "server" },
+            "patient_sequence": { "type": "SmallInt", "source": "server", "notes": "1, 2, 3... for multi-patient incidents" },
+            "is_reporter": { "type": "Boolean", "source": "mobile (user confirms)", "notes": "true only if citizen explicitly indicates they are the patient" },
+            "is_unknown": { "type": "Boolean", "source": "mobile or server", "notes": "true when patient identity cannot be determined — fully valid state" },
+            "patient_name": { "type": "string (255)", "source": "mobile (user input)", "notes": "Optional; null for unknown patients" },
+            "approximate_age": { "type": "SmallInt", "source": "mobile (user input)", "notes": "Optional; citizen's estimate" },
+            "sex": { "type": "string (20)", "source": "mobile (user selection)", "notes": "Optional; e.g. MALE, FEMALE, UNKNOWN" },
+            "user_id": { "type": "UUID", "source": "mobile (optional link)", "notes": "Only populated if patient is a known AGAP user who consents; never auto-linked" },
+            "medical_profile_id": { "type": "UUID", "source": "server (if user_id linked + consent)", "notes": "FK to MedicalProfile — requires separate ConsentRecord; missing never blocks dispatch" },
+            "scene_assessment_notes": { "type": "string", "source": "responder (MOD-37)", "notes": "Filled by responder on-scene, not by citizen" },
+            "vitals_at_scene": { "type": "JSON", "source": "responder (MOD-37)", "notes": "Blood pressure, pulse, etc. — filled on-scene" },
+            "interventions_done": { "type": "string[]", "source": "responder (MOD-37)", "notes": "e.g. ['CPR', 'TOURNIQUET'] — filled on-scene" },
+            "created_at": { "type": "Timestamptz", "source": "server (now())" },
+            "updated_at": { "type": "Timestamptz", "source": "server (now())" }
+          }
+        },
+        "first_aid_guides": {
+          "purpose": "Read-only lookup — system surfaces relevant first aid content to citizen while waiting for responders",
+          "required": false,
+          "operation": "READ only — citizen flow never writes to this table",
+          "fields": {
+            "id": { "type": "UUID" },
+            "category": { "type": "enum (incident_category)", "notes": "Matched against Incident.category" },
+            "title": { "type": "string (255)" },
+            "content_fil": { "type": "string", "notes": "Filipino language content" },
+            "content_en": { "type": "string", "notes": "English language content" },
+            "steps": { "type": "JSON", "notes": "Ordered step array for display in mobile app" },
+            "is_active": { "type": "Boolean" },
+            "display_order": { "type": "SmallInt" }
+          }
+        }
+      }
+    },
+
+    {
+      "step": 4,
+      "name": "Add More Details (Photo Attachment)",
+      "module": "MOD-10",
+      "trigger": "Citizen optionally attaches a photo using Expo Camera or Image Picker in mobile/app/emergency/photo.tsx",
+      "description": "Photos are uploaded to object storage. The IncidentAttachment record links the stored file back to the Incident. Uploading a photo is entirely optional — its absence never delays or blocks the incident.",
+      "optional": true,
+      "optionalNote": "Photo upload must never block Incident creation or dispatch (Architectural Rule #5)",
+      "tables": {
+        "IncidentAttachment": {
+          "purpose": "Metadata record for each file attached to the incident — actual binary stored in object storage",
+          "required": false,
+          "fields": {
+            "id": { "type": "UUID", "source": "server-generated" },
+            "incident_id": { "type": "UUID", "source": "server", "notes": "FK to Incident; multiple attachments allowed per incident" },
+            "uploaded_by_id": { "type": "UUID", "source": "JWT", "notes": "Nullable for guests" },
+            "file_name": { "type": "string (255)", "source": "mobile", "notes": "Original filename from device" },
+            "file_type": { "type": "string (50)", "source": "mobile", "notes": "MIME type, e.g. image/jpeg, image/png, video/mp4" },
+            "file_size_bytes": { "type": "Int", "source": "mobile", "notes": "File size in bytes; optional" },
+            "storage_bucket": { "type": "string (255)", "source": "server (env config)", "notes": "Object storage bucket name" },
+            "storage_key": { "type": "string (500)", "source": "server", "notes": "Path within the bucket — never expose to public directly" },
+            "storage_url": { "type": "string", "source": "server (presigned URL)", "notes": "Presigned URL for authorized access; regenerated on each download request" },
+            "is_processed": { "type": "Boolean", "source": "server", "notes": "true after server-side processing (virus scan, thumbnail generation)" },
+            "uploaded_at": { "type": "Timestamptz", "source": "server (now())" }
+          }
+        }
+      }
+    }
+  ],
+
+  "crossCuttingTables": {
+    "description": "Tables written to in the background after the SOS flow completes — not part of the 4-step citizen capture sequence but triggered by it",
+    "tables": {
+      "IncidentEvent": {
+        "module": "MOD-15",
+        "purpose": "Immutable status transition log — one record per status change",
+        "trigger": "Written every time Incident.status changes (SUBMITTED → RECEIVED → ACKNOWLEDGED etc.)",
+        "fields": {
+          "incident_id": { "type": "UUID" },
+          "from_status": { "type": "enum (incident_status)", "notes": "null on first creation" },
+          "to_status": { "type": "enum (incident_status)" },
+          "triggered_by_id": { "type": "UUID", "notes": "User who caused the transition" },
+          "triggered_by_role": { "type": "enum (user_role)" },
+          "notes": { "type": "string", "notes": "Optional context for the transition" },
+          "occurred_at": { "type": "Timestamptz" }
+        }
+      },
+      "AuditLog": {
+        "module": "MOD-46",
+        "purpose": "Immutable audit trail for all consequential actions — no UPDATE or DELETE ever",
+        "trigger": "Written on every CREATE, STATUS_CHANGE, and sensitive data access",
+        "fields": {
+          "actor_id": { "type": "UUID", "notes": "User performing the action" },
+          "actor_role": { "type": "enum (user_role)" },
+          "action": { "type": "enum (audit_action)", "values": ["CREATE", "STATUS_CHANGE", "DISPATCH", "READ", "UPDATE", "DELETE"] },
+          "entity_type": { "type": "string", "notes": "e.g. 'Incident', 'IncidentReporter'" },
+          "entity_id": { "type": "UUID" },
+          "module_id": { "type": "string", "notes": "e.g. 'MOD-06'" },
+          "old_values": { "type": "JSON", "notes": "Snapshot before change" },
+          "new_values": { "type": "JSON", "notes": "Snapshot after change" },
+          "incident_id": { "type": "UUID", "notes": "Always linked when action is incident-related" },
+          "occurred_at": { "type": "Timestamptz" }
+        }
+      },
+      "Notification": {
+        "module": "MOD-16 + MOD-18",
+        "purpose": "Tracks all outbound push and SMS notifications triggered by the incident",
+        "trigger": "Background job (BullMQ) queued after Incident creation",
+        "reliabilityRule": "A failed notification must NEVER delete or cancel the Incident",
+        "fields": {
+          "incident_id": { "type": "UUID" },
+          "recipient_user_id": { "type": "UUID", "notes": "Nullable; null for SMS-only recipients" },
+          "recipient_phone": { "type": "string (20)", "notes": "For SMS notifications" },
+          "channel": { "type": "enum", "values": ["PUSH", "SMS", "IN_APP", "EMAIL"] },
+          "event_type": { "type": "string", "notes": "e.g. 'incident.created'" },
+          "sms_payload": { "type": "string (160)", "notes": "Always <= 160 chars for single-segment SMS delivery" },
+          "status": { "type": "enum", "values": ["PENDING", "SENT", "DELIVERED", "FAILED", "RETRYING", "CANCELLED"] },
+          "retry_count": { "type": "SmallInt", "notes": "Max 3 retries" }
+        }
+      }
+    }
+  },
+
+  "tableRelationshipSummary": {
+    "description": "Primary key relationships across the SOS flow",
+    "relationships": [
+      { "from": "alert_triggers", "to": "Incident", "via": "alert_triggers.incident_id", "cardinality": "many-to-one" },
+      { "from": "Incident", "to": "IncidentReporter", "via": "IncidentReporter.incident_id", "cardinality": "one-to-one", "notes": "One reporter per incident" },
+      { "from": "Incident", "to": "incident_locations", "via": "incident_locations.incident_id", "cardinality": "one-to-one", "notes": "One GPS record per incident" },
+      { "from": "Incident", "to": "incident_details", "via": "incident_details.incident_id", "cardinality": "one-to-one" },
+      { "from": "Incident", "to": "incident_patients", "via": "incident_patients.incident_id", "cardinality": "one-to-many", "notes": "Multiple patients per incident" },
+      { "from": "Incident", "to": "IncidentAttachment", "via": "IncidentAttachment.incident_id", "cardinality": "one-to-many", "notes": "Multiple photos per incident" },
+      { "from": "Incident", "to": "offline_event_queue", "via": "offline_event_queue.incident_id", "cardinality": "one-to-one" },
+      { "from": "Incident", "to": "IncidentEvent", "via": "IncidentEvent.incident_id", "cardinality": "one-to-many", "notes": "One record per status transition" },
+      { "from": "Incident", "to": "AuditLog", "via": "AuditLog.incident_id", "cardinality": "one-to-many" },
+      { "from": "Incident", "to": "Notification", "via": "Notification.incident_id", "cardinality": "one-to-many" },
+      { "from": "incident_details", "to": "first_aid_guides", "via": "incident_details.first_aid_guide_id", "cardinality": "many-to-one", "notes": "Read-only lookup; citizen never writes here" }
+    ]
+  },
+
+  "fieldSourceLegend": {
+    "mobile": "Sent by the Expo mobile app at trigger time",
+    "JWT": "Extracted from the Bearer token in the Authorization header",
+    "server-generated": "Created by the NestJS backend (UUID, timestamps, etc.)",
+    "server (now())": "PostgreSQL now() / Prisma default timestamp",
+    "server (auto-matched)": "Backend logic derives this automatically",
+    "server (reverse geocoding)": "Populated asynchronously via map provider after record creation",
+    "Expo Location": "Captured by the expo-location library from device GPS/network",
+    "mobile (user selection)": "Citizen explicitly chose from a UI picker",
+    "mobile (user input)": "Citizen typed a free-text or numeric value",
+    "mobile (toggle)": "Citizen toggled a boolean switch",
+    "mobile (multi-select)": "Citizen selected one or more options from a list",
+    "responder (MOD-37)": "Filled by responder on-scene — not part of citizen SOS flow"
+  }
+}
