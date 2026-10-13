@@ -1,4 +1,5 @@
 import { authedFetch } from './authed-fetch';
+import { apiFetch } from './http';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -18,50 +19,37 @@ export interface PaginatedNotifications {
   meta: { total: number; page: number; perPage: number; totalPages: number };
 }
 
-function authHeader(token: string) {
-  return { Authorization: `Bearer ${token}` };
-}
-
-export async function getNotifications(
-  token: string,
-  page = 1,
-): Promise<PaginatedNotifications> {
-  const res = await fetch(`${API_BASE}/v1/notifications?page=${page}`, {
-    headers: authHeader(token),
+export function getNotifications(token: string, page = 1): Promise<PaginatedNotifications> {
+  return apiFetch(`${API_BASE}/v1/notifications?page=${page}`, {
+    headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
 }
 
 export async function getUnreadCount(): Promise<number> {
   const res = await authedFetch(`${API_BASE}/v1/notifications/unread-count`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) return 0;
   const data = await res.json();
   return data.unread ?? 0;
 }
 
 export async function markAllRead(token: string): Promise<void> {
-  await fetch(`${API_BASE}/v1/notifications/read-all`, {
+  await apiFetch(`${API_BASE}/v1/notifications/read-all`, {
     method: 'PATCH',
-    headers: authHeader(token),
+    headers: { Authorization: `Bearer ${token}` },
   });
 }
 
 export async function markRead(id: string, token: string): Promise<void> {
-  await fetch(`${API_BASE}/v1/notifications/${id}/read`, {
+  await apiFetch(`${API_BASE}/v1/notifications/${id}/read`, {
     method: 'PATCH',
-    headers: authHeader(token),
+    headers: { Authorization: `Bearer ${token}` },
   });
 }
 
-export async function registerFcmToken(
-  accessToken: string,
-  fcmToken: string,
-): Promise<void> {
-  const res = await fetch(`${API_BASE}/v1/notifications/register-token`, {
+export async function registerFcmToken(accessToken: string, fcmToken: string): Promise<void> {
+  await apiFetch(`${API_BASE}/v1/notifications/register-token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeader(accessToken) },
+    headers: { Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ fcmToken }),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }

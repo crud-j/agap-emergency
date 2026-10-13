@@ -9,6 +9,7 @@ import {
   scheduleAnnouncement,
   archiveAnnouncement,
   updateAnnouncement,
+  uploadAnnouncementImage,
   type AnnouncementListParams,
   type CreateAnnouncementBody,
 } from './api';
@@ -76,6 +77,18 @@ export function useUpdateAnnouncement() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: Partial<CreateAnnouncementBody> }) =>
       updateAnnouncement(id, body),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ['announcements'] });
+      qc.invalidateQueries({ queryKey: ['announcement', id] });
+    },
+  });
+}
+
+export function useUploadAnnouncementImage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) =>
+      uploadAnnouncementImage(id, file),
     onSuccess: (_data, { id }) => {
       qc.invalidateQueries({ queryKey: ['announcements'] });
       qc.invalidateQueries({ queryKey: ['announcement', id] });

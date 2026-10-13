@@ -1,5 +1,6 @@
 import type { CreateIncidentInput } from '@agap/shared';
 import { authedFetch } from './authed-fetch';
+import { apiFetch, defaultHeaders, multipartHeaders, ApiError } from './http';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -7,27 +8,16 @@ export async function submitIncident(
   payload: CreateIncidentInput,
   token?: string,
 ): Promise<{ id: string; ticketNumber: string }> {
-  const res = await fetch(`${API_BASE}/v1/incidents`, {
+  return apiFetch(`${API_BASE}/v1/incidents`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: JSON.stringify(payload),
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `HTTP ${res.status}`);
-  }
-
-  return res.json();
 }
 
 /**
  * Upload a captured photo as an incident attachment (MOD-10).
- * Best-effort by design — the caller must never let a failure here cancel or
- * block the incident itself. Requires an authenticated citizen (JWT).
+ * Best-effort by design — a failure here must never cancel or block the incident.
  */
 export async function uploadIncidentPhoto(
   incidentId: string,
@@ -35,7 +25,7 @@ export async function uploadIncidentPhoto(
   token: string,
 ): Promise<void> {
   const name = uri.split('/').pop() || `incident-${Date.now()}.jpg`;
-  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const ext  = name.split('.').pop()?.toLowerCase() ?? '';
   const MIME: Record<string, string> = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg',
     png: 'image/png', webp: 'image/webp', mp4: 'video/mp4',
@@ -45,26 +35,23 @@ export async function uploadIncidentPhoto(
   // React Native FormData file shape.
   form.append('file', { uri, name, type } as unknown as Blob);
 
-  const res = await fetch(`${API_BASE}/v1/incidents/${incidentId}/attachments`, {
+  const res = await authedFetch(`${API_BASE}/v1/incidents/${incidentId}/attachments`, {
     method: 'POST',
-    // NOTE: do not set Content-Type — fetch adds the multipart boundary.
-    headers: { Authorization: `Bearer ${token}` },
+    // Content-Type intentionally omitted — runtime sets multipart boundary.
+    headers: multipartHeaders(token),
     body: form,
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `HTTP ${res.status}`);
+    throw new ApiError((err as any).message ?? `HTTP ${res.status}`, res.status);
   }
 }
 
 export async function getIncidentStatus(id: string, token?: string) {
-  const res = await fetch(`${API_BASE}/v1/incidents/${id}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  return apiFetch(`${API_BASE}/v1/incidents/${id}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
-
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
 }
 
 /**
@@ -73,33 +60,30 @@ export async function getIncidentStatus(id: string, token?: string) {
  */
 export async function listMyIncidents(): Promise<IncidentSummary[]> {
   const res = await authedFetch(`${API_BASE}/v1/incidents/mine`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
   const body = await res.json();
   return Array.isArray(body) ? body : (body.data ?? []);
 }
 
 /**
- * Full citizen-facing detail for one of the user's own incidents. The backend
- * enforces ownership and omits sensitive recipient data.
+ * Full citizen-facing detail for one of the user's own incidents (MOD-42).
+ * Uses authedFetch so a stale access token is refreshed automatically rather
+ * than hard-failing with 401.
  */
 export async function getIncidentHistoryDetail(
   id: string,
   token: string,
 ): Promise<IncidentHistoryDetail> {
-  const res = await fetch(`${API_BASE}/v1/incidents/${id}/detail`, {
+  const res = await authedFetch(`${API_BASE}/v1/incidents/${id}/detail`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
   return res.json();
 }
 
 /**
- * Cancel an incident (MOD-08). Reporter can cancel their own pre-dispatch
- * incident; dispatchers can cancel at any cancellable status.
- *
- * Never throws silently — callers must catch and surface errors so the UI
- * never appears to have cancelled when the request actually failed.
+ * Cancel an incident (MOD-08). Never throws silently — callers must catch and
+ * surface errors so the UI never appears to have cancelled when it hasn't.
  */
 export async function cancelIncident(
   incidentId: string,
@@ -107,20 +91,11 @@ export async function cancelIncident(
   token: string,
   notes?: string,
 ): Promise<{ id: string; status: string }> {
-  const res = await fetch(`${API_BASE}/v1/false-alerts/${incidentId}/cancel`, {
+  return apiFetch(`${API_BASE}/v1/false-alerts/${incidentId}/cancel`, {
     method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ reason, notes }),
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `HTTP ${res.status}`);
-  }
-  return res.json();
 }
 
 export enum CancellationReason {

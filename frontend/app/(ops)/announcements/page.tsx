@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, type JSX } from 'react';
+import { useState, useRef, useCallback, type JSX } from 'react';
 import {
   Megaphone, Plus, Send, CalendarClock, Archive,
-  AlertTriangle, Radio, Info,
+  AlertTriangle, Radio, Info, ImagePlus, X,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,
@@ -20,6 +20,7 @@ import {
   usePublishAnnouncement,
   useScheduleAnnouncement,
   useArchiveAnnouncement,
+  useUploadAnnouncementImage,
 } from '@/features/announcements/hooks';
 import type { Announcement, CreateAnnouncementBody } from '@/features/announcements/api';
 import { cn } from '@/lib/utils';
@@ -102,16 +103,45 @@ function ComposeDialog({ open, onOpenChange }: ComposeDialogProps): JSX.Element 
   const [form, setForm] = useState<CreateAnnouncementBody>(EMPTY_FORM);
   const [barangayInput, setBarangayInput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const create = useCreateAnnouncement();
+  const uploadImage = useUploadAnnouncementImage();
 
   function handleOpen(next: boolean) {
     if (next) {
       setForm(EMPTY_FORM);
       setBarangayInput('');
       setError(null);
+      setImageFile(null);
+      setImagePreview(null);
     }
     onOpenChange(next);
+  }
+
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Image must be JPEG, PNG, or WebP.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image must be under 5 MB.');
+      return;
+    }
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+    setError(null);
+  }, []);
+
+  function removeImage() {
+    setImageFile(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   async function handleSubmit() {
@@ -125,16 +155,22 @@ function ComposeDialog({ open, onOpenChange }: ComposeDialogProps): JSX.Element 
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-      await create.mutateAsync({ ...form, targetBarangays: barangays });
+      const draft = await create.mutateAsync({ ...form, targetBarangays: barangays });
+      // Upload image as a second step after the draft is created
+      if (imageFile && draft?.id) {
+        await uploadImage.mutateAsync({ id: draft.id, file: imageFile });
+      }
       handleOpen(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create announcement.');
     }
   }
 
+  const isBusy = create.isPending || uploadImage.isPending;
+
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Megaphone size={18} className="text-agap-green" />
@@ -240,6 +276,50 @@ function ComposeDialog({ open, onOpenChange }: ComposeDialogProps): JSX.Element 
             />
           </div>
 
+          {/* Image attachment */}
+          <div>
+            <label className="block text-xs font-semibold text-agap-textMid mb-1.5 uppercase tracking-wide">
+              Image <span className="text-agap-textSub font-normal normal-case">(optional · jpeg/png/webp · max 5 MB)</span>
+            </label>
+
+            {imagePreview ? (
+              <div className="relative rounded-xl overflow-hidden border border-[rgba(168,181,193,0.20)] bg-agap-surface">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imagePreview}
+                  alt="Announcement image preview"
+                  className="w-full max-h-48 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={removeImage}
+                  className="absolute top-2 right-2 flex items-center justify-center w-7 h-7 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
+                  aria-label="Remove image"
+                >
+                  <X size={14} />
+                </button>
+                <p className="px-3 py-1.5 text-xs text-agap-textSub truncate">{imageFile?.name}</p>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 w-full rounded-xl border border-dashed border-[rgba(168,181,193,0.40)] bg-agap-surface px-4 py-5 text-sm text-agap-textSub hover:border-agap-green hover:text-agap-green transition-colors"
+              >
+                <ImagePlus size={18} />
+                Click to attach an image
+              </button>
+            )}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+          </div>
+
           {error && (
             <p className="rounded-lg bg-agap-dangerSoft border border-[rgba(212,72,88,0.18)] px-3 py-2 text-sm text-agap-danger">
               {error}
@@ -249,7 +329,7 @@ function ComposeDialog({ open, onOpenChange }: ComposeDialogProps): JSX.Element 
 
         <DialogFooter>
           <Button variant="secondary" onClick={() => handleOpen(false)}>Cancel</Button>
-          <Button variant="primary" loading={create.isPending} onClick={handleSubmit}>
+          <Button variant="primary" loading={isBusy} onClick={handleSubmit}>
             Save as Draft
           </Button>
         </DialogFooter>
@@ -360,6 +440,21 @@ export default function AnnouncementsPage(): JSX.Element {
   // ─── Columns ─────────────────────────────────────────────────────────────
 
   const columns: Column<Announcement>[] = [
+    {
+      key: 'image',
+      header: '',
+      accessor: (row) =>
+        row.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={row.image_url}
+            alt=""
+            className="w-10 h-10 rounded-lg object-cover shrink-0 border border-[rgba(168,181,193,0.18)]"
+          />
+        ) : (
+          <div className="w-10 h-10 rounded-lg bg-agap-surface border border-[rgba(168,181,193,0.12)] shrink-0" />
+        ),
+    },
     {
       key: 'title',
       header: 'Title',

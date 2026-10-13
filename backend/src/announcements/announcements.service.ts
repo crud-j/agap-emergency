@@ -7,7 +7,7 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { SmsSubscribeDto } from './dto/sms-subscribe.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, announcement_status } from '@prisma/client';
 
 @Injectable()
 export class AnnouncementsService {
@@ -32,7 +32,9 @@ export class AnnouncementsService {
     const skip = (page - 1) * perPage;
 
     const where: Prisma.AnnouncementWhereInput = {};
-    if (filters.status) where.status = filters.status as any;
+    if (filters.status && Object.values(announcement_status).includes(filters.status as announcement_status)) {
+      where.status = filters.status as announcement_status;
+    }
     if (filters.category) where.category = filters.category as any;
 
     const data = await this.prisma.announcement.findMany({
@@ -57,7 +59,7 @@ export class AnnouncementsService {
   }
 
   async findPublished(filters: { category?: string; barangay?: string }) {
-    const where: Prisma.AnnouncementWhereInput = { status: 'PUBLISHED' };
+    const where: Prisma.AnnouncementWhereInput = { status: announcement_status.PUBLISHED };
     if (filters.category) where.category = filters.category as any;
     if (filters.barangay) where.target_barangays = { has: filters.barangay };
     return this.prisma.announcement.findMany({

@@ -7,11 +7,15 @@ import {
   Body,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Request,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { AnnouncementsService } from './announcements.service';
+import { MediaService, MULTER_MEMORY_STORAGE } from '../media/media.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { SmsSubscribeDto } from './dto/sms-subscribe.dto';
 import { Public } from '../common/decorators/public.decorator';
@@ -23,7 +27,10 @@ import { UserRole } from '@agap/shared';
 @ApiTags('announcements')
 @Controller({ path: 'announcements', version: '1' })
 export class AnnouncementsController {
-  constructor(private readonly announcementsService: AnnouncementsService) {}
+  constructor(
+    private readonly announcementsService: AnnouncementsService,
+    private readonly mediaService: MediaService,
+  ) {}
 
   @Get()
   @Public()
@@ -119,6 +126,20 @@ export class AnnouncementsController {
     @Request() req: any,
   ) {
     return this.announcementsService.schedule(id, body.scheduledAt, req.user.id);
+  }
+
+  @Post(':id/image')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ANNOUNCEMENTS_PUBLISHER, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload an image for an announcement (jpeg/png/webp, max 5 MB)' })
+  @UseInterceptors(FileInterceptor('file', { storage: MULTER_MEMORY_STORAGE }))
+  async uploadImage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.mediaService.uploadAnnouncementImage(file, id);
   }
 
   @Post(':id/archive')

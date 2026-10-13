@@ -49,12 +49,26 @@ function AuthGuard() {
   }, []);
 
   useEffect(() => {
+    // Wait until both SecureStore and accessibility prefs have been read.
     if (isLoading || !accessibilityLoaded) return;
+
+    const atRoot   = segments.length === 0;
     const inPublic = PUBLIC_SEGMENTS.some((s) => segments[0] === s);
-    if (!isAuthenticated && !inPublic) {
-      router.replace('/auth/login');
-    } else if (isAuthenticated && inPublic) {
-      router.replace(homeRouteForRole(user?.role) as never);
+
+    if (isAuthenticated) {
+      // Move out of the splash root or any public screen (onboarding/auth)
+      // and go straight to the role-specific home screen.
+      if (atRoot || inPublic) {
+        router.replace(homeRouteForRole(user?.role) as never);
+      }
+    } else {
+      if (atRoot) {
+        // First-time or logged-out user at root → begin onboarding.
+        router.replace('/onboarding/first-onbrd');
+      } else if (!inPublic) {
+        // Unauthenticated user tried to access a protected route → login.
+        router.replace('/auth/login');
+      }
     }
   }, [isAuthenticated, isLoading, accessibilityLoaded, segments, user?.role]);
 
@@ -74,6 +88,8 @@ export default function RootLayout() {
             <Stack.Screen name="home/index" options={{ animation: 'none' }} />
             <Stack.Screen name="incidents/index" options={{ animation: 'none' }} />
             <Stack.Screen name="announcements/index" options={{ animation: 'none' }} />
+            <Stack.Screen name="announcements/[id]" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="announcements/subscribe" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="profile/index" options={{ animation: 'none' }} />
           </Stack>
           {/* Global offline indicator — position:absolute overlay, never blocks taps */}

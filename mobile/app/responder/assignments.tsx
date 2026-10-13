@@ -1,4 +1,14 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl, StatusBar } from 'react-native';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
+  StatusBar,
+  Image,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -7,91 +17,227 @@ import type { Assignment } from '@/src/services/api/responders.api';
 import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
 import { categoryIcon, categoryColor, priorityColor, titleCase } from '@/src/lib/incident-visuals';
 
-const STATUS_COLOR: Record<string, string> = {
-  PENDING:      '#D97706',
-  SENT:         '#D97706',
-  ACCEPTED:     '#3B82F6',
-  EN_ROUTE:     '#0891B2',
-  ON_SCENE:     '#0D6053',
-  TRANSPORTING: '#7C3AED',
+const AGAP_ICON = require('../../assets/icons/agap-solo-icon.png') as number;
+
+const COLORS = {
+  pearl: '#F5F7FA',
+  white: '#FFFFFF',
+  green: '#0D6053',
+  greenSoft: '#EEF7F4',
+  text: '#1C2B3A',
+  secondary: '#40536D',
+  muted: '#8795A3',
+  surface: '#EDF1F4',
+  border: 'rgba(168,181,193,0.28)',
+  amber: '#D97706',
+  amberSoft: '#FFFBEB',
+  blue: '#3B82F6',
+  blueSoft: '#EFF6FF',
+  red: '#D44858',
+  redSoft: '#FDF0F1',
 };
 
 const CARD_SHADOW = {
   shadowColor: '#8795A3',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.09,
-  shadowRadius: 12,
-  elevation: 3,
+  shadowOffset: { width: 0, height: 3 },
+  shadowOpacity: 0.07,
+  shadowRadius: 10,
+  elevation: 2,
 };
 
+const STATUS_STYLES: Record<string, { label: string; color: string; background: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  PENDING: { label: 'Pending offer', color: COLORS.amber, background: COLORS.amberSoft, icon: 'time-outline' },
+  SENT: { label: 'Pending offer', color: COLORS.amber, background: COLORS.amberSoft, icon: 'time-outline' },
+  ACCEPTED: { label: 'Accepted', color: COLORS.blue, background: COLORS.blueSoft, icon: 'checkmark-circle-outline' },
+  EN_ROUTE: { label: 'En route', color: COLORS.blue, background: COLORS.blueSoft, icon: 'navigate-outline' },
+  ON_SCENE: { label: 'On scene', color: COLORS.green, background: COLORS.greenSoft, icon: 'location-outline' },
+  TRANSPORTING: { label: 'Transporting', color: '#7C3AED', background: '#F5F3FF', icon: 'car-outline' },
+  ASSISTING: { label: 'Assisting', color: COLORS.green, background: COLORS.greenSoft, icon: 'people-outline' },
+  COMPLETED: { label: 'Completed', color: COLORS.muted, background: COLORS.surface, icon: 'checkmark-done-outline' },
+  CANCELLED: { label: 'Cancelled', color: COLORS.muted, background: COLORS.surface, icon: 'close-circle-outline' },
+  REJECTED: { label: 'Declined', color: COLORS.muted, background: COLORS.surface, icon: 'close-circle-outline' },
+};
+
+function getStatus(item: Assignment) {
+  const dispatchStatus = String(item.status ?? '').toUpperCase();
+  const incidentStatus = String(item.incidents?.status ?? '').toUpperCase();
+
+  // Dispatches often remain ACCEPTED while the incident moves through operational states.
+  const effectiveStatus =
+    dispatchStatus === 'ACCEPTED' && STATUS_STYLES[incidentStatus]
+      ? incidentStatus
+      : dispatchStatus;
+
+  return STATUS_STYLES[effectiveStatus] ?? {
+    label: 'Assignment status unavailable',
+    color: COLORS.secondary,
+    background: COLORS.surface,
+    icon: 'alert-circle-outline' as const,
+  };
+}
+
 /**
- * Responder assignment queue (MOD-32). Lists the dispatches the logged-in
- * rescuer is crewed on, newest first, and opens the live assignment detail.
+ * Responder assignment queue (MOD-32).
+ * Keeps the existing API/query hook and assignment-detail route unchanged.
  */
 export default function AssignmentsScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const { assignments, isLoading, isError, isRefreshing, refetch } = useResponderAssignments();
-  const activeCount = assignments.length;
+
   const firstName = user?.full_name?.split(' ')[0] ?? 'Responder';
-  const initials = (user?.full_name?.charAt(0) ?? 'R').toUpperCase();
+  const initials = (user?.full_name?.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('') ?? 'R').toUpperCase();
+  const pendingCount = assignments.filter((item) => ['PENDING', 'SENT'].includes(String(item.status ?? '').toUpperCase())).length;
+  const unknownCount = assignments.filter((item) => getStatus(item).label === 'Assignment status unavailable').length;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.pearl} />
 
-      {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-            <View style={styles.onDutyDot} />
+        {/* ── Header bar ───────────────────────────────────────────────── */}
+        <View style={styles.headerTopRow}>
+          <View style={styles.headerLeft}>
+            <View style={styles.logoWrap}>
+              <Image source={AGAP_ICON} style={styles.logoIcon} resizeMode="contain" />
+            </View>
+            <View>
+              <Text style={styles.logoName}>AGAP</Text>
+              <Text style={styles.logoOrg}>MDRRMO Bocaue</Text>
+            </View>
           </View>
-          <View>
-            <Text style={styles.greeting}>On duty, {firstName}</Text>
-            <Text style={styles.subtitle}>
-              {activeCount > 0
-                ? `${activeCount} active assignment${activeCount > 1 ? 's' : ''}`
-                : 'Standing by'}
-            </Text>
+          <View style={styles.headerRight}>
+            <View style={[
+              styles.connPill,
+              {
+                backgroundColor: isError ? '#FEF2F2' : COLORS.white,
+                borderColor: isError ? 'rgba(220,38,38,0.22)' : COLORS.border,
+              },
+            ]}>
+              <View style={[styles.connDot, { backgroundColor: isError ? '#EF4444' : COLORS.muted }]} />
+              <Text style={[styles.connText, { color: isError ? '#DC2626' : COLORS.secondary }]}>
+                {isError ? 'Sync issue' : 'Mission queue'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={() => refetch()}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh missions"
+              hitSlop={4}
+            >
+              {isRefreshing ? (
+                <ActivityIndicator color={COLORS.green} size="small" />
+              ) : (
+                <Ionicons name="refresh-outline" size={20} color={COLORS.secondary} />
+              )}
+            </TouchableOpacity>
+            <View style={styles.avatarCircle}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
           </View>
         </View>
-        <TouchableOpacity style={styles.refreshBtn} onPress={() => refetch()} accessibilityLabel="Refresh">
-          {isRefreshing
-            ? <ActivityIndicator color="#0D6053" />
-            : <Ionicons name="refresh" size={20} color="#8795A3" />}
-        </TouchableOpacity>
+
+        {/* ── Page title ───────────────────────────────────────────────── */}
+        <View style={styles.pageTitle}>
+          <Text style={styles.pageTitleText}>Missions</Text>
+          <Text style={styles.pageTitleSub}>Assignments and incident activity</Text>
+        </View>
+
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryNumber}>{assignments.length}</Text>
+            <Text style={styles.summaryLabel}>Assignments</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryNumber, pendingCount > 0 && { color: COLORS.amber }]}>{pendingCount}</Text>
+            <Text style={styles.summaryLabel}>Pending offers</Text>
+          </View>
+          {unknownCount > 0 && (
+            <>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryItem}>
+                <Text style={[styles.summaryNumber, { color: COLORS.secondary }]}>{unknownCount}</Text>
+                <Text style={styles.summaryLabel}>Need review</Text>
+              </View>
+            </>
+          )}
+        </View>
       </View>
 
-      {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color="#0D6053" size="large" />
-        </View>
-      ) : isError ? (
-        <View style={styles.center}>
-          <View style={styles.emptyIcon}>
-            <Ionicons name="cloud-offline-outline" size={36} color="#8795A3" />
+      {isLoading && assignments.length === 0 ? (
+        <LoadingState />
+      ) : isError && assignments.length === 0 ? (
+        <View style={styles.centerState}>
+          <View style={styles.stateIcon}>
+            <Ionicons name="cloud-offline-outline" size={30} color={COLORS.secondary} />
           </View>
-          <Text style={styles.muted}>Could not load assignments.</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()}>
-            <Text style={styles.retryText}>Retry</Text>
+          <Text style={styles.stateTitle}>Unable to refresh missions</Text>
+          <Text style={styles.stateDescription}>Check your connection and try loading your assignments again.</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => refetch()} activeOpacity={0.85}>
+            <Ionicons name="refresh-outline" size={18} color={COLORS.white} />
+            <Text style={styles.primaryButtonText}>Retry</Text>
           </TouchableOpacity>
-        </View>
-      ) : assignments.length === 0 ? (
-        <View style={styles.center}>
-          <View style={styles.emptyIcon}>
-            <Ionicons name="shield-checkmark-outline" size={40} color="#8795A3" />
-          </View>
-          <Text style={styles.muted}>No active assignments</Text>
-          <Text style={styles.mutedSmall}>You'll be notified the moment you're dispatched.</Text>
         </View>
       ) : (
         <FlatList
           data={assignments}
-          keyExtractor={(i) => i.id}
-          contentContainerStyle={{ padding: 16, paddingTop: 8 }}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[
+            styles.listContent,
+            assignments.length === 0 && styles.emptyListContent,
+          ]}
+          showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={refetch} tintColor="#0D6053" />
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={refetch}
+              tintColor={COLORS.green}
+              colors={[COLORS.green]}
+            />
+          }
+          ListHeaderComponent={
+            <>
+              {isError && assignments.length > 0 && (
+                <View style={styles.staleNotice}>
+                  <Ionicons name="cloud-offline-outline" size={18} color={COLORS.amber} />
+                  <View style={styles.noticeCopy}>
+                    <Text style={styles.noticeTitle}>Unable to refresh missions</Text>
+                    <Text style={styles.noticeDescription}>Showing the assignments currently available on this device.</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => refetch()} style={styles.noticeRetry} accessibilityRole="button" accessibilityLabel="Retry refresh">
+                    <Ionicons name="refresh" size={18} color={COLORS.green} />
+                  </TouchableOpacity>
+                </View>
+              )}
+              <View style={styles.sectionHeading}>
+                <Text style={styles.sectionTitle}>Your assignments</Text>
+                <Text style={styles.sectionMeta}>Select a card for details</Text>
+              </View>
+              {unknownCount > 0 && (
+                <View style={styles.unknownNotice}>
+                  <Ionicons name="alert-circle-outline" size={18} color={COLORS.secondary} />
+                  <Text style={styles.unknownNoticeText}>
+                    {unknownCount === 1 ? 'One assignment has an unconfirmed status.' : `${unknownCount} assignments have unconfirmed statuses.`} Review these before assuming there is no active work.
+                  </Text>
+                </View>
+              )}
+            </>
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <View style={styles.stateIcon}>
+                <Ionicons name="clipboard-outline" size={32} color={COLORS.green} />
+              </View>
+              <Text style={styles.stateTitle}>No missions to show</Text>
+              <Text style={styles.stateDescription}>There are no assignments in the current response. Pull down to refresh for the latest status.</Text>
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => refetch()} activeOpacity={0.8}>
+                <Ionicons name="refresh-outline" size={17} color={COLORS.green} />
+                <Text style={styles.secondaryButtonText}>Refresh missions</Text>
+              </TouchableOpacity>
+            </View>
           }
           renderItem={({ item }) => (
             <AssignmentCard
@@ -99,123 +245,228 @@ export default function AssignmentsScreen() {
               onPress={() => router.push(`/responder/assignment/${item.id}` as never)}
             />
           )}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          ListFooterComponent={<View style={{ height: 20 }} />}
         />
       )}
     </SafeAreaView>
   );
 }
 
+function LoadingState() {
+  return (
+    <View style={styles.loadingContent}>
+      <View style={styles.loadingHeading}>
+        <ActivityIndicator color={COLORS.green} size="small" />
+        <Text style={styles.loadingText}>Loading your assignments…</Text>
+      </View>
+      {[0, 1, 2].map((key) => (
+        <View key={key} style={styles.skeletonCard}>
+          <View style={styles.skeletonTop}>
+            <View style={styles.skeletonIcon} />
+            <View style={{ flex: 1, gap: 8 }}>
+              <View style={[styles.skeletonLine, { width: '55%' }]} />
+              <View style={[styles.skeletonLine, { width: '38%' }]} />
+            </View>
+            <View style={styles.skeletonPill} />
+          </View>
+          <View style={[styles.skeletonLine, { width: '78%', marginTop: 18 }]} />
+          <View style={[styles.skeletonLine, { width: '58%', marginTop: 10 }]} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function AssignmentCard({ item, onPress }: { item: Assignment; onPress: () => void }) {
-  const incident    = item.incidents;
-  const unit        = item.resources;
-  const cat         = incident?.category;
-  const accent      = categoryColor(cat);
-  const statusColor = STATUS_COLOR[item.status] ?? '#8795A3';
-  const prioColor   = priorityColor(incident?.priority);
-  const address     =
+  const incident = item.incidents;
+  const unit = item.resources;
+  const category = incident?.category;
+  const accent = categoryColor(category);
+  const priority = String(incident?.priority ?? '').toUpperCase();
+  const priorityAccent = priorityColor(incident?.priority);
+  const status = getStatus(item);
+  const unknown = status.label === 'Assignment status unavailable';
+  const address =
     incident?.incident_locations?.formatted_address ??
     ([incident?.incident_locations?.barangay, incident?.incident_locations?.municipality]
       .filter(Boolean)
       .join(', ') || 'Location pending');
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
-      {/* Left accent bar by category */}
-      <View style={[styles.accent, { backgroundColor: accent }]} />
-
+    <TouchableOpacity
+      style={[styles.card, { borderLeftWidth: 3, borderLeftColor: accent }]}
+      onPress={onPress}
+      activeOpacity={0.78}
+      accessibilityRole="button"
+      accessibilityLabel={`${incident?.public_reference ?? 'Assignment'}, ${titleCase(category ?? 'Incident')}, ${status.label}. Open assignment details.`}
+    >
       <View style={styles.cardBody}>
-        <View style={styles.cardTop}>
-          <View style={styles.unitRow}>
-            <View style={[styles.catIcon, { backgroundColor: `${accent}18` }]}>
-              <Ionicons name={categoryIcon(cat)} size={16} color={accent} />
-            </View>
-            <Text style={styles.unit}>{unit?.call_sign ?? unit?.name ?? 'Unit'}</Text>
+        <View style={styles.cardEyebrowRow}>
+          <View style={styles.referenceWrap}>
+            <Text style={styles.referenceLabel}>INCIDENT</Text>
+            <Text style={styles.reference} numberOfLines={1}>{incident?.public_reference ?? 'Reference unavailable'}</Text>
           </View>
-          <View style={[styles.statusPill, { backgroundColor: `${statusColor}15` }]}>
-            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-            <Text style={[styles.statusText, { color: statusColor }]}>{titleCase(item.status)}</Text>
+          <View style={[styles.priorityPill, { backgroundColor: `${priorityAccent}14` }]}>
+            <View style={[styles.priorityDot, { backgroundColor: priorityAccent }]} />
+            <Text style={[styles.priorityText, { color: priorityAccent }]}>
+              {priority ? titleCase(priority) : 'Priority unavailable'}
+            </Text>
           </View>
         </View>
 
-        <Text style={styles.type}>{titleCase(incident?.category ?? 'Incident')}</Text>
-        <View style={styles.metaRow}>
-          <View style={[styles.prioTag, { borderColor: prioColor }]}>
-            <Text style={[styles.prioText, { color: prioColor }]}>{titleCase(incident?.priority)}</Text>
+        <View style={styles.categoryRow}>
+          <View style={[styles.categoryIconWrap, { backgroundColor: `${accent}16` }]}>
+            <Ionicons name={categoryIcon(category)} size={21} color={accent} />
           </View>
-          <Text style={styles.ref}>{incident?.public_reference ?? ''}</Text>
+          <View style={styles.categoryCopy}>
+            <Text style={styles.categoryTitle} numberOfLines={2}>{titleCase(category ?? 'Incident')}</Text>
+            <Text style={styles.unitText} numberOfLines={1}>
+              {unit?.call_sign ?? unit?.name ?? 'Responder assignment'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={COLORS.muted} />
         </View>
 
-        <View style={styles.addrRow}>
-          <Ionicons name="location-outline" size={14} color="#8795A3" style={{ marginRight: 4 }} />
-          <Text style={styles.addr} numberOfLines={1}>{address}</Text>
-          <Ionicons name="chevron-forward" size={16} color="#8795A3" />
+        <View style={styles.cardDivider} />
+
+        <View style={styles.detailRow}>
+          <Ionicons name="location-outline" size={17} color={COLORS.secondary} />
+          <Text style={styles.address} numberOfLines={2}>{address}</Text>
         </View>
+
+        <View style={styles.cardBottomRow}>
+          <View style={[styles.statusPill, { backgroundColor: status.background }]}>
+            <Ionicons name={status.icon} size={15} color={status.color} />
+            <Text style={[styles.statusText, { color: status.color }]} numberOfLines={1}>{status.label}</Text>
+          </View>
+          <Text style={styles.actionText}>{unknown ? 'Review status' : 'View mission'}</Text>
+        </View>
+
+        {unknown && (
+          <View style={styles.unknownCardNote}>
+            <Ionicons name="information-circle-outline" size={16} color={COLORS.secondary} />
+            <Text style={styles.unknownCardNoteText}>The latest assignment status could not be confirmed. Open details or refresh to retry.</Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F2F5F8' },
+  container: { flex: 1, backgroundColor: COLORS.pearl },
 
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 10, paddingBottom: 14,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(168,181,193,0.20)',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
+    backgroundColor: COLORS.pearl,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: {
-    width: 46, height: 46, borderRadius: 23, backgroundColor: '#0D6053',
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#0D6053', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4,
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  headerLeft:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerRight:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  logoWrap:     { width: 38, height: 38, borderRadius: 10, backgroundColor: '#0D6053', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  logoIcon:     { width: 38, height: 38 },
+  logoName:     { fontSize: 15, fontWeight: '800', color: '#1C2B3A', lineHeight: 18 },
+  logoOrg:      { fontSize: 11, color: '#8795A3', lineHeight: 15 },
+  connPill:     { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
+  connDot:      { width: 7, height: 7, borderRadius: 4 },
+  connText:     { fontSize: 12, fontWeight: '600' },
+  avatarCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF7F4', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(13,96,83,0.18)' },
+  avatarText:   { fontSize: 13, fontWeight: '800', color: COLORS.green },
+  refreshButton: {
+    width: 36, height: 36, borderRadius: 12, backgroundColor: COLORS.white,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.border,
   },
-  avatarText: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
-  onDutyDot: {
-    position: 'absolute', right: -1, bottom: -1, width: 14, height: 14, borderRadius: 7,
-    backgroundColor: '#0D6053', borderWidth: 2.5, borderColor: '#FFFFFF',
+  pageTitle:     { marginBottom: 16 },
+  pageTitleText: { fontSize: 28, fontWeight: '800', color: '#1C2B3A', lineHeight: 33, letterSpacing: -0.5 },
+  pageTitleSub:  { fontSize: 13, color: '#8795A3', marginTop: 3 },
+  summaryRow: {
+    flexDirection: 'row', alignItems: 'center', marginTop: 18, paddingVertical: 13,
+    paddingHorizontal: 16, borderRadius: 16, backgroundColor: COLORS.white,
+    borderWidth: 1, borderColor: COLORS.border, ...CARD_SHADOW,
   },
-  greeting: { fontSize: 18, fontWeight: '800', color: '#1C2B3A' },
-  subtitle: { fontSize: 13, color: '#8795A3', marginTop: 1 },
-  refreshBtn: {
-    width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#EDF1F4',
-    borderWidth: 1, borderColor: 'rgba(168,181,193,0.20)',
-  },
+  summaryItem: { flex: 1, alignItems: 'flex-start' },
+  summaryNumber: { color: COLORS.text, fontSize: 20, lineHeight: 25, fontWeight: '800' },
+  summaryLabel: { color: COLORS.secondary, fontSize: 11, marginTop: 2 },
+  summaryDivider: { width: 1, height: 30, backgroundColor: COLORS.border, marginHorizontal: 12 },
 
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 6 },
-  emptyIcon: {
-    width: 84, height: 84, borderRadius: 42, backgroundColor: '#EDF1F4',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 10,
-    borderWidth: 1, borderColor: 'rgba(168,181,193,0.20)',
+  listContent: { paddingHorizontal: 16, paddingTop: 2, paddingBottom: 24 },
+  sectionHeading: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
+  sectionTitle: { color: COLORS.text, fontSize: 17, fontWeight: '800' },
+  sectionMeta: { color: COLORS.muted, fontSize: 11 },
+  staleNotice: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, marginBottom: 14,
+    borderRadius: 14, backgroundColor: COLORS.amberSoft, borderWidth: 1, borderColor: '#F5E3BF',
   },
-  muted: { color: '#1C2B3A', fontSize: 16, fontWeight: '600' },
-  mutedSmall: { color: '#8795A3', fontSize: 13, textAlign: 'center' },
-  retryBtn: { marginTop: 14, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
-  retryText: { color: '#FFFFFF', fontWeight: '700' },
+  noticeCopy: { flex: 1 },
+  noticeTitle: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
+  noticeDescription: { color: COLORS.secondary, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  noticeRetry: { width: 40, height: 40, borderRadius: 12, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
+  unknownNotice: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 12, marginBottom: 14,
+    borderRadius: 13, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+  },
+  unknownNoticeText: { flex: 1, color: COLORS.secondary, fontSize: 12, lineHeight: 17 },
 
   card: {
-    flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 18, marginBottom: 12,
-    overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(168,181,193,0.20)',
+    backgroundColor: COLORS.white, borderRadius: 18, borderWidth: 1, borderColor: COLORS.border,
     ...CARD_SHADOW,
   },
-  accent: { width: 5 },
-  cardBody: { flex: 1, padding: 15 },
-  cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  unitRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  catIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  unit: { fontSize: 16, fontWeight: '800', color: '#1C2B3A', letterSpacing: 0.3 },
-  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4 },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  statusText: { fontSize: 11, fontWeight: '800' },
+  cardBody: { padding: 15 },
+  cardEyebrowRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  referenceWrap: { flex: 1, minWidth: 0 },
+  referenceLabel: { color: COLORS.secondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.1, marginBottom: 4 },
+  reference: { color: COLORS.text, fontSize: 15, fontWeight: '800', letterSpacing: 0.1 },
+  priorityPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 6 },
+  priorityDot: { width: 6, height: 6, borderRadius: 3 },
+  priorityText: { fontSize: 11, fontWeight: '800' },
+  categoryRow: { flexDirection: 'row', alignItems: 'center', marginTop: 15 },
+  categoryIconWrap: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
+  categoryCopy: { flex: 1, paddingRight: 8 },
+  categoryTitle: { color: COLORS.text, fontSize: 16, lineHeight: 21, fontWeight: '700' },
+  unitText: { color: COLORS.secondary, fontSize: 12, marginTop: 3 },
+  cardDivider: { height: StyleSheet.hairlineWidth, backgroundColor: COLORS.border, marginVertical: 14 },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  address: { flex: 1, color: COLORS.secondary, fontSize: 13, lineHeight: 19 },
+  cardBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 15 },
+  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7, maxWidth: '72%' },
+  statusText: { fontSize: 12, fontWeight: '700', flexShrink: 1 },
+  actionText: { color: COLORS.green, fontSize: 12, fontWeight: '800' },
+  unknownCardNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, padding: 10, marginTop: 12, borderRadius: 10, backgroundColor: COLORS.surface },
+  unknownCardNoteText: { flex: 1, color: COLORS.secondary, fontSize: 11, lineHeight: 16 },
 
-  type: { fontSize: 17, fontWeight: '700', color: '#1C2B3A', marginBottom: 8 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-  prioTag: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  prioText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
-  ref: { fontSize: 12, fontFamily: 'monospace', color: '#8795A3' },
+  centerState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingBottom: 40 },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 22, paddingVertical: 48 },
+  emptyListContent: { flexGrow: 1 },
+  stateIcon: {
+    width: 68, height: 68, borderRadius: 22, backgroundColor: COLORS.greenSoft,
+    borderWidth: 1, borderColor: '#DCECE7', alignItems: 'center', justifyContent: 'center', marginBottom: 17,
+  },
+  stateTitle: { color: COLORS.text, fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  stateDescription: { color: COLORS.secondary, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 7, maxWidth: 300 },
+  primaryButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    minHeight: 46, paddingHorizontal: 22, marginTop: 18, borderRadius: 13, backgroundColor: COLORS.green,
+  },
+  primaryButtonText: { color: COLORS.white, fontSize: 14, fontWeight: '700' },
+  secondaryButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    minHeight: 44, paddingHorizontal: 16, marginTop: 18, borderRadius: 12,
+    backgroundColor: COLORS.white, borderWidth: 1, borderColor: COLORS.border,
+  },
+  secondaryButtonText: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
 
-  addrRow: { flexDirection: 'row', alignItems: 'center' },
-  addr: { fontSize: 13, color: '#40536D', flex: 1 },
+  loadingContent: { paddingHorizontal: 16, paddingTop: 8, gap: 12 },
+  loadingHeading: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10 },
+  loadingText: { color: COLORS.secondary, fontSize: 13, fontWeight: '600' },
+  skeletonCard: {
+    backgroundColor: COLORS.white, borderRadius: 18, borderWidth: 1, borderColor: COLORS.border,
+    padding: 16, minHeight: 150, ...CARD_SHADOW,
+  },
+  skeletonTop: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  skeletonIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: COLORS.surface },
+  skeletonLine: { height: 10, borderRadius: 5, backgroundColor: COLORS.surface },
+  skeletonPill: { width: 70, height: 25, borderRadius: 8, backgroundColor: COLORS.surface },
 });

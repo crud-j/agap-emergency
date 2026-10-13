@@ -1,3 +1,5 @@
+import { apiFetch } from './http';
+
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 export interface AssessmentVitals {
@@ -22,23 +24,14 @@ export interface SubmitAssessmentInput {
   triageTag?: string;
 }
 
-export async function submitAssessment(
+export function submitAssessment(
   incidentId: string,
   body: SubmitAssessmentInput,
   token: string,
 ): Promise<{ id: string }> {
-  const res = await fetch(`${API_BASE}/v1/incidents/${incidentId}/assessment`, {
+  return apiFetch(`${API_BASE}/v1/incidents/${incidentId}/assessment`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `HTTP ${res.status}`);
-  }
-  const text = await res.text();
-  return (text ? JSON.parse(text) : { id: '' }) as { id: string };
 }

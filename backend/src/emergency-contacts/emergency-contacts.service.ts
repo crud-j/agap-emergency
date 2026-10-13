@@ -45,7 +45,10 @@ export class EmergencyContactsService {
 
   async remove(id: string, userId: string) {
     await this.verifyOwnership(id, userId);
-    await this.prisma.emergencyContact.delete({ where: { id } });
+    await this.prisma.emergencyContact.update({
+      where: { id },
+      data: { is_active: false },
+    });
   }
 
   async reorderPriority(id: string, userId: string, newPriority: number) {

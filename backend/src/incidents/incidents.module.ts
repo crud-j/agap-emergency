@@ -12,6 +12,7 @@ import { TransportService } from './transport/transport.service';
 import { MediaModule } from '../media/media.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AuditModule } from '../audit/audit.module';
+import { EmergencyContactsModule } from '../emergency-contacts/emergency-contacts.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
@@ -21,6 +22,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     MediaModule,
     RealtimeModule,
     AuditModule,
+    EmergencyContactsModule,
   ],
   controllers: [IncidentsController],
   providers: [

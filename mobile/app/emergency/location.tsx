@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Component, useMemo, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -25,44 +25,45 @@ import {
 import { OnboardProgressbar } from '@/src/components/ui/onbrd-progressbar';
 import { AccessibleText } from '@/src/components/accessibility';
 import { MapProvider, type MapClientConfig } from '@agap/shared';
+import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
+
+const CitizenLocationMap = React.lazy(
+  () => import('@/src/components/tracking/citizen-location-map'),
+);
+
+const MAPLIBRE_DEMO_STYLE = 'https://demotiles.maplibre.org/style.json';
 
 const TEAL = '#0D6053';
 
-// Mapbox public token (pk.*) — a non-secret token already shipped to the client.
-// It only builds the Static Images URL *when the backend reports Mapbox as the
-// active provider*. The provider choice itself comes from /v1/locations/map-config,
-// so switching map vendors is a backend config change, not a mobile release.
-const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAP_API_KEY;
-
-// Used when the map-config endpoint is unreachable (offline-first): fall back to
-// the build-time provider so the preview still works.
+// Used when the map-config endpoint is unreachable (offline-first): MapLibre demo
+// tiles so the preview still works without committing to any commercial provider.
 const FALLBACK_MAP_CONFIG: MapClientConfig = {
-  provider: MapProvider.MAPBOX,
+  provider: MapProvider.MAPLIBRE,
   styleUrl: null,
-  attribution: '© Mapbox © OpenStreetMap',
-  staticMapSupported: Boolean(MAPBOX_TOKEN),
+  attribution: '© OpenStreetMap contributors',
+  staticMapSupported: false,
   supports3dBuildings: false,
 };
 
-/**
- * Builds a static map image URL for the non-interactive preview using whichever
- * provider the backend reports. Returns null when the active provider has no
- * static image API (e.g. MapLibre/OSM) or no token is available, so the caller
- * can fall back to a styled placeholder.
- */
-function buildStaticMapUrl(
-  coords: { lat: number; lng: number },
-  config: MapClientConfig,
-): string | null {
-  if (!config.staticMapSupported) return null;
-  if (config.provider === MapProvider.MAPBOX && MAPBOX_TOKEN) {
-    const pin = `pin-l+0d605b(${coords.lng},${coords.lat})`;
-    return (
-      `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/${pin}/` +
-      `${coords.lng},${coords.lat},15,0/640x360@2x?access_token=${MAPBOX_TOKEN}`
-    );
+// ─── Map error boundary ───────────────────────────────────────────────────────
+
+class MapErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) {
+      return (
+        <View style={styles.mapFallback}>
+          <Ionicons name="map-outline" size={36} color="#9CA3AF" />
+          <Text style={styles.mapFallbackText}>Map failed to render on this device.</Text>
+        </View>
+      );
+    }
+    return this.props.children;
   }
-  return null;
 }
 
 type GpsStatus = 'locating' | 'ready' | 'denied' | 'error';
@@ -79,6 +80,8 @@ export default function LocationScreen() {
   const setManualAddress = useIncidentStore((s) => s.setManualAddress);
   const manualAddress = useIncidentStore((s) => s.draft.manualAddress);
   const accessToken = useAuthStore((s) => s.accessToken);
+
+  const mapAvailable = useMemo(() => isNativeMapAvailable(), []);
 
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('locating');
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
@@ -196,12 +199,42 @@ export default function LocationScreen() {
           We're capturing your current location to help send the nearest responders.
         </AccessibleText>
 
-        {/* Map preview */}
+        {/* Map preview — interactive MapLibre map, falls back when native module absent */}
         <View style={styles.mapCard}>
-          <MapPreview
-            url={coords && mapConfig ? buildStaticMapUrl(coords, mapConfig) : null}
-            loading={gpsStatus === 'locating' || (!!coords && !mapConfig)}
-          />
+          <View style={styles.map}>
+            {mapAvailable ? (
+              <MapErrorBoundary>
+                <React.Suspense
+                  fallback={
+                    <View style={styles.mapFallback}>
+                      <ActivityIndicator color={TEAL} />
+                      <Text style={styles.mapFallbackText}>Locating you on the map...</Text>
+                    </View>
+                  }
+                >
+                  <CitizenLocationMap
+                    styleUrl={(mapConfig ?? FALLBACK_MAP_CONFIG).styleUrl ?? MAPLIBRE_DEMO_STYLE}
+                    coords={coords}
+                    onRetryLocation={locate}
+                  />
+                </React.Suspense>
+              </MapErrorBoundary>
+            ) : (
+              <View style={styles.mapFallback}>
+                {gpsStatus === 'locating' ? (
+                  <>
+                    <ActivityIndicator color={TEAL} />
+                    <Text style={styles.mapFallbackText}>Locating you on the map...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="map-outline" size={40} color="#9CA3AF" />
+                    <Text style={styles.mapFallbackText}>Map preview unavailable</Text>
+                  </>
+                )}
+              </View>
+            )}
+          </View>
 
           {mapConfig?.attribution ? (
             <Text style={styles.mapAttribution}>{mapConfig.attribution}</Text>
@@ -217,18 +250,6 @@ export default function LocationScreen() {
               </Text>
             </View>
           )}
-
-          <View style={styles.mapControls}>
-            <View style={styles.mapControlBtn}>
-              <Ionicons name="navigate" size={18} color={TEAL} />
-            </View>
-            <View style={styles.mapControlBtn}>
-              <Ionicons name="layers-outline" size={18} color={TEAL} />
-            </View>
-            <TouchableOpacity style={styles.mapControlBtn} onPress={locate} accessibilityLabel="Refresh location">
-              <Ionicons name="locate" size={18} color={TEAL} />
-            </TouchableOpacity>
-          </View>
         </View>
 
         {/* Status cards */}
@@ -369,48 +390,6 @@ function gpsStatusDescription(status: GpsStatus): string {
   }
 }
 
-/**
- * Non-interactive location preview. The image URL is built from the active map
- * provider reported by /v1/locations/map-config, so this screen is vendor-neutral.
- * A null URL (unsupported provider / no token) or a failed load falls back to a
- * styled placeholder; while GPS or the config is still resolving we show a spinner.
- */
-function MapPreview({ url, loading }: { url: string | null; loading: boolean }) {
-  const [failed, setFailed] = useState(false);
-
-  // Recover if a later refresh produces a loadable tile.
-  useEffect(() => {
-    setFailed(false);
-  }, [url]);
-
-  if (!url || failed) {
-    return (
-      <View style={[styles.map, styles.mapFallback]}>
-        {loading ? (
-          <>
-            <ActivityIndicator color={TEAL} />
-            <Text style={styles.mapFallbackText}>Locating you on the map...</Text>
-          </>
-        ) : (
-          <>
-            <Ionicons name="map-outline" size={40} color="#9CA3AF" />
-            <Text style={styles.mapFallbackText}>Map preview unavailable</Text>
-          </>
-        )}
-      </View>
-    );
-  }
-
-  return (
-    <Image
-      source={{ uri: url }}
-      style={styles.map}
-      resizeMode="cover"
-      onError={() => setFailed(true)}
-      accessibilityLabel="Map showing your current location"
-    />
-  );
-}
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF' },
@@ -430,8 +409,8 @@ const styles = StyleSheet.create({
   // Map
   mapCard: { borderRadius: 18, overflow: 'hidden', marginBottom: 18, backgroundColor: '#E5E7EB' },
   map: { width: '100%', height: 190 },
-  mapFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF2F1' },
-  mapFallbackText: { marginTop: 8, fontSize: 13, color: '#6B7280', fontWeight: '500' },
+  mapFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF2F1', gap: 8 },
+  mapFallbackText: { marginTop: 4, fontSize: 13, color: '#6B7280', fontWeight: '500' },
   mapPill: {
     position: 'absolute', top: 14, alignSelf: 'center',
     backgroundColor: '#FFFFFF', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8,
@@ -444,12 +423,6 @@ const styles = StyleSheet.create({
     position: 'absolute', left: 8, bottom: 6,
     fontSize: 9, color: '#374151',
     backgroundColor: 'rgba(255,255,255,0.7)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
-  },
-  mapControls: { position: 'absolute', top: 12, right: 12, gap: 8 },
-  mapControlBtn: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF',
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
 
   // Status group

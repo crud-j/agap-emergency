@@ -18,6 +18,8 @@ export interface Announcement {
   publish_now: boolean;
   target_barangays: string[];
   sms_sent_count: number | null;
+  image_url: string | null;
+  image_storage_key: string | null;
   publisher_id: string | null;
   organization_id: string | null;
   created_at: string;
@@ -90,4 +92,24 @@ export function updateAnnouncement(
   body: Partial<CreateAnnouncementBody>,
 ): Promise<Announcement> {
   return api.patch(`/announcements/${id}`, body, getToken());
+}
+
+export async function uploadAnnouncementImage(
+  id: string,
+  file: File,
+): Promise<{ image_url: string; image_storage_key: string }> {
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+  const token = getToken();
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE}/v1/announcements/${id}/image`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any).message ?? `Upload failed (${res.status})`);
+  }
+  return res.json();
 }

@@ -478,6 +478,8 @@ model Announcement {
   superseded_by_id        String?                   @db.Uuid
   push_sent_count         Int?                      @default(0)
   sms_sent_count          Int?                      @default(0)
+  image_url               String?                   @db.VarChar(1000)
+  image_storage_key       String?                   @db.VarChar(500)
   created_at              DateTime                  @default(now()) @db.Timestamptz(6)
   updated_at              DateTime                  @default(now()) @db.Timestamptz(6)
   announcement_deliveries announcement_deliveries[]
