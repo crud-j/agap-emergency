@@ -20,7 +20,7 @@ Citizen/guest reporter accounts are intentionally excluded.
 | Role | Name | Email (login) | Phone | Password | Org | Logs in to |
 |---|---|---|---|---|---|---|
 | System Administrator | System Administrator | `admin@agap.local` *(= `INITIAL_ADMIN_EMAIL`)* | — | `INITIAL_ADMIN_PASSWORD` | Platform | Web (Admin) |
-| Dispatcher | Juan dela Cruz | `dispatcher1@mdrrmo.bocaue.gov.ph` | +639171234001 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
+| Dgaispatcher | Juan dela Cruz | `dispatcher1@mdrrmo.bocaue.gov.ph` | +639171234001 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
 | Dispatcher | Maria Santos | `dispatcher2@mdrrmo.bocaue.gov.ph` | +639171234002 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
 | Supervisor | Roberto Reyes | `supervisor@mdrrmo.bocaue.gov.ph` | +639171234003 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
 | Responder | Jose Mendoza | `responder1@mdrrmo.bocaue.gov.ph` | +639171234004 | `AgapDev2026!` | MDRRMO Bocaue | Mobile (Responder) |

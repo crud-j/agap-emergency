@@ -24,7 +24,7 @@ import {
 } from '@/src/services/api/locations.api';
 import { OnboardProgressbar } from '@/src/components/ui/onbrd-progressbar';
 import { AccessibleText } from '@/src/components/accessibility';
-import { MapProvider, type MapClientConfig } from '@agap/shared';
+import { isCoordinateInBocaue, MapProvider, type MapClientConfig } from '@agap/shared';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 
 const CitizenLocationMap = React.lazy(
@@ -93,6 +93,7 @@ export default function LocationScreen() {
   const [editing, setEditing] = useState(false);
   const [manualText, setManualText] = useState('');
   const [mapConfig, setMapConfig] = useState<MapClientConfig | null>(null);
+  const [locationWarning, setLocationWarning] = useState<string | null>(null);
 
   useEffect(() => {
     locate();
@@ -109,12 +110,21 @@ export default function LocationScreen() {
   }
 
   async function locate() {
+    setLocationWarning(null);
     setGpsStatus('locating');
     // Reusable MOD-11 capture: handles permission, best-of-N sampling, and a
     // bounded timeout. Returns a typed outcome — it never throws.
     const outcome = await captureBestFix();
     if (outcome.status !== 'ready') {
       setGpsStatus(outcome.status); // 'denied' | 'error'
+      return;
+    }
+    if (!isCoordinateInBocaue(outcome.fix.lat, outcome.fix.lng)) {
+      setCoords(null);
+      setGpsStatus('error');
+      setLocationWarning(
+        'Your GPS fix is outside Bocaue Municipality. Retry your location, or continue without precise GPS and describe the Bocaue location.',
+      );
       return;
     }
     const next = {
@@ -201,6 +211,12 @@ export default function LocationScreen() {
         <AccessibleText style={styles.subtitle} tone="muted">
           We're capturing your current location to help send the nearest responders.
         </AccessibleText>
+        {locationWarning && (
+          <View style={styles.locationWarning} accessibilityRole="alert">
+            <Ionicons name="warning" size={18} color="#92400E" />
+            <Text style={styles.locationWarningText}>{locationWarning}</Text>
+          </View>
+        )}
 
         {/* Map preview — interactive MapLibre map, falls back when native module absent */}
         <View style={styles.mapCard}>
@@ -408,6 +424,18 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 24 },
   title: { fontSize: 30, fontWeight: '800', color: TEAL, lineHeight: 36, marginBottom: 8 },
   subtitle: { fontSize: 14, color: '#6B7280', lineHeight: 21, marginBottom: 18 },
+  locationWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    backgroundColor: '#FFFBEB',
+    padding: 12,
+    marginBottom: 16,
+  },
+  locationWarningText: { flex: 1, color: '#78350F', fontSize: 13, lineHeight: 19 },
 
   // Map
   mapCard: { borderRadius: 18, overflow: 'hidden', marginBottom: 18, backgroundColor: '#E5E7EB' },

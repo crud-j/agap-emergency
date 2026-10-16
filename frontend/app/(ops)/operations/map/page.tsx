@@ -9,6 +9,7 @@ import { useWsState } from '@/lib/use-ws-state';
 import { useIncidentLocations, useLiveResponders } from '@/features/map/hooks';
 import { ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { MapIncident } from '@/components/incidents/IncidentMapView';
+import { isCoordinateInBocaue } from '@agap/shared';
 
 // MapLibre GL uses WebGL + Web Workers; must be client-side only.
 const IncidentMapView = dynamic(
@@ -49,6 +50,16 @@ export default function MapPage(): JSX.Element {
     () => (incidentLocations ?? []).filter((i) => ACTIVE_STATUSES.includes(i.status)),
     [incidentLocations],
   );
+  const excludedIncidents = incidents.filter(
+    (incident) =>
+      incident.lat != null &&
+      incident.lng != null &&
+      (incident.lat !== 0 || incident.lng !== 0) &&
+      !isCoordinateInBocaue(incident.lat, incident.lng),
+  ).length;
+  const excludedResponders = (responders ?? []).filter(
+    (responder) => !isCoordinateInBocaue(responder.lat, responder.lng),
+  ).length;
 
   function select(id: string) {
     setSelectedId(id);
@@ -73,6 +84,11 @@ export default function MapPage(): JSX.Element {
         {isError && (
           <div className="absolute left-1/2 top-4 z-[1000] -translate-x-1/2 rounded-lg bg-agap-dangerSoft px-3 py-1.5 text-xs font-semibold text-agap-danger shadow-card">
             Incident layer failed to load — responder positions may still update.
+          </div>
+        )}
+        {(excludedIncidents > 0 || excludedResponders > 0) && (
+          <div className="absolute right-4 top-4 z-[1000] max-w-sm rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 shadow-card">
+            {excludedIncidents + excludedResponders} incident/responder location(s) outside Bocaue are omitted from the map.
           </div>
         )}
         <IncidentMapView

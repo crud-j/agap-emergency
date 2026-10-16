@@ -328,6 +328,7 @@ pnpm exec prisma migrate resolve --applied 20260921044125_init
 pnpm exec prisma migrate resolve --applied 20260925070703_add_accessibility_prefs
 pnpm exec prisma migrate resolve --applied 20261007000000_add_incident_duplicate_of
 pnpm exec prisma migrate resolve --applied 20261011000000_add_responder_availability
+pnpm exec prisma migrate resolve --applied 20261012155848_add_announcement_image
 ```
 
 ### Redis connection refused
