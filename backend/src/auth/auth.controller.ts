@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, ParseUUIDPipe, Ip } from '@nestjs/common';
+import { BadRequestException, Controller, HttpCode, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, ParseUUIDPipe, Ip } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -7,6 +7,7 @@ import { WebAuthnService } from './webauthn.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { RegisterDto } from './dto/register.dto';
+import { GeoCheckDto } from './dto/geo-check.dto';
 import { RegisterGuestDto } from './dto/register-guest.dto';
 import { LoginPhoneDto } from './dto/login-phone.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -26,6 +27,16 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly webAuthnService: WebAuthnService,
   ) {}
+
+  @Post('geo-check')
+  @Public()
+  @HttpCode(200)
+  @Throttle({ burst: { ttl: 60000, limit: 20 }, sustained: { ttl: 900000, limit: 60 } })
+  @ApiOperation({ summary: 'Check whether a GPS coordinate is inside Bocaue, Bulacan' })
+  @ApiResponse({ status: 200, description: 'Inside/outside result' })
+  async geoCheck(@Body() dto: GeoCheckDto) {
+    return this.authService.checkGeoFence(dto.latitude, dto.longitude);
+  }
 
   @Post('register')
   @Public()

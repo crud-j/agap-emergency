@@ -4,6 +4,7 @@ import { useMemo, useState, type JSX } from 'react';
 import {
   Truck, Flame, Waves, Users, Package,
   Search, CheckCircle2, Radio, MapPin, AlertCircle, Wrench,
+  UserCheck, UserX, UserMinus,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -15,8 +16,10 @@ import { useWsState } from '@/lib/use-ws-state';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { titleCase } from '@/lib/incident-format';
 import { useResources, useUpdateResourceStatus } from '@/features/resources/hooks';
+import { useResponders } from '@/features/responders/hooks';
 import { useOrganizations } from '@/features/organizations/hooks';
 import type { Resource } from '@/features/resources/api';
+import type { Responder } from '@/features/responders/api';
 import { cn } from '@/lib/utils';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -204,6 +207,92 @@ function UnitCard({ resource, canChangeStatus }: UnitCardProps): JSX.Element {
   );
 }
 
+// ─── Responder card ───────────────────────────────────────────────────────────
+
+interface AvailabilityStyle {
+  card: string;
+  badge: string;
+  icon: LucideIcon;
+  label: string;
+}
+
+function responderAvailabilityStyle(status: string): AvailabilityStyle {
+  switch (status) {
+    case 'AVAILABLE':
+      return {
+        card:  'border-[rgba(13,96,83,0.16)] bg-white',
+        badge: 'bg-agap-greenSoft text-agap-green',
+        icon:  UserCheck,
+        label: 'Available',
+      };
+    case 'OFF_DUTY':
+      return {
+        card:  'border-[rgba(168,181,193,0.24)] bg-agap-surface',
+        badge: 'bg-slate-100 text-slate-500',
+        icon:  UserMinus,
+        label: 'Off Duty',
+      };
+    case 'UNAVAILABLE':
+      return {
+        card:  'border-[rgba(212,72,88,0.22)] bg-agap-dangerSoft',
+        badge: 'bg-red-100 text-red-600',
+        icon:  UserX,
+        label: 'Unavailable',
+      };
+    default:
+      return {
+        card:  'border-[rgba(168,181,193,0.24)] bg-white',
+        badge: 'bg-slate-100 text-slate-500',
+        icon:  Users,
+        label: titleCase(status),
+      };
+  }
+}
+
+function ResponderCard({ responder }: { responder: Responder }): JSX.Element {
+  const style = responderAvailabilityStyle(responder.availability_status);
+  const StatusIcon = style.icon;
+  const initials = responder.full_name
+    .split(' ')
+    .map((p) => p[0] ?? '')
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
+  return (
+    <div
+      className={cn(
+        'flex flex-col gap-3 rounded-2xl border p-4 shadow-tile transition-colors duration-300',
+        style.card,
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-tile font-bold text-sm text-agap-textMid">
+            {initials}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate font-bold text-agap-textMain leading-tight">{responder.full_name}</p>
+            {responder.phone_number && (
+              <p className="font-mono text-[11px] text-agap-textSub leading-tight">{responder.phone_number}</p>
+            )}
+          </div>
+        </div>
+        <span className={cn(
+          'inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold',
+          style.badge,
+        )}>
+          <StatusIcon size={11} />
+          {style.label}
+        </span>
+      </div>
+      {responder.organization && (
+        <p className="text-xs text-agap-textSub truncate">{responder.organization.name}</p>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FleetPage(): JSX.Element {
@@ -217,10 +306,13 @@ export default function FleetPage(): JSX.Element {
   const { data, isLoading, isError, refetch } = useResources({ perPage: 500 });
   const resources = useMemo<Resource[]>(() => data?.data ?? [], [data]);
 
+  const { data: responders = [], isLoading: respondersLoading } = useResponders({ perPage: 200 });
+
   const [search, setSearch]       = useState('');
   const [orgFilter, setOrgFilter] = useState(ALL);
   const [typeFilter, setTypeFilter]     = useState(ALL);
   const [statusFilter, setStatusFilter] = useState(ALL);
+  const [responderAvailFilter, setResponderAvailFilter] = useState(ALL);
 
   const filtered = useMemo<Resource[]>(() => {
     const q = search.trim().toLowerCase();
@@ -237,11 +329,28 @@ export default function FleetPage(): JSX.Element {
       );
   }, [resources, search, orgFilter, typeFilter, statusFilter]);
 
-  // Summary counts
+  const filteredResponders = useMemo<Responder[]>(() => {
+    const q = search.trim().toLowerCase();
+    return responders
+      .filter((r) => (responderAvailFilter === ALL ? true : r.availability_status === responderAvailFilter))
+      .filter((r) =>
+        q
+          ? r.full_name.toLowerCase().includes(q) ||
+            (r.organization?.name ?? '').toLowerCase().includes(q)
+          : true,
+      );
+  }, [responders, search, responderAvailFilter]);
+
+  // Summary counts — resources
   const total        = resources.length;
   const available    = resources.filter((r) => r.status === 'AVAILABLE').length;
   const active       = resources.filter((r) => ['DISPATCHED', 'EN_ROUTE', 'ON_SCENE'].includes(r.status)).length;
   const unavailable  = resources.filter((r) => ['OUT_OF_SERVICE', 'MAINTENANCE'].includes(r.status)).length;
+
+  // Summary counts — personnel
+  const totalPersonnel     = responders.length;
+  const availPersonnel     = responders.filter((r) => r.availability_status === 'AVAILABLE').length;
+  const offDutyPersonnel   = responders.filter((r) => r.availability_status === 'OFF_DUTY').length;
 
   return (
     <div className="space-y-5">
@@ -383,6 +492,91 @@ export default function FleetPage(): JSX.Element {
           ))}
         </div>
       )}
+
+      {/* ── Personnel section ──────────────────────────────────────────────── */}
+      <div className="border-t border-[rgba(168,181,193,0.18)] pt-5 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-extrabold text-agap-textMain">Personnel — Responder Availability</h2>
+            <p className="mt-0.5 text-sm text-agap-textSub">
+              {respondersLoading ? 'Loading…' : `${filteredResponders.length} of ${totalPersonnel} responder${totalPersonnel === 1 ? '' : 's'} shown`}
+            </p>
+          </div>
+        </div>
+
+        {/* Personnel stat cards */}
+        {!respondersLoading && totalPersonnel > 0 && (
+          <div className="grid grid-cols-3 gap-3">
+            <StatCard
+              label="Total Responders"
+              value={totalPersonnel}
+              icon={<Users size={16} />}
+            />
+            <StatCard
+              label="Available"
+              value={availPersonnel}
+              icon={<UserCheck size={16} />}
+              variant="success"
+            />
+            <StatCard
+              label="Off Duty"
+              value={offDutyPersonnel}
+              icon={<UserMinus size={16} />}
+            />
+          </div>
+        )}
+
+        {/* Availability filter */}
+        {!respondersLoading && totalPersonnel > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={responderAvailFilter} onValueChange={setResponderAvailFilter}>
+              <SelectTrigger className="w-44"><SelectValue placeholder="All statuses" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All statuses</SelectItem>
+                <SelectItem value="AVAILABLE">Available</SelectItem>
+                <SelectItem value="OFF_DUTY">Off Duty</SelectItem>
+                <SelectItem value="UNAVAILABLE">Unavailable</SelectItem>
+              </SelectContent>
+            </Select>
+            {responderAvailFilter !== ALL && (
+              <Button variant="ghost" size="sm" onClick={() => setResponderAvailFilter(ALL)}>
+                Clear
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Loading skeleton */}
+        {respondersLoading && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-28 animate-pulse rounded-2xl border border-[rgba(168,181,193,0.20)] bg-agap-surface" />
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!respondersLoading && filteredResponders.length === 0 && (
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white py-12 text-center shadow-tile">
+            <Users size={28} className="mb-3 text-agap-track" />
+            <p className="font-semibold text-agap-textMain">No responders found</p>
+            <p className="mt-1 text-sm text-agap-textSub">
+              {totalPersonnel === 0
+                ? 'No responder accounts have been registered yet.'
+                : 'Adjust the filter above.'}
+            </p>
+          </div>
+        )}
+
+        {/* Responder card grid */}
+        {!respondersLoading && filteredResponders.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filteredResponders.map((r) => (
+              <ResponderCard key={r.id} responder={r} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -17,7 +17,10 @@ export const DialogOverlay = forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'fixed inset-0 z-50 bg-black/30 backdrop-blur-sm',
+      // z-[1300]: above the drawer (z-[1200]/[1210]) so the Resolution dialog,
+      // which opens from within the incident drawer, layers correctly — and above
+      // Leaflet map UI (z-index 1000).
+      'fixed inset-0 z-[1300] bg-black/30 backdrop-blur-sm',
       'data-[state=open]:animate-in data-[state=closed]:animate-out',
       'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className,
@@ -36,7 +39,7 @@ export const DialogContent = forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
+        'fixed left-1/2 top-1/2 z-[1310] w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
         'bg-white rounded-2xl shadow-[0_20px_60px_rgba(135,149,163,0.20)] border border-[rgba(168,181,193,0.20)]',
         'p-6 focus:outline-none',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',

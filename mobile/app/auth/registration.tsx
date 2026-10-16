@@ -14,29 +14,62 @@ import {
   ActivityIndicator,
   Modal,
   Animated,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import MaskedView from '@react-native-masked-view/masked-view';
+import * as Location from 'expo-location';
 import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import type { Language } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
-import { register } from '../../src/services/api/auth.api';
+import { register, geoCheck } from '../../src/services/api/auth.api';
+
+// ─── Validation schema (address fields removed) ──────────────────────────────
 
 const registerSchema = z.object({
-  fullName: z.string().min(2, 'Full name must be at least 2 characters.'),
-  phoneNumber: z.string().regex(/^(\+63|0)9\d{9}$/, 'Enter a valid Philippine mobile number.'),
-  email: z.string().email('Enter a valid email address.').optional().or(z.literal('')),
-  password: z.string().min(8, 'Password must be at least 8 characters.'),
+  fullName:        z.string().min(2, 'Full name must be at least 2 characters.'),
+  phoneNumber:     z.string().regex(/^(\+63|0)9\d{9}$/, 'Enter a valid Philippine mobile number.'),
+  email:           z.string().email('Enter a valid email address.').optional().or(z.literal('')),
+  password:        z.string().min(8, 'Password must be at least 8 characters.'),
   confirmPassword: z.string(),
 }).refine((d) => d.password === d.confirmPassword, {
   message: 'Passwords do not match.',
   path: ['confirmPassword'],
 });
 
-// SVG logo fallback pattern
+// ─── Geo-fence ───────────────────────────────────────────────────────────────
+
+// Rough bounding box used as a fast-fail before the server-side PostGIS check.
+// The server check is the authoritative gate; this just avoids a network round-trip
+// for coordinates that are clearly outside Bocaue.
+const BOCAUE_BOUNDS = {
+  minLat: 14.770, maxLat: 14.840,
+  minLng: 120.885, maxLng: 120.980,
+};
+function isInBocaueBoundingBox(lat: number, lng: number): boolean {
+  return (
+    lat >= BOCAUE_BOUNDS.minLat && lat <= BOCAUE_BOUNDS.maxLat &&
+    lng >= BOCAUE_BOUNDS.minLng && lng <= BOCAUE_BOUNDS.maxLng
+  );
+}
+
+// ─── Location step state machine ─────────────────────────────────────────────
+
+type LocationStep =
+  | 'permission'   // initial: show rationale + "Allow" button
+  | 'requesting'   // OS permission dialog in progress or GPS acquiring
+  | 'denied'       // permission permanently denied
+  | 'gps_error'    // GPS timeout / low-accuracy failure
+  | 'checking'     // server-side geo-fence API call in progress
+  | 'outside'      // geo-fence returned inside=false
+  | 'geo_error'    // geo-check API threw an error
+  | 'inside';      // geo-fence passed → show registration form
+
+// ─── SVG logo fallback ───────────────────────────────────────────────────────
+
 import AgapLogoSvg from '../../assets/icons/agap-svg-icon.svg';
 
 const LOGO_W = 160;
@@ -63,42 +96,112 @@ function AgapLogo() {
   );
 }
 
+// ─── Component ───────────────────────────────────────────────────────────────
+
 export default function RegistrationScreen() {
   const router = useRouter();
   const { loadFromStorage, setPreferences, language } = useAccessibilityStore();
   const t = useTranslations();
 
-  // Form State
-  const [fullName, setFullName] = useState('');
-  const [mobileNumber, setMobileNumber] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // ── Location state ──
+  const [locationStep, setLocationStep] = useState<LocationStep>('permission');
+  const [capturedCoords, setCapturedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  // ── Form state ──
+  const [fullName, setFullName]               = useState('');
+  const [mobileNumber, setMobileNumber]       = useState('');
+  const [email, setEmail]                     = useState('');
+  const [password, setPassword]               = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // UX State
-  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  // ── UX state ──
+  const [isPasswordVisible, setIsPasswordVisible]               = useState(false);
   const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
-  const [agreeTerms, setAgreeTerms] = useState(true);
-  const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [agreeTerms, setAgreeTerms]         = useState(true);
+  const [focusedField, setFocusedField]     = useState<string | null>(null);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [apiError, setApiError] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const [isLoading, setIsLoading]           = useState(false);
+  const [fieldErrors, setFieldErrors]       = useState<Record<string, string>>({});
+  const [apiError, setApiError]             = useState('');
+  const [showModal, setShowModal]           = useState(false);
+  const [isSuccess, setIsSuccess]           = useState(false);
   const [submittedPhone, setSubmittedPhone] = useState('');
-  const checkScale = useRef(new Animated.Value(0)).current;
+  const checkScale  = useRef(new Animated.Value(0)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    loadFromStorage();
-  }, []);
+  useEffect(() => { loadFromStorage(); }, []);
+
+  // ── Location / geo-fence handlers ──────────────────────────────────────────
+
+  async function handleGeoFenceCheck(skipBoundingBox = false) {
+    // Dev-only bypass: set EXPO_PUBLIC_DEV_SKIP_GEO_FENCE=true in .env.development
+    if (process.env.EXPO_PUBLIC_DEV_SKIP_GEO_FENCE === 'true') {
+      setCapturedCoords({ latitude: 14.7977, longitude: 120.9374 });
+      setLocationStep('inside');
+      return;
+    }
+
+    setLocationStep('requesting');
+    try {
+      const locationPromise = Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 10_000),
+      );
+      const location = await Promise.race([locationPromise, timeoutPromise]);
+      const { latitude, longitude } = location.coords;
+
+      // Client-side bounding box fast-fail (skipped when explicitly retrying after an outside result)
+      if (!skipBoundingBox && !isInBocaueBoundingBox(latitude, longitude)) {
+        setLocationStep('outside');
+        return;
+      }
+
+      setLocationStep('checking');
+      const result = await geoCheck(latitude, longitude);
+      if (result.inside) {
+        setCapturedCoords({ latitude, longitude });
+        setLocationStep('inside');
+      } else {
+        setLocationStep('outside');
+      }
+    } catch (e: any) {
+      if (e?.message === 'timeout') {
+        setLocationStep('gps_error');
+      } else if (e?.message?.toLowerCase().includes('location')) {
+        setLocationStep('gps_error');
+      } else {
+        setLocationStep('geo_error');
+      }
+    }
+  }
+
+  async function handleRequestPermission() {
+    const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+    if (status === 'granted') {
+      await handleGeoFenceCheck();
+    } else if (!canAskAgain) {
+      setLocationStep('denied');
+    } else {
+      // Denied but can re-ask: treat as denied for this session
+      setLocationStep('denied');
+    }
+  }
+
+  // ── Registration submit ─────────────────────────────────────────────────────
 
   async function handleRegister() {
     setFieldErrors({});
     setApiError('');
-    const phone = mobileNumber.trim().startsWith('+63') ? mobileNumber.trim() : `+63${mobileNumber.trim().replace(/^0/, '')}`;
-    const result = registerSchema.safeParse({ fullName: fullName.trim(), phoneNumber: phone, email: email.trim() || undefined, password, confirmPassword });
+    const phone = mobileNumber.trim().startsWith('+63')
+      ? mobileNumber.trim()
+      : `+63${mobileNumber.trim().replace(/^0/, '')}`;
+
+    const result = registerSchema.safeParse({
+      fullName: fullName.trim(), phoneNumber: phone,
+      email: email.trim() || undefined, password, confirmPassword,
+    });
     if (!result.success) {
       const errs: Record<string, string> = {};
       result.error.issues.forEach((i) => { errs[i.path[0] as string] = i.message; });
@@ -112,20 +215,22 @@ export default function RegistrationScreen() {
     setIsSuccess(false);
     setShowModal(true);
     setIsLoading(true);
-
     Animated.timing(cardOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
 
     try {
-      await register({ fullName: fullName.trim(), phoneNumber: phone, email: email.trim() || undefined, password, confirmPassword });
+      await register({
+        fullName:        fullName.trim(),
+        phoneNumber:     phone,
+        email:           email.trim() || undefined,
+        password,
+        confirmPassword,
+        latitude:        capturedCoords?.latitude,
+        longitude:       capturedCoords?.longitude,
+      });
       setSubmittedPhone(phone);
       setIsLoading(false);
       setIsSuccess(true);
-      Animated.spring(checkScale, {
-        toValue: 1,
-        tension: 80,
-        friction: 6,
-        useNativeDriver: true,
-      }).start();
+      Animated.spring(checkScale, { toValue: 1, tension: 80, friction: 6, useNativeDriver: true }).start();
       setTimeout(() => {
         setShowModal(false);
         setIsSuccess(false);
@@ -137,11 +242,223 @@ export default function RegistrationScreen() {
       const msg: string = e.message ?? '';
       if (msg.toLowerCase().includes('phone') || msg.toLowerCase().includes('number')) {
         setApiError(t.registration.errorPhoneExists);
+      } else if (msg.toLowerCase().includes('bocaue')) {
+        // Server rejected the geo-fence — bounce back to outside screen
+        setLocationStep('outside');
       } else {
         setApiError(msg || t.common.error);
       }
     }
   }
+
+  // ── Render: location step screens ──────────────────────────────────────────
+
+  if (locationStep !== 'inside') {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+        <ScrollView
+          contentContainerStyle={[styles.scrollContent, styles.locationScreenContent]}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Logo */}
+          <View style={styles.logoBlock}>
+            <AgapLogo />
+          </View>
+
+          {/* ── Permission rationale ── */}
+          {locationStep === 'permission' && (
+            <View style={styles.locationCard}>
+              <View style={styles.locationIconWrap}>
+                <Ionicons name="location-outline" size={40} color="#0D6053" />
+              </View>
+              <Text style={styles.locationHeading}>Location Required</Text>
+              <Text style={styles.locationBody}>
+                AGAP is available only within{' '}
+                <Text style={styles.locationEmphasis}>Bocaue, Bulacan</Text>. We need your
+                precise location to confirm you are within the service area.
+              </Text>
+              <Text style={styles.locationSubtext}>
+                Your location is used only for this one-time check and is not stored or shared.
+              </Text>
+              <TouchableOpacity
+                testID="allow-location-btn"
+                style={styles.locationPrimaryBtn}
+                activeOpacity={0.85}
+                onPress={handleRequestPermission}
+              >
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
+                  locations={[0, 0.38, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={styles.gradientOverlay}
+                >
+                  <Ionicons name="navigate-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.solidButtonText}>Allow Location Access</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.locationSecondaryBtn}
+                activeOpacity={0.7}
+                onPress={() => router.push('/auth/login')}
+              >
+                <Text style={styles.locationSecondaryText}>Already have an account? Sign in</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ── GPS acquiring / server check loading ── */}
+          {(locationStep === 'requesting' || locationStep === 'checking') && (
+            <View style={styles.locationCard}>
+              <View style={styles.locationSpinnerWrap}>
+                <ActivityIndicator size="large" color="#0D6053" />
+              </View>
+              <Text style={styles.locationHeading}>
+                {locationStep === 'checking' ? 'Verifying your location…' : 'Detecting your location…'}
+              </Text>
+              <Text style={styles.locationBody}>Please wait a moment</Text>
+            </View>
+          )}
+
+          {/* ── Permission permanently denied ── */}
+          {locationStep === 'denied' && (
+            <View style={styles.locationCard}>
+              <View style={[styles.locationIconWrap, styles.locationIconError]}>
+                <Ionicons name="location-off-outline" size={40} color="#EF4444" />
+              </View>
+              <Text style={styles.locationHeading}>Permission Required</Text>
+              <Text style={styles.locationBody}>
+                Location access was denied. Please enable it in your device settings to continue.
+              </Text>
+              <TouchableOpacity
+                style={styles.locationPrimaryBtn}
+                activeOpacity={0.85}
+                onPress={() => Linking.openSettings()}
+              >
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
+                  locations={[0, 0.38, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={styles.gradientOverlay}
+                >
+                  <Ionicons name="settings-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.solidButtonText}>Open Settings</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.locationSecondaryBtn}
+                activeOpacity={0.7}
+                onPress={() => setLocationStep('permission')}
+              >
+                <Text style={styles.locationSecondaryText}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ── GPS timeout / signal error ── */}
+          {locationStep === 'gps_error' && (
+            <View style={styles.locationCard}>
+              <View style={[styles.locationIconWrap, styles.locationIconError]}>
+                <Ionicons name="wifi-outline" size={40} color="#F59E0B" />
+              </View>
+              <Text style={styles.locationHeading}>Weak GPS Signal</Text>
+              <Text style={styles.locationBody}>
+                We couldn't determine your location. Move to an open area for a better signal and try again.
+              </Text>
+              <TouchableOpacity
+                style={styles.locationPrimaryBtn}
+                activeOpacity={0.85}
+                onPress={() => handleGeoFenceCheck()}
+              >
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
+                  locations={[0, 0.38, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={styles.gradientOverlay}
+                >
+                  <Ionicons name="refresh-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.solidButtonText}>Retry</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ── Outside Bocaue ── */}
+          {locationStep === 'outside' && (
+            <View style={styles.locationCard}>
+              <View style={[styles.locationIconWrap, styles.locationIconWarning]}>
+                <Ionicons name="map-outline" size={40} color="#DC2626" />
+              </View>
+              <Text style={styles.locationHeading}>Service Not Available in Your Area</Text>
+              <Text style={styles.locationBody}>
+                AGAP is currently only available to residents and workers within{' '}
+                <Text style={styles.locationEmphasis}>Bocaue, Bulacan</Text>.
+              </Text>
+              <Text style={styles.locationSubtext}>
+                If you need emergency help right now, please call:
+              </Text>
+              <TouchableOpacity onPress={() => Linking.openURL('tel:911')}>
+                <Text style={styles.emergencyPhoneLink}>911 — National Emergency Hotline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => Linking.openURL('tel:+6344691-1830')}>
+                <Text style={styles.emergencyPhoneLink}>Bocaue MDRRMO Hotline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.locationPrimaryBtn, { marginTop: 24 }]}
+                activeOpacity={0.85}
+                onPress={() => handleGeoFenceCheck(true)}
+              >
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
+                  locations={[0, 0.38, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={styles.gradientOverlay}
+                >
+                  <Ionicons name="refresh-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.solidButtonText}>Try Again</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ── Geo-check API error ── */}
+          {locationStep === 'geo_error' && (
+            <View style={styles.locationCard}>
+              <View style={[styles.locationIconWrap, styles.locationIconError]}>
+                <Ionicons name="cloud-offline-outline" size={40} color="#EF4444" />
+              </View>
+              <Text style={styles.locationHeading}>Unable to Verify Location</Text>
+              <Text style={styles.locationBody}>
+                We couldn't connect to our verification service. Please check your internet connection and try again.
+              </Text>
+              <TouchableOpacity
+                style={styles.locationPrimaryBtn}
+                activeOpacity={0.85}
+                onPress={() => handleGeoFenceCheck()}
+              >
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
+                  locations={[0, 0.38, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={styles.gradientOverlay}
+                >
+                  <Ionicons name="refresh-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.solidButtonText}>Retry</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Render: registration form (geo-fence passed) ────────────────────────────
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -201,11 +518,9 @@ export default function RegistrationScreen() {
             <AgapLogo />
           </View>
 
-          {/* ── Header Texts (With Gradient) ── */}
+          {/* ── Header Texts ── */}
           <View style={styles.textBlock}>
-            <MaskedView
-              maskElement={<Text style={styles.heading}>{t.registration.heading}</Text>}
-            >
+            <MaskedView maskElement={<Text style={styles.heading}>{t.registration.heading}</Text>}>
               <LinearGradient
                 colors={['#098B81', '#004141']}
                 start={{ x: 0, y: 0 }}
@@ -217,9 +532,15 @@ export default function RegistrationScreen() {
             <Text style={styles.body}>{t.registration.body}</Text>
           </View>
 
+          {/* ── Location confirmed badge ── */}
+          <View style={styles.locationBadge}>
+            <Ionicons name="checkmark-circle" size={16} color="#0D6053" />
+            <Text style={styles.locationBadgeText}>Location confirmed — Bocaue, Bulacan</Text>
+          </View>
+
           {/* ── Form Fields ── */}
           <View style={styles.formBlock}>
-            
+
             {/* Full Name */}
             <View style={styles.inputWrapper}>
               <Text style={styles.inputLabel}>{t.registration.fullName}</Text>
@@ -227,7 +548,7 @@ export default function RegistrationScreen() {
                 <Ionicons
                   name="person-outline"
                   size={20}
-                  color={focusedField === 'name' ? "#0D6053" : "#9CA3AF"}
+                  color={focusedField === 'name' ? '#0D6053' : '#9CA3AF'}
                   style={styles.inputIconLeft}
                 />
                 <TextInput
@@ -244,15 +565,15 @@ export default function RegistrationScreen() {
               </View>
             </View>
 
-            {/* Mobile Number with Country Code */}
+            {/* Mobile Number */}
             <View style={styles.inputWrapper}>
               <Text style={styles.inputLabel}>{t.registration.mobile}</Text>
               <View style={[styles.inputContainer, focusedField === 'mobile' && styles.inputContainerFocused]}>
-                <Ionicons 
-                  name="phone-portrait-outline" 
-                  size={20} 
-                  color={focusedField === 'mobile' ? "#0D6053" : "#9CA3AF"} 
-                  style={styles.inputIconLeft} 
+                <Ionicons
+                  name="phone-portrait-outline"
+                  size={20}
+                  color={focusedField === 'mobile' ? '#0D6053' : '#9CA3AF'}
+                  style={styles.inputIconLeft}
                 />
                 <Text style={styles.countryCodeText}>+63</Text>
                 <View style={styles.verticalDivider} />
@@ -275,7 +596,7 @@ export default function RegistrationScreen() {
               )}
             </View>
 
-            {/* Email Address */}
+            {/* Email */}
             <View style={styles.inputWrapper}>
               <Text style={styles.inputLabel}>{t.registration.email}</Text>
               <View style={[styles.inputContainer, focusedField === 'email' && styles.inputContainerFocused]}>
@@ -313,7 +634,7 @@ export default function RegistrationScreen() {
                 <Ionicons
                   name="lock-closed-outline"
                   size={20}
-                  color={focusedField === 'password' ? "#0D6053" : "#9CA3AF"}
+                  color={focusedField === 'password' ? '#0D6053' : '#9CA3AF'}
                   style={styles.inputIconLeft}
                 />
                 <TextInput
@@ -327,12 +648,16 @@ export default function RegistrationScreen() {
                   onFocus={() => setFocusedField('password')}
                   onBlur={() => setFocusedField(null)}
                 />
-                <TouchableOpacity 
-                  onPress={() => setIsPasswordVisible(!isPasswordVisible)} 
+                <TouchableOpacity
+                  onPress={() => setIsPasswordVisible(!isPasswordVisible)}
                   style={styles.inputIconRight}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Ionicons name={isPasswordVisible ? "eye-outline" : "eye-off-outline"} size={22} color="#9CA3AF" />
+                  <Ionicons
+                    name={isPasswordVisible ? 'eye-outline' : 'eye-off-outline'}
+                    size={22}
+                    color="#9CA3AF"
+                  />
                 </TouchableOpacity>
               </View>
               {fieldErrors.password ? (
@@ -349,7 +674,7 @@ export default function RegistrationScreen() {
                 <Ionicons
                   name="lock-closed-outline"
                   size={20}
-                  color={focusedField === 'confirm' ? "#0D6053" : "#9CA3AF"}
+                  color={focusedField === 'confirm' ? '#0D6053' : '#9CA3AF'}
                   style={styles.inputIconLeft}
                 />
                 <TextInput
@@ -363,20 +688,26 @@ export default function RegistrationScreen() {
                   onFocus={() => setFocusedField('confirm')}
                   onBlur={() => setFocusedField(null)}
                 />
-                <TouchableOpacity 
-                  onPress={() => setIsConfirmPasswordVisible(!isConfirmPasswordVisible)} 
+                <TouchableOpacity
+                  onPress={() => setIsConfirmPasswordVisible(!isConfirmPasswordVisible)}
                   style={styles.inputIconRight}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Ionicons name={isConfirmPasswordVisible ? "eye-outline" : "eye-off-outline"} size={22} color="#9CA3AF" />
+                  <Ionicons
+                    name={isConfirmPasswordVisible ? 'eye-outline' : 'eye-off-outline'}
+                    size={22}
+                    color="#9CA3AF"
+                  />
                 </TouchableOpacity>
               </View>
               {fieldErrors.confirmPassword ? (
-                <Text style={[styles.fieldError, { marginTop: 6, paddingHorizontal: 4 }]}>{fieldErrors.confirmPassword}</Text>
+                <Text style={[styles.fieldError, { marginTop: 6, paddingHorizontal: 4 }]}>
+                  {fieldErrors.confirmPassword}
+                </Text>
               ) : null}
             </View>
 
-            {/* Terms and Privacy Checkbox */}
+            {/* Terms */}
             <View style={styles.termsBlock}>
               <TouchableOpacity
                 style={styles.checkboxWrapper}
@@ -390,17 +721,18 @@ export default function RegistrationScreen() {
               </TouchableOpacity>
               <View style={styles.termsTextContent}>
                 <Text style={styles.termsPrimaryText}>
-                  I have read and agree to the <Text style={styles.linkText}>Terms of Service</Text> and <Text style={styles.linkText}>Privacy Policy.</Text>
+                  I have read and agree to the{' '}
+                  <Text style={styles.linkText}>Terms of Service</Text> and{' '}
+                  <Text style={styles.linkText}>Privacy Policy.</Text>
                 </Text>
                 <Text style={styles.termsSubText}>
                   Your information will be used only for emergency response and will be kept secure and confidential.
                 </Text>
               </View>
             </View>
-
           </View>
 
-          {/* ── Action Buttons ── */}
+          {/* ── Error banner ── */}
           {apiError ? (
             <View style={styles.errorBanner}>
               <Ionicons name="alert-circle-outline" size={16} color="#EF4444" style={{ marginRight: 6 }} />
@@ -408,9 +740,15 @@ export default function RegistrationScreen() {
             </View>
           ) : null}
 
+          {/* ── Action Buttons ── */}
           <View style={styles.actionBlock}>
-            {/* Create Account Button */}
-            <TouchableOpacity testID="register-submit-btn" activeOpacity={0.85} style={styles.solidButtonContainer} onPress={handleRegister} disabled={isLoading}>
+            <TouchableOpacity
+              testID="register-submit-btn"
+              activeOpacity={0.85}
+              style={styles.solidButtonContainer}
+              onPress={handleRegister}
+              disabled={isLoading}
+            >
               <LinearGradient
                 colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
                 locations={[0, 0.38, 1]}
@@ -424,14 +762,12 @@ export default function RegistrationScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
-            {/* Divider */}
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>or</Text>
               <View style={styles.dividerLine} />
             </View>
 
-            {/* Emergency Button */}
             <TouchableOpacity activeOpacity={0.85} style={styles.emergencyButtonContainer}>
               <LinearGradient
                 colors={['rgba(255,255,255,0.35)', 'rgba(255,255,255,0)', 'rgba(0,0,0,0.05)']}
@@ -447,8 +783,8 @@ export default function RegistrationScreen() {
           </View>
 
           {/* ── Footer Link ── */}
-          <TouchableOpacity 
-            style={styles.footerLinkRow} 
+          <TouchableOpacity
+            style={styles.footerLinkRow}
             activeOpacity={0.7}
             onPress={() => router.push('/auth/login')}
             hitSlop={{ top: 15, bottom: 15 }}
@@ -458,7 +794,6 @@ export default function RegistrationScreen() {
               <Text style={styles.footerLinkText}>{t.registration.signIn}</Text>
             </Text>
           </TouchableOpacity>
-
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -467,7 +802,6 @@ export default function RegistrationScreen() {
         <View style={styles.modalOverlay}>
           <Animated.View style={[styles.modalCard, { opacity: cardOpacity }]}>
             {!isSuccess ? (
-              /* ── Loading State ── */
               <>
                 <View style={styles.modalSpinnerWrap}>
                   <ActivityIndicator size="large" color="#0D6053" />
@@ -476,16 +810,13 @@ export default function RegistrationScreen() {
                 <Text style={styles.modalSubtext}>Please wait a moment</Text>
               </>
             ) : (
-              /* ── Success State ── */
               <>
                 <Animated.View style={[styles.successCircle, { transform: [{ scale: checkScale }] }]}>
                   <Ionicons name="checkmark" size={40} color="#FFFFFF" />
                 </Animated.View>
                 <Text style={styles.modalTitle}>Account Created!</Text>
                 <Text style={styles.modalName}>Welcome, {fullName.trim()}!</Text>
-                <Text style={styles.modalSubtext}>
-                  We sent a 6-digit verification code to
-                </Text>
+                <Text style={styles.modalSubtext}>We sent a 6-digit verification code to</Text>
                 <Text style={styles.modalPhone}>{submittedPhone}</Text>
                 <View style={styles.modalDivider} />
                 <Text style={styles.modalFooter}>Redirecting to verification…</Text>
@@ -494,10 +825,11 @@ export default function RegistrationScreen() {
           </Animated.View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -510,8 +842,109 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 40,
   },
+  locationScreenContent: {
+    justifyContent: 'center',
+    minHeight: '100%',
+  },
 
-  // ── Top Bar (Language Selector) ──
+  // ── Location step screens ──
+  locationCard: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 8,
+    gap: 12,
+  },
+  locationIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#F0FBF9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  locationIconError: {
+    backgroundColor: '#FEF2F2',
+  },
+  locationIconWarning: {
+    backgroundColor: '#FEF2F2',
+  },
+  locationSpinnerWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#F0FBF9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  locationHeading: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  locationBody: {
+    fontSize: 15,
+    color: '#4B5563',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  locationEmphasis: {
+    fontWeight: '700',
+    color: '#0D6053',
+  },
+  locationSubtext: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    lineHeight: 19,
+  },
+  locationPrimaryBtn: {
+    width: '100%',
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#0D6053',
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  locationSecondaryBtn: {
+    marginTop: 4,
+    paddingVertical: 12,
+  },
+  locationSecondaryText: {
+    fontSize: 14,
+    color: '#0D6053',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  emergencyPhoneLink: {
+    fontSize: 15,
+    color: '#DC2626',
+    fontWeight: '700',
+    textAlign: 'center',
+    textDecorationLine: 'underline',
+    paddingVertical: 4,
+  },
+
+  // ── Location confirmed badge (inside form) ──
+  locationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FBF9',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 20,
+    gap: 8,
+  },
+  locationBadgeText: {
+    fontSize: 13,
+    color: '#0D6053',
+    fontWeight: '600',
+  },
+
+  // ── Top Bar ──
   topBar: {
     alignItems: 'flex-end',
     marginBottom: 16,
@@ -592,7 +1025,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  // ── Form Elements ──
+  // ── Form ──
   formBlock: {
     marginBottom: 24,
     gap: 16,
@@ -616,10 +1049,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 14,
   },
-  // Active Focus State for Inputs
   inputContainerFocused: {
     borderColor: '#0D6053',
-    backgroundColor: '#F4F9F8', // Slight background tint when focused
+    backgroundColor: '#F4F9F8',
   },
   inputIconLeft: {
     marginRight: 10,
@@ -658,7 +1090,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
 
-  // ── Terms & Privacy Checkbox ──
+  // ── Terms ──
   termsBlock: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -702,6 +1134,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
+  // ── Error banner ──
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -720,7 +1153,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Buttons & Divider ──
+  // ── Buttons ──
   actionBlock: {
     gap: 16,
     marginBottom: 32,
@@ -783,7 +1216,7 @@ const styles = StyleSheet.create({
     color: '#0D6053',
   },
 
-  // ── Registration Status Modal ──
+  // ── Modal ──
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',

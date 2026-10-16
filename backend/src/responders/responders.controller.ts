@@ -28,7 +28,7 @@ export class RespondersController {
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'List responders' })
   async findAll() {
     return this.respondersService.findAll({});

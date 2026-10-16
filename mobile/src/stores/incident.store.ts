@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { IncidentType } from '@agap/shared';
+import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
 
 interface LocationData {
   lat: number;
@@ -26,6 +27,9 @@ interface IncidentDraft {
   location: LocationData | null;
   patient: PatientData | null;
   photoUris: string[];
+  /** Trusted capture provenance for the primary photo/video (Tier 1 validation). */
+  photoCaptureMeta: PhotoCaptureMeta | null;
+  videoUri: string | null;
   affectedCount: string | null;
   hazards: string[];
   responseNeeds: string[];
@@ -43,6 +47,8 @@ interface IncidentState {
   setLocation: (location: LocationData) => void;
   addPhoto: (uri: string) => void;
   setPhotos: (uris: string[]) => void;
+  setPhotoCaptureMeta: (meta: PhotoCaptureMeta | null) => void;
+  setVideoUri: (uri: string | null) => void;
   setDescription: (desc: string) => void;
   setAffectedCount: (count: string | null) => void;
   setHazards: (hazards: string[]) => void;
@@ -59,6 +65,8 @@ const DEFAULT_DRAFT: IncidentDraft = {
   location: null,
   patient: null,
   photoUris: [],
+  photoCaptureMeta: null,
+  videoUri: null,
   affectedCount: null,
   hazards: [],
   responseNeeds: [],
@@ -104,6 +112,12 @@ export const useIncidentStore = create<IncidentState>((set) => ({
 
   setPhotos: (uris) =>
     set((s) => ({ draft: { ...s.draft, photoUris: uris.slice(0, 5) } })),
+
+  setPhotoCaptureMeta: (photoCaptureMeta) =>
+    set((s) => ({ draft: { ...s.draft, photoCaptureMeta } })),
+
+  setVideoUri: (videoUri) =>
+    set((s) => ({ draft: { ...s.draft, videoUri } })),
 
   setDescription: (description) =>
     set((s) => ({ draft: { ...s.draft, description } })),

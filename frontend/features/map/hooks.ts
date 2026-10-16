@@ -2,11 +2,21 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  fetchMapConfig,
   fetchRiskData,
   fetchLiveResponderPositions,
   fetchIncidentLocations,
   type LiveResponderPosition,
 } from './api';
+
+export function useMapStyle(): string {
+  const { data } = useQuery({
+    queryKey: ['map-config'],
+    queryFn: fetchMapConfig,
+    staleTime: Infinity,
+  });
+  return data?.styleUrl ?? 'https://demotiles.maplibre.org/style.json';
+}
 
 export function useRiskData(periodDays = 30) {
   return useQuery({

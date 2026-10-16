@@ -13,7 +13,6 @@ import { NotificationProcessor } from './processors/notification.processor';
 import { SmsProcessor } from './processors/sms.processor';
 import { EscalationProcessor } from './processors/escalation.processor';
 import { SlaMonitorProcessor } from './processors/sla-monitor.processor';
-import { OfflineSyncProcessor } from './processors/offline-sync.processor';
 import { AnalyticsProcessor } from './processors/analytics.processor';
 import { AnalyticsCronService } from './analytics-cron.service';
 import { EtaRefreshProcessor } from './processors/eta-refresh.processor';
@@ -33,7 +32,6 @@ import { AnnouncementPushProcessor } from './processors/announcement-push.proces
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.PUSH_NOTIFICATIONS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.INCIDENT_RETRY }),
-    BullModule.registerQueue({ name: QUEUE_NAMES.OFFLINE_SYNC }),
     BullModule.registerQueue({ name: QUEUE_NAMES.ESCALATION }),
     BullModule.registerQueue({ name: QUEUE_NAMES.SLA_MONITOR }),
     BullModule.registerQueue({ name: QUEUE_NAMES.LOCATION_PROCESSING }),
@@ -45,7 +43,6 @@ import { AnnouncementPushProcessor } from './processors/announcement-push.proces
     SmsProcessor,
     EscalationProcessor,
     SlaMonitorProcessor,
-    OfflineSyncProcessor,
     AnalyticsProcessor,
     AnalyticsCronService,
     EtaRefreshProcessor,

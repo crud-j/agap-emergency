@@ -16,6 +16,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { RegisterDto } from './dto/register.dto';
+import { GeoCheckResult } from './dto/geo-check.dto';
 import { RegisterGuestDto } from './dto/register-guest.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -68,12 +69,49 @@ export class AuthService {
     return bcrypt.hash(password, 12);
   }
 
+  async checkGeoFence(lat: number, lng: number): Promise<GeoCheckResult> {
+    const rows = await this.prisma.$queryRaw<Array<{ inside: boolean }>>`
+      SELECT ST_Within(
+        ST_SetSRID(ST_Point(${lng}::float8, ${lat}::float8), 4326),
+        boundary
+      ) AS inside
+      FROM geo_regions
+      WHERE name = 'Bocaue' AND region_type = 'municipality'
+      LIMIT 1
+    `;
+
+    const row = rows[0];
+    if (!row) {
+      throw new ServiceUnavailableException('Geo-fence boundary not configured');
+    }
+
+    const inside = row.inside === true;
+    return {
+      inside,
+      barangay:     inside ? null : null,
+      municipality: inside ? 'Bocaue'  : null,
+      province:     inside ? 'Bulacan' : null,
+    };
+  }
+
   async register(dto: RegisterDto) {
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Passwords do not match');
     }
 
     const phoneNumber = this.normalizePhone(dto.phoneNumber);
+
+    // Geo-fence gate: when coordinates are provided, reject registrations
+    // from outside Bocaue. Coordinates are always sent by the mobile client
+    // after the on-device GPS check passes.
+    if (dto.latitude !== undefined && dto.longitude !== undefined) {
+      const geo = await this.checkGeoFence(dto.latitude, dto.longitude);
+      if (!geo.inside) {
+        throw new BadRequestException(
+          'Registration is only available for residents and workers within Bocaue, Bulacan.',
+        );
+      }
+    }
 
     const existing = await this.prisma.user.findUnique({
       where: { phone_number: phoneNumber },
@@ -89,11 +127,15 @@ export class AuthService {
 
     const user = await this.prisma.user.create({
       data: {
-        full_name: dto.fullName,
+        full_name:    dto.fullName,
         phone_number: phoneNumber,
-        email: dto.email ?? null,
+        email:        dto.email ?? null,
         password_hash: passwordHash,
-        status: 'PENDING_VERIFICATION',
+        status:       'PENDING_VERIFICATION',
+        barangay:     null,
+        municipality: 'Bocaue',
+        province:     'Bulacan',
+        full_address: null,
       },
     });
 

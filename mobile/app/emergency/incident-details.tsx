@@ -28,37 +28,27 @@ type GpsState = 'locating' | 'ready' | 'unavailable';
 type PromptOption = { value: string; label: string };
 type PromptDef    = { key: string; question: string; options: PromptOption[] };
 
+const YN  = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }];
+const YNU = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'unknown', label: 'Unknown' }];
+
+// Each incident type collects the triage information its responders actually need.
+// Every type has at least one prompt so no incident is submitted without situational context.
 const QUICK_PROMPTS: Partial<Record<IncidentType, PromptDef[]>> = {
+  [IncidentType.MEDICAL]: [
+    { key: 'conscious', question: 'Is the person conscious?', options: YNU },
+    { key: 'breathing', question: 'Is the person breathing?', options: YNU },
+    { key: 'bleeding',  question: 'Severe bleeding?',          options: YN  },
+  ],
   [IncidentType.ROAD_ACCIDENT]: [
-    {
-      key: 'injuries',
-      question: 'Injuries visible?',
-      options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'unknown', label: 'Unknown' }],
-    },
-    {
-      key: 'road_blocked',
-      question: 'Road blocked?',
-      options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }],
-    },
+    { key: 'injuries',     question: 'Injuries visible?', options: YNU },
+    { key: 'road_blocked', question: 'Road blocked?',     options: YN  },
   ],
   [IncidentType.FIRE]: [
-    {
-      key: 'trapped',
-      question: 'Anyone trapped?',
-      options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'unknown', label: 'Unknown' }],
-    },
-    {
-      key: 'gas',
-      question: 'Gas or chemicals involved?',
-      options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'unknown', label: 'Unknown' }],
-    },
+    { key: 'trapped', question: 'Anyone trapped?',             options: YNU },
+    { key: 'gas',     question: 'Gas or chemicals involved?', options: YNU },
   ],
   [IncidentType.FLOOD]: [
-    {
-      key: 'stranded',
-      question: 'People stranded?',
-      options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }],
-    },
+    { key: 'stranded',    question: 'People stranded?',          options: YN },
     {
       key: 'water_level',
       question: 'Approximate water level?',
@@ -69,6 +59,21 @@ const QUICK_PROMPTS: Partial<Record<IncidentType, PromptDef[]>> = {
         { value: 'above', label: 'Above waist' },
       ],
     },
+  ],
+  [IncidentType.RESCUE]: [
+    { key: 'trapped',     question: 'Anyone trapped or stranded?', options: YNU },
+    { key: 'hard_access', question: 'Area hard to reach?',         options: YN  },
+  ],
+  [IncidentType.INDUSTRIAL]: [
+    { key: 'gas',       question: 'Gas or chemicals involved?', options: YNU },
+    { key: 'explosion', question: 'Explosion or fire risk?',    options: YNU },
+  ],
+  [IncidentType.DEBRIS]: [
+    { key: 'trapped',  question: 'Anyone trapped?',      options: YNU },
+    { key: 'unstable', question: 'Structure unstable?',  options: YNU },
+  ],
+  [IncidentType.OTHER]: [
+    { key: 'injuries', question: 'Anyone injured?', options: YNU },
   ],
 };
 
@@ -85,6 +90,12 @@ const HAZARD_LABELS: Record<string, Record<string, string>> = {
     waist: 'Water level: waist-deep',
     above: 'Water level: above waist',
   },
+  conscious:   { yes: 'Person is conscious', no: 'Person is UNCONSCIOUS', unknown: 'Consciousness unknown' },
+  breathing:   { yes: 'Person is breathing', no: 'Person is NOT breathing', unknown: 'Breathing status unknown' },
+  bleeding:    { yes: 'Severe bleeding reported', no: 'No severe bleeding' },
+  hard_access: { yes: 'Area is hard to reach' },
+  explosion:   { yes: 'Explosion/fire risk reported', unknown: 'Possible explosion/fire risk' },
+  unstable:    { yes: 'Structure may be unstable', unknown: 'Structural stability unknown' },
 };
 
 function buildHazards(answers: Record<string, string>): string[] {
@@ -94,13 +105,6 @@ function buildHazards(answers: Record<string, string>): string[] {
 }
 
 // ─── Static option lists ─────────────────────────────────────────────────────
-
-const RESPONSE_NEEDS: { key: string; label: string; icon: IoniconName; color: string }[] = [
-  { key: 'ambulance',   label: 'Ambulance',    icon: 'medkit',           color: '#DC2626' },
-  { key: 'fire_truck',  label: 'Fire Truck',   icon: 'flame',            color: '#EA580C' },
-  { key: 'rescue_boat', label: 'Rescue Boat',  icon: 'boat',             color: '#2563EB' },
-  { key: 'police',      label: 'Police',       icon: 'shield-checkmark', color: '#7C3AED' },
-];
 
 const AFFECTED_OPTIONS: { key: string; label: string; icon: IoniconName }[] = [
   { key: '1',       label: '1 person',    icon: 'person-outline'  },
@@ -180,7 +184,6 @@ export default function IncidentDetailsScreen() {
     setLocation,
     setAffectedCount,
     setHazards,
-    setResponseNeeds,
     setManualAddress,
   } = useIncidentStore();
 
@@ -191,10 +194,10 @@ export default function IncidentDetailsScreen() {
   const [reverseAddress,    setReverseAddress]     = useState<string | null>(null);
   const [affectedCount,     setAffectedCountLocal] = useState<string | null>(null);
   const [quickAnswers,      setQuickAnswers]       = useState<Record<string, string>>({});
-  const [responseNeedsLocal,setResponseNeedsLocal] = useState<string[]>([]);
   const [manualAddressText, setManualAddressText]  = useState('');
 
   const photoUri = draft.photoUris?.[0];
+  const videoUri = draft.videoUri;
   const prompts  = draft.type ? (QUICK_PROMPTS[draft.type] ?? []) : [];
   const typeColor = draft.type ? (TYPE_COLORS[draft.type] ?? C.primary) : C.primary;
   const typeIcon  = draft.type ? (TYPE_ICONS[draft.type]  ?? 'alert-circle') : 'alert-circle';
@@ -248,19 +251,12 @@ export default function IncidentDetailsScreen() {
     });
   }
 
-  function toggleResponseNeed(key: string) {
-    setResponseNeedsLocal((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-    );
-  }
-
   function submit() {
     if (description.trim()) setDescription(description.trim());
     if (patient) setPatient({ isReporter: patient === 'me', isUnknown: patient === 'unknown' });
     if (affectedCount) setAffectedCount(affectedCount);
     const hazardList = buildHazards(quickAnswers);
     if (hazardList.length) setHazards(hazardList);
-    if (responseNeedsLocal.length) setResponseNeeds(responseNeedsLocal);
     if (gps === 'unavailable' && manualAddressText.trim()) setManualAddress(manualAddressText.trim());
     router.push('/emergency/transmission');
   }
@@ -286,13 +282,13 @@ export default function IncidentDetailsScreen() {
           </TouchableOpacity>
 
           <View style={styles.brandRow}>
-            <View style={styles.brandIcon}>
-              <Text style={styles.brandIconText}>A</Text>
-            </View>
-            <View>
-              <Text style={styles.brandName}>AGAP</Text>
-              <Text style={styles.brandTagline}>Incident Management Platform</Text>
-            </View>
+            <Image
+              source={require('@/assets/icons/agap-icon.png')}
+              style={styles.brandLogo}
+              resizeMode="contain"
+              accessibilityRole="image"
+              accessibilityLabel="AGAP — Incident Management Platform"
+            />
           </View>
 
           {/* Step indicator */}
@@ -337,18 +333,77 @@ export default function IncidentDetailsScreen() {
           </View>
         </View>
 
-        {/* ── Photo card ────────────────────────────────────────────────────── */}
+        {/* ── Type-specific triage (MOD-09) — leads the form so each incident ──
+             collects the information its responders actually need. */}
+        {prompts.length > 0 && (
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionIconWrap}>
+                <Ionicons name="clipboard-outline" size={15} color={C.primary} />
+              </View>
+              <Text style={styles.sectionTitle}>Quick Situation Info</Text>
+              <Text style={styles.optionalTag}>helps dispatch prepare</Text>
+            </View>
+
+            {prompts.map((prompt, pi) => (
+              <View key={prompt.key} style={[styles.promptBlock, pi < prompts.length - 1 && styles.promptBorder]}>
+                <Text style={styles.promptQuestion}>{prompt.question}</Text>
+                <View style={styles.pillRow}>
+                  {prompt.options.map((opt) => {
+                    const active = quickAnswers[prompt.key] === opt.value;
+                    return (
+                      <TouchableOpacity
+                        key={opt.value}
+                        style={[styles.pill, active && styles.pillActive]}
+                        activeOpacity={0.8}
+                        onPress={() => toggleQuickAnswer(prompt.key, opt.value)}
+                      >
+                        {active && (
+                          <Ionicons name="checkmark" size={12} color={C.primary} style={{ marginRight: 4 }} />
+                        )}
+                        <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* ── Photo / Video card (MOD-10) ───────────────────────────────── */}
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionIconWrap}>
-              <Ionicons name="camera-outline" size={15} color={C.primary} />
+              <Ionicons name={videoUri ? 'videocam-outline' : 'camera-outline'} size={15} color={C.primary} />
             </View>
-            <Text style={styles.sectionTitle}>Incident Photo</Text>
-            <Text style={styles.optionalTag}>optional</Text>
+            <Text style={styles.sectionTitle}>Incident Photo / Video</Text>
           </View>
 
           <View style={styles.photoContainer}>
-            {photoUri ? (
+            {videoUri ? (
+              <>
+                <View style={styles.videoPoster}>
+                  <View style={styles.videoPlayCircle}>
+                    <Ionicons name="videocam" size={28} color={C.primary} />
+                  </View>
+                  <Text style={styles.videoCapturedTitle}>Video evidence captured</Text>
+                  <Text style={styles.videoCapturedSub}>Will be sent with your report</Text>
+                </View>
+                <View style={styles.photoOverlay}>
+                  <TouchableOpacity
+                    style={styles.photoOverlayBtn}
+                    onPress={() => router.replace('/emergency/capture?retake=1')}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="refresh" size={14} color={C.white} style={{ marginRight: 5 }} />
+                    <Text style={styles.photoOverlayText}>Re-record</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : photoUri ? (
               <>
                 <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="cover" />
                 <View style={styles.photoOverlay}>
@@ -371,7 +426,7 @@ export default function IncidentDetailsScreen() {
                 <View style={styles.photoEmptyIcon}>
                   <Ionicons name="camera" size={24} color={C.primary} />
                 </View>
-                <Text style={styles.photoEmptyTitle}>Add a photo</Text>
+                <Text style={styles.photoEmptyTitle}>Add a photo or video</Text>
                 <Text style={styles.photoEmptyDesc}>Helps responders assess the scene faster</Text>
               </TouchableOpacity>
             )}
@@ -450,7 +505,6 @@ export default function IncidentDetailsScreen() {
               <Ionicons name="people-outline" size={15} color={C.primary} />
             </View>
             <Text style={styles.sectionTitle}>People Affected</Text>
-            <Text style={styles.optionalTag}>optional</Text>
           </View>
 
           <View style={styles.chipGrid}>
@@ -478,88 +532,6 @@ export default function IncidentDetailsScreen() {
           </View>
         </View>
 
-        {/* ── Type-specific quick prompts ───────────────────────────────────── */}
-        {prompts.length > 0 && (
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionIconWrap}>
-                <Ionicons name="clipboard-outline" size={15} color={C.primary} />
-              </View>
-              <Text style={styles.sectionTitle}>Quick Situation Info</Text>
-              <Text style={styles.optionalTag}>helps dispatch prepare</Text>
-            </View>
-
-            {prompts.map((prompt, pi) => (
-              <View key={prompt.key} style={[styles.promptBlock, pi < prompts.length - 1 && styles.promptBorder]}>
-                <Text style={styles.promptQuestion}>{prompt.question}</Text>
-                <View style={styles.pillRow}>
-                  {prompt.options.map((opt) => {
-                    const active = quickAnswers[prompt.key] === opt.value;
-                    return (
-                      <TouchableOpacity
-                        key={opt.value}
-                        style={[styles.pill, active && styles.pillActive]}
-                        activeOpacity={0.8}
-                        onPress={() => toggleQuickAnswer(prompt.key, opt.value)}
-                      >
-                        {active && (
-                          <Ionicons name="checkmark" size={12} color={C.primary} style={{ marginRight: 4 }} />
-                        )}
-                        <Text style={[styles.pillText, active && styles.pillTextActive]}>
-                          {opt.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* ── Response needs ────────────────────────────────────────────────── */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionIconWrap}>
-              <Ionicons name="medkit-outline" size={15} color={C.primary} />
-            </View>
-            <Text style={styles.sectionTitle}>Help Needed</Text>
-            <Text style={styles.optionalTag}>optional</Text>
-          </View>
-
-          <View style={styles.responseGrid}>
-            {RESPONSE_NEEDS.map((need) => {
-              const active = responseNeedsLocal.includes(need.key);
-              return (
-                <TouchableOpacity
-                  key={need.key}
-                  style={[
-                    styles.responseCard,
-                    active && { borderColor: need.color, backgroundColor: `${need.color}08` },
-                  ]}
-                  activeOpacity={0.8}
-                  onPress={() => toggleResponseNeed(need.key)}
-                >
-                  <View style={[
-                    styles.responseIconCircle,
-                    { backgroundColor: active ? `${need.color}18` : C.bg },
-                  ]}>
-                    <Ionicons name={need.icon} size={18} color={active ? need.color : C.textSub} />
-                  </View>
-                  <Text style={[styles.responseLabel, active && { color: need.color, fontWeight: '700' }]}>
-                    {need.label}
-                  </Text>
-                  {active && (
-                    <View style={[styles.responseCheck, { backgroundColor: need.color }]}>
-                      <Ionicons name="checkmark" size={10} color={C.white} />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
         {/* ── Description ───────────────────────────────────────────────────── */}
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeader}>
@@ -567,7 +539,6 @@ export default function IncidentDetailsScreen() {
               <Ionicons name="document-text-outline" size={15} color={C.primary} />
             </View>
             <Text style={styles.sectionTitle}>Describe the Situation</Text>
-            <Text style={styles.optionalTag}>optional</Text>
           </View>
 
           <TextInput
@@ -590,7 +561,6 @@ export default function IncidentDetailsScreen() {
               <Ionicons name="person-outline" size={15} color={C.primary} />
             </View>
             <Text style={styles.sectionTitle}>Who Needs Help?</Text>
-            <Text style={styles.optionalTag}>optional</Text>
           </View>
 
           <View style={styles.patientList}>
@@ -686,15 +656,8 @@ const styles = StyleSheet.create({
     backgroundColor: C.bg,
     alignItems: 'center', justifyContent: 'center',
   },
-  brandRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  brandIcon: {
-    width: 30, height: 30, borderRadius: 8,
-    backgroundColor: C.navy,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  brandIconText: { color: C.white, fontWeight: '900', fontSize: 15 },
-  brandName:     { fontSize: 13, fontWeight: '800', color: C.navy },
-  brandTagline:  { fontSize: 9,  color: C.textSub, fontWeight: '500' },
+  brandRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  brandLogo: { width: 128, height: 38 },
   stepBadge: {
     backgroundColor: C.primarySoft,
     borderRadius: 20,
@@ -872,30 +835,6 @@ const styles = StyleSheet.create({
   pillText:       { fontSize: 13, fontWeight: '600', color: C.textSub },
   pillTextActive: { color: C.primary, fontWeight: '700' },
 
-  // ── Response needs ─────────────────────────────────────────────────────────
-  responseGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  responseCard: {
-    width: '47%',
-    alignItems: 'center',
-    paddingVertical: 14, paddingHorizontal: 12,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: C.border,
-    backgroundColor: C.bg,
-    position: 'relative',
-  },
-  responseIconCircle: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 6,
-  },
-  responseLabel: { fontSize: 13, fontWeight: '600', color: C.textSub, textAlign: 'center' },
-  responseCheck: {
-    position: 'absolute', top: 8, right: 8,
-    width: 18, height: 18, borderRadius: 9,
-    alignItems: 'center', justifyContent: 'center',
-  },
-
   // ── Description ────────────────────────────────────────────────────────────
   textArea: {
     minHeight: 100,
@@ -979,6 +918,22 @@ const styles = StyleSheet.create({
   },
   submitTitle:    { fontSize: 15, fontWeight: '800', color: C.white },
   submitSubtitle: { fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
+
+  // ── Video poster ───────────────────────────────────────────────────────────
+  videoPoster: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    gap: 8, padding: 20,
+  },
+  videoPlayCircle: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: C.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 4,
+  },
+  videoCapturedTitle: { fontSize: 14, fontWeight: '700', color: C.white },
+  videoCapturedSub:   { fontSize: 12, color: 'rgba(255,255,255,0.6)', textAlign: 'center' },
 
   // ── Shared ─────────────────────────────────────────────────────────────────
   confirmedBadge: {

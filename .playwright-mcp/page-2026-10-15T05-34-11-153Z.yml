@@ -1,0 +1,28 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - img "Bocaue Logo" [ref=e6]
+        - generic [ref=e8]:
+          - paragraph [ref=e9]: © 2026 Bayan ng Bocaue MDRRMO
+          - paragraph [ref=e10]: Powered by AGAP Operations
+      - generic [ref=e11]:
+        - heading "Login" [level=1] [ref=e12]
+        - generic [ref=e13]:
+          - generic [ref=e14]:
+            - generic [ref=e15]: Email address
+            - textbox "Email address" [ref=e16]:
+              - /placeholder: Enter your email address
+          - generic [ref=e17]:
+            - generic [ref=e18]: Password
+            - generic [ref=e19]:
+              - textbox "Password" [ref=e20]:
+                - /placeholder: Enter your password
+              - button "Show" [ref=e21] [cursor=pointer]
+            - button "Forgot Password?" [ref=e23] [cursor=pointer]
+          - button "Login to AGAP" [ref=e25] [cursor=pointer]
+        - generic [ref=e26]:
+          - button "Terms and Services" [ref=e27] [cursor=pointer]
+          - paragraph [ref=e28]: Need assistance? Call 911
+  - region "Notifications (F8)":
+    - list

@@ -1,4 +1,5 @@
 import type { CreateIncidentInput } from '@agap/shared';
+import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
 import { authedFetch } from './authed-fetch';
 import { apiFetch, defaultHeaders, multipartHeaders, ApiError } from './http';
 
@@ -18,11 +19,16 @@ export async function submitIncident(
 /**
  * Upload a captured photo as an incident attachment (MOD-10).
  * Best-effort by design — a failure here must never cancel or block the incident.
+ *
+ * `meta` carries trusted capture provenance (Tier 1 photo validation) as extra
+ * multipart fields the backend reads during triage (MOD-25) to score authenticity.
+ * The fields are advisory — the backend must ignore them gracefully if absent.
  */
 export async function uploadIncidentPhoto(
   incidentId: string,
   uri: string,
   token: string,
+  meta?: PhotoCaptureMeta,
 ): Promise<void> {
   const name = uri.split('/').pop() || `incident-${Date.now()}.jpg`;
   const ext  = name.split('.').pop()?.toLowerCase() ?? '';
@@ -35,6 +41,15 @@ export async function uploadIncidentPhoto(
   // React Native FormData file shape.
   form.append('file', { uri, name, type } as unknown as Blob);
 
+  // Trusted capture provenance — stamped on-device at the shutter, not from EXIF.
+  if (meta) {
+    form.append('capturedAt', String(meta.capturedAt));
+    form.append('captureSource', meta.source);
+    if (meta.lat != null)      form.append('captureLat', String(meta.lat));
+    if (meta.lng != null)      form.append('captureLng', String(meta.lng));
+    if (meta.accuracy != null) form.append('captureAccuracy', String(meta.accuracy));
+  }
+
   const res = await authedFetch(`${API_BASE}/v1/incidents/${incidentId}/attachments`, {
     method: 'POST',
     // Content-Type intentionally omitted — runtime sets multipart boundary.
@@ -46,6 +61,18 @@ export async function uploadIncidentPhoto(
     const err = await res.json().catch(() => ({}));
     throw new ApiError((err as any).message ?? `HTTP ${res.status}`, res.status);
   }
+}
+
+/**
+ * Upload a recorded video clip as an incident attachment (MOD-10).
+ * Best-effort — failure must never cancel or modify the incident.
+ */
+export async function uploadIncidentVideo(
+  incidentId: string,
+  uri: string,
+  token: string,
+): Promise<void> {
+  return uploadIncidentPhoto(incidentId, uri, token);
 }
 
 export async function getIncidentStatus(id: string, token?: string) {

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   MapPin, User, Users, FileText, Image as ImageIcon, Activity, Sparkles,
   AlertTriangle, HeartPulse, MessageSquare, CheckCircle2,
+  Shield, ShieldCheck, ShieldAlert, Video, Play,
 } from 'lucide-react';
 import { IncidentChatPanel } from './IncidentChatPanel';
 import {
@@ -528,56 +529,192 @@ function ResolutionDialog({
   );
 }
 
-// ─── Citizen Photo Strip (MOD-10) ────────────────────────────────────────────
+// ─── Citizen Photo Strip (MOD-10) + authenticity verification (MOD-25) ────────
+
+// Human-readable explanations for the backend's advisory authenticity flags.
+const PHOTO_FLAG_LABELS: Record<string, string> = {
+  STALE_PHOTO: 'Captured well before the report',
+  FUTURE_TIMESTAMP: 'Capture time is after the report',
+  OUTSIDE_BOCAUE: 'Captured outside Bocaue',
+  PHOTO_LOCATION_MISMATCH: 'Capture location far from the incident',
+  NOT_LIVE_CAPTURE: 'Not a live in-app capture',
+  NO_CAPTURE_GPS: 'No GPS recorded at capture',
+  NO_PROVENANCE: 'No capture metadata (older app or manual upload)',
+};
+
+/** Maps an attachment's advisory score to a dispatcher-facing verdict chip. */
+function photoVerdict(a: IncidentAttachment): { label: string; cls: string; Icon: typeof Shield } {
+  const score = a.authenticity_score;
+  const flags = a.authenticity_flags ?? [];
+  if (score == null) {
+    return { label: 'Unverified', cls: 'border-slate-200 bg-slate-100 text-slate-500', Icon: Shield };
+  }
+  if (score >= 80 && flags.length === 0) {
+    return { label: 'Verified', cls: 'border-emerald-200 bg-emerald-50 text-emerald-700', Icon: ShieldCheck };
+  }
+  if (score >= 50) {
+    return { label: `Review ${score}`, cls: 'border-amber-200 bg-amber-50 text-amber-700', Icon: ShieldAlert };
+  }
+  return { label: `Suspect ${score}`, cls: 'border-red-200 bg-red-50 text-red-700', Icon: ShieldAlert };
+}
+
+function photoTitle(a: IncidentAttachment): string {
+  const parts = [`${a.file_name} · submitted ${timeAgo(a.uploaded_at)}`];
+  if (a.authenticity_score != null) parts.push(`Authenticity ${a.authenticity_score}/100`);
+  if (a.capture_source) parts.push(`Source: ${a.capture_source}`);
+  const flags = a.authenticity_flags ?? [];
+  if (flags.length) parts.push(flags.map((f) => PHOTO_FLAG_LABELS[f] ?? f).join('; '));
+  return parts.join('\n');
+}
 
 /**
  * Read-only preview of photos/videos submitted by the citizen from the mobile
  * app. The data arrives embedded in the incident detail fetch — no extra query.
+ * Photos carry an advisory authenticity verdict (Tier 1 photo validation).
+ * Videos open an inline player so the dispatcher can watch without leaving the
+ * drawer — a new-tab link was unreliable and caused playback glitches.
  * Returns null when the citizen didn't capture any media.
  */
 function CitizenPhotoStrip({ attachments }: { attachments: IncidentAttachment[] }): JSX.Element | null {
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
+
   if (attachments.length === 0) return null;
 
+  const flaggedCodes = Array.from(
+    new Set(attachments.flatMap((a) => a.authenticity_flags ?? [])),
+  );
+
   return (
-    <Section icon={ImageIcon} title={`Citizen Photo Reference (${attachments.length})`}>
-      <div className="flex flex-wrap gap-2">
-        {attachments.map((a) =>
-          a.storage_url && a.file_type?.startsWith('image/') ? (
-            <a
-              key={a.id}
-              href={a.storage_url}
-              target="_blank"
-              rel="noreferrer"
-              title={`${a.file_name} · submitted ${timeAgo(a.uploaded_at)}`}
-              className="group relative overflow-hidden rounded-xl border border-[rgba(168,181,193,0.20)] transition-shadow hover:shadow-md"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={a.storage_url}
-                alt={a.file_name}
-                className="h-24 w-24 object-cover"
-              />
-              <span className="absolute bottom-0 left-0 right-0 bg-black/40 px-1.5 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-                {timeAgo(a.uploaded_at)}
-              </span>
-            </a>
-          ) : (
-            <a
-              key={a.id}
-              href={a.storage_url ?? '#'}
-              target="_blank"
-              rel="noreferrer"
-              title={a.file_name}
-              className="flex h-24 w-24 flex-col items-center justify-center gap-1.5 rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface text-agap-textSub transition-colors hover:bg-agap-surface/80"
-            >
-              <FileText size={20} />
-              <span className="max-w-[80px] truncate px-1 text-[10px] font-medium">{a.file_name}</span>
-              <span className="text-[9px]">{timeAgo(a.uploaded_at)}</span>
-            </a>
-          ),
+    <>
+      <Section icon={ImageIcon} title={`Citizen Media (${attachments.length})`}>
+        <div className="flex flex-wrap gap-2">
+          {attachments.map((a) => {
+            const v = photoVerdict(a);
+            const isVideo = a.file_type?.startsWith('video/');
+            const isImage = a.file_type?.startsWith('image/');
+
+            if (a.storage_url && isVideo) {
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setActiveVideoUrl(a.storage_url!)}
+                  title={`${a.file_name} · click to play`}
+                  className="group relative overflow-hidden rounded-xl border border-[rgba(168,181,193,0.20)] transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
+                >
+                  {/* Video thumbnail — seeks to 0.1 s to paint the first frame */}
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                  <video
+                    src={a.storage_url}
+                    className="h-24 w-24 bg-black object-cover"
+                    muted
+                    preload="metadata"
+                    onLoadedMetadata={(e) => { e.currentTarget.currentTime = 0.1; }}
+                  />
+                  {/* Play-button overlay */}
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 transition-colors group-hover:bg-black/45">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow">
+                      <Play size={13} className="ml-0.5 text-agap-textMain" fill="currentColor" />
+                    </div>
+                  </div>
+                  {/* Video badge — top left */}
+                  <span className="absolute left-1 top-1 inline-flex items-center gap-0.5 rounded-md border border-slate-300/60 bg-black/60 px-1 py-0.5 text-[9px] font-semibold text-white">
+                    <Video size={8} /> VIDEO
+                  </span>
+                  <span className="absolute bottom-0 left-0 right-0 bg-black/40 px-1.5 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    {timeAgo(a.uploaded_at)}
+                  </span>
+                </button>
+              );
+            }
+
+            if (a.storage_url && isImage) {
+              return (
+                <a
+                  key={a.id}
+                  href={a.storage_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={photoTitle(a)}
+                  className="group relative overflow-hidden rounded-xl border border-[rgba(168,181,193,0.20)] transition-shadow hover:shadow-md"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={a.storage_url}
+                    alt={a.file_name}
+                    className="h-24 w-24 object-cover"
+                  />
+                  <span className={`absolute left-1 top-1 inline-flex items-center gap-0.5 rounded-md border px-1 py-0.5 text-[9px] font-semibold ${v.cls}`}>
+                    <v.Icon size={10} /> {v.label}
+                  </span>
+                  <span className="absolute bottom-0 left-0 right-0 bg-black/40 px-1.5 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    {timeAgo(a.uploaded_at)}
+                  </span>
+                </a>
+              );
+            }
+
+            return (
+              <a
+                key={a.id}
+                href={a.storage_url ?? '#'}
+                target="_blank"
+                rel="noreferrer"
+                title={a.file_name}
+                className="flex h-24 w-24 flex-col items-center justify-center gap-1.5 rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface text-agap-textSub transition-colors hover:bg-agap-surface/80"
+              >
+                <FileText size={20} />
+                <span className="max-w-[80px] truncate px-1 text-[10px] font-medium">{a.file_name}</span>
+                <span className="text-[9px]">{timeAgo(a.uploaded_at)}</span>
+              </a>
+            );
+          })}
+        </div>
+
+        {/* Dispatcher verification advisory — only when photos have flags */}
+        {flaggedCodes.length > 0 && (
+          <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+              <ShieldAlert size={12} /> Verify photo authenticity before relying on this evidence
+            </div>
+            <ul className="mt-1 space-y-0.5">
+              {flaggedCodes.map((f) => (
+                <li key={f} className="text-[11px] text-amber-700">• {PHOTO_FLAG_LABELS[f] ?? f}</li>
+              ))}
+            </ul>
+            <p className="mt-1 text-[10px] text-amber-600">Advisory only — this never blocks dispatch.</p>
+          </div>
         )}
-      </div>
-    </Section>
+      </Section>
+
+      {/* ── Inline video player — opens when a video thumbnail is clicked ── */}
+      <Dialog open={!!activeVideoUrl} onOpenChange={(open) => { if (!open) setActiveVideoUrl(null); }}>
+        <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0">
+          <DialogHeader className="px-5 pb-3 pt-5">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Video size={16} className="text-agap-textSub" />
+              Video Evidence
+            </DialogTitle>
+            <DialogDescription className="text-xs text-agap-textSub">
+              Captured and submitted by the citizen at the incident scene.
+            </DialogDescription>
+          </DialogHeader>
+          {activeVideoUrl && (
+            // key forces a fresh element (and stops the previous video) whenever
+            // a different clip is selected.
+            // eslint-disable-next-line jsx-a11y/media-has-caption
+            <video
+              key={activeVideoUrl}
+              src={activeVideoUrl}
+              controls
+              autoPlay
+              className="w-full"
+              style={{ backgroundColor: '#000', maxHeight: '60vh' }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

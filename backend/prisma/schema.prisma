@@ -36,7 +36,8 @@ model User {
   account_lifecycle_events_account_lifecycle_events_user_idTousers         account_lifecycle_events[]     @relation("account_lifecycle_events_user_idTousers")
   alert_triggers                                                           alert_triggers[]
   announcement_deliveries                                                  announcement_deliveries[]
-  announcements                                                            Announcement[]
+  announcements                                                            Announcement[]                 @relation("announcement_publisher")
+  announcements_approved                                                   Announcement[]                 @relation("announcement_approver")
   audit_logs                                                               AuditLog[]
   consent_records                                                          consent_records[]
   dispatch_crew                                                            dispatch_crew[]
@@ -263,6 +264,17 @@ model IncidentAttachment {
   storage_key       String              @db.VarChar(500)
   storage_url       String?
   is_processed      Boolean             @default(false)
+  // Tier 1 photo validation (MOD-25) — trusted capture provenance stamped on-device
+  // at the shutter, plus an advisory authenticity assessment. Advisory only: a low
+  // score never blocks dispatch; it helps a dispatcher verify the photo.
+  capture_timestamp       DateTime?     @db.Timestamptz(6)
+  capture_latitude        Decimal?      @db.Decimal(10, 7)
+  capture_longitude       Decimal?      @db.Decimal(10, 7)
+  capture_accuracy_meters Decimal?      @db.Decimal(8, 2)
+  capture_source          String?       @db.VarChar(30)
+  authenticity_score      Int?          @db.SmallInt
+  authenticity_flags      String[]
+  authenticity_checked_at DateTime?     @db.Timestamptz(6)
   uploaded_at       DateTime            @default(now()) @db.Timestamptz(6)
   incidents         Incident            @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users             User?               @relation(fields: [uploaded_by_id], references: [id], onUpdate: NoAction)
@@ -480,17 +492,35 @@ model Announcement {
   sms_sent_count          Int?                      @default(0)
   image_url               String?                   @db.VarChar(1000)
   image_storage_key       String?                   @db.VarChar(500)
+  image_alt_text          String?                   @db.VarChar(300)
+  /// Structured announcement format (docs/automation/bocaue_mayor_announcement_format.md)
+  template_key            String?                   @db.VarChar(50)
+  template_data           Json?
+  language                announcement_language     @default(FIL)
+  summary                 String?                   @db.VarChar(400)
+  action_required         String?
+  effective_start_at      DateTime?                 @db.Timestamptz(6)
+  effective_end_at        DateTime?                 @db.Timestamptz(6)
+  issuing_office          String?                   @db.VarChar(200)
+  source_reference        String?                   @db.VarChar(500)
+  contact_info            String?                   @db.VarChar(300)
+  approved_by_id          String?                   @db.Uuid
+  approved_at             DateTime?                 @db.Timestamptz(6)
+  cancelled_at            DateTime?                 @db.Timestamptz(6)
+  correction_note         String?
   created_at              DateTime                  @default(now()) @db.Timestamptz(6)
-  updated_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                  @default(now()) @updatedAt @db.Timestamptz(6)
   announcement_deliveries announcement_deliveries[]
   organizations           Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
-  users                   User                      @relation(fields: [publisher_id], references: [id], onUpdate: NoAction)
+  users                   User                      @relation("announcement_publisher", fields: [publisher_id], references: [id], onUpdate: NoAction)
+  approver                User?                     @relation("announcement_approver", fields: [approved_by_id], references: [id], onUpdate: NoAction)
   announcements           Announcement?             @relation("announcementsToannouncements", fields: [superseded_by_id], references: [id], onUpdate: NoAction)
   other_announcements     Announcement[]            @relation("announcementsToannouncements")
 
   @@index([category], map: "idx_announcements_category")
   @@index([severity], map: "idx_announcements_severity")
   @@index([status], map: "idx_announcements_status")
+  @@index([status, scheduled_at], map: "idx_announcements_status_scheduled")
   @@map("announcements")
 }
 
@@ -1351,6 +1381,9 @@ model webauthn_credentials {
 }
 
 enum announcement_category {
+  WEATHER_ADVISORY
+  PUBLIC_ADVISORY
+  MUNICIPAL_SERVICE
   CLASS_SUSPENSION
   FLOOD_ALERT
   EVACUATION_ORDER
@@ -1360,6 +1393,12 @@ enum announcement_category {
   POST_DISASTER_UPDATE
   RESCUE_UPDATE
   GENERAL_INFORMATION
+}
+
+enum announcement_language {
+  FIL
+  EN
+  FIL_EN
 }
 
 enum announcement_scope {
@@ -1381,6 +1420,7 @@ enum announcement_status {
   PUBLISHED
   ARCHIVED
   SUPERSEDED
+  CANCELLED
 }
 
 enum audit_action {
@@ -1681,4 +1721,16 @@ enum webauthn_transport {
   INTERNAL
   HYBRID
   SMART_CARD
+}
+
+model GeoRegion {
+  id              String   @id @default(cuid())
+  name            String
+  region_type     String
+  boundary        Unsupported("geometry(Polygon, 4326)")
+  last_updated_at DateTime @updatedAt
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([name, region_type], map: "idx_geo_regions_name_type")
+  @@map("geo_regions")
 }

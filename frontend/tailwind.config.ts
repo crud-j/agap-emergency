@@ -8,29 +8,34 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['var(--font-sans)', 'IBM Plex Sans', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'IBM Plex Mono', 'ui-monospace', 'monospace'],
+      },
       colors: {
         agap: {
-          // Pearl/green palette — mirrors mobile/src/theme/tokens.ts
-          pearl:      '#F2F5F8',
+          pearl:      '#EFF3F7',
           green:      '#0D6053',
           greenSoft:  '#EEF7F4',
           surface:    '#EDF1F4',
-          textMain:   '#1C2B3A',
-          textMid:    '#40536D',
-          textSub:    '#8795A3',
-          track:      '#DCE3E9',
-          danger:     '#D44858',
-          dangerSoft: '#FDF0F1',
-          amber:      '#D97706',
-          amberSoft:  '#FFFBEB',
-          info:       '#3B82F6',
-          infoSoft:   '#EFF6FF',
-          // Status accents (shared semantic tokens)
+          textMain:   '#0F1C2D',
+          textMid:    '#3D5166',
+          textSub:    '#7A8FA3',
+          track:      '#D8E3EC',
+          danger:     '#CF3B4E',
+          dangerSoft: '#FDF0F2',
+          amber:      '#C96A00',
+          amberSoft:  '#FFF8EB',
+          info:       '#2563EB',
+          infoSoft:   '#EBF4FF',
+          // Sidebar (dark navy rail)
+          sidebar:    '#0A1628',
+          // Status accents
           red:    '#DC2626',
           orange: '#EA580C',
           yellow: '#CA8A04',
           blue:   '#1D4ED8',
-          // Retained for backward-compat; retire incrementally
+          // Retained for backward-compat
           dark:   '#0F172A',
         },
         priority: {
@@ -41,9 +46,11 @@ const config: Config = {
         },
       },
       boxShadow: {
-        card:  '0 4px 16px rgba(135, 149, 163, 0.09)',
-        tile:  '0 4px 12px rgba(122, 136, 152, 0.09)',
-        green: '0 4px 12px rgba(13, 96, 83, 0.18)',
+        card:    '0 2px 8px rgba(15, 28, 45, 0.06), 0 1px 3px rgba(15, 28, 45, 0.04)',
+        'card-md': '0 4px 16px rgba(15, 28, 45, 0.09), 0 2px 4px rgba(15, 28, 45, 0.05)',
+        tile:    '0 4px 12px rgba(15, 28, 45, 0.07)',
+        green:   '0 4px 12px rgba(13, 96, 83, 0.22)',
+        panel:   '0 0 0 1px rgba(148,168,188,0.14), 0 4px 16px rgba(15,28,45,0.08)',
       },
     },
   },

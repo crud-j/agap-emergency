@@ -17,7 +17,6 @@ import { FacilitiesModule } from './facilities/facilities.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RealtimeModule } from './realtime/realtime.module';
-import { OfflineSyncModule } from './offline-sync/offline-sync.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { AuditModule } from './audit/audit.module';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -80,7 +79,6 @@ import { validateConfig } from './config/config.validation';
     CommunicationsModule,
     NotificationsModule,
     RealtimeModule,
-    OfflineSyncModule,
     AnnouncementsModule,
     AuditModule,
     AnalyticsModule,

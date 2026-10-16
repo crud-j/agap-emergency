@@ -126,7 +126,14 @@ export class IncidentsController {
     schema: {
       type: 'object',
       required: ['file'],
-      properties: { file: { type: 'string', format: 'binary', description: 'JPEG/PNG/WebP image or MP4 video (max 10 MB)' } },
+      properties: {
+        file: { type: 'string', format: 'binary', description: 'JPEG/PNG/WebP image or MP4 video (max 10 MB)' },
+        capturedAt: { type: 'string', description: 'Device clock (ms epoch) at capture — Tier 1 provenance' },
+        captureLat: { type: 'string', description: 'GPS latitude at capture' },
+        captureLng: { type: 'string', description: 'GPS longitude at capture' },
+        captureAccuracy: { type: 'string', description: 'GPS accuracy (m) at capture' },
+        captureSource: { type: 'string', description: "Provenance, e.g. 'live-camera'" },
+      },
     },
   })
   @ApiResponse({ status: 201, description: 'Attachment record created; storage_url is the public download URL' })
@@ -134,9 +141,23 @@ export class IncidentsController {
   async addAttachment(
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body() body: Record<string, string>,
     @Request() req: any,
   ) {
-    return this.mediaService.uploadIncidentPhoto(file, id, req.user?.id);
+    // Trusted capture provenance sent as multipart fields (Tier 1 photo validation).
+    // Parsed defensively — any missing/invalid field simply lowers check confidence.
+    const num = (v?: string) => {
+      const n = v != null ? Number(v) : NaN;
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const capture = {
+      capturedAt: num(body?.capturedAt),
+      lat: num(body?.captureLat),
+      lng: num(body?.captureLng),
+      accuracy: num(body?.captureAccuracy),
+      source: body?.captureSource || undefined,
+    };
+    return this.mediaService.uploadIncidentPhoto(file, id, req.user?.id, capture);
   }
 
   @Get(':id/attachments')

@@ -1,20 +1,79 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Component, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Animated, StatusBar, Easing,
+  Animated, StatusBar, Easing, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useIncidentStore } from '@/src/stores/incident.store';
 import { useAuthStore } from '@/src/stores/auth.store';
-import { submitIncident, uploadIncidentPhoto } from '@/src/services/api/incidents.api';
-import { OfflineQueueService } from '@/src/services/offline/offline-queue.service';
+import { submitIncident, uploadIncidentPhoto, uploadIncidentVideo } from '@/src/services/api/incidents.api';
 import type { CreateIncidentInput } from '@agap/shared';
 import { ReporterType } from '@agap/shared';
 import { colors, cardShadow, radius } from '@/src/theme/tokens';
+import { useQuery } from '@tanstack/react-query';
+import { getMapConfig } from '@/src/services/api/locations.api';
+import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
+import { FALLBACK_MAP_STYLE_URL } from '@/src/config/bocaue-geo';
+import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 
-type TransmissionState = 'submitting' | 'success' | 'queued' | 'failed';
+// Lazy so the MapLibre native module imports only when present (never in Expo Go).
+const LiveTrackingMap = React.lazy(() => import('@/src/components/tracking/live-tracking-map'));
+
+type TransmissionState = 'submitting' | 'success' | 'failed';
+
+// ─── Bocaue-scoped location preview ─────────────────────────────────────────────
+
+class MapErrorBoundary extends Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) {
+      return (
+        <View style={[styles.mapCard, styles.mapFallback]}>
+          <Ionicons name="map-outline" size={28} color="#9CA3AF" />
+          <Text style={styles.mapFallbackText}>Map preview unavailable</Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/**
+ * Bocaue-locked incident preview. LiveTrackingMap already clamps the camera to the
+ * municipality (maxBounds + zoom 12.5–18.5 from bocaue-geo), so no extra scoping is
+ * needed here — just feed it the incident point. Needs a parent with a fixed height
+ * because LiveTrackingMap fills its container via StyleSheet.absoluteFill.
+ */
+function MapPreview({
+  location, styleUrl, mapAvailable,
+}: { location: LatLngLite | null; styleUrl: string; mapAvailable: boolean }) {
+  if (!mapAvailable) {
+    return (
+      <View style={[styles.mapCard, styles.mapFallback]}>
+        <Ionicons name="map-outline" size={28} color="#9CA3AF" />
+        <Text style={styles.mapFallbackText}>Map preview unavailable</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.mapCard}>
+      <MapErrorBoundary>
+        <React.Suspense
+          fallback={
+            <View style={[StyleSheet.absoluteFill, styles.mapFallback]}>
+              <ActivityIndicator color={colors.primary} />
+            </View>
+          }
+        >
+          <LiveTrackingMap styleUrl={styleUrl} incident={location} responder={null} routeGeometry={null} />
+        </React.Suspense>
+      </MapErrorBoundary>
+    </View>
+  );
+}
 
 // ─── Submitting ────────────────────────────────────────────────────────────────
 
@@ -49,7 +108,9 @@ function SubmittingView() {
 
 // ─── Success ──────────────────────────────────────────────────────────────────
 
-function SuccessView() {
+function SuccessView({
+  location, styleUrl, mapAvailable,
+}: { location: LatLngLite | null; styleUrl: string; mapAvailable: boolean }) {
   const scale = useRef(new Animated.Value(0.6)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
@@ -69,116 +130,13 @@ function SuccessView() {
       <Text style={styles.sub}>
         The MDRRMO Operations Center has been notified.{'\n'}A dispatcher will review your report shortly.
       </Text>
+      {location && <MapPreview location={location} styleUrl={styleUrl} mapAvailable={mapAvailable} />}
       <View style={[styles.infoCard, styles.successCard]}>
         <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
         <Text style={styles.infoCardText}>Help is on the way. Stay calm and keep your phone nearby.</Text>
       </View>
     </View>
   );
-}
-
-// ─── Queued (Offline) ─────────────────────────────────────────────────────────
-
-function QueuedView({ onViewReports }: { onViewReports: () => void }) {
-  const pulse = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 0.45, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1,    duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ]),
-    ).start();
-  }, []);
-
-  return (
-    <View style={styles.queuedRoot}>
-      {/* Icon */}
-      <View style={[styles.iconWrap, styles.iconWrapAmber]}>
-        <Ionicons name="cloud-offline-outline" size={42} color={colors.amber} />
-      </View>
-
-      {/* Headlines */}
-      <Text style={styles.heading}>Report Saved</Text>
-      <View style={styles.noConnRow}>
-        <Ionicons name="cloud-offline-outline" size={15} color={colors.amber} />
-        <Text style={styles.noConnText}>No Internet Connection</Text>
-      </View>
-
-      {/* Explanation card */}
-      <View style={[styles.card, styles.explainCard]}>
-        <Text style={styles.explainTitle}>Your report is stored safely on this device.</Text>
-        <Text style={styles.explainBody}>
-          It will be sent automatically to the MDRRMO Operations Center the moment your internet
-          connection is restored. No action is needed from you.
-        </Text>
-      </View>
-
-      {/* Steps */}
-      <View style={[styles.card, styles.stepsCard]}>
-        <Step done icon="save-outline"        label="Report saved on your device" />
-        <StepConnector />
-        <Step wait icon="wifi-outline"         label="Waiting for internet connection" pulse={pulse} />
-        <StepConnector />
-        <Step wait icon="cloud-upload-outline" label="Will send automatically" dim />
-      </View>
-
-      {/* Emergency hotline reminder */}
-      <View style={[styles.card, styles.hotlineCard]}>
-        <View style={styles.hotlineHeader}>
-          <Ionicons name="warning-outline" size={16} color={colors.danger} />
-          <Text style={styles.hotlineBold}>If this is a life emergency, do not wait.</Text>
-        </View>
-        <Text style={styles.hotlineLine}>
-          <Text style={styles.hotlineNum}>Call 911</Text>
-          <Text style={styles.hotlineSub}> or the </Text>
-          <Text style={styles.hotlineNum}>MDRRMO Hotline</Text>
-          <Text style={styles.hotlineSub}> immediately.</Text>
-        </Text>
-      </View>
-
-      {/* CTA */}
-      <TouchableOpacity
-        style={styles.primaryBtn}
-        onPress={onViewReports}
-        accessibilityRole="button"
-        accessibilityLabel="View my saved reports"
-      >
-        <Text style={styles.primaryBtnText}>View My Reports</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-interface StepProps {
-  done?: boolean;
-  wait?: boolean;
-  dim?: boolean;
-  icon: string;
-  label: string;
-  pulse?: Animated.Value;
-}
-
-function Step({ done, wait, dim, icon, label, pulse }: StepProps) {
-  const dotColor = done ? colors.primary : wait && !dim ? colors.amber : colors.track;
-  const textColor = done ? colors.text : dim ? colors.textSub : colors.textMid;
-
-  return (
-    <View style={styles.stepRow}>
-      <View style={[styles.stepDot, { backgroundColor: dotColor }]}>
-        {done && <Ionicons name="checkmark" size={10} color="#fff" />}
-        {wait && !dim && pulse && (
-          <Animated.View style={[StyleSheet.absoluteFill, styles.stepPulseRing, { opacity: pulse }]} />
-        )}
-      </View>
-      <Ionicons name={icon as any} size={16} color={done ? colors.primary : dim ? colors.textSub : colors.textMid} style={styles.stepIcon} />
-      <Text style={[styles.stepLabel, { color: textColor }]}>{label}</Text>
-    </View>
-  );
-}
-
-function StepConnector() {
-  return <View style={styles.stepConnector} />;
 }
 
 // ─── Failed ───────────────────────────────────────────────────────────────────
@@ -191,7 +149,7 @@ function FailedView({ error, onRetry, onHome }: { error: string | null; onRetry:
       </View>
       <Text style={styles.heading}>Transmission Failed</Text>
       <Text style={styles.sub}>
-        {error ?? 'We could not send or save your emergency report.'}
+        {error ?? 'We could not send your emergency report.'}
       </Text>
 
       <View style={[styles.card, styles.hotlineCard, { marginTop: 24 }]}>
@@ -221,6 +179,20 @@ export default function TransmissionScreen() {
   const accessToken = useAuthStore((s) => s.accessToken);
   const [txState, setTxState] = useState<TransmissionState>('submitting');
   const [error, setError] = useState<string | null>(null);
+
+  const mapAvailable = useMemo(() => isNativeMapAvailable(), []);
+  const { data: mapConfig } = useQuery({
+    queryKey: ['map-config'],
+    queryFn: () => getMapConfig(accessToken ?? undefined),
+    enabled: mapAvailable,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    gcTime: 30 * 60 * 1000,
+  });
+  const styleUrl = mapConfig?.styleUrl ?? FALLBACK_MAP_STYLE_URL;
+  const incidentLocation: LatLngLite | null = draft.location
+    ? { lat: draft.location.lat, lng: draft.location.lng }
+    : null;
 
   useEffect(() => {
     transmit();
@@ -253,20 +225,22 @@ export default function TransmissionScreen() {
       setTxState('success');
 
       if (accessToken && draft.photoUris.length > 0) {
-        draft.photoUris.forEach((uri) => {
-          uploadIncidentPhoto(result.id, uri, accessToken).catch(() => undefined);
+        draft.photoUris.forEach((uri, i) => {
+          const meta = i === 0 ? draft.photoCaptureMeta ?? undefined : undefined;
+          uploadIncidentPhoto(result.id, uri, accessToken, meta).catch(() => undefined);
         });
+      }
+
+      if (accessToken && draft.videoUri) {
+        uploadIncidentVideo(result.id, draft.videoUri, accessToken).catch(() => undefined);
       }
 
       setTimeout(() => router.replace(`/incidents/${result.id}` as any), 2500);
     } catch {
-      try {
-        await OfflineQueueService.enqueue(payload);
-        setTxState('queued');
-      } catch {
-        setError('Could not queue the emergency. Call 911 immediately.');
-        setTxState('failed');
-      }
+      // Never hold an emergency for later delivery — tell the reporter now so
+      // they can retry or call a hotline instead of waiting on a reconnect.
+      setError('Could not reach the MDRRMO Operations Center. Check your connection and try again.');
+      setTxState('failed');
     }
   }
 
@@ -275,9 +249,8 @@ export default function TransmissionScreen() {
       <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         {txState === 'submitting' && <SubmittingView />}
-        {txState === 'success'    && <SuccessView />}
-        {txState === 'queued'     && (
-          <QueuedView onViewReports={() => router.replace('/incidents' as any)} />
+        {txState === 'success'    && (
+          <SuccessView location={incidentLocation} styleUrl={styleUrl} mapAvailable={mapAvailable} />
         )}
         {txState === 'failed'     && (
           <FailedView
@@ -310,7 +283,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   iconWrapSuccess: { backgroundColor: colors.primarySoft },
-  iconWrapAmber:   { backgroundColor: '#FFF8E6' },
   iconWrapDanger:  { backgroundColor: colors.dangerSoft },
 
   // ─── Typography ────────────────────────────────────────────────────────────
@@ -323,17 +295,14 @@ const styles = StyleSheet.create({
     textAlign: 'center', lineHeight: 22, marginBottom: 16,
   },
 
-  // ─── Queued root ───────────────────────────────────────────────────────────
-  queuedRoot: {
-    flex: 1, alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 40, paddingBottom: 24,
+  // ─── Map preview ─────────────────────────────────────────────────────────────
+  mapCard: {
+    width: '100%', height: 190, borderRadius: radius.lg, overflow: 'hidden',
+    marginBottom: 16, backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border,
   },
-  noConnRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 24,
-  },
-  noConnText: {
-    fontSize: 15, fontWeight: '700', color: colors.amber,
-  },
+  mapFallback: { alignItems: 'center', justifyContent: 'center', gap: 6 },
+  mapFallbackText: { fontSize: 12, fontWeight: '500', color: colors.textSub },
 
   // ─── Cards ─────────────────────────────────────────────────────────────────
   card: {
@@ -342,35 +311,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
     padding: 16, marginBottom: 12,
     ...cardShadow,
-  },
-  explainCard: {},
-  explainTitle: {
-    fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: 6,
-  },
-  explainBody: {
-    fontSize: 13, fontWeight: '400', color: colors.textMid, lineHeight: 20,
-  },
-
-  // ─── Steps card ────────────────────────────────────────────────────────────
-  stepsCard: { paddingVertical: 14 },
-  stepRow: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 2,
-  },
-  stepDot: {
-    width: 20, height: 20, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center',
-    marginRight: 10, flexShrink: 0,
-  },
-  stepPulseRing: {
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: colors.amber,
-  },
-  stepIcon: { marginRight: 8, flexShrink: 0 },
-  stepLabel: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  stepConnector: {
-    width: 2, height: 10, backgroundColor: colors.track,
-    marginLeft: 9, marginVertical: 1,
   },
 
   // ─── Hotline card ──────────────────────────────────────────────────────────
@@ -384,9 +324,6 @@ const styles = StyleSheet.create({
   hotlineBold: {
     fontSize: 13, fontWeight: '800', color: colors.text, flexShrink: 1,
   },
-  hotlineLine: { fontSize: 14, lineHeight: 21 },
-  hotlineNum: { fontWeight: '800', color: colors.danger },
-  hotlineSub: { color: colors.textMid },
 
   // ─── Info card (success) ───────────────────────────────────────────────────
   infoCard: {

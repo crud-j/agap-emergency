@@ -8,11 +8,12 @@ import {
   type ResponderListParams,
 } from './api';
 
-export function useResponders(params?: ResponderListParams) {
+export function useResponders(params?: ResponderListParams, opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['responders', params],
     queryFn: () => fetchResponders(params),
     staleTime: 30_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 

@@ -19,11 +19,12 @@ import {
   type CreateResolutionBody,
 } from './api';
 
-export function useIncidents(params?: IncidentListParams) {
+export function useIncidents(params?: IncidentListParams, opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['incidents', params],
     queryFn: () => fetchIncidents(params),
     staleTime: 30_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 

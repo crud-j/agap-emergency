@@ -1,6 +1,7 @@
 import '../global.css';
 import { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -8,8 +9,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from '../src/stores/auth.store';
 import { useAccessibilityStore } from '../src/stores/accessibility.store';
 import { homeRouteForRole } from '../src/lib/role-routing';
-import { useNetworkSync } from '../src/hooks/useNetworkSync';
 import { OfflineBanner } from '../src/components/ui/OfflineBanner';
+import { registerFcmToken } from '../src/services/api/notifications.api';
 
 // Wire React Native's AppState into TanStack Query's focus manager so
 // refetchOnWindowFocus works when the app comes back to the foreground.
@@ -38,10 +39,46 @@ function AuthGuard() {
   const router = useRouter();
   const segments = useSegments();
   const { isAuthenticated, isLoading, loadFromStorage } = useAuthStore();
+  const accessToken = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
   const loadAccessibility = useAccessibilityStore((s) => s.loadFromStorage);
   const accessibilityLoaded = useAccessibilityStore((s) => s.isLoaded);
-  useNetworkSync();
+
+  useEffect(() => {
+    if (!isAuthenticated || !accessToken || Platform.OS === 'web') return;
+    const token = accessToken;
+
+    let cancelled = false;
+    async function registerDevice() {
+      try {
+        const current = await Notifications.getPermissionsAsync();
+        const permissions = current.granted
+          ? current
+          : await Notifications.requestPermissionsAsync();
+        if (!permissions.granted || cancelled) return;
+
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('default', {
+            name: 'AGAP announcements',
+            importance: Notifications.AndroidImportance.DEFAULT,
+          });
+        }
+
+        const deviceToken = await Notifications.getDevicePushTokenAsync();
+        if (!cancelled && typeof deviceToken.data === 'string') {
+          await registerFcmToken(token, deviceToken.data);
+        }
+      } catch (error) {
+        // Push is optional; the in-app notification feed remains authoritative.
+        console.warn('Unable to register push notification token', error);
+      }
+    }
+
+    void registerDevice();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, isAuthenticated]);
 
   useEffect(() => {
     loadFromStorage();

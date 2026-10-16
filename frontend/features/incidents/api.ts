@@ -76,6 +76,11 @@ export interface IncidentAttachment {
   file_type: string;
   storage_url: string | null;
   uploaded_at: string;
+  // Tier 1 photo validation (MOD-25) — advisory capture provenance + authenticity.
+  capture_timestamp?: string | null;
+  capture_source?: string | null;
+  authenticity_score?: number | null;
+  authenticity_flags?: string[] | null;
 }
 
 export interface IncidentDetail extends IncidentListItem {

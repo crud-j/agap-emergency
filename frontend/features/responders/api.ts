@@ -1,35 +1,29 @@
 import { api } from '@/lib/api';
 import { getToken } from '@/lib/auth';
-import type { PaginatedResult } from '@agap/shared';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface Responder {
   id: string;
-  user_id: string;
   full_name: string;
   phone_number: string | null;
   status: string | null;
-  resource_id: string | null;
-  organization_id: string;
-  resource?: { id: string; name: string; call_sign: string | null };
+  availability_status: string;
+  availability_changed_at: string | null;
+  organization: { id: string; name: string } | null;
 }
 
 export interface ResponderListParams {
-  status?: string;
-  organization_id?: string;
   page?: number;
   perPage?: number;
 }
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
-export function fetchResponders(params?: ResponderListParams): Promise<PaginatedResult<Responder>> {
+export function fetchResponders(params?: ResponderListParams): Promise<Responder[]> {
   const qs = new URLSearchParams();
-  if (params?.status)          qs.set('status', params.status);
-  if (params?.organization_id) qs.set('organization_id', params.organization_id);
-  if (params?.page)            qs.set('page', String(params.page));
-  if (params?.perPage)         qs.set('perPage', String(params.perPage));
+  if (params?.page)    qs.set('page', String(params.page));
+  if (params?.perPage) qs.set('perPage', String(params.perPage));
   return api.get(`/responders?${qs}`, getToken());
 }
 

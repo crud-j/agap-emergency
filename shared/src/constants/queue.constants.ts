@@ -3,7 +3,6 @@ export const QUEUE_NAMES = {
   SMS: 'sms',
   PUSH_NOTIFICATIONS: 'push-notifications',
   INCIDENT_RETRY: 'incident-retry',
-  OFFLINE_SYNC: 'offline-sync',
   ESCALATION: 'escalation',
   SLA_MONITOR: 'sla-monitor',
   LOCATION_PROCESSING: 'location-processing',

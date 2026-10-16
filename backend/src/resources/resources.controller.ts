@@ -30,7 +30,7 @@ export class ResourcesController {
   constructor(private readonly resourcesService: ResourcesService) {}
 
   @Get()
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'List resources' })
   async findAll(
     @Query('status') status?: string,
@@ -45,7 +45,7 @@ export class ResourcesController {
   }
 
   @Get('available')
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'List available resources' })
   async findAvailable() {
     return this.resourcesService.findAvailable();

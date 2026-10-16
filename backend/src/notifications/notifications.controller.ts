@@ -52,8 +52,9 @@ export class NotificationsController {
 
   @Post('register-token')
   @ApiOperation({ summary: 'Register a push notification token' })
-  async registerToken(@Request() req: any, @Body() body: { token: string }) {
-    return this.notificationsService.registerToken(req.user.id, body.token);
+  async registerToken(@Request() req: any, @Body() body: { fcmToken?: string; token?: string }) {
+    const token = body.fcmToken ?? body.token ?? '';
+    return this.notificationsService.registerToken(req.user.id, token);
   }
 
   @Delete('register-token')

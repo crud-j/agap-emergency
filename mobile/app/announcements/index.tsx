@@ -14,8 +14,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { LinearGradient } from 'expo-linear-gradient';
-import { getAnnouncements, type Announcement } from '@/src/services/api/announcements.api';
+import {
+  getAnnouncements,
+  announcementImageSource,
+  type Announcement,
+} from '@/src/services/api/announcements.api';
 import { BottomNav } from '@/src/components/ui/bottom-nav';
 
 const TEAL = '#0D6053';
@@ -30,13 +33,37 @@ const SEVERITY_CONFIG: Record<string, { color: string; bg: string; icon: string;
 const CATEGORIES = [
   { value: '', label: 'All' },
   { value: 'FLOOD_ALERT',        label: 'Flood' },
+  { value: 'WEATHER_ADVISORY',   label: 'Weather' },
   { value: 'EVACUATION_ORDER',   label: 'Evacuation' },
   { value: 'CLASS_SUSPENSION',   label: 'Class' },
   { value: 'ROAD_CLOSURE',       label: 'Road' },
   { value: 'FIRE_ADVISORY',      label: 'Fire' },
   { value: 'POST_DISASTER_UPDATE', label: 'Post-Disaster' },
-  { value: 'GENERAL_INFORMATION', label: 'General' },
+  { value: 'PUBLIC_ADVISORY',    label: 'Advisory' },
 ];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  FLOOD_ALERT: 'Flood',
+  WEATHER_ADVISORY: 'Weather',
+  EVACUATION_ORDER: 'Evacuation',
+  CLASS_SUSPENSION: 'Class suspension',
+  ROAD_CLOSURE: 'Traffic',
+  PUBLIC_ADVISORY: 'Public advisory',
+  MUNICIPAL_SERVICE: 'Municipal service',
+  FIRE_ADVISORY: 'Fire',
+  INDUSTRIAL_HAZARD: 'Industrial hazard',
+  POST_DISASTER_UPDATE: 'Post-disaster',
+  RESCUE_UPDATE: 'Rescue',
+  GENERAL_INFORMATION: 'General',
+};
+
+const categoryLabel = (c: string) => CATEGORY_LABELS[c] ?? c.replace(/_/g, ' ');
+
+function areaLabel(a: Announcement): string {
+  return a.scope === 'MUNICIPALITY_WIDE' || a.target_barangays.length === 0
+    ? 'All of Bocaue'
+    : `Brgy. ${a.target_barangays.join(', ')}`;
+}
 
 function formatRelative(iso: string | null): string {
   if (!iso) return '';
@@ -61,18 +88,7 @@ function CriticalBanner({ item }: { item: Announcement }) {
       accessibilityRole="button"
       accessibilityLabel={`Critical: ${item.title}`}
     >
-      <LinearGradient
-        colors={['#8B1A26', '#3A0810']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.criticalBanner}
-      >
-        <LinearGradient
-          pointerEvents="none"
-          colors={['rgba(255,255,255,0.14)', 'rgba(255,255,255,0.04)', 'rgba(255,255,255,0)']}
-          locations={[0, 0.38, 0.85]}
-          start={{ x: 0.08, y: 0 }} end={{ x: 0.75, y: 0.8 }}
-          style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
-        />
+      <View style={styles.criticalBanner}>
         <View style={styles.criticalRow}>
           <View style={styles.criticalIconWrap}>
             <Ionicons name={cfg.icon as any} size={20} color="#FFFFFF" />
@@ -81,14 +97,17 @@ function CriticalBanner({ item }: { item: Announcement }) {
             <View style={styles.criticalLabelRow}>
               <Text style={styles.criticalTag}>CRITICAL</Text>
               <Text style={styles.criticalMeta}>
-                {item.category.replace(/_/g, ' ')} · {formatRelative(item.published_at)}
+                {categoryLabel(item.category)} · {formatRelative(item.published_at)}
               </Text>
             </View>
             <Text style={styles.criticalTitle} numberOfLines={2}>{item.title}</Text>
+            {item.summary ? (
+              <Text style={styles.criticalSummary} numberOfLines={2}>{item.summary}</Text>
+            ) : null}
           </View>
           <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.7)" />
         </View>
-      </LinearGradient>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -96,6 +115,9 @@ function CriticalBanner({ item }: { item: Announcement }) {
 function AnnouncementCard({ item }: { item: Announcement }) {
   const router = useRouter();
   const cfg = SEVERITY_CONFIG[item.severity] ?? SEVERITY_CONFIG.INFORMATIONAL;
+  const image = announcementImageSource(item);
+  const [imageFailed, setImageFailed] = useState(false);
+  const preview = item.summary ?? item.body;
 
   return (
     <TouchableOpacity
@@ -112,21 +134,29 @@ function AnnouncementCard({ item }: { item: Announcement }) {
             <Ionicons name={cfg.icon as any} size={10} color={cfg.color} style={{ marginRight: 3 }} />
             <Text style={[styles.severityText, { color: cfg.color }]}>{cfg.label}</Text>
           </View>
-          <Text style={styles.cardCategory}>{item.category.replace(/_/g, ' ')}</Text>
+          <Text style={styles.cardCategory} numberOfLines={1}>{categoryLabel(item.category)}</Text>
           <Text style={styles.cardTime}>{formatRelative(item.published_at)}</Text>
         </View>
         <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
-        {item.image_url ? (
+        {preview ? <Text style={styles.cardBody2} numberOfLines={2}>{preview}</Text> : null}
+        {image && !imageFailed ? (
           <Image
-            source={{ uri: item.image_url }}
+            source={image}
             style={styles.cardImage}
             resizeMode="cover"
+            onError={() => setImageFailed(true)}
             accessibilityIgnoresInvertColors
+            accessible
+            accessibilityLabel={item.image_alt_text ?? 'Announcement image'}
           />
-        ) : item.body ? (
-          <Text style={styles.cardBody2} numberOfLines={2}>{item.body}</Text>
         ) : null}
-        <Text style={styles.cardScope}>{item.scope.replace(/_/g, ' ')}</Text>
+        <View style={styles.cardFooter}>
+          <Ionicons name="location-outline" size={11} color="#9CA3AF" />
+          <Text style={styles.cardScope} numberOfLines={1}>{areaLabel(item)}</Text>
+          {item.issuing_office ? (
+            <Text style={styles.cardIssuer} numberOfLines={1}>· {item.issuing_office}</Text>
+          ) : null}
+        </View>
       </View>
       <Ionicons name="chevron-forward" size={16} color="#C4CDD6" style={styles.cardChevron} />
     </TouchableOpacity>
@@ -207,7 +237,7 @@ export default function AnnouncementsScreen() {
           <Text style={styles.emptySub}>
             {category
               ? 'Try a different category filter.'
-              : 'Official MDRRMO announcements will appear here.'}
+              : 'Official notices from the Mayor’s Office and MDRRMO will appear here.'}
           </Text>
         </View>
       )}
@@ -218,7 +248,7 @@ export default function AnnouncementsScreen() {
     <View style={styles.root}>
       <SafeAreaView edges={['top']} style={styles.header}>
         <Text style={styles.headerTitle}>Announcements</Text>
-        <Text style={styles.headerSub}>Bocaue MDRRMO · Official broadcast</Text>
+        <Text style={styles.headerSub}>Office of the Mayor · MDRRMO Bocaue</Text>
       </SafeAreaView>
 
       {isLoading ? (
@@ -277,7 +307,7 @@ const styles = StyleSheet.create({
   criticalBanner: {
     borderRadius: 14,
     padding: 14,
-    overflow: 'hidden',
+    backgroundColor: '#9F1D2C',
   },
   criticalRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   criticalIconWrap: {
@@ -292,6 +322,7 @@ const styles = StyleSheet.create({
   criticalTag:  { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.9)', letterSpacing: 0.5 },
   criticalMeta: { fontSize: 10, color: 'rgba(255,255,255,0.6)' },
   criticalTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', lineHeight: 19 },
+  criticalSummary: { fontSize: 12, color: 'rgba(255,255,255,0.85)', lineHeight: 17, marginTop: 3 },
 
   // Filter chips
   filterRow: { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
@@ -334,9 +365,11 @@ const styles = StyleSheet.create({
   cardTime:     { fontSize: 10, color: '#9CA3AF' },
 
   cardTitle: { fontSize: 14, fontWeight: '700', color: '#111827', lineHeight: 20, marginBottom: 6 },
-  cardImage: { width: '100%', height: 120, borderRadius: 8, marginBottom: 6 },
-  cardBody2: { fontSize: 12, color: '#6B7280', lineHeight: 17, marginBottom: 3 },
-  cardScope: { fontSize: 11, color: '#9CA3AF' },
+  cardImage: { width: '100%', height: 140, borderRadius: 8, marginBottom: 8, backgroundColor: '#EDF1F4' },
+  cardBody2: { fontSize: 12, color: '#4B5563', lineHeight: 17, marginBottom: 8 },
+  cardFooter: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  cardScope: { fontSize: 11, color: '#9CA3AF', flexShrink: 1 },
+  cardIssuer: { fontSize: 11, color: '#9CA3AF', flexShrink: 2 },
 
   // Empty
   empty: { alignItems: 'center', paddingVertical: 48, paddingHorizontal: 32 },

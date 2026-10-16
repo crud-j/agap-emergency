@@ -16,7 +16,10 @@ export const DrawerOverlay = forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'fixed inset-0 z-50 bg-black/20 backdrop-blur-[2px]',
+      // z-[1200]: above Leaflet map panes/controls (which reach z-index 1000) and
+      // the dispatch page's z-[1000] floating overlays — otherwise the drawer opens
+      // hidden behind the map.
+      'fixed inset-0 z-[1200] bg-black/20 backdrop-blur-[2px]',
       'data-[state=open]:animate-in data-[state=closed]:animate-out',
       'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className,
@@ -40,7 +43,7 @@ export const DrawerContent = forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed top-0 z-50 h-full bg-white shadow-[−4px_0_40px_rgba(135,149,163,0.12)] border-l border-[rgba(168,181,193,0.20)] flex flex-col',
+        'fixed top-0 z-[1210] h-full bg-white shadow-[−4px_0_40px_rgba(135,149,163,0.12)] border-l border-[rgba(168,181,193,0.20)] flex flex-col',
         'data-[state=open]:animate-in data-[state=closed]:animate-out duration-300',
         side === 'right'
           ? 'right-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right'

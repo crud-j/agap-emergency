@@ -3,7 +3,6 @@ export declare const QUEUE_NAMES: {
     readonly SMS: "sms";
     readonly PUSH_NOTIFICATIONS: "push-notifications";
     readonly INCIDENT_RETRY: "incident-retry";
-    readonly OFFLINE_SYNC: "offline-sync";
     readonly ESCALATION: "escalation";
     readonly SLA_MONITOR: "sla-monitor";
     readonly LOCATION_PROCESSING: "location-processing";

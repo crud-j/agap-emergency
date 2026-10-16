@@ -60,10 +60,6 @@ export function createMockPrisma() {
       update: jest.fn(),
       findMany: jest.fn(),
     },
-    offline_event_queue: {
-      findUnique: jest.fn(),
-      create: jest.fn(),
-    },
     dispatch_crew: {
       create: jest.fn(),
       createMany: jest.fn(),

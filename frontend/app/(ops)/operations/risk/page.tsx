@@ -7,7 +7,7 @@ import { Badge, Card, CardHeader, CardTitle, Skeleton, EmptyState, Button } from
 import type { BadgeVariant } from '@/components/ui';
 import { useRiskHeatmap, useFloodZones, useRiskAreas } from '@/features/risk/hooks';
 
-// Leaflet touches `window`; load client-side only.
+// MapLibre GL uses WebGL + Web Workers; must be client-side only.
 const RiskHeatmapView = dynamic(
   () => import('@/components/risk/RiskHeatmapView').then((m) => m.RiskHeatmapView),
   {

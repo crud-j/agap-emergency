@@ -1,7 +1,6 @@
 import { type ReactNode, type JSX } from 'react';
 import { cn } from '@/lib/utils';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { Card } from './card';
 
 interface StatCardProps {
   label: string;
@@ -14,31 +13,38 @@ interface StatCardProps {
   className?: string | undefined;
 }
 
+const variantConfig = {
+  default:  { icon: 'bg-agap-greenSoft text-agap-green',   num: 'text-agap-textMain' },
+  critical: { icon: 'bg-red-50 text-red-600',              num: 'text-red-600' },
+  warning:  { icon: 'bg-agap-amberSoft text-agap-amber',   num: 'text-agap-amber' },
+  success:  { icon: 'bg-agap-greenSoft text-agap-green',   num: 'text-agap-green' },
+};
+
 export function StatCard({
   label, value, trend, trendLabel, icon, variant = 'default', loading, className,
 }: StatCardProps): JSX.Element {
-  const variantAccent = {
-    default: 'bg-agap-greenSoft text-agap-green',
-    critical: 'bg-agap-dangerSoft text-agap-danger',
-    warning: 'bg-agap-amberSoft text-agap-amber',
-    success: 'bg-agap-greenSoft text-agap-green',
-  }[variant];
+  const cfg = variantConfig[variant];
 
   return (
-    <Card className={cn('flex flex-col gap-3', className)}>
+    <div className={cn(
+      'flex flex-col gap-3 rounded-xl bg-white border border-agap-track/40 p-5 shadow-card transition-shadow hover:shadow-card-md',
+      className,
+    )}>
       <div className="flex items-start justify-between">
-        <span className="text-sm font-semibold text-agap-textSub uppercase tracking-wide">{label}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-agap-textSub">{label}</span>
         {icon && (
-          <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl', variantAccent)}>
+          <span className={cn('flex h-8 w-8 items-center justify-center rounded-lg', cfg.icon)}>
             {icon}
           </span>
         )}
       </div>
 
       {loading ? (
-        <div className="h-8 w-24 animate-pulse rounded-lg bg-agap-track" />
+        <div className="h-9 w-20 animate-pulse rounded-lg bg-agap-track" />
       ) : (
-        <span className="text-3xl font-extrabold text-agap-textMain tabular-nums">{value}</span>
+        <span className={cn('font-mono text-[32px] font-bold leading-none tabular-nums', cfg.num)}>
+          {value}
+        </span>
       )}
 
       {(trend !== undefined || trendLabel) && !loading && (
@@ -46,7 +52,7 @@ export function StatCard({
           {trend !== undefined && (
             <span
               className={cn(
-                'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold',
+                'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
                 trend > 0 ? 'bg-red-50 text-red-600' :
                 trend < 0 ? 'bg-emerald-50 text-emerald-700' :
                 'bg-agap-surface text-agap-textSub',
@@ -56,9 +62,9 @@ export function StatCard({
               {Math.abs(trend)}%
             </span>
           )}
-          {trendLabel && <span className="text-xs text-agap-textSub">{trendLabel}</span>}
+          {trendLabel && <span className="text-[11px] text-agap-textSub">{trendLabel}</span>}
         </div>
       )}
-    </Card>
+    </div>
   );
 }

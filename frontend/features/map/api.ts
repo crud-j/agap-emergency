@@ -31,10 +31,24 @@ export interface LiveResponderPosition {
   updated_at: string;
 }
 
+export interface MapConfig {
+  provider: string;
+  styleUrl: string;
+  attribution: string;
+  staticMapSupported: boolean;
+  supports3dBuildings: boolean;
+}
+
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
+export function fetchMapConfig(): Promise<MapConfig> {
+  return api.get('/locations/map-config', getToken());
+}
+
 export function fetchRiskData(periodDays = 30): Promise<RiskIntelligenceResponse> {
-  return api.get(`/analytics/risk?periodDays=${periodDays}`, getToken());
+  // Geo risk points for the map overlay (MOD-51). Lives under risk-intelligence —
+  // the former /analytics/risk path never existed on the backend (404).
+  return api.get(`/risk-intelligence/map-points?periodDays=${periodDays}`, getToken());
 }
 
 export function fetchLiveResponderPositions(): Promise<LiveResponderPosition[]> {

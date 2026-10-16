@@ -2,6 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { Map, Camera, Marker, type CameraRef } from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  BOCAUE_BOUNDS,
+  BOCAUE_CENTER,
+  BOCAUE_DEFAULT_ZOOM,
+  BOCAUE_MIN_ZOOM,
+  BOCAUE_MAX_ZOOM,
+} from '@/src/config/bocaue-geo';
+import { BocaueBarangayBoundaryLayer } from './bocaue-boundary-layer';
 
 const TILE_LOAD_TIMEOUT_MS = 15_000;
 
@@ -22,10 +30,12 @@ export default function CitizenLocationMap({
   styleUrl,
   coords,
   onRetryLocation,
+  showBoundary = false,
 }: {
   styleUrl: string;
   coords: { lat: number; lng: number } | null;
   onRetryLocation?: () => void;
+  showBoundary?: boolean;
 }) {
   const cameraRef = useRef<CameraRef>(null);
   const [mapKey, setMapKey] = useState(0);
@@ -74,10 +84,15 @@ export default function CitizenLocationMap({
       >
         <Camera
           ref={cameraRef}
+          maxBounds={BOCAUE_BOUNDS}
+          minZoom={BOCAUE_MIN_ZOOM}
+          maxZoom={BOCAUE_MAX_ZOOM}
           {...(coords
             ? { initialViewState: { center: [coords.lng, coords.lat], zoom: 15 } }
-            : {})}
+            : { initialViewState: { center: BOCAUE_CENTER, zoom: BOCAUE_DEFAULT_ZOOM } })}
         />
+
+        <BocaueBarangayBoundaryLayer show={showBoundary} />
 
         {coords && (
           <Marker id="citizen-pin" lngLat={[coords.lng, coords.lat]}>

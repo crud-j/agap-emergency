@@ -10,6 +10,7 @@ export interface AppNotification {
   event_type: string;
   title: string | null;
   body: string;
+  data_payload: Record<string, unknown> | null;
   status: string;
   created_at: string;
 }

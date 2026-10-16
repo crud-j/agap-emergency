@@ -72,6 +72,7 @@ export function useCreateDispatch() {
       qc.invalidateQueries({ queryKey: ['dispatches'] });
       qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
       qc.invalidateQueries({ queryKey: ['available-units'] });
+      qc.invalidateQueries({ queryKey: ['responders'] });
       qc.invalidateQueries({ queryKey: ['incidents'] });
       qc.invalidateQueries({ queryKey: ['incident', body.incidentId] });
       qc.invalidateQueries({ queryKey: ['dispatch-incident', body.incidentId] });

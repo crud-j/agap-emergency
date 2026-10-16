@@ -79,7 +79,6 @@ async function bootstrap() {
       .addTag('risk', 'Risk intelligence and heatmaps')
       .addTag('surge', 'Disaster surge and mass-casualty mode')
       .addTag('communications', 'Secure incident messaging')
-      .addTag('offline-sync', 'Offline queue synchronization')
       .addTag('privacy', 'Data access log and export')
       .addTag('consent', 'Medical data consent management')
       .build();

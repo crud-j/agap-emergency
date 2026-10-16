@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, MinLength, Matches, IsOptional, IsEmail } from 'class-validator';
+import { IsString, MinLength, Matches, IsOptional, IsEmail, IsNumber, Min, Max } from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({ example: 'Juan dela Cruz' })
@@ -29,4 +29,24 @@ export class RegisterDto {
   @ApiProperty({ example: 'S3curePass!' })
   @IsString()
   confirmPassword!: string;
+
+  @ApiPropertyOptional({
+    example: 14.7977,
+    description: 'WGS-84 latitude from device GPS — used for geo-fence validation',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude?: number;
+
+  @ApiPropertyOptional({
+    example: 120.9374,
+    description: 'WGS-84 longitude from device GPS — used for geo-fence validation',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude?: number;
 }

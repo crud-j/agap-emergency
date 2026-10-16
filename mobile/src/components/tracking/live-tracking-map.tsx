@@ -10,6 +10,14 @@ import {
   type LngLatBounds,
 } from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  BOCAUE_BOUNDS,
+  BOCAUE_CENTER,
+  BOCAUE_DEFAULT_ZOOM,
+  BOCAUE_MIN_ZOOM,
+  BOCAUE_MAX_ZOOM,
+} from '@/src/config/bocaue-geo';
+import { BocaueBarangayBoundaryLayer } from './bocaue-boundary-layer';
 
 export interface LatLngLite {
   lat: number;
@@ -53,6 +61,7 @@ export function LiveTrackingMap({
   pitch: externalPitch = 0,
   navigationHeading = null,
   supports3dBuildings = false,
+  showBoundary = false,
 }: {
   styleUrl: string;
   incident: LatLngLite | null;
@@ -65,6 +74,7 @@ export function LiveTrackingMap({
   /** Enables the fill-extrusion building layer. True only when the tile style has
    *  OpenMapTiles-format building height data (see backend MAP_STYLE_URL). */
   supports3dBuildings?: boolean;
+  showBoundary?: boolean;
 }) {
   const cameraRef = useRef<CameraRef>(null);
   const [follow, setFollow] = useState(true);
@@ -133,6 +143,15 @@ export function LiveTrackingMap({
     setFollow(true); // re-enter follow so the camera centres immediately
   }
 
+  function clampToBocaue(bounds: LngLatBounds): LngLatBounds {
+    return [
+      Math.max(bounds[0], BOCAUE_BOUNDS[0]),
+      Math.max(bounds[1], BOCAUE_BOUNDS[1]),
+      Math.min(bounds[2], BOCAUE_BOUNDS[2]),
+      Math.min(bounds[3], BOCAUE_BOUNDS[3]),
+    ];
+  }
+
   function fitRoute() {
     const pts: LatLngLite[] = [];
     if (responder) pts.push(responder);
@@ -145,7 +164,7 @@ export function LiveTrackingMap({
     const lats = pts.map((p) => p.lat);
     const lngs = pts.map((p) => p.lng);
     const pad = 0.004; // ~450 m breathing room so markers aren't at the edge
-    const bounds: LngLatBounds = [
+    const rawBounds: LngLatBounds = [
       Math.min(...lngs) - pad,
       Math.min(...lats) - pad,
       Math.max(...lngs) + pad,
@@ -154,7 +173,7 @@ export function LiveTrackingMap({
     setIs3d(false);   // flat top-down for route overview
     setFollow(false);
     try {
-      cameraRef.current?.fitBounds(bounds, { duration: 600 });
+      cameraRef.current?.fitBounds(clampToBocaue(rawBounds), { duration: 600 });
     } catch {
       // ignore
     }
@@ -182,12 +201,19 @@ export function LiveTrackingMap({
       >
         <Camera
           ref={cameraRef}
+          maxBounds={BOCAUE_BOUNDS}
+          minZoom={BOCAUE_MIN_ZOOM}
+          maxZoom={BOCAUE_MAX_ZOOM}
           pitch={activePitch}
           bearing={activeBearing}
           duration={600}
           easing="ease"
-          {...(center ? { initialViewState: { center: [center.lng, center.lat], zoom: 14 } } : {})}
+          {...(center
+            ? { initialViewState: { center: [center.lng, center.lat], zoom: 14 } }
+            : { initialViewState: { center: BOCAUE_CENTER, zoom: BOCAUE_DEFAULT_ZOOM } })}
         />
+
+        <BocaueBarangayBoundaryLayer show={showBoundary} />
 
         {/* 3D building extrusion — only when tile style has OpenMapTiles building data */}
         {supports3dBuildings && (

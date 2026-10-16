@@ -9,7 +9,14 @@ export function getSocket(): Socket {
   if (!socket) {
     socket = io(`${WS_URL}/agap`, {
       autoConnect: false,
-      transports: ['websocket'],
+      // Try a direct WebSocket first — it connects in a single round-trip, so the
+      // "Live" indicator flips over almost immediately. 'polling' is kept only as a
+      // fallback for proxies/networks that refuse a WebSocket upgrade.
+      transports: ['websocket', 'polling'],
+      // Attempt the upgrade right away rather than settling on long-polling first.
+      upgrade: true,
+      // Don't wait the default 20s before surfacing a failed connection.
+      timeout: 8_000,
       // Slow down reconnection retries so the browser console isn't flooded when
       // the backend is temporarily down. Starts at 2s, caps at 30s (6× the default 5s).
       reconnectionDelay: 2_000,

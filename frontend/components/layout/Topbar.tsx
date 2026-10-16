@@ -8,6 +8,7 @@ import { useWsState } from '@/lib/use-ws-state';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { cn } from '@/lib/utils';
 import { LogOut, ChevronRight } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 
 // ─── Role display labels ────────────────────────────────────────────────────────
 
@@ -68,16 +69,17 @@ export function Topbar(): JSX.Element {
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-[rgba(168,181,193,0.20)] bg-white px-6">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-agap-track/60 bg-white px-5">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm" aria-label="Breadcrumb">
+      <nav className="flex items-center gap-1 text-sm" aria-label="Breadcrumb">
         {crumbs.map((crumb, i) => (
-          <span key={i} className="flex items-center gap-1.5">
-            {i > 0 && <ChevronRight size={14} className="text-agap-track" />}
+          <span key={i} className="flex items-center gap-1">
+            {i > 0 && <ChevronRight size={13} className="text-agap-track" />}
             <span
               className={cn(
+                'font-medium',
                 i === crumbs.length - 1
-                  ? 'font-semibold text-agap-textMain'
+                  ? 'text-agap-textMain'
                   : 'text-agap-textSub',
               )}
             >
@@ -88,42 +90,40 @@ export function Topbar(): JSX.Element {
       </nav>
 
       {/* Right rail */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <ConnectionIndicator state={wsState} />
+        <NotificationBell />
 
         {user && (
           <>
-            {/* Org name */}
+            <div className="mx-1 h-5 w-px bg-agap-track/70" />
+
             {user.orgName && (
-              <span className="hidden lg:block text-xs font-medium text-agap-textSub border-r border-[rgba(168,181,193,0.20)] pr-3">
+              <span className="hidden lg:block text-xs text-agap-textSub font-medium">
                 {user.orgName}
               </span>
             )}
 
-            {/* Role badge */}
-            <span className="hidden sm:inline-flex items-center rounded-full bg-agap-greenSoft px-2.5 py-0.5 text-xs font-semibold text-agap-green">
+            <span className="hidden sm:inline-flex items-center rounded-md bg-agap-greenSoft px-2 py-0.5 text-[11px] font-semibold text-agap-green">
               {ROLE_LABELS[user.role] ?? user.role}
             </span>
 
-            {/* Avatar */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-agap-green shadow-green">
-              <span className="text-xs font-bold text-white">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-agap-green shadow-green">
+              <span className="text-[11px] font-bold text-white">
                 {(user.name ?? user.email ?? '?')[0]?.toUpperCase()}
               </span>
             </div>
 
-            {/* User name */}
-            <span className="hidden md:block text-sm font-semibold text-agap-textMain max-w-[120px] truncate">
+            <span className="hidden md:block text-[13px] font-semibold text-agap-textMain max-w-[120px] truncate">
               {user.name ?? user.email}
             </span>
 
-            {/* Logout */}
             <button
               onClick={handleLogout}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-agap-textSub hover:bg-agap-surface hover:text-agap-danger transition-colors focus:outline-none focus:ring-2 focus:ring-agap-green"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-agap-textSub hover:bg-agap-surface hover:text-agap-danger transition-colors focus:outline-none focus:ring-2 focus:ring-agap-green"
               aria-label="Log out"
             >
-              <LogOut size={16} />
+              <LogOut size={14} />
             </button>
           </>
         )}

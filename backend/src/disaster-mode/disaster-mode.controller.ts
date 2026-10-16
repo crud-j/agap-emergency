@@ -26,7 +26,7 @@ export class DisasterModeController {
   constructor(private readonly disasterModeService: DisasterModeService) {}
 
   @Get('status')
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Get surge mode status' })
   async status() {
     return this.disasterModeService.getStatus();

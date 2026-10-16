@@ -7,8 +7,7 @@
     "test:cov": "jest --config jest.config.ts --coverage",
     "test:watch": "jest --config jest.config.ts --watch",
     "test:mobile": "jest --config mobile/jest.config.ts",
-    "test:mobile:watch": "jest --config mobile/jest.config.ts --watch",
-    "test:offline-sync": "jest --config jest.config.ts --testPathPattern=offline-sync --no-coverage"
+    "test:mobile:watch": "jest --config mobile/jest.config.ts --watch"
   },
   "devDependencies": {
     "react": "19.2.3",

@@ -11,12 +11,13 @@ import {
   type ActivateSurgeBody,
 } from './api';
 
-export function useSurgeState() {
+export function useSurgeState(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['surge-state'],
     queryFn: fetchSurgeState,
     staleTime: 15_000,
     refetchInterval: 30_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 

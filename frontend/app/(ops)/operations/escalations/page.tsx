@@ -9,6 +9,7 @@ import {
   type Column,
 } from '@/components/ui';
 import { titleCase, timeAgo } from '@/lib/incident-format';
+import { useAuthUser, hasRole } from '@/lib/use-auth';
 import {
   useEscalations,
   useAcknowledgeEscalation,
@@ -55,14 +56,27 @@ function breachLabel(iso: string): { text: string; overdue: boolean } {
 
 export default function EscalationsPage(): JSX.Element {
   const [statusFilter, setStatusFilter] = useState<string>('ACTIVE');
+  const user = useAuthUser();
+  const canManageEscalations = hasRole(user, 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
 
   const { data, isLoading, isError, refetch } = useEscalations(
     statusFilter === ALL ? undefined : { status: statusFilter },
+    { enabled: canManageEscalations },
   );
   const acknowledge = useAcknowledgeEscalation();
   const resolve = useResolveEscalation();
 
   const rows = useMemo<Escalation[]>(() => data ?? [], [data]);
+
+  if (user && !canManageEscalations) {
+    return (
+      <div className="rounded-2xl border border-[rgba(212,72,88,0.22)] bg-agap-dangerSoft p-6 text-center">
+        <p className="text-sm text-agap-danger">
+          Escalation monitoring requires the Supervisor or System Administrator role.
+        </p>
+      </div>
+    );
+  }
 
   const columns: Column<Escalation>[] = [
     {

@@ -47,6 +47,8 @@ export interface RegisterDto {
   email?: string;
   password: string;
   confirmPassword: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface RegisterResponse {
@@ -55,6 +57,20 @@ export interface RegisterResponse {
 
 export async function register(dto: RegisterDto): Promise<RegisterResponse> {
   return api('/v1/auth/register', { method: 'POST', body: JSON.stringify(dto) });
+}
+
+export interface GeoCheckResult {
+  inside: boolean;
+  barangay: string | null;
+  municipality: string | null;
+  province: string | null;
+}
+
+export async function geoCheck(latitude: number, longitude: number): Promise<GeoCheckResult> {
+  return api('/v1/auth/geo-check', {
+    method: 'POST',
+    body: JSON.stringify({ latitude, longitude }),
+  });
 }
 
 export async function loginWithPassword(dto: {

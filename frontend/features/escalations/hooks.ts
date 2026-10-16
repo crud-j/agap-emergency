@@ -9,11 +9,12 @@ import {
   type EscalationListParams,
 } from './api';
 
-export function useEscalations(params?: EscalationListParams) {
+export function useEscalations(params?: EscalationListParams, opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['escalations', params],
     queryFn: () => fetchEscalations(params),
     staleTime: 15_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 

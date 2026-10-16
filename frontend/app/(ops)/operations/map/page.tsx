@@ -10,7 +10,7 @@ import { useIncidentLocations, useLiveResponders } from '@/features/map/hooks';
 import { ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { MapIncident } from '@/components/incidents/IncidentMapView';
 
-// Leaflet touches `window`; load the map client-side only.
+// MapLibre GL uses WebGL + Web Workers; must be client-side only.
 const IncidentMapView = dynamic(
   () => import('@/components/incidents/IncidentMapView').then((m) => m.IncidentMapView),
   {

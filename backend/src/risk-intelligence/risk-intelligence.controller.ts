@@ -5,6 +5,7 @@ import {
   Patch,
   Delete,
   Param,
+  Query,
   Body,
   UseGuards,
   ParseUUIDPipe,
@@ -28,6 +29,13 @@ export class RiskIntelligenceController {
   @ApiOperation({ summary: 'Incident heatmap by barangay' })
   async heatmap() {
     return this.riskIntelligenceService.getHeatmap();
+  }
+
+  @Get('map-points')
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Geo risk points for the operations map overlay (MOD-51)' })
+  async mapPoints(@Query('periodDays') periodDays?: string) {
+    return this.riskIntelligenceService.getGeoHeatmap(periodDays ? Number(periodDays) : 30);
   }
 
   @Get('flood-zones')

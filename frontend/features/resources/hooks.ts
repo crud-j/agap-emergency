@@ -30,11 +30,12 @@ export function useResource(id: string | null) {
   });
 }
 
-export function useAvailableResources() {
+export function useAvailableResources(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['available-units'],
     queryFn: fetchAvailableResources,
     staleTime: 20_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 

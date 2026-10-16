@@ -519,7 +519,7 @@ function MutualAidTab(): JSX.Element {
             <Plus size={14} /> New Request
           </Button>
         )}
-        {data && (
+        {data?.meta?.total != null && (
           <span className="text-xs text-agap-textSub">{data.meta.total} request{data.meta.total !== 1 ? 's' : ''}</span>
         )}
       </div>

@@ -49,6 +49,7 @@
 
 # --- Local dev tooling (not needed inside the image) ---
 .claude
+docs
 scripts
 tests
 infrastructure

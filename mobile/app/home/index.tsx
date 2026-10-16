@@ -15,7 +15,7 @@ import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { useActiveIncident } from '../../src/hooks/useActiveIncident';
 import { getAnnouncements, type Announcement } from '../../src/services/api/announcements.api';
-import { getUnreadCount } from '../../src/services/api/notifications.api';
+import { useUnreadCount } from '../../src/hooks/useNotifications';
 import { reverseGeocode } from '../../src/services/api/locations.api';
 import { BottomNav } from '../../src/components/ui/bottom-nav';
 import SOSAlert from '../../src/components/emergency/SOSAlert';
@@ -59,27 +59,14 @@ function SurgeBanner({ announcement }: { announcement: Announcement }) {
       onPress={() => router.push({ pathname: '/announcements/[id]', params: { id: announcement.id } } as any)}
       style={styles.surgeBannerContainer}
     >
-      <LinearGradient
-        colors={['#8B1A26', '#3A0810']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.surgeBanner}
-      >
-        {/* Specular glint — matches greeting card treatment */}
-        <LinearGradient
-          pointerEvents="none"
-          colors={['rgba(255,255,255,0.14)', 'rgba(255,255,255,0.04)', 'rgba(255,255,255,0)']}
-          locations={[0, 0.38, 0.85]}
-          start={{ x: 0.08, y: 0 }}
-          end={{ x: 0.75, y: 0.8 }}
-          style={[StyleSheet.absoluteFill, { borderRadius: 16 }]}
-        />
+      <View style={styles.surgeBanner}>
         <Ionicons name={cfg.icon as any} size={20} color="#FFFFFF" style={{ marginRight: 12 }} />
         <View style={{ flex: 1 }}>
           <Text style={styles.surgeBannerLabel}>{t.home.surgeActive}</Text>
           <Text style={styles.surgeBannerTitle} numberOfLines={1}>{announcement.title}</Text>
         </View>
         <Ionicons name="arrow-forward" size={16} color="rgba(255,255,255,0.7)" />
-      </LinearGradient>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -230,12 +217,8 @@ export default function HomeScreen() {
     staleTime: 60_000,
   });
 
-  const { data: unreadCount = 0 } = useQuery<number>({
-    queryKey: ['unread-count'],
-    queryFn: () => getUnreadCount(),
-    enabled: !!accessToken,
-    refetchInterval: 60_000,
-  });
+  const { data: unreadData } = useUnreadCount();
+  const unreadCount = unreadData?.unread ?? 0;
 
   useEffect(() => {
     (async () => {
@@ -377,6 +360,8 @@ export default function HomeScreen() {
           activeOpacity={0.82}
           accessibilityRole="button"
           accessibilityLabel={t.home.locationTitle}
+          accessibilityHint="Opens the Bocaue coverage map"
+          onPress={() => router.push('/coverage' as any)}
         >
           <View style={styles.locationIconWrap}>
             <Ionicons name="location" size={21} color="#D44858" />
@@ -395,7 +380,13 @@ export default function HomeScreen() {
             <Text style={styles.locationCardSub} numberOfLines={2}>
               {gpsGranted === false ? t.home.locationUnavailable : (locationText ?? t.common.loading)}
             </Text>
+            <View style={styles.locationMapLinkRow}>
+              <Ionicons name="map-outline" size={13} color="#0D6053" />
+              <Text style={styles.locationMapLinkText}>View Bocaue coverage map</Text>
+            </View>
           </View>
+
+          <Ionicons name="chevron-forward" size={18} color="#8795A3" />
         </TouchableOpacity>
 
         <View style={{ height: 20 }} />
@@ -433,7 +424,7 @@ const styles = StyleSheet.create({
 
   // ─── Surge banner ───────────────────────────────────────────────────────────
   surgeBannerContainer: { marginHorizontal: 16, marginTop: 8, marginBottom: 8, borderRadius: 16, overflow: 'hidden', ...CARD_SHADOW },
-  surgeBanner: { minHeight: 58, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center' },
+  surgeBanner: { minHeight: 58, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', backgroundColor: '#9F1D2C' },
   surgeBannerLabel: { fontSize: 10, lineHeight: 12, fontWeight: '800', color: 'rgba(255,200,195,0.9)', letterSpacing: 1.1, textTransform: 'uppercase' },
   surgeBannerTitle: { marginTop: 4, fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#FFFFFF' },
 
@@ -611,6 +602,8 @@ const styles = StyleSheet.create({
   locationTitleRow: { marginBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   locationCardLabel: { fontSize: 12, fontWeight: '800', color: '#8795A3', letterSpacing: 1, textTransform: 'uppercase' },
   locationCardSub: { fontSize: 14, fontWeight: '700', color: '#1C2B3A' },
+  locationMapLinkRow: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  locationMapLinkText: { fontSize: 12, fontWeight: '700', color: '#0D6053' },
   gpsStatusPill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
   gpsStatusReady: { backgroundColor: '#EEF7F4' },
   gpsStatusUnavailable: { backgroundColor: '#FDF0F1' },

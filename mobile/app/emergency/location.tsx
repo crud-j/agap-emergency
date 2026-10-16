@@ -31,7 +31,10 @@ const CitizenLocationMap = React.lazy(
   () => import('@/src/components/tracking/citizen-location-map'),
 );
 
-const MAPLIBRE_DEMO_STYLE = 'https://demotiles.maplibre.org/style.json';
+// Keyless OpenFreeMap fallback — real OSM streets at municipal zoom (the old
+// maplibre.org demo tiles were blank at Bocaue). Used only when the backend
+// map-config returns no styleUrl.
+const MAPLIBRE_DEMO_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 const TEAL = '#0D6053';
 

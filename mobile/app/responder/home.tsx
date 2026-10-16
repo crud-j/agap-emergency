@@ -223,6 +223,24 @@ export default function HomeScreen() {
           <Text style={styles.pageTitleSub}>Stay ready. Respond. Make a difference.</Text>
         </View>
 
+        {/* ── Bocaue coverage map ───────────────────────────────────────── */}
+        <TouchableOpacity
+          style={styles.coverageCard}
+          activeOpacity={0.85}
+          onPress={() => router.push('/coverage' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Open the Bocaue coverage map"
+        >
+          <View style={styles.coverageIconWrap}>
+            <Ionicons name="map-outline" size={20} color="#0D6053" />
+          </View>
+          <View style={styles.coverageBody}>
+            <Text style={styles.coverageTitle}>Bocaue coverage map</Text>
+            <Text style={styles.coverageSub}>View the municipality and all 19 barangays</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#8795A3" />
+        </TouchableOpacity>
+
         {/* ── Duty availability ─────────────────────────────────────────── */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
@@ -579,6 +597,13 @@ const styles = StyleSheet.create({
   // Cards
   card:         { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: BEVEL, ...SHADOW },
   cardTitle:    { fontSize: 16, fontWeight: '700', color: '#1C2B3A' },
+
+  // Coverage-map shortcut
+  coverageCard:    { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 18, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: BEVEL, ...SHADOW },
+  coverageIconWrap:{ width: 42, height: 42, borderRadius: 21, backgroundColor: '#EEF7F4', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(13,96,83,0.14)' },
+  coverageBody:    { flex: 1 },
+  coverageTitle:   { fontSize: 14, fontWeight: '800', color: '#1C2B3A' },
+  coverageSub:     { fontSize: 12, color: '#8795A3', marginTop: 2 },
   cardHeaderRow:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
 
   // Availability

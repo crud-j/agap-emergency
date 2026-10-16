@@ -2,6 +2,7 @@ import React, { Component, useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
@@ -34,7 +35,10 @@ const CitizenLocationMap = React.lazy(
   () => import('../../src/components/tracking/citizen-location-map'),
 );
 
-const MAPLIBRE_DEMO_STYLE = 'https://demotiles.maplibre.org/style.json';
+// Keyless OpenFreeMap fallback — real OSM streets at municipal zoom (the old
+// maplibre.org demo tiles were blank at Bocaue). Used only when the backend
+// map-config returns no styleUrl.
+const MAPLIBRE_DEMO_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -831,15 +835,15 @@ export default function IncidentDetailScreen() {
             <Ionicons name="chevron-back" size={22} color={C.navy} />
           </TouchableOpacity>
 
-          {/* AGAP branding */}
+          {/* AGAP branding — official wordmark (contains the mark, name, and tagline) */}
           <View style={styles.brandRow}>
-            <View style={styles.brandIcon}>
-              <Text style={styles.brandIconText}>A</Text>
-            </View>
-            <View>
-              <Text style={styles.brandName}>AGAP</Text>
-              <Text style={styles.brandTagline}>Incident Management Platform</Text>
-            </View>
+            <Image
+              source={require('../../assets/icons/agap-icon.png')}
+              style={styles.brandLogo}
+              resizeMode="contain"
+              accessibilityRole="image"
+              accessibilityLabel="AGAP — Incident Management Platform"
+            />
           </View>
 
           <View style={styles.appBarRight}>
@@ -865,7 +869,6 @@ export default function IncidentDetailScreen() {
         <View style={styles.pageHeader}>
           <View style={{ flex: 1 }}>
             <Text style={styles.pageTitle}>Incident Details</Text>
-            <Text style={styles.pageSubtitle}>Complete information about this incident.</Text>
           </View>
           <TouchableOpacity style={styles.shareBtn} onPress={handleShare} accessibilityLabel="Share report">
             <Ionicons name="share-outline" size={15} color={C.primary} style={{ marginRight: 5 }} />
@@ -896,17 +899,13 @@ export default function IncidentDetailScreen() {
             </View>
           </View>
 
-          {/* Status + type (right column) */}
+          {/* Status (right column) */}
           <View style={styles.incidentCardRight}>
             <View style={[styles.badge, { backgroundColor: badge.bg }]}>
               {badge.icon && (
                 <Ionicons name={badge.icon} size={12} color={badge.text} style={{ marginRight: 4 }} />
               )}
               <Text style={[styles.badgeText, { color: badge.text }]}>{statusLabel}</Text>
-            </View>
-            <View style={styles.incidentTypeChip}>
-              <Text style={styles.incidentTypeLabel}>Incident Type</Text>
-              <Text style={styles.incidentTypeValue}>{typeLabel}</Text>
             </View>
           </View>
         </View>
@@ -989,15 +988,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: C.bg,
   },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
-  brandIcon: {
-    width: 32, height: 32, borderRadius: 8,
-    backgroundColor: C.navy,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  brandIconText: { color: C.white, fontWeight: '900', fontSize: 16, letterSpacing: 0.5 },
-  brandName: { fontSize: 13, fontWeight: '800', color: C.navy },
-  brandTagline: { fontSize: 9, color: C.textSub, fontWeight: '500' },
+  brandRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  brandLogo: { width: 130, height: 40 },
   appBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   onlineChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -1011,17 +1003,15 @@ const styles = StyleSheet.create({
   // ── Page header ─────────────────────────────────────────────────────────────
   pageHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: 12,
     backgroundColor: C.white,
   },
   pageTitle:    { fontSize: 26, fontWeight: '800', color: C.navy, lineHeight: 32 },
-  pageSubtitle: { fontSize: 13, color: C.textSub, marginTop: 2 },
   shareBtn: {
     flexDirection: 'row', alignItems: 'center',
-    marginTop: 4,
     paddingHorizontal: 12, paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1, borderColor: `${C.primary}30`,
@@ -1053,15 +1043,6 @@ const styles = StyleSheet.create({
   incidentMeta:  { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
   incidentMetaText: { fontSize: 11, color: C.textSub, flex: 1 },
   incidentCardRight: { alignItems: 'flex-end', gap: 8, flexShrink: 0 },
-  incidentTypeChip: {
-    alignItems: 'flex-end',
-    backgroundColor: C.bg,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  incidentTypeLabel: { fontSize: 9, color: C.textSub, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4 },
-  incidentTypeValue: { fontSize: 12, fontWeight: '700', color: C.navy, marginTop: 1 },
 
   // ── Badge ────────────────────────────────────────────────────────────────────
   badge: {

@@ -43,10 +43,38 @@ export class RespondersService {
   ) {}
 
   async findAll(_filters: Record<string, unknown>) {
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: { role: 'RESPONDER' },
-      select: { id: true, full_name: true, phone_number: true, status: true },
+      select: {
+        id: true,
+        full_name: true,
+        phone_number: true,
+        status: true,
+        responder_availability_user: {
+          select: { status: true, changed_at: true },
+        },
+        organization_memberships: {
+          where: { is_active: true },
+          select: {
+            organizations: { select: { id: true, name: true } },
+          },
+          orderBy: [{ organizations: { name: 'asc' } }, { id: 'asc' }],
+          take: 1,
+        },
+      },
+      orderBy: { full_name: 'asc' },
     });
+    return users.map((u) => ({
+      id: u.id,
+      full_name: u.full_name,
+      phone_number: u.phone_number,
+      status: u.status,
+      availability_status:
+        (u.responder_availability_user?.status as string) ?? 'OFF_DUTY',
+      availability_changed_at:
+        u.responder_availability_user?.changed_at?.toISOString() ?? null,
+      organization: u.organization_memberships[0]?.organizations ?? null,
+    }));
   }
 
   async getMySummary(userId: string) {

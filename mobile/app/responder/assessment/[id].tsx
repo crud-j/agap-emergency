@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -17,9 +17,8 @@ import {
   submitAssessment,
   type SubmitAssessmentInput,
 } from '@/src/services/api/assessments.api';
-import { AssessmentQueueService } from '@/src/services/offline/assessment-queue.service';
 
-type SaveState = 'idle' | 'saving' | 'synced' | 'queued' | 'error';
+type SaveState = 'idle' | 'saving' | 'synced' | 'error';
 
 const CONSCIOUSNESS = [
   { value: 'CONSCIOUS', label: 'Conscious' },
@@ -50,8 +49,8 @@ function parseNum(s: string): number | undefined {
 /**
  * On-scene patient assessment form (MOD-37 / WS-5.1). Every field is optional —
  * a responder records whatever they have and submits; missing data never blocks.
- * Offline-safe: on a failed POST the assessment is queued locally and synced
- * later, with a visible save/sync indicator throughout.
+ * On a failed POST the form keeps its values and shows an error so the
+ * responder can retry immediately — nothing is held back for later delivery.
  */
 export default function AssessmentScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -72,27 +71,8 @@ export default function AssessmentScreen() {
   const [notes, setNotes] = useState('');
 
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [pending, setPending] = useState(0);
 
   const incidentId = id as string;
-
-  const trySubmit = useCallback(
-    (iid: string, payload: SubmitAssessmentInput) => submitAssessment(iid, payload, token as string),
-    [token],
-  );
-
-  // Flush any locally-queued assessments whenever the screen opens.
-  useEffect(() => {
-    if (!incidentId || !token) return;
-    let active = true;
-    (async () => {
-      const left = await AssessmentQueueService.flush(trySubmit);
-      if (active) setPending(left || (await AssessmentQueueService.pendingCount(incidentId)));
-    })();
-    return () => {
-      active = false;
-    };
-  }, [incidentId, token, trySubmit]);
 
   function buildPayload(): SubmitAssessmentInput {
     const vitals = {
@@ -123,13 +103,9 @@ export default function AssessmentScreen() {
     try {
       await submitAssessment(incidentId, payload, token);
       setSaveState('synced');
-      setPending(await AssessmentQueueService.pendingCount(incidentId));
       setTimeout(() => router.back(), 900);
     } catch {
-      // Offline / server unreachable — persist locally and sync later.
-      await AssessmentQueueService.enqueue(incidentId, payload);
-      setSaveState('queued');
-      setPending(await AssessmentQueueService.pendingCount(incidentId));
+      setSaveState('error');
     }
   }
 
@@ -143,7 +119,7 @@ export default function AssessmentScreen() {
         <View style={styles.iconBtn} />
       </SafeAreaView>
 
-      <SyncBanner state={saveState} pending={pending} />
+      <SyncBanner state={saveState} />
 
       <ScrollView style={styles.body} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
         <Text style={styles.hint}>
@@ -239,27 +215,20 @@ export default function AssessmentScreen() {
 
 // ─── Sync / save state banner ────────────────────────────────────────────────
 
-function SyncBanner({ state, pending }: { state: SaveState; pending: number }) {
-  if (state === 'idle' && pending === 0) return null;
+function SyncBanner({ state }: { state: SaveState }) {
+  if (state === 'idle') return null;
 
   const cfg =
     state === 'saving'
       ? { bg: colors.infoSoft, fg: colors.info, icon: 'cloud-upload-outline' as const, text: 'Saving…' }
       : state === 'synced'
         ? { bg: colors.primarySoft, fg: colors.primary, icon: 'checkmark-circle' as const, text: 'Submitted — dispatcher notified' }
-        : state === 'queued'
-          ? { bg: colors.amberSoft, fg: colors.amber, icon: 'cloud-offline-outline' as const, text: 'Saved offline — will sync automatically' }
-          : state === 'error'
-            ? { bg: colors.dangerSoft, fg: colors.danger, icon: 'alert-circle' as const, text: 'Could not save' }
-            : { bg: colors.amberSoft, fg: colors.amber, icon: 'time-outline' as const, text: `${pending} pending sync` };
+        : { bg: colors.dangerSoft, fg: colors.danger, icon: 'alert-circle' as const, text: 'Not submitted — check connection and try again' };
 
   return (
     <View style={[styles.banner, { backgroundColor: cfg.bg }]}>
       <Ionicons name={cfg.icon} size={16} color={cfg.fg} style={{ marginRight: 8 }} />
       <Text style={[styles.bannerText, { color: cfg.fg }]}>{cfg.text}</Text>
-      {pending > 0 && state !== 'queued' && (
-        <Text style={[styles.bannerText, { color: cfg.fg, marginLeft: 'auto' }]}>· {pending} queued</Text>
-      )}
     </View>
   );
 }

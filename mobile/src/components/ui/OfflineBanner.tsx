@@ -1,57 +1,34 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNetworkStatus, type SyncState } from '@/src/hooks/useNetworkStatus';
+import { useNetworkStatus } from '@/src/hooks/useNetworkStatus';
 import { colors } from '@/src/theme/tokens';
 
 interface BannerContent {
   bg: string;
   iconName: string;
   message: string;
-  spinner?: boolean;
 }
 
-function getContent(
-  isOnline: boolean,
-  syncState: SyncState,
-  syncedCount: number,
-): BannerContent | null {
-  if (syncState === 'synced' && syncedCount > 0) {
-    return {
-      bg: colors.primary,
-      iconName: 'checkmark-circle',
-      message:
-        syncedCount === 1
-          ? 'Emergency report sent successfully'
-          : `${syncedCount} emergency reports sent`,
-    };
-  }
-  if (syncState === 'syncing') {
-    return {
-      bg: colors.primary,
-      iconName: 'cloud-upload-outline',
-      message: 'Sending saved emergency report…',
-      spinner: true,
-    };
-  }
+function getContent(isOnline: boolean): BannerContent | null {
   if (!isOnline) {
     return {
       bg: colors.amber,
       iconName: 'cloud-offline-outline',
-      message: 'No internet — emergency saved, sends when reconnected',
+      message: 'No internet — reports cannot be sent. Call 911 for emergencies',
     };
   }
   return null;
 }
 
 export function OfflineBanner() {
-  const { isOnline, syncState, syncedCount } = useNetworkStatus();
+  const { isOnline } = useNetworkStatus();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(-80)).current;
   const [rendered, setRendered] = useState(false);
 
-  const content = getContent(isOnline, syncState, syncedCount);
+  const content = getContent(isOnline);
   const shouldShow = content !== null;
 
   useEffect(() => {
@@ -87,11 +64,7 @@ export function OfflineBanner() {
       pointerEvents="none"
     >
       <View style={styles.row}>
-        {content.spinner ? (
-          <ActivityIndicator size="small" color="#fff" style={styles.icon} />
-        ) : (
-          <Ionicons name={content.iconName as any} size={14} color="#fff" style={styles.icon} />
-        )}
+        <Ionicons name={content.iconName as any} size={14} color="#fff" style={styles.icon} />
         <Text style={styles.message} numberOfLines={1}>
           {content.message}
         </Text>

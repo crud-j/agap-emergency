@@ -18,7 +18,10 @@ import { isNativeMapAvailable } from '@/src/components/tracking/native-map-avail
 const LiveTrackingMap = React.lazy(() => import('@/src/components/tracking/live-tracking-map'));
 const MAP_AVAILABLE = isNativeMapAvailable();
 
-const MAPLIBRE_DEMO_STYLE = 'https://demotiles.maplibre.org/style.json';
+// Keyless OpenFreeMap fallback — real OSM streets at municipal zoom (the old
+// maplibre.org demo tiles were blank at Bocaue). Used only when the backend
+// map-config returns no styleUrl.
+const MAPLIBRE_DEMO_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 interface IncidentLite {
   public_reference: string;

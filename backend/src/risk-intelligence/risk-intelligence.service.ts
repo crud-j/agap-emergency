@@ -15,6 +15,63 @@ export class RiskIntelligenceService {
     return grouped.map((g) => ({ barangay: g.barangay, count: g._count._all }));
   }
 
+  /**
+   * Geo risk points for the operations map overlay (MOD-51). Clusters recent
+   * incidents by a ~111 m coordinate grid and returns normalized intensity per
+   * cluster. Pure PostgreSQL read — no PostGIS required.
+   */
+  async getGeoHeatmap(periodDays = 30) {
+    const days = Number.isFinite(periodDays) && periodDays > 0 ? Math.min(periodDays, 365) : 30;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const rows = await this.prisma.incident.findMany({
+      where: { submitted_at: { gte: since } },
+      select: {
+        category: true,
+        incident_locations: { select: { latitude: true, longitude: true, barangay: true } },
+      },
+    });
+
+    const buckets = new Map<
+      string,
+      { lat: number; lng: number; count: number; barangay: string | null; categories: Record<string, number> }
+    >();
+
+    for (const row of rows) {
+      const loc = row.incident_locations;
+      if (!loc || loc.latitude == null || loc.longitude == null) continue;
+      const lat = Number(loc.latitude);
+      const lng = Number(loc.longitude);
+      // Round to 3 decimals (~111 m) so nearby incidents form one density point.
+      const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = { lat, lng, count: 0, barangay: loc.barangay ?? null, categories: {} };
+        buckets.set(key, bucket);
+      }
+      bucket.count += 1;
+      if (row.category) bucket.categories[row.category] = (bucket.categories[row.category] ?? 0) + 1;
+    }
+
+    const clusters = [...buckets.values()];
+    const maxCount = Math.max(1, ...clusters.map((b) => b.count));
+
+    const points = clusters.map((b) => {
+      const topCategory =
+        Object.entries(b.categories).sort((a, c) => c[1] - a[1])[0]?.[0] ?? null;
+      return {
+        lat: b.lat,
+        lng: b.lng,
+        intensity: Math.round((b.count / maxCount) * 100) / 100, // 0..1
+        category: topCategory,
+        barangay: b.barangay,
+        incident_count: b.count,
+      };
+    });
+
+    return { points, generated_at: new Date().toISOString(), period_days: days };
+  }
+
   async getFloodZones() {
     return this.prisma.risk_areas.findMany({
       where: { risk_type: 'FLOOD', is_active: true },
