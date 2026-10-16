@@ -9,7 +9,7 @@ import { useWsState } from '@/lib/use-ws-state';
 import { useIncidentLocations, useLiveResponders } from '@/features/map/hooks';
 import { ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { MapIncident } from '@/components/incidents/IncidentMapView';
-import { isCoordinateInBocaue } from '@agap/shared';
+import { isWithinBocaue } from '@/lib/bocaue-geo';
 
 // MapLibre GL uses WebGL + Web Workers; must be client-side only.
 const IncidentMapView = dynamic(
@@ -55,10 +55,10 @@ export default function MapPage(): JSX.Element {
       incident.lat != null &&
       incident.lng != null &&
       (incident.lat !== 0 || incident.lng !== 0) &&
-      !isCoordinateInBocaue(incident.lat, incident.lng),
+      !isWithinBocaue(incident.lng, incident.lat),
   ).length;
   const excludedResponders = (responders ?? []).filter(
-    (responder) => !isCoordinateInBocaue(responder.lat, responder.lng),
+    (responder) => !isWithinBocaue(responder.lng, responder.lat),
   ).length;
 
   function select(id: string) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactElement } from 'react';
 import '@/lib/maplibre-setup';
-import Map, { Layer, Marker, Popup, Source, useMap, type MarkerEvent } from 'react-map-gl/maplibre';
+import Map, { Layer, Marker, Popup, Source, useMap, type MapEvent, type MarkerEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useMapStyle } from '@/features/map/hooks';
 import {
@@ -97,7 +97,7 @@ export function IncidentMap({
         maxZoom={BOCAUE_MAX_ZOOM}
         style={{ height: '100%', width: '100%' }}
         onError={() => setTileError(true)}
-        onLoad={(e) => {
+        onLoad={(e: MapEvent) => {
           const resolved = new Set<string>();
           e.target.setMissingStyleImageResolver((id: string) => {
             if (!id?.trim() || resolved.has(id) || e.target.hasImage(id)) return;

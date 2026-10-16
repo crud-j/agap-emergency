@@ -3,8 +3,6 @@
 import { useMemo, useState, type JSX } from 'react';
 import '@/lib/maplibre-setup';
 import Map, { Source, Layer } from 'react-map-gl/maplibre';
-// maplibre-gl does not provide TypeScript declarations for its stylesheet.
-// @ts-expect-error -- the CSS is handled by the bundler at runtime.
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useMapStyle } from '@/features/map/hooks';
 import {
