@@ -325,7 +325,7 @@ export default function RegistrationScreen() {
           {locationStep === 'denied' && (
             <View style={styles.locationCard}>
               <View style={[styles.locationIconWrap, styles.locationIconError]}>
-                <Ionicons name="location-off-outline" size={40} color="#EF4444" />
+                <Ionicons name="location-outline" size={40} color="#EF4444" />
               </View>
               <Text style={styles.locationHeading}>Permission Required</Text>
               <Text style={styles.locationBody}>
