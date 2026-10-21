@@ -14,6 +14,7 @@ import {
 } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcryptjs';
+import { seedBarangayDirectory } from './barangay-directory';
 
 const adapter = new PrismaPg({ connectionString: process.env['DATABASE_URL'] as string });
 const prisma = new PrismaClient({ adapter });
@@ -39,6 +40,7 @@ async function main() {
       email: process.env['INITIAL_ADMIN_EMAIL'] ?? 'admin@agap.local',
       password_hash: adminHash,
       role: user_role.SYSTEM_ADMINISTRATOR,
+      must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
     },
@@ -53,6 +55,7 @@ async function main() {
       phone_number: '+639171234001',
       password_hash: devHash,
       role: user_role.DISPATCHER,
+      must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
     },
@@ -67,6 +70,7 @@ async function main() {
       phone_number: '+639171234002',
       password_hash: devHash,
       role: user_role.DISPATCHER,
+      must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
     },
@@ -81,6 +85,7 @@ async function main() {
       phone_number: '+639171234003',
       password_hash: devHash,
       role: user_role.SUPERVISOR,
+      must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
     },
@@ -137,6 +142,7 @@ async function main() {
       phone_number: '+639171234007',
       password_hash: devHash,
       role: user_role.HOSPITAL_USER,
+      must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
     },
@@ -151,6 +157,7 @@ async function main() {
       phone_number: '+639171234008',
       password_hash: devHash,
       role: user_role.ANNOUNCEMENTS_PUBLISHER,
+      must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
     },
@@ -165,6 +172,7 @@ async function main() {
       phone_number: '+639171234009',
       password_hash: devHash,
       role: user_role.ORG_ADMINISTRATOR,
+      must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
     },
@@ -1003,6 +1011,10 @@ async function main() {
   }
 
   console.log(`  Demo incidents done (${demoIncidents.length} across all categories)`);
+
+  // ── Barangay hotline directory (MOD-17 / MOD-34) ───────────────────────────
+
+  await seedBarangayDirectory(prisma);
 
   // ── Summary ────────────────────────────────────────────────────────────────
 

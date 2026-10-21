@@ -7,12 +7,22 @@ import {
   IsUUID,
   IsBoolean,
   IsInt,
+  IsIn,
+  IsObject,
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IncidentType, IncidentPriority, ReporterType } from '@agap/shared';
+import {
+  IncidentType,
+  IncidentPriority,
+  ReporterType,
+  ReporterStatus,
+  LANDMARK_MAX_LENGTH,
+} from '@agap/shared';
 
 export class ReporterDto {
   @ApiProperty({ enum: ReporterType })
@@ -60,6 +70,33 @@ export class PatientDto {
   sex?: string;
 }
 
+/**
+ * MOD-09 structured caller intake. `answers` is checked here only for shape;
+ * IncidentsService re-validates it against the @agap/shared intake catalog and
+ * drops any question or option the catalog does not define.
+ */
+export class IncidentIntakeDto {
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'array', items: { type: 'string' } },
+    description: 'Intake question key → selected option values',
+  })
+  @IsOptional()
+  @IsObject()
+  answers?: Record<string, string[]>;
+
+  @ApiPropertyOptional({ enum: ReporterStatus })
+  @IsOptional()
+  @IsEnum(ReporterStatus)
+  reporterStatus?: ReporterStatus;
+
+  @ApiPropertyOptional({ maxLength: LANDMARK_MAX_LENGTH })
+  @IsOptional()
+  @IsString()
+  @MaxLength(LANDMARK_MAX_LENGTH)
+  landmark?: string;
+}
+
 export class CreateIncidentDto {
   @ApiProperty({ enum: IncidentType })
   @IsEnum(IncidentType)
@@ -104,9 +141,13 @@ export class CreateIncidentDto {
   @IsOptional()
   patient?: PatientDto;
 
-  @ApiPropertyOptional({ description: 'Affected count bucket from citizen: "1", "2-5", "5+", "unknown"' })
+  @ApiPropertyOptional({
+    enum: ['1', '2-5', '5+', 'unknown'],
+    description: 'Caller-estimated affected-person range; never a confirmed patient count',
+  })
   @IsOptional()
   @IsString()
+  @IsIn(['1', '2-5', '5+', 'unknown'])
   @MaxLength(20)
   affectedCount?: string;
 
@@ -121,4 +162,10 @@ export class CreateIncidentDto {
   @IsArray()
   @IsString({ each: true })
   responseNeeds?: string[];
+
+  @ApiPropertyOptional({ type: IncidentIntakeDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => IncidentIntakeDto)
+  intake?: IncidentIntakeDto;
 }

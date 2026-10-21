@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useAuthStore } from '../../src/stores/auth.store';
 import { useAccessibilityStore } from '../../src/stores/accessibility.store';
@@ -48,7 +49,43 @@ function formatRelative(iso: string) {
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-function SurgeBanner({ announcement }: { announcement: Announcement }) {
+// A dismissal is remembered per announcement version, so an edited or newly
+// published critical notice shows the banner again. The full notice stays in
+// the announcements feed either way.
+const DISMISSED_SURGE_KEY = 'agap.dismissedSurgeBanners';
+const MAX_DISMISSED_SURGE = 20;
+
+function surgeVersionKey(a: Pick<Announcement, 'id' | 'updated_at'>): string {
+  return `${a.id}:${a.updated_at}`;
+}
+
+function isExpired(a: Pick<Announcement, 'effective_end_at'>): boolean {
+  if (!a.effective_end_at) return false;
+  const end = new Date(a.effective_end_at).getTime();
+  return !isNaN(end) && end <= Date.now();
+}
+
+function useDismissedSurgeBanners() {
+  const [dismissed, setDismissed] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(DISMISSED_SURGE_KEY)
+      .then((raw) => setDismissed(raw ? JSON.parse(raw) : []))
+      .catch(() => setDismissed([]));
+  }, []);
+
+  const dismiss = (a: Announcement) => {
+    const next = [surgeVersionKey(a), ...(dismissed ?? [])].slice(0, MAX_DISMISSED_SURGE);
+    setDismissed(next);
+    AsyncStorage.setItem(DISMISSED_SURGE_KEY, JSON.stringify(next)).catch(() => {
+      // Not persisted — the banner stays hidden for this session only.
+    });
+  };
+
+  return { dismissed, dismiss };
+}
+
+function SurgeBanner({ announcement, onDismiss }: { announcement: Announcement; onDismiss: () => void }) {
   const router = useRouter();
   const t = useTranslations();
   const cfg = SEVERITY_CONFIG[announcement.severity] ?? SEVERITY_CONFIG.CRITICAL;
@@ -66,6 +103,16 @@ function SurgeBanner({ announcement }: { announcement: Announcement }) {
           <Text style={styles.surgeBannerTitle} numberOfLines={1}>{announcement.title}</Text>
         </View>
         <Ionicons name="arrow-forward" size={16} color="rgba(255,255,255,0.7)" />
+        <TouchableOpacity
+          onPress={onDismiss}
+          style={styles.surgeDismiss}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel={t.home.surgeDismiss}
+        >
+          <Ionicons name="checkmark-done" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
+          <Text style={styles.surgeDismissText}>{t.home.surgeDismiss}</Text>
+        </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
@@ -218,7 +265,7 @@ export default function HomeScreen() {
   });
 
   const { data: unreadData } = useUnreadCount();
-  const unreadCount = unreadData?.unread ?? 0;
+  const unreadCount = unreadData ?? 0;
 
   useEffect(() => {
     (async () => {
@@ -256,14 +303,19 @@ export default function HomeScreen() {
     })();
   }, [accessToken]);
 
-  const surgeBanner = announcements.find((a) => a.severity === 'CRITICAL');
+  const { dismissed: dismissedSurge, dismiss: dismissSurge } = useDismissedSurgeBanners();
+  // Wait for the stored dismissals so a dismissed banner does not flash on launch.
+  const surgeBanner = dismissedSurge === null
+    ? undefined
+    : announcements.find((a) =>
+        a.severity === 'CRITICAL' && !isExpired(a) && !dismissedSurge.includes(surgeVersionKey(a)));
   const announcementsStrip = announcements.filter((a) => a.severity !== 'CRITICAL').slice(0, 2);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
 
-      {surgeBanner && <SurgeBanner announcement={surgeBanner} />}
+      {surgeBanner && <SurgeBanner announcement={surgeBanner} onDismiss={() => dismissSurge(surgeBanner)} />}
 
       {/* Header — sits on the pearl background, separated with a fine bevel line */}
       <View style={styles.header}>
@@ -426,6 +478,8 @@ const styles = StyleSheet.create({
   surgeBannerContainer: { marginHorizontal: 16, marginTop: 8, marginBottom: 8, borderRadius: 16, overflow: 'hidden', ...CARD_SHADOW },
   surgeBanner: { minHeight: 58, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', backgroundColor: '#9F1D2C' },
   surgeBannerLabel: { fontSize: 10, lineHeight: 12, fontWeight: '800', color: 'rgba(255,200,195,0.9)', letterSpacing: 1.1, textTransform: 'uppercase' },
+  surgeDismiss: { flexDirection: 'row', alignItems: 'center', marginLeft: 12, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.18)' },
+  surgeDismissText: { fontSize: 12, fontWeight: '700', color: '#FFFFFF' },
   surgeBannerTitle: { marginTop: 4, fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#FFFFFF' },
 
   // ─── Header ─────────────────────────────────────────────────────────────────

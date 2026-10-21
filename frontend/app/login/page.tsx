@@ -1,13 +1,31 @@
 'use client';
 
-import { useState, useEffect, type ReactElement, type FormEvent } from 'react';
+import { useState, useEffect, useRef, type ReactElement, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
+import Link from 'next/link';
+import { WebAuthnAbortService, startAuthentication } from '@simplewebauthn/browser';
+import { AccountPicker } from '@/components/auth/AccountPicker';
+import { PasskeySignInOverlay, type PasskeyOverlayState } from '@/components/auth/PasskeySignInOverlay';
 import bocaueLogo from '@/assets/Bocaue-logo.png';
 import bgImage from '@/assets/login-page-background.png';
 import agapIcon from '@/assets/agap-solo-icon.png';
 import { useAccessibilityStore } from '@/lib/accessibility.store';
 import { useTranslations } from '@/hooks/use-translations';
+import { getSessionUser, type SessionUser } from '@/lib/auth';
+import { forgetAccount, getRememberedAccounts, type RememberedAccount } from '@/lib/remembered-accounts';
+import { WEB_CLIENT_HEADERS, refreshSession, startSession } from '@/lib/session';
+import { setMfaChallenge, type MfaMethod } from '@/lib/mfa-challenge';
+import { MfaApiError, isPasskeyCancelled, mfaRequest, passkeysSupported, type WebSession } from '@/lib/mfa';
+import { destinationAfterSignIn, safeNextPath } from '@/lib/post-login';
+
+/** What POST /auth/login returns when the password was right but a second step is owed. */
+interface MfaRequiredResponse {
+  mfaRequired: true;
+  mfaToken: string;
+  methods: MfaMethod[];
+  enrollmentRequired: boolean;
+}
 
 export default function LoginPage(): ReactElement {
   const router = useRouter();
@@ -17,7 +35,15 @@ export default function LoginPage(): ReactElement {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyStage, setPasskeyStage] = useState<PasskeyOverlayState | null>(null);
 
+  const cancelledByUser = useRef(false);
+  const [accounts, setAccounts] = useState<RememberedAccount[]>([]);
+  const [activeEmail, setActiveEmail] = useState<string | null>(null);
+  const [view, setView] = useState<'picker' | 'form'>('form');
+  // Same as the mobile app: email first, then a passkey; "Use password instead" is the fallback.
+  const [mode, setMode] = useState<'passkey' | 'password'>('passkey');
   const { language, setLanguage } = useAccessibilityStore();
   const t = useTranslations();
 
@@ -26,7 +52,62 @@ export default function LoginPage(): ReactElement {
     useAccessibilityStore.persist.rehydrate();
     router.prefetch('/dashboard');
     router.prefetch('/operations/dispatch');
+    if (!passkeysSupported()) setMode('password');
+
+    // "Choose an account": people who have signed in on this browser before.
+    const remembered = getRememberedAccounts();
+    if (remembered.length === 0) return;
+    setAccounts(remembered);
+    setView('picker');
+    // Mark the one that still has a live session (the refresh cookie is HttpOnly, so ask the server).
+    let cancelled = false;
+    void refreshSession().then((result) => {
+      if (!cancelled && result === 'ok') setActiveEmail(getSessionUser()?.email?.toLowerCase() ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
+
+  /** Real password sign-in. Returns what to do next (so callers can animate first); throws on failure. */
+  async function login(identifier: string, secret: string): Promise<() => void> {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+    const res = await fetch(`${apiBase}/v1/auth/login`, {
+      method: 'POST',
+      // The backend sets the HttpOnly refresh cookie; the access token stays in memory.
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...WEB_CLIENT_HEADERS },
+      body: JSON.stringify({ identifier, password: secret }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data as { message?: string }).message ?? t.login.errorGeneric);
+    }
+
+    const body = await res.json() as MfaRequiredResponse | { accessToken: string; user: SessionUser };
+
+    // Correct password, but this role owes a second step (or first-time enrollment).
+    // The mfaToken stays in memory only — see lib/mfa-challenge.ts.
+    if ('mfaRequired' in body) {
+      setMfaChallenge({
+        mfaToken: body.mfaToken,
+        methods: body.methods,
+        enrollmentRequired: body.enrollmentRequired,
+        next: safeNextPath(),
+        identifier,
+      });
+      return () => router.push(body.enrollmentRequired ? '/login/enroll' : '/login/verify');
+    }
+
+    startSession(body);
+    return () => router.replace(destinationAfterSignIn(body.user, safeNextPath()));
+  }
+
+  function friendlyError(err: unknown): string {
+    if (!(err instanceof Error)) return t.login.errorGeneric;
+    return err.message.includes('Unexpected token') || err.message.includes('JSON') ? t.login.errorServer : err.message;
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -34,54 +115,81 @@ export default function LoginPage(): ReactElement {
     setLoading(true);
 
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
-      const res = await fetch(`${apiBase}/v1/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: email, password }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error((data as { message?: string }).message ?? t.login.errorGeneric);
-      }
-
-      const { accessToken, user } = await res.json() as {
-        accessToken: string;
-        user: { role?: string };
-      };
-
-      document.cookie = `agap_token=${accessToken}; path=/; samesite=strict`;
-      router.replace(landingForRole(user?.role));
+      const proceed = await login(email, password);
+      setPassword('');
+      proceed();
     } catch (err: unknown) {
-      const msg = err instanceof Error
-        ? (err.message.includes('Unexpected token') || err.message.includes('JSON')
-            ? t.login.errorServer
-            : err.message)
-        : t.login.errorGeneric;
-      setError(msg);
+      setError(friendlyError(err));
       setLoading(false);
     }
   }
 
-  function landingForRole(role?: string): string {
-    switch (role) {
-      case 'DISPATCHER':
-      case 'SUPERVISOR':
-        return '/operations/dispatch';
-      case 'SYSTEM_ADMINISTRATOR':
-        return '/administration';
-      case 'HOSPITAL_USER':
-        return '/hospitals';
-      case 'ANNOUNCEMENTS_PUBLISHER':
-        return '/announcements';
-      default:
-        return '/dashboard';
+  async function pickerSignIn(accountEmail: string, secret: string): Promise<() => void> {
+    try {
+      return await login(accountEmail, secret);
+    } catch (err: unknown) {
+      throw new Error(friendlyError(err));
+    }
+  }
+
+  function continueLiveSession(): void {
+    const user = getSessionUser();
+    if (user) router.replace(destinationAfterSignIn(user, safeNextPath()));
+  }
+
+  /**
+   * Passkey-first sign-in: a full login with no extra step, because the passkey itself is
+   * device possession + biometric/PIN (userVerification: 'required'). If an email was typed
+   * the prompt is scoped to that account's passkeys; otherwise the browser offers its own.
+   */
+  function cancelPasskey(): void {
+    // Aborts the pending browser ceremony; handlePasskey's catch then clears the overlay.
+    cancelledByUser.current = true;
+    WebAuthnAbortService.cancelCeremony();
+    setPasskeyStage(null);
+  }
+
+  /** `forEmail` comes from "Choose an account"; otherwise the email typed in the form. */
+  async function handlePasskey(forEmail?: string) {
+    setError(null);
+    const identifier = (forEmail ?? email).trim();
+    if (!identifier || !identifier.includes('@')) {
+      setError(t.login.passkeyNeedsEmail);
+      return;
+    }
+    if (!passkeysSupported()) {
+      setMode('password');
+      setError(t.login.passkeyUnsupported);
+      return;
+    }
+    setPasskeyBusy(true);
+    setPasskeyStage('waiting');
+    try {
+      const begin = await mfaRequest<{ challengeId: string; options: Parameters<typeof startAuthentication>[0]['optionsJSON'] }>(
+        '/auth/passkey/authenticate/begin',
+        { body: { identifier } },
+      );
+      const assertion = await startAuthentication({ optionsJSON: begin.options });
+      setPasskeyStage('verifying');
+      const session = await mfaRequest<WebSession>('/auth/passkey/authenticate/complete', {
+        body: { challengeId: begin.challengeId, response: assertion },
+      });
+      startSession(session);
+      // Let the green "Signed in" state land before the console takes over.
+      setPasskeyStage('success');
+      setTimeout(() => router.replace(destinationAfterSignIn(session.user, safeNextPath())), 900);
+    } catch (err: unknown) {
+      setPasskeyStage(null);
+      if (cancelledByUser.current) cancelledByUser.current = false;
+      else if (isPasskeyCancelled(err)) setError(t.login.passkeyCancelled);
+      else if (err instanceof MfaApiError) setError(err.status === 401 ? t.login.passkeyNotFound : err.message);
+      else setError(t.login.errorGeneric);
+      setPasskeyBusy(false);
     }
   }
 
   return (
-    <main className="relative isolate flex min-h-screen flex-col overflow-hidden bg-[#071510]">
+    <main className="relative isolate flex h-[100svh] min-h-0 flex-col overflow-hidden bg-[#071510]">
 
       {/* ── Background ── */}
       <Image
@@ -96,15 +204,15 @@ export default function LoginPage(): ReactElement {
       {/* ── Dark gradient overlay — left side heavier, fades right ── */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,18,25,0.90)_0%,rgba(5,24,31,0.76)_34%,rgba(8,27,31,0.34)_65%,rgba(8,27,31,0.10)_100%)]"
+        className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,18,25,0.92)_0%,rgba(5,24,31,0.78)_36%,rgba(8,27,31,0.42)_67%,rgba(8,27,31,0.16)_100%)]"
       />
       <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(0deg,rgba(3,16,19,0.46)_0%,transparent_24%,transparent_76%,rgba(3,16,19,0.12)_100%)]" />
 
       {/* ── All content sits above background ── */}
-      <div className="relative z-10 flex min-h-screen flex-1 flex-col">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col">
 
         {/* ── Top nav bar ── */}
-        <header className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-4 px-5 py-5 sm:px-8 lg:px-12 xl:px-16">
+        <header className="mx-auto flex w-full max-w-[1480px] shrink-0 items-center justify-between gap-4 px-5 py-3 sm:px-8 lg:px-10 xl:px-12">
 
           {/* Left: Bocaue logo + divider + portal label */}
           <div className="flex min-w-0 items-center gap-3 sm:gap-5">
@@ -176,41 +284,41 @@ export default function LoginPage(): ReactElement {
         </header>
 
         {/* ── Main row: hero left + card right ── */}
-        <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col items-center justify-center gap-10 px-5 py-8 sm:px-8 lg:flex-row lg:items-center lg:justify-between lg:gap-12 lg:px-12 lg:py-8 xl:gap-20 xl:px-16">
+        <div className="mx-auto grid min-h-0 w-full max-w-[1360px] flex-1 grid-cols-1 content-center items-center gap-7 overflow-hidden px-5 py-3 sm:px-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-14 lg:px-10 xl:grid-cols-[minmax(0,1fr)_420px] xl:gap-20 xl:px-12 max-[1100px]:gap-8 max-[800px]:py-2">
 
           {/* ── Left: Hero ── */}
-          <div className="w-full max-w-[540px] text-center lg:text-left">
+          <div className="hidden w-full max-w-[480px] min-w-0 text-center lg:block lg:text-left">
             {/* Brand tagline stays in Filipino — it is the AGAP slogan */}
-            <div className="mb-5 flex items-center justify-center gap-3 lg:justify-start">
+            <div className="mb-4 flex items-center justify-center gap-3 lg:justify-start">
               <span className="h-[2px] w-7 rounded-full bg-emerald-300" aria-hidden="true" />
               <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/80">A safer, stronger Bocaue</span>
             </div>
-            <h1 className="text-4xl font-extrabold leading-[1.02] tracking-[-0.05em] text-white drop-shadow-sm sm:text-5xl xl:text-[4.25rem]">
+            <h1 className="text-4xl font-bold leading-[1.04] tracking-[-0.045em] text-white drop-shadow-sm sm:text-5xl xl:text-[3.55rem]">
               Sa Mas Ligtas
               <br />
               na{' '}
               <span className="text-[#69E3A2]">Bocaue.</span>
             </h1>
 
-            <p className="mx-auto mt-5 max-w-[440px] text-sm leading-7 text-white/75 sm:text-base sm:leading-7 lg:mx-0">
+            <p className="mx-auto mt-4 max-w-[410px] text-sm leading-6 text-white/80 sm:text-[15px] sm:leading-6 lg:mx-0">
               {t.login.heroBody}
             </p>
 
             {/* Compact service highlights */}
-            <div className="mt-8 grid max-w-[430px] grid-cols-1 gap-3 text-left md:grid-cols-3 lg:grid-cols-1 lg:gap-4">
-              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#061C20]/35 px-3.5 py-3 backdrop-blur-md">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-emerald-200/15 bg-emerald-400/15 text-emerald-200">
+            <div className="mt-6 grid max-w-[440px] grid-cols-1 gap-2 text-left sm:grid-cols-3 lg:grid-cols-1 lg:gap-2">
+              <div className="flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200">
                   <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                     <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </span>
                 <div>
                   <p className="text-sm font-semibold text-white">{t.login.featureFaster}</p>
-                  <p className="mt-0.5 text-xs leading-5 text-white/65">From alert to dispatch, in minutes.</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-white/70">From alert to dispatch, in minutes.</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#061C20]/35 px-3.5 py-3 backdrop-blur-md">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-emerald-200/15 bg-emerald-400/15 text-emerald-200">
+              <div className="flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200">
                   <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                     <path d="M12 3.5 20 7v5.2c0 4.2-3.2 7.2-8 8.8-4.8-1.6-8-4.6-8-8.8V7l8-3.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
                     <path d="m8.5 12 2.3 2.3 4.7-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
@@ -218,11 +326,11 @@ export default function LoginPage(): ReactElement {
                 </span>
                 <div>
                   <p className="text-sm font-semibold text-white">{t.login.featureAccurate}</p>
-                  <p className="mt-0.5 text-xs leading-5 text-white/65">Real-time location and incident data.</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-white/70">Real-time location and incident data.</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#061C20]/35 px-3.5 py-3 backdrop-blur-md">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-emerald-200/15 bg-emerald-400/15 text-emerald-200">
+              <div className="flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200">
                   <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                     <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="1.5" />
@@ -231,38 +339,43 @@ export default function LoginPage(): ReactElement {
                 </span>
                 <div>
                   <p className="text-sm font-semibold text-white">{t.login.featureStronger}</p>
-                  <p className="mt-0.5 text-xs leading-5 text-white/65">A safer Bocaue for everyone.</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-white/70">A safer Bocaue for everyone.</p>
                 </div>
               </div>
             </div>
           </div>
 
           {/* ── Right: Login card ── */}
-          <div className="w-full max-w-[440px] shrink-0 rounded-[1.75rem] border border-white/70 bg-white/[0.91] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.30)] ring-1 ring-white/50 backdrop-blur-2xl sm:p-8 lg:p-9">
+          <div className="relative mx-auto w-full max-w-[420px] min-w-0 shrink-0 overflow-hidden rounded-[24px] border border-white/60 bg-white/[0.42] p-5 shadow-[0_22px_64px_rgba(2,12,18,0.24)] backdrop-blur-[32px] sm:p-6 lg:p-6 [@media(max-height:800px)]:p-4">
+            {passkeyStage && <PasskeySignInOverlay state={passkeyStage} onCancel={cancelPasskey} />}
+            {/* Subtle glass highlights; intentionally restrained to keep the form readable. */}
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[linear-gradient(135deg,rgba(255,255,255,0.32)_0%,rgba(255,255,255,0.08)_42%,rgba(222,239,232,0.10)_100%)]" />
+            <div aria-hidden="true" className="pointer-events-none absolute inset-x-8 top-0 h-px bg-white/90" />
+            <div className="relative">
 
             {/* AGAP icon */}
-            <div className="mb-5 flex justify-center">
-              <div className="flex h-20 w-20 items-center justify-center rounded-2xl">
+            <div className="mb-2 flex justify-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl">
                 <Image
                   src={agapIcon}
                   alt="AGAP"
-                  width={90}
-                  height={90}
+                  width={56}
+                  height={56}
                   priority
                 />
               </div>
             </div>
 
             {/* Card heading */}
-            <div className="mb-6 text-center">
+            <div className="mb-4 text-center">
               <p className="text-[10px] font-bold tracking-[0.22em] text-emerald-800/70">
                 BOCAUE MDRRMO
               </p>
-              <h2 className="mt-1.5 text-[1.8rem] font-bold tracking-[-0.04em] text-slate-950">
-                {t.login.cardHeading}
+              <h2 className="mt-1.5 text-[1.55rem] font-semibold tracking-[-0.035em] text-slate-950">
+                {view === 'picker' ? t.login.pickerHeading : t.login.cardHeading}
               </h2>
-              <p className="mt-1.5 text-sm leading-6 text-slate-500">
-                {t.login.cardSubheading}
+              <p className="mt-1 text-sm leading-5 text-slate-500">
+                {view === 'picker' ? t.login.pickerSubheading : t.login.cardSubheading}
               </p>
             </div>
 
@@ -282,7 +395,54 @@ export default function LoginPage(): ReactElement {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} noValidate className="space-y-[1.125rem]">
+            {view === 'picker' ? (
+              <AccountPicker
+                accounts={accounts}
+                activeEmail={activeEmail}
+                onSignIn={pickerSignIn}
+                passkeyAvailable={passkeysSupported()}
+                passkeyBusy={passkeyBusy}
+                onPasskey={(accountEmail) => void handlePasskey(accountEmail)}
+                onContinueSession={continueLiveSession}
+                onRemove={(removed) => {
+                  const remaining = forgetAccount(removed);
+                  setAccounts(remaining);
+                  if (remaining.length === 0) setView('form');
+                }}
+                onUseAnother={() => {
+                  setError(null);
+                  setView('form');
+                }}
+              />
+            ) : (
+              <>
+            {accounts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setView('picker');
+                }}
+                className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#1B5E3B] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1B5E3B]"
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+                {t.login.pickerBackToAccounts}
+              </button>
+            )}
+            <form
+              onSubmit={(e) => {
+                if (mode === 'passkey') {
+                  e.preventDefault();
+                  void handlePasskey();
+                } else {
+                  void handleSubmit(e);
+                }
+              }}
+              noValidate
+              className="space-y-3"
+            >
 
               {/* Work Email */}
               <div>
@@ -302,14 +462,16 @@ export default function LoginPage(): ReactElement {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    autoComplete="username"
+                    autoComplete="username webauthn"
                     inputMode="email"
                     placeholder={t.login.emailPlaceholder}
-                    className="h-[3.15rem] w-full rounded-xl border border-slate-200/90 bg-slate-50/60 pl-11 pr-4 text-sm text-slate-900 outline-none transition-all placeholder:text-slate-400 hover:border-slate-300 hover:bg-white focus:border-[#176B4B] focus:bg-white focus:ring-4 focus:ring-[#176B4B]/10"
+                    className="h-[46px] w-full rounded-xl border border-white/85 bg-white/58 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-colors placeholder:text-slate-400 hover:border-slate-300/90 hover:bg-white/78 focus:border-[#176B4B] focus:bg-white/90 focus:ring-4 focus:ring-[#176B4B]/10"
                   />
                 </div>
               </div>
 
+              {mode === 'password' ? (
+                <>
               {/* Password */}
               <div>
                 <label htmlFor="password" className="mb-2 block text-[13px] font-semibold text-slate-700">
@@ -331,7 +493,7 @@ export default function LoginPage(): ReactElement {
                     required
                     autoComplete="current-password"
                     placeholder={t.login.passwordPlaceholder}
-                    className="h-[3.15rem] w-full rounded-xl border border-slate-200/90 bg-slate-50/60 pl-11 pr-12 text-sm text-slate-900 outline-none transition-all placeholder:text-slate-400 hover:border-slate-300 hover:bg-white focus:border-[#176B4B] focus:bg-white focus:ring-4 focus:ring-[#176B4B]/10"
+                    className="h-[46px] w-full rounded-xl border border-white/85 bg-white/58 pl-11 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-colors placeholder:text-slate-400 hover:border-slate-300/90 hover:bg-white/78 focus:border-[#176B4B] focus:bg-white/90 focus:ring-4 focus:ring-[#176B4B]/10"
                   />
                   <button
                     type="button"
@@ -354,75 +516,92 @@ export default function LoginPage(): ReactElement {
                 </div>
               </div>
 
-              {/* Remember device + Forgot password */}
-              <div className="flex items-center justify-between">
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 accent-[#1B5E3B]"
-                  />
-                  {t.login.rememberDevice}
-                </label>
-                <button
-                  type="button"
+              {/* Forgot password */}
+              <div className="flex items-center justify-end">
+                <Link
+                  href="/login/forgot"
                   className="text-sm text-[#1B5E3B] underline-offset-2 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1B5E3B] focus-visible:ring-offset-1"
                 >
                   {t.login.forgotPassword}
-                </button>
+                </Link>
               </div>
 
-              {/* Sign in */}
-              <button
-                type="submit"
-                disabled={loading}
-                className="mt-1 flex h-[3.15rem] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#176B4B] to-[#0F5942] text-sm font-semibold text-white shadow-[0_5px_14px_rgba(23,107,75,0.18)] transition-all hover:-translate-y-0.5 hover:from-[#145D42] hover:to-[#0C4C39] hover:shadow-[0_8px_20px_rgba(23,107,75,0.24)] active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2"
-              >
-                {loading ? (
-                  <>
-                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                    </svg>
-                    {t.login.signingIn}
-                  </>
-                ) : (
-                  <>
-                    {t.login.signIn}
-                    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
-                      <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </>
-                )}
-              </button>
+                </>
+              ) : (
+                <div className="flex items-start gap-3 rounded-xl border border-emerald-900/[0.07] bg-emerald-50/60 px-3.5 py-3 text-[#1B5E3B]">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" /><path d="M14 13.12c0 2.38 0 6.38-1 8.88" /><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" /><path d="M2 12a10 10 0 0 1 18-6" /><path d="M2 16h.01" /><path d="M21.8 16c.2-2 .131-5.354 0-6" /><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" /><path d="M8.65 22c.21-.66.45-1.32.57-2" /><path d="M9 6.8a6 6 0 0 1 9 5.2v2" /></svg>
+                  <p className="text-sm text-slate-600">{t.login.passkeyHint}</p>
+                </div>
+              )}
+
+              {mode === 'passkey' ? (
+                <>
+                  <button type="submit" disabled={passkeyBusy || loading} className="mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#126247] text-sm font-semibold text-white shadow-[0_4px_12px_rgba(18,98,71,0.16)] transition-colors hover:bg-[#0F543D] active:bg-[#0C4935] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2">
+                    {passkeyBusy ? (
+                      <>
+                        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+                        {t.login.passkeyWaiting}
+                      </>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" /><path d="M14 13.12c0 2.38 0 6.38-1 8.88" /><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" /><path d="M2 12a10 10 0 0 1 18-6" /><path d="M2 16h.01" /><path d="M21.8 16c.2-2 .131-5.354 0-6" /><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" /><path d="M8.65 22c.21-.66.45-1.32.57-2" /><path d="M9 6.8a6 6 0 0 1 9 5.2v2" /></svg>
+                        {t.login.passkeySignIn}
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={passkeyBusy}
+                    onClick={() => {
+                      setError(null);
+                      setMode('password');
+                    }}
+                    className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#126247]/30 bg-white/60 text-sm font-semibold text-[#126247] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px] shrink-0" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+                    {t.login.usePasswordInstead}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="submit" disabled={loading} className="mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#126247] text-sm font-semibold text-white shadow-[0_4px_12px_rgba(18,98,71,0.16)] transition-colors hover:bg-[#0F543D] active:bg-[#0C4935] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2">
+                    {loading ? (
+                      <>
+                        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+                        {t.login.signingIn}
+                      </>
+                    ) : (
+                      <>
+                        {t.login.signIn}
+                        <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+                          <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </>
+                    )}
+                  </button>
+                  {passkeysSupported() && (
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => {
+                        setError(null);
+                        setMode('passkey');
+                      }}
+                      className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#126247]/30 bg-white/60 text-sm font-semibold text-[#126247] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" /><path d="M14 13.12c0 2.38 0 6.38-1 8.88" /><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" /><path d="M2 12a10 10 0 0 1 18-6" /><path d="M2 16h.01" /><path d="M21.8 16c.2-2 .131-5.354 0-6" /><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" /><path d="M8.65 22c.21-.66.45-1.32.57-2" /><path d="M9 6.8a6 6 0 0 1 9 5.2v2" /></svg>
+                      {t.login.usePasskeyInstead}
+                    </button>
+                  )}
+                </>
+              )}
 
             </form>
-
-            {/* Or divider */}
-            <div className="my-5 flex items-center gap-3">
-              <div className="h-px flex-1 bg-slate-200" />
-              <span className="text-xs text-slate-400">or</span>
-              <div className="h-px flex-1 bg-slate-200" />
-            </div>
-
-            {/* Google Workspace */}
-            <button
-              type="button"
-              className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition-all hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-300/60"
-            >
-              <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" aria-hidden="true">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-              </svg>
-              {t.login.googleSignIn}
-              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 shrink-0" aria-hidden="true">
-                <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+              </>
+            )}
 
             {/* Security note */}
-            <div className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-100/80 bg-[#F0F8F3] px-4 py-3.5">
+            <div className="mt-3 flex items-start gap-3 rounded-xl border border-emerald-900/[0.07] bg-emerald-50/60 px-3.5 py-2.5">
               <svg viewBox="0 0 24 24" fill="none" className="mt-0.5 h-4 w-4 shrink-0 text-[#1B5E3B]" aria-hidden="true">
                 <rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.5" />
                 <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -434,12 +613,13 @@ export default function LoginPage(): ReactElement {
               </div>
             </div>
 
+            </div>
           </div>
         </div>
 
         {/* ── Bottom information rail ── */}
-        <footer className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-5 pb-5 sm:px-8 lg:flex-row lg:items-end lg:justify-between lg:px-12 xl:px-16">
-          <div className="grid grid-cols-1 gap-3 text-white/85 sm:grid-cols-3 sm:gap-5">
+        <footer className="mx-auto hidden w-full max-w-[1480px] shrink-0 flex-col gap-3 px-5 pb-3 sm:px-8 lg:flex lg:flex-row lg:items-end lg:justify-between lg:px-10 xl:px-12 max-[900px]:hidden [@media(max-height:800px)]:hidden">
+          <div className="grid grid-cols-1 gap-2 text-white/85 sm:grid-cols-3 sm:gap-4">
             <div className="flex items-center gap-2.5">
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 shrink-0 text-emerald-300" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" stroke="currentColor" strokeWidth="1.7"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.7"/></svg>
               <div><p className="text-xs font-semibold">Bocaue, Bulacan</p><p className="mt-0.5 text-[10px] text-white/55">Prepared. Responsive. United.</p></div>

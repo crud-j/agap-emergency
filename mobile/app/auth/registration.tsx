@@ -26,6 +26,8 @@ import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import type { Language } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { register, geoCheck } from '../../src/services/api/auth.api';
+import { useIncidentStore } from '../../src/stores/incident.store';
+import { isCoordinateInBocaue } from '@agap/shared';
 
 // ─── Validation schema (address fields removed) ──────────────────────────────
 
@@ -33,33 +35,38 @@ const registerSchema = z.object({
   fullName:        z.string().min(2, 'Full name must be at least 2 characters.'),
   phoneNumber:     z.string().regex(/^(\+63|0)9\d{9}$/, 'Enter a valid Philippine mobile number.'),
   email:           z.string().email('Enter a valid email address.').optional().or(z.literal('')),
-  password:        z.string().min(8, 'Password must be at least 8 characters.'),
+  password:        z.string()
+    .min(8, 'Use at least 8 characters.')
+    .max(128, 'Use no more than 128 characters.')
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9\s]).{8,128}$/,
+      'Use at least 8 characters with uppercase, lowercase, a number, and a symbol.',
+    ),
   confirmPassword: z.string(),
 }).refine((d) => d.password === d.confirmPassword, {
   message: 'Passwords do not match.',
   path: ['confirmPassword'],
 });
 
-// ─── Geo-fence ───────────────────────────────────────────────────────────────
+const PASSWORD_REQUIREMENTS = [
+  { key: 'length', labelKey: 'passwordReqLength', test: (value: string) => value.length >= 8 },
+  { key: 'maximum', labelKey: 'passwordReqMaximum', test: (value: string) => value.length <= 128 },
+  { key: 'lowercase', labelKey: 'passwordReqLowercase', test: (value: string) => /[a-z]/.test(value) },
+  { key: 'uppercase', labelKey: 'passwordReqUppercase', test: (value: string) => /[A-Z]/.test(value) },
+  { key: 'number', labelKey: 'passwordReqNumber', test: (value: string) => /\d/.test(value) },
+  { key: 'symbol', labelKey: 'passwordReqSymbol', test: (value: string) => /[^A-Za-z0-9\s]/.test(value) },
+] as const;
 
-// Rough bounding box used as a fast-fail before the server-side PostGIS check.
-// The server check is the authoritative gate; this just avoids a network round-trip
-// for coordinates that are clearly outside Bocaue.
-const BOCAUE_BOUNDS = {
-  minLat: 14.770, maxLat: 14.840,
-  minLng: 120.885, maxLng: 120.980,
-};
-function isInBocaueBoundingBox(lat: number, lng: number): boolean {
-  return (
-    lat >= BOCAUE_BOUNDS.minLat && lat <= BOCAUE_BOUNDS.maxLat &&
-    lng >= BOCAUE_BOUNDS.minLng && lng <= BOCAUE_BOUNDS.maxLng
-  );
+function normalizePhoneForOtp(value: string): string {
+  const phone = value.trim();
+  return phone.startsWith('+63') ? phone : `+63${phone.replace(/^0/, '')}`;
 }
 
 // ─── Location step state machine ─────────────────────────────────────────────
 
 type LocationStep =
   | 'permission'   // initial: show rationale + "Allow" button
+  | 'permission_request' // OS permission dialog is in progress
   | 'requesting'   // OS permission dialog in progress or GPS acquiring
   | 'denied'       // permission permanently denied
   | 'gps_error'    // GPS timeout / low-accuracy failure
@@ -100,6 +107,7 @@ function AgapLogo() {
 
 export default function RegistrationScreen() {
   const router = useRouter();
+  const beginGuestReport = useIncidentStore((state) => state.beginGuestReport);
   const { loadFromStorage, setPreferences, language } = useAccessibilityStore();
   const t = useTranslations();
 
@@ -113,6 +121,7 @@ export default function RegistrationScreen() {
   const [email, setEmail]                     = useState('');
   const [password, setPassword]               = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const passwordIsStrong = PASSWORD_REQUIREMENTS.every((requirement) => requirement.test(password));
 
   // ── UX state ──
   const [isPasswordVisible, setIsPasswordVisible]               = useState(false);
@@ -121,6 +130,7 @@ export default function RegistrationScreen() {
   const [focusedField, setFocusedField]     = useState<string | null>(null);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [isLoading, setIsLoading]           = useState(false);
+  const [registrationSlow, setRegistrationSlow] = useState(false);
   const [fieldErrors, setFieldErrors]       = useState<Record<string, string>>({});
   const [apiError, setApiError]             = useState('');
   const [showModal, setShowModal]           = useState(false);
@@ -128,63 +138,74 @@ export default function RegistrationScreen() {
   const [submittedPhone, setSubmittedPhone] = useState('');
   const checkScale  = useRef(new Animated.Value(0)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
+  const continuedToOtp = useRef(false);
 
   useEffect(() => { loadFromStorage(); }, []);
 
+  useEffect(() => {
+    if (!isLoading || isSuccess) {
+      setRegistrationSlow(false);
+      return;
+    }
+    const timeout = setTimeout(() => setRegistrationSlow(true), 15_000);
+    return () => clearTimeout(timeout);
+  }, [isLoading, isSuccess]);
+
   // ── Location / geo-fence handlers ──────────────────────────────────────────
 
-  async function handleGeoFenceCheck(skipBoundingBox = false) {
-    // Dev-only bypass: set EXPO_PUBLIC_DEV_SKIP_GEO_FENCE=true in .env.development
-    if (process.env.EXPO_PUBLIC_DEV_SKIP_GEO_FENCE === 'true') {
-      setCapturedCoords({ latitude: 14.7977, longitude: 120.9374 });
-      setLocationStep('inside');
+  async function handleGeoFenceCheck() {
+    setLocationStep('requesting');
+    let location: Location.LocationObject;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      location = await Promise.race([
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+          mayShowUserSettingsDialog: true,
+        }),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('GPS_TIMEOUT')), 15_000);
+        }),
+      ]);
+    } catch {
+      setLocationStep('gps_error');
+      return;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+
+    const { latitude, longitude } = location.coords;
+    if (!isCoordinateInBocaue(latitude, longitude)) {
+      setLocationStep('outside');
       return;
     }
 
-    setLocationStep('requesting');
+    setLocationStep('checking');
     try {
-      const locationPromise = Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 10_000),
-      );
-      const location = await Promise.race([locationPromise, timeoutPromise]);
-      const { latitude, longitude } = location.coords;
-
-      // Client-side bounding box fast-fail (skipped when explicitly retrying after an outside result)
-      if (!skipBoundingBox && !isInBocaueBoundingBox(latitude, longitude)) {
+      const result = await geoCheck(latitude, longitude);
+      if (!result.inside) {
         setLocationStep('outside');
         return;
       }
-
-      setLocationStep('checking');
-      const result = await geoCheck(latitude, longitude);
-      if (result.inside) {
-        setCapturedCoords({ latitude, longitude });
-        setLocationStep('inside');
-      } else {
-        setLocationStep('outside');
-      }
-    } catch (e: any) {
-      if (e?.message === 'timeout') {
-        setLocationStep('gps_error');
-      } else if (e?.message?.toLowerCase().includes('location')) {
-        setLocationStep('gps_error');
-      } else {
-        setLocationStep('geo_error');
-      }
+      setCapturedCoords({ latitude, longitude });
+      setLocationStep('inside');
+    } catch {
+      setLocationStep('geo_error');
     }
   }
 
   async function handleRequestPermission() {
-    const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
-    if (status === 'granted') {
-      await handleGeoFenceCheck();
-    } else if (!canAskAgain) {
-      setLocationStep('denied');
-    } else {
-      // Denied but can re-ask: treat as denied for this session
+    setLocationStep('permission_request');
+    try {
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        await handleGeoFenceCheck();
+      } else if (!canAskAgain) {
+        setLocationStep('denied');
+      } else {
+        setLocationStep('permission');
+      }
+    } catch {
       setLocationStep('denied');
     }
   }
@@ -194,9 +215,7 @@ export default function RegistrationScreen() {
   async function handleRegister() {
     setFieldErrors({});
     setApiError('');
-    const phone = mobileNumber.trim().startsWith('+63')
-      ? mobileNumber.trim()
-      : `+63${mobileNumber.trim().replace(/^0/, '')}`;
+    const phone = normalizePhoneForOtp(mobileNumber);
 
     const result = registerSchema.safeParse({
       fullName: fullName.trim(), phoneNumber: phone,
@@ -213,6 +232,8 @@ export default function RegistrationScreen() {
     checkScale.setValue(0);
     cardOpacity.setValue(0);
     setIsSuccess(false);
+    setRegistrationSlow(false);
+    continuedToOtp.current = false;
     setShowModal(true);
     setIsLoading(true);
     Animated.timing(cardOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
@@ -227,6 +248,7 @@ export default function RegistrationScreen() {
         latitude:        capturedCoords?.latitude,
         longitude:       capturedCoords?.longitude,
       });
+      if (continuedToOtp.current) return;
       setSubmittedPhone(phone);
       setIsLoading(false);
       setIsSuccess(true);
@@ -234,9 +256,10 @@ export default function RegistrationScreen() {
       setTimeout(() => {
         setShowModal(false);
         setIsSuccess(false);
-        router.push({ pathname: '/auth/verify-otp', params: { mode: 'register', phone } });
+        router.replace({ pathname: '/auth/verify-otp', params: { mode: 'register', phone } });
       }, 2400);
     } catch (e: any) {
+      if (continuedToOtp.current) return;
       setShowModal(false);
       setIsLoading(false);
       const msg: string = e.message ?? '';
@@ -249,6 +272,16 @@ export default function RegistrationScreen() {
         setApiError(msg || t.common.error);
       }
     }
+  }
+
+  function continueToOtp() {
+    continuedToOtp.current = true;
+    setShowModal(false);
+    setIsLoading(false);
+    router.replace({
+      pathname: '/auth/verify-otp',
+      params: { mode: 'register', phone: submittedPhone || normalizePhoneForOtp(mobileNumber) },
+    });
   }
 
   // ── Render: location step screens ──────────────────────────────────────────
@@ -309,15 +342,23 @@ export default function RegistrationScreen() {
           )}
 
           {/* ── GPS acquiring / server check loading ── */}
-          {(locationStep === 'requesting' || locationStep === 'checking') && (
+          {(locationStep === 'permission_request' || locationStep === 'requesting' || locationStep === 'checking') && (
             <View style={styles.locationCard}>
               <View style={styles.locationSpinnerWrap}>
                 <ActivityIndicator size="large" color="#0D6053" />
               </View>
               <Text style={styles.locationHeading}>
-                {locationStep === 'checking' ? 'Verifying your location…' : 'Detecting your location…'}
+                {locationStep === 'permission_request'
+                  ? 'Requesting location access…'
+                  : locationStep === 'checking'
+                    ? 'Verifying your location…'
+                    : 'Detecting your location…'}
               </Text>
-              <Text style={styles.locationBody}>Please wait a moment</Text>
+              <Text style={styles.locationBody}>
+                {locationStep === 'permission_request'
+                  ? 'Allow location access in the prompt to check that you are within Bocaue.'
+                  : 'Please wait a moment'}
+              </Text>
             </View>
           )}
 
@@ -370,7 +411,7 @@ export default function RegistrationScreen() {
               <TouchableOpacity
                 style={styles.locationPrimaryBtn}
                 activeOpacity={0.85}
-                onPress={() => handleGeoFenceCheck()}
+                onPress={() => handleRequestPermission()}
               >
                 <LinearGradient
                   colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
@@ -409,7 +450,7 @@ export default function RegistrationScreen() {
               <TouchableOpacity
                 style={[styles.locationPrimaryBtn, { marginTop: 24 }]}
                 activeOpacity={0.85}
-                onPress={() => handleGeoFenceCheck(true)}
+                onPress={() => handleRequestPermission()}
               >
                 <LinearGradient
                   colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
@@ -438,7 +479,7 @@ export default function RegistrationScreen() {
               <TouchableOpacity
                 style={styles.locationPrimaryBtn}
                 activeOpacity={0.85}
-                onPress={() => handleGeoFenceCheck()}
+                onPress={() => handleRequestPermission()}
               >
                 <LinearGradient
                   colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
@@ -665,6 +706,37 @@ export default function RegistrationScreen() {
               ) : (
                 <Text style={styles.helperText}>{t.registration.passwordHelper}</Text>
               )}
+              <View style={styles.passwordRequirements} accessibilityLiveRegion="polite">
+                <View style={styles.passwordStrengthHeader}>
+                  <Text style={styles.passwordStrengthLabel}>{t.registration.passwordRequirements}</Text>
+                  {password.length > 0 && (
+                    <Text style={[
+                      styles.passwordStrengthStatus,
+                      passwordIsStrong ? styles.passwordStrengthMet : styles.passwordStrengthPending,
+                    ]}>
+                      {passwordIsStrong ? t.registration.passwordStrong : t.registration.passwordInProgress}
+                    </Text>
+                  )}
+                </View>
+                {PASSWORD_REQUIREMENTS.map((requirement) => {
+                  const met = requirement.test(password);
+                  return (
+                    <View key={requirement.key} style={styles.passwordRequirementRow}>
+                      <Ionicons
+                        name={met ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={15}
+                        color={met ? '#15803D' : '#9CA3AF'}
+                      />
+                      <Text style={[
+                        styles.passwordRequirementText,
+                        met && styles.passwordRequirementTextMet,
+                      ]}>
+                        {t.registration[requirement.labelKey]}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
             </View>
 
             {/* Confirm Password */}
@@ -703,6 +775,15 @@ export default function RegistrationScreen() {
               {fieldErrors.confirmPassword ? (
                 <Text style={[styles.fieldError, { marginTop: 6, paddingHorizontal: 4 }]}>
                   {fieldErrors.confirmPassword}
+                </Text>
+              ) : confirmPassword.length > 0 ? (
+                <Text style={[
+                  styles.passwordMatch,
+                  confirmPassword === password ? styles.passwordRequirementTextMet : styles.passwordMatchPending,
+                ]}>
+                  {confirmPassword === password
+                    ? t.registration.passwordsMatch
+                    : t.registration.passwordsDoNotMatch}
                 </Text>
               ) : null}
             </View>
@@ -768,7 +849,15 @@ export default function RegistrationScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            <TouchableOpacity activeOpacity={0.85} style={styles.emergencyButtonContainer}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={styles.emergencyButtonContainer}
+              onPress={() => {
+                beginGuestReport();
+                router.push('/emergency/location');
+              }}
+              accessibilityRole="button"
+            >
               <LinearGradient
                 colors={['rgba(255,255,255,0.35)', 'rgba(255,255,255,0)', 'rgba(0,0,0,0.05)']}
                 locations={[0, 0.4, 1]}
@@ -801,7 +890,7 @@ export default function RegistrationScreen() {
       <Modal visible={showModal} transparent animationType="none" statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <Animated.View style={[styles.modalCard, { opacity: cardOpacity }]}>
-            {!isSuccess ? (
+            {!isSuccess && !registrationSlow ? (
               <>
                 <View style={styles.modalSpinnerWrap}>
                   <ActivityIndicator size="large" color="#0D6053" />
@@ -809,7 +898,7 @@ export default function RegistrationScreen() {
                 <Text style={styles.modalTitle}>Creating your account…</Text>
                 <Text style={styles.modalSubtext}>Please wait a moment</Text>
               </>
-            ) : (
+            ) : isSuccess ? (
               <>
                 <Animated.View style={[styles.successCircle, { transform: [{ scale: checkScale }] }]}>
                   <Ionicons name="checkmark" size={40} color="#FFFFFF" />
@@ -820,6 +909,23 @@ export default function RegistrationScreen() {
                 <Text style={styles.modalPhone}>{submittedPhone}</Text>
                 <View style={styles.modalDivider} />
                 <Text style={styles.modalFooter}>Redirecting to verification…</Text>
+              </>
+            ) : (
+              <>
+                <View style={[styles.locationIconWrap, styles.locationIconWarning]}>
+                  <Ionicons name="time-outline" size={36} color="#D97706" />
+                </View>
+                <Text style={styles.modalTitle}>This is taking longer than expected</Text>
+                <Text style={styles.modalSubtext}>
+                  Your account request may still be processing. If you received a verification code, continue to enter it.
+                </Text>
+                <TouchableOpacity
+                  style={styles.modalContinueBtn}
+                  activeOpacity={0.85}
+                  onPress={continueToOtp}
+                >
+                  <Text style={styles.modalContinueText}>Continue to verification</Text>
+                </TouchableOpacity>
               </>
             )}
           </Animated.View>
@@ -1083,6 +1189,56 @@ const styles = StyleSheet.create({
     marginTop: 6,
     paddingHorizontal: 4,
   },
+  passwordRequirements: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 7,
+  },
+  passwordStrengthHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 1,
+  },
+  passwordStrengthLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  passwordStrengthStatus: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  passwordStrengthMet: {
+    color: '#15803D',
+  },
+  passwordStrengthPending: {
+    color: '#6B7280',
+  },
+  passwordRequirementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  passwordRequirementText: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  passwordRequirementTextMet: {
+    color: '#15803D',
+  },
+  passwordMatch: {
+    fontSize: 12,
+    marginTop: 6,
+    paddingHorizontal: 4,
+  },
+  passwordMatchPending: {
+    color: '#B45309',
+  },
   fieldError: {
     fontSize: 12,
     color: '#EF4444',
@@ -1294,5 +1450,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     textAlign: 'center',
+  },
+  modalContinueBtn: {
+    width: '100%',
+    minHeight: 48,
+    marginTop: 20,
+    borderRadius: 14,
+    backgroundColor: '#0D6053',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  modalContinueText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

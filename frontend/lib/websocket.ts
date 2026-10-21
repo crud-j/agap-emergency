@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import type { AgapWebSocketEvent, AgapEventName } from '@agap/shared';
+import { getToken } from './auth';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3000';
 
@@ -27,27 +28,41 @@ export function getSocket(): Socket {
   return socket;
 }
 
-export function connectSocket(token?: string): Socket {
+/**
+ * Connect using the current in-memory access token. The callback form means every
+ * reconnect sends the latest (silently refreshed) token, not the one from page load.
+ */
+export function connectSocket(): Socket {
   const s = getSocket();
   if (!s.connected) {
-    if (token) {
-      s.auth = { token };
-    }
+    s.auth = (cb) => cb({ token: getToken() });
     s.connect();
   }
   return s;
+}
+
+/** Close the connection on sign-out so no further incident events arrive. */
+export function disconnectSocket(): void {
+  socket?.disconnect();
 }
 
 /**
  * Join the Operations Center room so this client receives ops-scoped events
  * (incident.created, incident.status_changed, dispatch.created, …). The gateway
  * restricts this room to dispatcher/supervisor/admin roles via the JWT.
+ *
+ * The server forgets a socket's rooms when it drops (backend restart, network blip,
+ * laptop sleep), so this rejoins on every reconnect, not just the first connect.
+ * Returns a cleanup that stops rejoining.
  */
-export function joinOps(): void {
+export function joinOps(): () => void {
   const s = getSocket();
   const emit = () => s.emit('join:ops');
   if (s.connected) emit();
-  else s.once('connect', emit);
+  s.on('connect', emit);
+  return () => {
+    s.off('connect', emit);
+  };
 }
 
 export function onIncidentEvent<T>(

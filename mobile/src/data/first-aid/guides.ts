@@ -27,7 +27,7 @@ export const GUIDES: FirstAidGuide[] = [
     steps: [
       { text: { en: 'Check for danger — make sure the area is safe before you approach.', fil: 'Tingnan ang panganib — tiyaking ligtas ang lugar bago lumapit.' }, caution: true },
       { text: { en: 'Check if the person responds — tap the shoulders and ask loudly, “Are you okay?”', fil: 'Tingnan kung tumutugon — tapikin ang balikat at malakas na tanungin, “Ayos ka lang ba?”' } },
-      { text: { en: 'Send for help — call 911 or the MDRRMO hotline, or ask a bystander to call. Keep AGAP open.', fil: 'Humingi ng tulong — tumawag sa 911 o MDRRMO hotline, o magpatawag sa katabi. Panatilihing bukas ang AGAP.' } },
+      { text: { en: 'Send for help — call Bocaue Hotlines or the MDRRMO hotline, or ask a bystander to call. Keep AGAP open.', fil: 'Humingi ng tulong — tumawag sa Bocaue Hotlines o MDRRMO hotline, o magpatawag sa katabi. Panatilihing bukas ang AGAP.' } },
       { text: { en: 'Check for normal breathing — watch the chest for up to 10 seconds.', fil: 'Tingnan ang normal na paghinga — bantayan ang dibdib hanggang 10 segundo.' } },
       { text: { en: 'If not breathing, be ready to start CPR (see the CPR guide).', fil: 'Kung hindi humihinga, maghandang magsimula ng CPR (tingnan ang gabay sa CPR).' } },
       { text: { en: 'Stay with the person and keep them calm until responders arrive.', fil: 'Manatili sa tao at panatagin hanggang dumating ang tutugon.' } },
@@ -243,7 +243,7 @@ export const GUIDES: FirstAidGuide[] = [
     dos: [
       { en: 'Wear something visible if you can.', fil: 'Magsuot ng kitang-kitang damit kung kaya.' },
       { en: 'Ask someone to direct traffic.', fil: 'Magpatulong na mag-direkta ng trapiko.' },
-      { en: 'Call 911/MDRRMO with the exact location.', fil: 'Tumawag sa 911/MDRRMO kasama ang eksaktong lokasyon.' },
+      { en: 'Call Bocaue Hotlines/MDRRMO with the exact location.', fil: 'Tumawag sa Bocaue Hotlines/MDRRMO kasama ang eksaktong lokasyon.' },
     ],
     donts: [
       { en: 'Don’t risk your life to reach the vehicle.', fil: 'Huwag ipanganib ang buhay para abutin ang sasakyan.' },

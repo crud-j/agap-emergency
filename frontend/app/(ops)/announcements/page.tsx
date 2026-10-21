@@ -34,7 +34,7 @@ import { getTemplate, manilaInputToIso, isoToManilaInput, SOURCE_REQUIRED_CATEGO
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_TABS = ['ALL', 'DRAFT', 'SCHEDULED', 'PUBLISHED', 'CANCELLED', 'ARCHIVED'] as const;
+const STATUS_TABS = ['ALL', 'DRAFT', 'SCHEDULED', 'PUBLISHED', 'CANCELLED', 'ARCHIVED', 'SUPERSEDED'] as const;
 type StatusTab = (typeof STATUS_TABS)[number];
 
 const inputCls =
@@ -505,7 +505,7 @@ function AnnouncementsList(): JSX.Element {
               activeTab === tab ? 'bg-white text-agap-textMain shadow-tile' : 'text-agap-textSub hover:text-agap-textMain',
             )}
           >
-            {tab === 'ALL' ? 'All' : statusMeta(tab).label}
+            {tab === 'ALL' ? 'All' : tab === 'ARCHIVED' ? 'Archive' : statusMeta(tab).label}
           </button>
         ))}
       </div>

@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
+import { UserSex } from '@agap/shared';
 
 export class UpdateProfileDto {
   @ApiPropertyOptional()
@@ -36,4 +37,10 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsBoolean()
   reducedMotion?: boolean;
+
+  /** Reporter map icon only. `null` clears it back to "not set". */
+  @ApiPropertyOptional({ enum: UserSex, nullable: true })
+  @IsOptional()
+  @IsEnum(UserSex, { message: 'sex must be MALE, FEMALE or PREFER_NOT_TO_SAY' })
+  sex?: UserSex | null;
 }

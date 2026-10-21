@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -12,7 +13,34 @@ import { AuditService } from '../audit/audit.service';
 import { UpdateAssignmentStatusDto } from './dto/update-assignment-status.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { TrackLocationDto } from '../locations/dto/track-location.dto';
-import { AuditAction, IncidentStatus, ResponderAvailability, ResponderStatus } from '@agap/shared';
+import {
+  AuditAction,
+  IncidentStatus,
+  INCIDENT_STATUS_TRANSITIONS,
+  ResponderAvailability,
+  ResponderStatus,
+} from '@agap/shared';
+import { REPORTER_SEX_INCLUDE, reporterSexFrom } from '../common/utils/reporter-sex';
+
+/**
+ * Crew-only by construction: adds `incidents.reporter_sex` (reporter map icon)
+ * and strips the raw users.sex so PREFER_NOT_TO_SAY never leaves the server.
+ */
+function withReporterSex<
+  T extends {
+    incidents: { incident_reporters: { is_guest: boolean; users: { sex: string | null } | null } | null };
+  },
+>(dispatch: T) {
+  const { incident_reporters, ...incident } = dispatch.incidents;
+  return {
+    ...dispatch,
+    incidents: {
+      ...incident,
+      incident_reporters: incident_reporters ? { is_guest: incident_reporters.is_guest } : null,
+      reporter_sex: reporterSexFrom(incident_reporters),
+    },
+  };
+}
 
 // Maps a responder-reported assignment status to the incident lifecycle status.
 const STATUS_TO_INCIDENT: Record<string, IncidentStatus | undefined> = {
@@ -20,6 +48,8 @@ const STATUS_TO_INCIDENT: Record<string, IncidentStatus | undefined> = {
   ON_SCENE: IncidentStatus.ON_SCENE,
   TRANSPORTING: IncidentStatus.TRANSPORTING,
   ASSISTING: IncidentStatus.ASSISTING,
+  // Field work is done. The crew can resolve; only a dispatcher can CLOSE.
+  RESOLVED: IncidentStatus.RESOLVED,
 };
 
 const RESPONDER_STATUS_STEP: Record<
@@ -28,6 +58,7 @@ const RESPONDER_STATUS_STEP: Record<
 > = {
   EN_ROUTE: { prev: ResponderStatus.BUSY, next: ResponderStatus.EN_ROUTE },
   ON_SCENE: { prev: ResponderStatus.EN_ROUTE, next: ResponderStatus.ON_SCENE },
+  RESOLVED: { prev: ResponderStatus.ON_SCENE, next: ResponderStatus.AVAILABLE },
 };
 
 type AvailabilityRow = { user_id: string; status: string };
@@ -210,24 +241,25 @@ export class RespondersService {
   }
 
   async getMyAssignments(userId: string) {
-    return this.prisma.dispatches.findMany({
+    const dispatches = await this.prisma.dispatches.findMany({
       where: {
         dispatch_crew: { some: { user_id: userId } },
         status: { notIn: ['COMPLETED', 'CANCELLED'] },
       },
       include: {
-        incidents: { include: { incident_locations: true } },
+        incidents: { include: { incident_locations: true, incident_reporters: REPORTER_SEX_INCLUDE } },
         resources: true,
       },
       orderBy: { created_at: 'desc' },
     });
+    return dispatches.map(withReporterSex);
   }
 
   async getAssignment(dispatchId: string, userId: string) {
     const dispatch = await this.prisma.dispatches.findUnique({
       where: { id: dispatchId },
       include: {
-        incidents: { include: { incident_locations: true } },
+        incidents: { include: { incident_locations: true, incident_reporters: REPORTER_SEX_INCLUDE } },
         resources: true,
         dispatch_crew: true,
       },
@@ -235,11 +267,11 @@ export class RespondersService {
     if (!dispatch) throw new NotFoundException('Assignment not found');
     const isCrew = dispatch.dispatch_crew.some((c) => c.user_id === userId);
     if (!isCrew) throw new ForbiddenException('You are not assigned to this dispatch');
-    return dispatch;
+    return withReporterSex(dispatch);
   }
 
   async acceptAssignment(dispatchId: string, userId: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const accepted = await this.prisma.$transaction(async (tx) => {
       // Lock availability row first, then dispatch row — consistent order to avoid deadlocks.
       const locked = await tx.$queryRaw<AvailabilityRow[]>`
         SELECT user_id, status::text AS status
@@ -279,14 +311,31 @@ export class RespondersService {
         data: { status: 'ACCEPTED', accepted_at: new Date() },
       });
     });
+    // Emitted after commit; a failed emit never affects the acceptance.
+    this.emitDispatchUpdated(accepted);
+    return accepted;
   }
 
   async declineAssignment(dispatchId: string, userId: string, reason: string) {
     await this.assertCrewMember(dispatchId, userId);
-    return this.prisma.dispatches.update({
+    const declined = await this.prisma.dispatches.update({
       where: { id: dispatchId },
       data: { status: 'REJECTED', rejected_at: new Date(), rejected_reason: reason },
     });
+    this.emitDispatchUpdated(declined);
+    return declined;
+  }
+
+  private emitDispatchUpdated(dispatch: { id: string; incident_id: string; resource_id: string; status: unknown }) {
+    try {
+      this.realtime.dispatchUpdated(dispatch.incident_id, {
+        dispatchId: dispatch.id,
+        resourceId: dispatch.resource_id,
+        status: String(dispatch.status),
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for dispatch ${dispatch.id}: ${String(err)}`);
+    }
   }
 
   async updateStatus(
@@ -296,65 +345,145 @@ export class RespondersService {
   ) {
     const dispatch = await this.assertCrewMember(dispatchId, userId);
     const incidentStatus = STATUS_TO_INCIDENT[dto.status];
+    if (!incidentStatus) {
+      throw new BadRequestException(
+        `Unsupported assignment status ${dto.status}. Allowed: ${Object.keys(STATUS_TO_INCIDENT).join(', ')}`,
+      );
+    }
+    if (dispatch.status !== 'ACCEPTED') {
+      throw new ConflictException('Accept the assignment before updating its status');
+    }
 
-    if (incidentStatus) {
-      const incident = await this.prisma.incident.findUnique({
+    const incident = await this.prisma.incident.findUnique({
+      where: { id: dispatch.incident_id },
+      select: { status: true },
+    });
+    if (!incident) throw new NotFoundException('Incident not found');
+    const currentStatus = incident.status as unknown as IncidentStatus;
+    // Same lifecycle rules the dispatcher endpoint enforces (MOD-15).
+    if (!INCIDENT_STATUS_TRANSITIONS[currentStatus]?.includes(incidentStatus)) {
+      throw new ConflictException(
+        `Cannot move incident from ${currentStatus} to ${incidentStatus}`,
+      );
+    }
+
+    const now = new Date();
+    const resolving = incidentStatus === IncidentStatus.RESOLVED;
+
+    // Every active dispatch on the incident ends when it is resolved — the
+    // units go back to AVAILABLE so the dashboard can assign them again.
+    const finishedDispatches = await this.prisma.$transaction(async (tx) => {
+      await tx.incident.update({
         where: { id: dispatch.incident_id },
+        data: {
+          status: incidentStatus as any,
+          ...(incidentStatus === IncidentStatus.EN_ROUTE && { en_route_at: now }),
+          ...(incidentStatus === IncidentStatus.ON_SCENE && { on_scene_at: now }),
+          ...(resolving && { resolved_at: now }),
+        },
       });
-      await this.prisma.$transaction([
-        this.prisma.incident.update({
-          where: { id: dispatch.incident_id },
-          data: {
-            status: incidentStatus as any,
-            ...(incidentStatus === IncidentStatus.EN_ROUTE && { en_route_at: new Date() }),
-            ...(incidentStatus === IncidentStatus.ON_SCENE && { on_scene_at: new Date() }),
-          },
-        }),
-        this.prisma.incidentEvent.create({
-          data: {
-            incident_id: dispatch.incident_id,
-            from_status: (incident?.status ?? null) as any,
-            to_status: incidentStatus as any,
-            triggered_by_id: userId,
-            triggered_by_role: 'RESPONDER',
-            notes: dto.notes ?? null,
-          },
-        }),
-      ]);
+      await tx.incidentEvent.create({
+        data: {
+          incident_id: dispatch.incident_id,
+          from_status: currentStatus as any,
+          to_status: incidentStatus as any,
+          triggered_by_id: userId,
+          triggered_by_role: 'RESPONDER',
+          notes: dto.notes ?? null,
+        },
+      });
 
-      try {
-        this.realtime.notifyIncidentStatusChanged({
-          incidentId: dispatch.incident_id,
-          previousStatus: (incident?.status ?? null) as any,
-          newStatus: incidentStatus as any,
-          changedAt: new Date().toISOString(),
-          changedBy: userId,
+      if (!resolving) return [];
+
+      const active = await tx.dispatches.findMany({
+        where: {
+          incident_id: dispatch.incident_id,
+          status: { in: ['PENDING', 'SENT', 'ACCEPTED'] },
+        },
+        select: { id: true, resource_id: true, status: true },
+      });
+      const finished: Array<{ id: string; resource_id: string; status: 'COMPLETED' | 'CANCELLED' }> = [];
+      for (const d of active) {
+        // A unit that never accepted didn't respond — cancel rather than complete.
+        const status = d.status === 'ACCEPTED' ? 'COMPLETED' : 'CANCELLED';
+        await tx.dispatches.update({
+          where: { id: d.id },
+          data: { status, ...(status === 'COMPLETED' && { completed_at: now }) },
         });
-      } catch (err) {
-        this.logger.warn(`Realtime emit failed for status change: ${String(err)}`);
+        finished.push({ id: d.id, resource_id: d.resource_id, status });
       }
+      // Only release units still pinned to this incident.
+      await tx.resources.updateMany({
+        where: {
+          id: { in: active.map((d) => d.resource_id) },
+          current_incident_id: dispatch.incident_id,
+        },
+        data: { status: 'AVAILABLE', current_incident_id: null },
+      });
+      return finished;
+    });
 
-      const step = RESPONDER_STATUS_STEP[dto.status];
-      if (step) {
+    void this.audit.log({
+      action: AuditAction.STATUS_CHANGE,
+      actorId: userId,
+      actorRole: 'RESPONDER',
+      entityId: dispatch.incident_id,
+      entityType: 'incident',
+      moduleId: resolving ? 'MOD-45' : 'MOD-32',
+      incidentId: dispatch.incident_id,
+      oldValues: { status: currentStatus },
+      newValues: { status: incidentStatus, dispatchId, ...(dto.notes && { notes: dto.notes }) },
+    });
+
+    // persist → commit → emit (best-effort).
+    try {
+      this.realtime.notifyIncidentStatusChanged({
+        incidentId: dispatch.incident_id,
+        previousStatus: currentStatus,
+        newStatus: incidentStatus,
+        changedAt: now.toISOString(),
+        changedBy: userId,
+        ...(dto.notes ? { reason: dto.notes } : {}),
+      });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for status change: ${String(err)}`);
+    }
+
+    for (const d of finishedDispatches) {
+      if (d.status === 'CANCELLED') {
         try {
-          this.realtime.responderStatus(
-            {
-              responderId: userId,
-              previousStatus: step.prev,
-              newStatus: step.next,
-              changedAt: new Date().toISOString(),
-            },
-            dispatch.incident_id,
-          );
+          this.realtime.notifyDispatchCancelled(dispatch.incident_id, {
+            dispatchId: d.id,
+            resourceId: d.resource_id,
+          });
         } catch (err) {
-          this.logger.warn(
-            `Realtime emit failed for responder status change: ${String(err)}`,
-          );
+          this.logger.warn(`Realtime emit failed for dispatch ${d.id}: ${String(err)}`);
         }
+      } else {
+        this.emitDispatchUpdated({ ...d, incident_id: dispatch.incident_id });
       }
     }
 
-    return { dispatchId, status: dto.status };
+    const step = RESPONDER_STATUS_STEP[dto.status];
+    if (step) {
+      try {
+        this.realtime.responderStatus(
+          {
+            responderId: userId,
+            previousStatus: step.prev,
+            newStatus: step.next,
+            changedAt: now.toISOString(),
+          },
+          dispatch.incident_id,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Realtime emit failed for responder status change: ${String(err)}`,
+        );
+      }
+    }
+
+    return { dispatchId, status: dto.status, incidentStatus };
   }
 
   async pushLocation(dto: TrackLocationDto, userId: string) {
@@ -366,6 +495,8 @@ export class RespondersService {
         dispatch_crew: { some: { user_id: userId } },
         status: { in: ['PENDING', 'SENT', 'ACCEPTED'] },
       },
+      orderBy: { status: 'desc' }, // prefer ACCEPTED (enum declaration order)
+      select: { id: true, resources: { select: { call_sign: true } } },
     });
     if (!activeDispatch) {
       throw new ForbiddenException('Not an active responder for this incident');
@@ -387,8 +518,12 @@ export class RespondersService {
     );
 
     try {
+      // Same contract as LocationsService.trackResponder: dispatch + call sign
+      // so maps can group crew phones per unit; never a name or phone.
       this.realtime.notifyResponderLocationUpdated(dto.incidentId, {
         responderId: userId,
+        dispatchId: activeDispatch.id,
+        callSign: activeDispatch.resources?.call_sign ?? null,
         lat: dto.latitude,
         lng: dto.longitude,
         heading: dto.headingDegrees ?? null,

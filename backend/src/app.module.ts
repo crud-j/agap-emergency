@@ -35,6 +35,8 @@ import { MediaModule } from './media/media.module';
 import { CommunicationsModule } from './communications/communications.module';
 import { ResourcesModule } from './resources/resources.module';
 import { FleetModule } from './fleet/fleet.module';
+import { BarangayCoordinationModule } from './barangay-coordination/barangay-coordination.module';
+import { BarangayCallbackModule } from './barangay-coordination/barangay-callback.module';
 import { validateConfig } from './config/config.validation';
 
 @Module({
@@ -73,6 +75,8 @@ import { validateConfig } from './config/config.validation';
     RespondersModule,
     ResourcesModule,
     FleetModule,
+    BarangayCoordinationModule,
+    BarangayCallbackModule,
     OrganizationsModule,
     HospitalsModule,
     FacilitiesModule,

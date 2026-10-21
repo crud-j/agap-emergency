@@ -3,13 +3,24 @@ import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 
+/** TRUST_PROXY: 'true' | 'false' | hop count | comma-separated names/CIDRs (Express syntax). */
+function parseTrustProxy(value: string): boolean | number | string {
+  const v = value.trim();
+  if (v === 'true') return true;
+  if (v === 'false' || v === '') return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  return v;
+}
+
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log'],
   });
 
@@ -19,6 +30,16 @@ async function bootstrap() {
   const isProd = configService.get('NODE_ENV') === 'production';
   app.use(helmet({ contentSecurityPolicy: isProd }));
   app.use(compression());
+  // Reads the HttpOnly `agap_refresh` cookie used by the web console's silent refresh.
+  app.use(cookieParser());
+
+  // Behind nginx every request arrives from the proxy. Trust X-Forwarded-For only
+  // from private/loopback hops so req.ip is the real client — audit logs record the
+  // right address and per-IP rate limits apply per client, not to the whole proxy.
+  app.set(
+    'trust proxy',
+    parseTrustProxy(configService.get<string>('TRUST_PROXY', 'loopback, linklocal, uniquelocal')),
+  );
 
   // CORS
   const corsOrigin = configService.get<string>('CORS_ORIGIN', 'http://localhost:3001');

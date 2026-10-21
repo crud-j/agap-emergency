@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,56 +26,46 @@ import { getMapConfig } from '@/src/services/api/locations.api';
 import { useResponderLocationShare } from '@/src/hooks/useResponderLocationShare';
 import { useRouteLine } from '@/src/hooks/useRouteLine';
 import { NavigateButton } from '@/src/components/responder/navigate-button';
+import { ResponderHeader } from '@/src/components/responder/responder-header';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 import { categoryIcon, categoryColor, priorityColor, titleCase } from '@/src/lib/incident-visuals';
+import { nextAssignmentActions, shouldShareLocation, type NextAction } from '@/src/lib/assignment-progress';
+import { colors, cardShadow, radius } from '@/src/theme/tokens';
 
-const LiveTrackingMap = React.lazy(() => import('@/src/components/tracking/live-tracking-map'));
+const LiveTrackingMap = React.lazy(() => Promise.resolve({
+  default: require('../../../src/components/tracking/live-tracking-map').default as typeof import('../../../src/components/tracking/live-tracking-map').default,
+}));
 const MAP_AVAILABLE = isNativeMapAvailable();
 // Keyless OpenFreeMap fallback — real OSM streets at municipal zoom (the old
 // maplibre.org demo tiles were blank at Bocaue). Used only when the backend
 // map-config returns no styleUrl.
 const MAPLIBRE_DEMO_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
-const ACTIVE_STATUSES = new Set(['ACCEPTED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING']);
-
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
-type NextAction =
-  | { kind: 'accept'; label: string; icon: IoniconName }
-  | { kind: 'status'; label: string; status: string; icon: IoniconName }
-  | null;
-
-function nextAction(status: string): NextAction {
-  switch (status) {
-    case 'PENDING':
-    case 'SENT':
-      return { kind: 'accept', label: 'Accept Assignment', icon: 'checkmark-circle' };
-    case 'ACCEPTED':
-      return { kind: 'status', label: 'Mark En Route', status: 'EN_ROUTE', icon: 'navigate' };
-    case 'EN_ROUTE':
-      return { kind: 'status', label: 'Mark On Scene', status: 'ON_SCENE', icon: 'location' };
-    case 'ON_SCENE':
-      return { kind: 'status', label: 'Mark Transporting', status: 'TRANSPORTING', icon: 'car' };
-    default:
-      return null;
-  }
-}
 
 /**
- * Responder assignment detail (MOD-32 / MOD-43). Shows the incident + citizen
- * location on a live map with an in-app route, lets the crew advance the status,
- * and — once engaged — shares the unit's live location back to the citizen.
+ * Responder assignment detail (MOD-32 / MOD-43).
+ *
+ * NOTE — the `[id]` here is the DISPATCH (assignment) id. The On-Scene
+ * Assessment screen's `[id]` is the INCIDENT id; this screen passes
+ * `data.incident_id` when navigating there. They are different entities.
+ *
+ * Shows the incident + citizen location on a live map with an in-app route, lets
+ * the crew advance the status, and — once the crew has accepted — shares the
+ * unit's live location back to the citizen.
  */
 export default function AssignmentDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: dispatchId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const qc = useQueryClient();
   const token = useAuthStore((s) => s.accessToken);
   const [busy, setBusy] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['responder-assignment', id],
-    queryFn: () => getAssignment(id as string, token as string),
-    enabled: !!id && !!token,
+    queryKey: ['responder-assignment', dispatchId],
+    queryFn: () => getAssignment(dispatchId as string, token as string),
+    enabled: !!dispatchId && !!token,
     refetchInterval: 10000,
   });
 
@@ -99,14 +90,20 @@ export default function AssignmentDetailScreen() {
     loc?.formatted_address ??
     ([loc?.barangay, loc?.municipality, loc?.province].filter(Boolean).join(', ') || null);
 
-  const status = data?.status ?? '';
-  const shareEnabled = ACTIVE_STATUSES.has(status);
+  const dispatchStatus = data?.status ?? '';
+  const incidentStatus = incident?.status ?? null;
+  const accepted = dispatchStatus === 'ACCEPTED';
+  const shareEnabled = shouldShareLocation(dispatchStatus, incidentStatus);
+  // Field progress lives on the incident once the crew has accepted.
+  const stage = accepted && incidentStatus ? incidentStatus : dispatchStatus;
+
   const share = useResponderLocationShare(data?.incident_id, shareEnabled);
-  const myPoint: (LatLngLite & { heading?: number }) | null = share.myPosition
+  const myPoint: (LatLngLite & { heading?: number; updatedAt?: string }) | null = share.myPosition
     ? {
         lat: share.myPosition.lat,
         lng: share.myPosition.lng,
         ...(share.myPosition.heading != null ? { heading: share.myPosition.heading } : {}),
+        updatedAt: share.myPosition.updatedAt,
       }
     : null;
 
@@ -114,63 +111,110 @@ export default function AssignmentDetailScreen() {
 
   const styleUrl = mapConfig?.styleUrl ?? MAPLIBRE_DEMO_STYLE;
 
-  const action = nextAction(status);
+  const actions = nextAssignmentActions(dispatchStatus, incidentStatus);
+  const fieldWorkDone =
+    dispatchStatus === 'COMPLETED' || incidentStatus === 'RESOLVED' || incidentStatus === 'CLOSED';
 
-  async function runAction() {
-    if (!action || !id || !token) return;
+  function onActionPress(action: NextAction) {
+    if (action.kind === 'status' && action.confirm) {
+      Alert.alert(action.confirm.title, action.confirm.message, [
+        { text: 'Not yet', style: 'cancel' },
+        { text: action.label, onPress: () => void runAction(action) },
+      ]);
+      return;
+    }
+    void runAction(action);
+  }
+
+  async function runAction(action: NextAction) {
+    if (!dispatchId || !token) return;
     setBusy(true);
     try {
       if (action.kind === 'accept') {
-        await acceptAssignment(id, token);
+        await acceptAssignment(dispatchId, token);
       } else {
-        await updateAssignmentStatus(id, action.status, token);
+        await updateAssignmentStatus(dispatchId, action.status, token);
       }
-      await refetch();
-    } catch {
-      Alert.alert('Action failed', 'Could not update the assignment. Please try again.');
+      await Promise.all([
+        refetch(),
+        // Keep Home / Missions / Map tabs in step without waiting for their poll.
+        qc.invalidateQueries({ queryKey: ['responder-assignments'] }),
+      ]);
+    } catch (err) {
+      Alert.alert(
+        'Action failed',
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not update the assignment. Please try again.',
+      );
     } finally {
       setBusy(false);
     }
   }
 
+  function goBack() {
+    if (router.canGoBack()) router.back();
+    else router.replace('/responder/assignments' as never);
+  }
+
+  const shareLine = share.permissionDenied
+    ? null
+    : share.sharing
+      ? share.push === 'error'
+        ? null
+        : share.push === 'ok'
+          ? 'Live location sharing active — visible to the citizen'
+          : 'Live location sharing active'
+      : shareEnabled
+        ? 'Starting location sharing…'
+        : 'Accept to start sharing your location';
+
   return (
     <View style={styles.root}>
-      <SafeAreaView edges={['top']} style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} accessibilityLabel="Back">
-          <Ionicons name="chevron-back" size={24} color="#F8FAFC" />
-        </TouchableOpacity>
-        <View style={{ alignItems: 'center' }}>
-          <Text style={styles.headerTitle}>{unit?.call_sign ?? 'Assignment'}</Text>
-          <Text style={styles.headerSub}>{unit?.name ?? 'Responding unit'}</Text>
-        </View>
-        <View style={styles.iconBtn} />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
+      <SafeAreaView edges={['top']} style={styles.headerSafe}>
+        <ResponderHeader
+          onBack={goBack}
+          title={unit?.call_sign ?? 'Assignment'}
+          subtitle={unit?.name ?? 'Responding unit'}
+        />
       </SafeAreaView>
 
       {isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator color="#34D399" />
+          <ActivityIndicator color={colors.primary} size="large" />
         </View>
       ) : isError || !data ? (
         <View style={styles.center}>
-          <Ionicons name="alert-circle-outline" size={40} color="#64748B" />
-          <Text style={styles.muted}>Could not load this assignment.</Text>
+          <View style={styles.iconWrap}>
+            <Ionicons name="cloud-offline-outline" size={32} color={colors.textSub} />
+          </View>
+          <Text style={styles.stateTitle}>Could not load this assignment</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()} accessibilityRole="button">
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <>
           <View style={styles.mapWrap}>
             {!MAP_AVAILABLE ? (
               <View style={styles.mapFallback}>
-                <Ionicons name="map-outline" size={40} color="#64748B" />
+                <Ionicons name="map-outline" size={36} color={colors.textSub} />
                 <Text style={styles.muted}>Live map requires the latest app build.</Text>
               </View>
             ) : (
               <MapErrorBoundary>
-                <React.Suspense fallback={<View style={styles.mapFallback}><ActivityIndicator color="#34D399" /></View>}>
+                <React.Suspense
+                  fallback={<View style={styles.mapFallback}><ActivityIndicator color={colors.primary} /></View>}
+                >
                   <LiveTrackingMap
                     styleUrl={styleUrl}
                     incident={citizenPoint}
                     responder={myPoint}
                     routeGeometry={route.geometry}
+                    responderIcon="ambulance"
+                    citizenSex={incident?.reporter_sex ?? null}
+                    priority={incident?.priority}
                     pitch={shareEnabled && myPoint != null ? 50 : 0}
                     navigationHeading={shareEnabled && myPoint?.heading != null ? myPoint.heading : null}
                     supports3dBuildings={mapConfig?.supports3dBuildings ?? false}
@@ -179,21 +223,25 @@ export default function AssignmentDetailScreen() {
               </MapErrorBoundary>
             )}
 
-            {/* Route ETA chip floating over the map */}
+            {/* Route ETA chip floating over the map — always an estimate */}
             {route.durationSeconds != null && (
               <View style={styles.etaChip}>
-                <Ionicons name="time" size={14} color="#0B1220" style={{ marginRight: 6 }} />
+                <Ionicons name="time" size={14} color={colors.white} style={{ marginRight: 6 }} />
                 <Text style={styles.etaChipText}>
-                  {formatKm(route.distanceMeters)} • ~{formatMin(route.durationSeconds)}
+                  {formatKm(route.distanceMeters)} • ~{formatMin(route.durationSeconds)} est.
                 </Text>
               </View>
             )}
           </View>
 
-          <ScrollView style={styles.sheet} contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+          <ScrollView
+            style={styles.sheet}
+            contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+            showsVerticalScrollIndicator={false}
+          >
             {/* Command card */}
-            <View style={styles.commandCard}>
-              <View style={[styles.catIcon, { backgroundColor: `${accent}22` }]}>
+            <View style={[styles.card, styles.commandCard, { borderLeftColor: accent }]}>
+              <View style={[styles.catIcon, { backgroundColor: `${accent}1A` }]}>
                 <Ionicons name={categoryIcon(incident?.category)} size={24} color={accent} />
               </View>
               <View style={{ flex: 1 }}>
@@ -205,30 +253,43 @@ export default function AssignmentDetailScreen() {
               </View>
             </View>
 
-            {/* Sharing status strip */}
+            {/* Sharing status */}
             <View style={styles.shareStrip}>
-              <View style={[styles.dot, { backgroundColor: share.sharing ? '#34D399' : '#64748B' }]} />
-              <Text style={styles.shareText}>
-                {share.sharing
-                  ? 'Live location sharing active'
-                  : shareEnabled
-                    ? 'Starting location sharing…'
-                    : 'Accept to start sharing your location'}
-              </Text>
-              <View style={[styles.statusChip, { backgroundColor: '#0D605322' }]}>
-                <Text style={styles.statusChipText}>{titleCase(status)}</Text>
+              <View
+                style={[
+                  styles.dot,
+                  { backgroundColor: share.sharing && share.push !== 'error' ? colors.primary : colors.textSub },
+                ]}
+              />
+              <Text style={styles.shareText}>{shareLine ?? ' '}</Text>
+              <View style={styles.statusChip}>
+                <Text style={styles.statusChipText}>{titleCase(stage)}</Text>
               </View>
             </View>
             {share.permissionDenied && (
               <View style={styles.warnRow}>
-                <Ionicons name="warning" size={14} color="#FBBF24" style={{ marginRight: 6 }} />
-                <Text style={styles.warnText}>Location permission denied — the citizen can't see your position.</Text>
+                <Ionicons name="warning" size={14} color={colors.amber} style={{ marginRight: 6 }} />
+                <Text style={styles.warnText}>
+                  Location permission denied — the citizen can't see your position.
+                </Text>
+              </View>
+            )}
+            {share.sharing && share.push === 'error' && (
+              <View style={[styles.warnRow, styles.errorRow]}>
+                <Ionicons name="cloud-offline" size={14} color={colors.danger} style={{ marginRight: 6 }} />
+                <Text style={[styles.warnText, { color: colors.danger }]}>
+                  Your location is not reaching the citizen: {share.pushError ?? 'upload failed'}
+                </Text>
               </View>
             )}
 
             {/* Info rows */}
-            <InfoRow icon="navigate-circle" label="Scene location" value={address ?? 'Address not available'}
-              sub={citizenPoint ? `${citizenPoint.lat.toFixed(5)}, ${citizenPoint.lng.toFixed(5)}` : undefined} />
+            <InfoRow
+              icon="navigate-circle"
+              label="Scene location"
+              value={address ?? 'Address not available'}
+              sub={citizenPoint ? `${citizenPoint.lat.toFixed(5)}, ${citizenPoint.lng.toFixed(5)}` : undefined}
+            />
             {incident?.description ? (
               <InfoRow icon="document-text" label="Details" value={incident.description} />
             ) : null}
@@ -245,30 +306,23 @@ export default function AssignmentDetailScreen() {
               style={{ marginTop: 14 }}
             />
 
-            {/* On-scene patient assessment (MOD-37) — available once engaged. */}
-            {data.incident_id && ACTIVE_STATUSES.has(status) && (
-              <TouchableOpacity
-                style={styles.assessBtn}
-                onPress={() => router.push(`/responder/assessment/${data.incident_id}`)}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="clipboard" size={18} color="#34D399" style={{ marginRight: 8 }} />
-                <Text style={styles.assessText}>On-Scene Assessment</Text>
-                <Ionicons name="chevron-forward" size={18} color="#64748B" style={{ marginLeft: 'auto' }} />
-              </TouchableOpacity>
+            {/* On-scene patient assessment (MOD-37) — available once engaged.
+                Takes the INCIDENT id, not this screen's dispatch id. */}
+            {data.incident_id && accepted && (
+              <LinkRow
+                icon="clipboard"
+                label="On-Scene Assessment"
+                onPress={() => router.push(`/responder/assessment/${data.incident_id}` as never)}
+              />
             )}
 
             {/* Incident chat (MOD-33) — message the reporter + dispatch. */}
             {data.incident_id && (
-              <TouchableOpacity
-                style={styles.assessBtn}
-                onPress={() => router.push(`/incident/chat/${data.incident_id}`)}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="chatbubbles" size={18} color="#34D399" style={{ marginRight: 8 }} />
-                <Text style={styles.assessText}>Incident Chat</Text>
-                <Ionicons name="chevron-forward" size={18} color="#64748B" style={{ marginLeft: 'auto' }} />
-              </TouchableOpacity>
+              <LinkRow
+                icon="chatbubbles"
+                label="Incident Chat"
+                onPress={() => router.push(`/incident/chat/${data.incident_id}` as never)}
+              />
             )}
 
             {/* Incident Command structure (MOD-36) — read-only viewer. */}
@@ -282,23 +336,57 @@ export default function AssignmentDetailScreen() {
             )}
           </ScrollView>
 
-          {action && (
+          {actions.length > 0 && (
             <SafeAreaView edges={['bottom']} style={styles.footer}>
-              <TouchableOpacity
-                style={[styles.actionBtn, busy && styles.actionBtnDisabled]}
-                onPress={runAction}
-                disabled={busy}
-                activeOpacity={0.85}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name={action.icon} size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <Text style={styles.actionText}>{action.label}</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              <View style={styles.actionRow}>
+                {actions.map((action) => {
+                  const secondary = action.kind === 'status' && action.secondary;
+                  return (
+                    <TouchableOpacity
+                      key={action.label}
+                      style={[
+                        styles.actionBtn,
+                        secondary && styles.actionBtnSecondary,
+                        busy && styles.actionBtnDisabled,
+                      ]}
+                      onPress={() => onActionPress(action)}
+                      disabled={busy}
+                      activeOpacity={0.85}
+                      accessibilityRole="button"
+                      accessibilityLabel={action.label}
+                    >
+                      {busy ? (
+                        <ActivityIndicator color={secondary ? colors.primary : '#FFFFFF'} />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name={action.icon}
+                            size={20}
+                            color={secondary ? colors.primary : '#FFFFFF'}
+                            style={{ marginRight: 8 }}
+                          />
+                          <Text style={[styles.actionText, secondary && styles.actionTextSecondary]}>
+                            {action.label}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </SafeAreaView>
+          )}
+
+          {fieldWorkDone && (
+            <SafeAreaView edges={['bottom']} style={styles.footer}>
+              <View style={styles.doneBanner}>
+                <Ionicons name="checkmark-done-circle" size={22} color={colors.primary} />
+                <Text style={styles.doneText}>
+                  {incidentStatus === 'CLOSED'
+                    ? 'Mission complete — the incident has been closed by the dispatcher.'
+                    : 'Mission complete — waiting for the dispatcher to close the incident.'}
+                </Text>
+              </View>
             </SafeAreaView>
           )}
         </>
@@ -319,9 +407,9 @@ function InfoRow({
   sub?: string;
 }) {
   return (
-    <View style={styles.infoRow}>
+    <View style={[styles.card, styles.infoRow]}>
       <View style={styles.infoIcon}>
-        <Ionicons name={icon} size={18} color="#34D399" />
+        <Ionicons name={icon} size={18} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.infoLabel}>{label}</Text>
@@ -329,6 +417,22 @@ function InfoRow({
         {sub ? <Text style={styles.infoSub}>{sub}</Text> : null}
       </View>
     </View>
+  );
+}
+
+function LinkRow({ icon, label, onPress }: { icon: IoniconName; label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      style={[styles.card, styles.linkRow]}
+      onPress={onPress}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Ionicons name={icon} size={18} color={colors.primary} style={{ marginRight: 8 }} />
+      <Text style={styles.linkText}>{label}</Text>
+      <Ionicons name="chevron-forward" size={18} color={colors.textSub} style={{ marginLeft: 'auto' }} />
+    </TouchableOpacity>
   );
 }
 
@@ -360,12 +464,14 @@ function IcsViewerSection({ incidentId, token }: { incidentId: string; token: st
   const active = ics.ics_assignments.filter((a) => !a.relieved_at);
 
   return (
-    <View style={cmdStyles.section}>
+    <View style={[styles.card, cmdStyles.section]}>
       <View style={cmdStyles.sectionHead}>
-        <Ionicons name="git-network" size={16} color="#34D399" style={{ marginRight: 8 }} />
+        <Ionicons name="git-network" size={16} color={colors.primary} style={{ marginRight: 8 }} />
         <Text style={cmdStyles.sectionTitle}>Incident Command</Text>
-        <View style={[cmdStyles.pill, { backgroundColor: ics.deactivated_at ? '#64748B33' : '#0D605333' }]}>
-          <Text style={cmdStyles.pillText}>{ics.deactivated_at ? 'Deactivated' : 'Active'}</Text>
+        <View style={[cmdStyles.pill, { backgroundColor: ics.deactivated_at ? colors.surface : colors.primarySoft }]}>
+          <Text style={[cmdStyles.pillText, ics.deactivated_at && { color: colors.textSub }]}>
+            {ics.deactivated_at ? 'Deactivated' : 'Active'}
+          </Text>
         </View>
       </View>
 
@@ -390,7 +496,7 @@ function IcsViewerSection({ incidentId, token }: { incidentId: string; token: st
             <View key={a.id} style={cmdStyles.posRow}>
               <Text style={[
                 cmdStyles.posName,
-                a.position === 'INCIDENT_COMMANDER' && { color: '#FCA5A5' },
+                a.position === 'INCIDENT_COMMANDER' && { color: colors.danger },
               ]}>
                 {positionLabel(a.position)}
               </Text>
@@ -429,9 +535,9 @@ function HandoverSection({ incidentId, token }: { incidentId: string; token: str
   const myPending = list.find((h) => h.acknowledged_at == null && h.to_user_id === currentUserId);
 
   return (
-    <View style={cmdStyles.section}>
+    <View style={[styles.card, cmdStyles.section]}>
       <View style={cmdStyles.sectionHead}>
-        <Ionicons name="swap-horizontal" size={16} color="#34D399" style={{ marginRight: 8 }} />
+        <Ionicons name="swap-horizontal" size={16} color={colors.primary} style={{ marginRight: 8 }} />
         <Text style={cmdStyles.sectionTitle}>Handovers</Text>
       </View>
 
@@ -440,13 +546,13 @@ function HandoverSection({ incidentId, token }: { incidentId: string; token: str
         return (
           <View key={h.id} style={cmdStyles.handoverCard}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={cmdStyles.posUser}>
+              <Text style={[cmdStyles.posUser, { flex: 1 }]}>
                 {(h.users_incident_handovers_from_user_idTousers?.full_name
                   ?? h.from_user_id.slice(0, 8))} → {(h.users_incident_handovers_to_user_idTousers?.full_name
                   ?? h.to_user_id.slice(0, 8))}
               </Text>
-              <View style={[cmdStyles.pill, { backgroundColor: acked ? '#0D605333' : '#B4530922' }]}>
-                <Text style={[cmdStyles.pillText, { color: acked ? '#34D399' : '#FBBF24' }]}>
+              <View style={[cmdStyles.pill, { backgroundColor: acked ? colors.primarySoft : colors.amberSoft }]}>
+                <Text style={[cmdStyles.pillText, { color: acked ? colors.primary : colors.amber }]}>
                   {acked ? 'Acknowledged' : 'Pending'}
                 </Text>
               </View>
@@ -456,7 +562,7 @@ function HandoverSection({ incidentId, token }: { incidentId: string; token: str
               <View style={{ marginTop: 6 }}>
                 {h.pending_actions.map((a, i) => (
                   <View key={i} style={cmdStyles.bulletRow}>
-                    <View style={[cmdStyles.bullet, { backgroundColor: '#FBBF24' }]} />
+                    <View style={[cmdStyles.bullet, { backgroundColor: colors.amber }]} />
                     <Text style={cmdStyles.bodyText}>{a}</Text>
                   </View>
                 ))}
@@ -472,12 +578,13 @@ function HandoverSection({ incidentId, token }: { incidentId: string; token: str
           onPress={() => ack.mutate()}
           disabled={ack.isPending}
           activeOpacity={0.85}
+          accessibilityRole="button"
         >
           {ack.isPending ? (
-            <ActivityIndicator color="#0B1220" />
+            <ActivityIndicator color="#FFFFFF" />
           ) : (
             <>
-              <Ionicons name="checkmark-circle" size={18} color="#0B1220" style={{ marginRight: 8 }} />
+              <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
               <Text style={cmdStyles.ackText}>Acknowledge handover</Text>
             </>
           )}
@@ -486,40 +593,6 @@ function HandoverSection({ incidentId, token }: { incidentId: string; token: str
     </View>
   );
 }
-
-const cmdStyles = StyleSheet.create({
-  section: {
-    marginTop: 14, padding: 14, borderRadius: 16,
-    backgroundColor: '#0F1B2E', borderWidth: 1, borderColor: '#1E293B',
-  },
-  sectionHead: { flexDirection: 'row', alignItems: 'center' },
-  sectionTitle: { flex: 1, fontSize: 15, fontWeight: '800', color: '#F8FAFC' },
-  subLabel: {
-    fontSize: 11, fontWeight: '700', color: '#64748B',
-    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4,
-  },
-  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 3 },
-  bullet: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#34D399', marginTop: 6, marginRight: 8 },
-  bodyText: { flex: 1, fontSize: 13, color: '#CBD5E1', lineHeight: 18 },
-  mutedText: { fontSize: 13, color: '#64748B' },
-  posRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1E293B',
-  },
-  posName: { fontSize: 13, fontWeight: '700', color: '#F8FAFC' },
-  posUser: { fontSize: 13, color: '#CBD5E1' },
-  pill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999, marginLeft: 8 },
-  pillText: { fontSize: 11, fontWeight: '700', color: '#34D399' },
-  handoverCard: {
-    marginTop: 10, padding: 12, borderRadius: 12,
-    backgroundColor: '#0B1220', borderWidth: 1, borderColor: '#1E293B',
-  },
-  ackBtn: {
-    marginTop: 12, height: 46, borderRadius: 12, backgroundColor: '#34D399',
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-  },
-  ackText: { fontSize: 15, fontWeight: '800', color: '#0B1220' },
-});
 
 function formatKm(meters: number | null): string {
   if (meters == null) return '—';
@@ -541,7 +614,7 @@ class MapErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
     if (this.state.failed) {
       return (
         <View style={styles.mapFallback}>
-          <Ionicons name="map-outline" size={40} color="#64748B" />
+          <Ionicons name="map-outline" size={36} color={colors.textSub} />
           <Text style={styles.muted}>Live map requires the latest app build.</Text>
         </View>
       );
@@ -550,38 +623,78 @@ class MapErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
   }
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0B1220' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingBottom: 10, backgroundColor: '#0B1220',
+const cmdStyles = StyleSheet.create({
+  section: { marginTop: 14, padding: 14 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center' },
+  sectionTitle: { flex: 1, fontSize: 15, fontWeight: '800', color: colors.text },
+  subLabel: {
+    fontSize: 11, fontWeight: '700', color: colors.textSub,
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4,
   },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 17, fontWeight: '800', color: '#F8FAFC', letterSpacing: 0.3 },
-  headerSub: { fontSize: 11, color: '#64748B' },
+  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 3 },
+  bullet: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary, marginTop: 6, marginRight: 8 },
+  bodyText: { flex: 1, fontSize: 13, color: colors.textMid, lineHeight: 18 },
+  mutedText: { fontSize: 13, color: colors.textSub },
+  posRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  posName: { fontSize: 13, fontWeight: '700', color: colors.text },
+  posUser: { fontSize: 13, color: colors.textMid },
+  pill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999, marginLeft: 8 },
+  pillText: { fontSize: 11, fontWeight: '700', color: colors.primary },
+  handoverCard: {
+    marginTop: 10, padding: 12, borderRadius: radius.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+  },
+  ackBtn: {
+    marginTop: 12, height: 46, borderRadius: radius.md, backgroundColor: colors.primary,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+  },
+  ackText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+});
 
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  muted: { color: '#94A3B8', marginTop: 10, textAlign: 'center' },
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  headerSafe: { backgroundColor: colors.bg },
 
-  mapWrap: { height: 280, backgroundColor: '#111C2E' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
+  iconWrap: {
+    width: 72, height: 72, borderRadius: 36, backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 8,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  stateTitle: { fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center' },
+  retryBtn: { marginTop: 12, backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: 24, paddingVertical: 11 },
+  retryText: { color: '#FFFFFF', fontWeight: '700' },
+  muted: { color: colors.textSub, marginTop: 10, textAlign: 'center', fontSize: 13 },
+
+  mapWrap: {
+    height: 240, marginHorizontal: 16, marginTop: 12, borderRadius: radius.lg,
+    overflow: 'hidden', backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border, ...cardShadow,
+  },
   mapFallback: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   etaChip: {
     position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#34D399', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7,
-    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4,
+    backgroundColor: colors.primary, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7,
+    ...cardShadow,
   },
-  etaChipText: { color: '#0B1220', fontSize: 13, fontWeight: '800' },
+  etaChipText: { color: colors.white, fontSize: 13, fontWeight: '800' },
 
-  sheet: { flex: 1, backgroundColor: '#0B1220' },
+  sheet: { flex: 1 },
+
+  card: {
+    backgroundColor: colors.white, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border, ...cardShadow,
+  },
 
   commandCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#111C2E', borderRadius: 16, padding: 14,
-    borderWidth: 1, borderColor: '#1E293B',
+    flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderLeftWidth: 4,
   },
   catIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 19, fontWeight: '800', color: '#F8FAFC' },
-  ref: { fontSize: 12, fontFamily: 'monospace', color: '#64748B', marginTop: 2 },
+  title: { fontSize: 19, fontWeight: '800', color: colors.text },
+  ref: { fontSize: 12, fontFamily: 'monospace', color: colors.textSub, marginTop: 2 },
   prioPill: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
   prioText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
 
@@ -590,29 +703,50 @@ const styles = StyleSheet.create({
     marginTop: 12, paddingHorizontal: 4,
   },
   dot: { width: 9, height: 9, borderRadius: 5 },
-  shareText: { color: '#CBD5E1', fontSize: 13, flex: 1 },
-  statusChip: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  statusChipText: { color: '#34D399', fontSize: 11, fontWeight: '800' },
-  warnRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingHorizontal: 4 },
-  warnText: { color: '#FBBF24', fontSize: 12, flex: 1 },
-
-  infoRow: {
-    flexDirection: 'row', gap: 12, backgroundColor: '#111C2E', borderRadius: 14,
-    padding: 14, marginTop: 12, borderWidth: 1, borderColor: '#1E293B',
+  shareText: { color: colors.textMid, fontSize: 13, flex: 1 },
+  statusChip: {
+    borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: 'rgba(13,96,83,0.18)',
   },
-  infoIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#0D605322', alignItems: 'center', justifyContent: 'center' },
-  infoLabel: { color: '#64748B', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
-  infoValue: { color: '#F8FAFC', fontSize: 15, lineHeight: 21 },
-  infoSub: { color: '#64748B', fontSize: 12, fontFamily: 'monospace', marginTop: 4 },
-
-  assessBtn: {
-    flexDirection: 'row', alignItems: 'center', marginTop: 14, padding: 16,
-    backgroundColor: '#111C2E', borderRadius: 14, borderWidth: 1, borderColor: '#1E293B',
+  statusChipText: { color: colors.primary, fontSize: 11, fontWeight: '800' },
+  warnRow: {
+    flexDirection: 'row', alignItems: 'flex-start', marginTop: 8, padding: 10,
+    borderRadius: radius.md, backgroundColor: colors.amberSoft,
+    borderWidth: 1, borderColor: 'rgba(217,119,6,0.20)',
   },
-  assessText: { color: '#F8FAFC', fontSize: 15, fontWeight: '700' },
+  errorRow: { backgroundColor: colors.dangerSoft, borderColor: 'rgba(212,72,88,0.20)' },
+  warnText: { color: colors.amber, fontSize: 12, flex: 1, lineHeight: 17 },
 
-  footer: { paddingHorizontal: 16, paddingTop: 10, backgroundColor: '#0B1220', borderTopWidth: 1, borderTopColor: '#1E293B' },
-  actionBtn: { flexDirection: 'row', height: 54, borderRadius: 14, backgroundColor: '#0D6053', alignItems: 'center', justifyContent: 'center' },
-  actionBtnDisabled: { backgroundColor: '#334155' },
+  infoRow: { flexDirection: 'row', gap: 12, padding: 14, marginTop: 12 },
+  infoIcon: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  infoLabel: { color: colors.textSub, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
+  infoValue: { color: colors.text, fontSize: 15, lineHeight: 21 },
+  infoSub: { color: colors.textSub, fontSize: 12, fontFamily: 'monospace', marginTop: 4 },
+
+  linkRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, padding: 16 },
+  linkText: { color: colors.text, fontSize: 15, fontWeight: '700' },
+
+  footer: {
+    paddingHorizontal: 16, paddingTop: 10, backgroundColor: colors.white,
+    borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  actionBtn: {
+    flex: 1, flexDirection: 'row', height: 54, borderRadius: radius.lg, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  actionRow: { flexDirection: 'row', gap: 10 },
+  actionBtnSecondary: {
+    backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.primary,
+  },
+  actionBtnDisabled: { backgroundColor: colors.track, borderColor: colors.track },
   actionText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  actionTextSecondary: { color: colors.primary },
+  doneBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    padding: 14, marginBottom: 10, borderRadius: radius.lg, backgroundColor: colors.primarySoft,
+  },
+  doneText: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.text, lineHeight: 20 },
 });

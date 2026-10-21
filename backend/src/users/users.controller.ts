@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -12,9 +13,10 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ReportReadinessDto } from './dto/report-readiness.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -53,9 +55,18 @@ export class UsersController {
   @Get('me/readiness')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get emergency readiness/permission status' })
-  async getReadiness(@Request() req: any) {
-    return this.usersService.getReadiness(req.user.id);
+  @ApiOperation({ summary: 'Get my latest emergency readiness status (MOD-05)' })
+  @ApiQuery({ name: 'deviceId', required: false, description: 'Limit to one device; defaults to the most recent report' })
+  async getReadiness(@Request() req: any, @Query('deviceId') deviceId?: string) {
+    return this.usersService.getReadiness(req.user.id, deviceId || undefined);
+  }
+
+  @Put('me/readiness')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Report this device’s readiness check and get the evaluated status (MOD-05)' })
+  async reportReadiness(@Request() req: any, @Body() dto: ReportReadinessDto) {
+    return this.usersService.reportReadiness(req.user.id, dto);
   }
 
   @Get(':id')

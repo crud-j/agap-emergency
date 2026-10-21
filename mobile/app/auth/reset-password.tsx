@@ -12,7 +12,7 @@ import { resetPassword } from '../../src/services/api/auth.api';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
-  const { otp } = useLocalSearchParams<{ otp: string }>();
+  const { otp, phone } = useLocalSearchParams<{ otp: string; phone: string }>();
   const t = useTranslations();
 
   const [newPassword, setNewPassword] = useState('');
@@ -25,21 +25,18 @@ export default function ResetPasswordScreen() {
 
   function getStrength(): { label: string; color: string; width: string } {
     const len = newPassword.length;
-    const hasSpecial = /[^a-zA-Z0-9]/.test(newPassword);
-    const hasMixed = /[a-z]/.test(newPassword) && /[A-Z]/.test(newPassword);
-    if (len < 8) return { label: 'Weak', color: '#EF4444', width: '25%' };
-    if (len >= 8 && (hasSpecial || hasMixed)) return { label: 'Good', color: '#F59E0B', width: '60%' };
-    if (len >= 10 && hasSpecial && hasMixed) return { label: 'Strong', color: '#10B981', width: '100%' };
-    return { label: 'Fair', color: '#F59E0B', width: '45%' };
+    if (len < 12) return { label: 'Weak', color: '#EF4444', width: '25%' };
+    if (len < 16) return { label: 'Good', color: '#F59E0B', width: '60%' };
+    return { label: 'Strong', color: '#10B981', width: '100%' };
   }
 
   async function handleReset() {
-    if (newPassword.length < 8) { setError(t.resetPassword.errorWeak); return; }
+    if (newPassword.length < 12 || newPassword.length > 128) { setError(t.resetPassword.errorWeak); return; }
     if (newPassword !== confirmPassword) { setError(t.resetPassword.errorMismatch); return; }
     setIsLoading(true);
     setError('');
     try {
-      await resetPassword({ token: otp, newPassword });
+      await resetPassword({ phoneNumber: phone, token: otp, newPassword });
       router.replace('/auth/login');
     } catch (e: any) {
       setError(e.message ?? t.common.error);
@@ -49,7 +46,7 @@ export default function ResetPasswordScreen() {
   }
 
   const strength = getStrength();
-  const canSubmit = newPassword.length >= 8 && confirmPassword.length >= 8;
+  const canSubmit = newPassword.length >= 12 && newPassword.length <= 128 && confirmPassword.length >= 12;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -76,6 +73,7 @@ export default function ResetPasswordScreen() {
                 placeholder={t.resetPassword.newPasswordPlaceholder}
                 placeholderTextColor="#9CA3AF"
                 secureTextEntry={!isNewVisible}
+                maxLength={128}
                 value={newPassword}
                 onChangeText={(v) => { setNewPassword(v); setError(''); }}
                 onFocus={() => setFocusedField('new')}
@@ -106,6 +104,7 @@ export default function ResetPasswordScreen() {
                 placeholder={t.resetPassword.confirmPlaceholder}
                 placeholderTextColor="#9CA3AF"
                 secureTextEntry={!isConfirmVisible}
+                maxLength={128}
                 value={confirmPassword}
                 onChangeText={(v) => { setConfirmPassword(v); setError(''); }}
                 onFocus={() => setFocusedField('confirm')}

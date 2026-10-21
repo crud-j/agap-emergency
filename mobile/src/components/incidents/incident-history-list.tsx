@@ -88,6 +88,7 @@ export function IncidentHistoryList({
     { key: 'ongoing',   label: t.history.filterOngoing },
     { key: 'resolved',  label: t.history.filterResolved },
     { key: 'cancelled', label: t.history.filterCancelled },
+    { key: 'archive',   label: t.history.filterArchive },
   ];
 
   const controls = (

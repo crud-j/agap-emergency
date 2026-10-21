@@ -45,6 +45,14 @@ const nextConfig = {
         source: '/maplibre-gl-worker.mjs.map',
         destination: '/maplibre-gl-worker.mjs',
       },
+      // The barangay status page (/b/<token>, opened from the alert SMS) talks to these two
+      // public endpoints through the web app's own origin. That way a single public address
+      // (a Cloudflare tunnel, or the production domain) is enough: no CORS, and nothing else
+      // of the API is exposed through it.
+      {
+        source: '/v1/public/barangay/:path*',
+        destination: `${process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:3000'}/v1/public/barangay/:path*`,
+      },
     ];
   },
 

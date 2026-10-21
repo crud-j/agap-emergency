@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, Switch, StyleSheet, ScrollView } from 'react-native';
+import { View, TouchableOpacity, Switch, StyleSheet, ScrollView } from 'react-native';
 import { ScreenHeader } from '../../src/components/ui/screen-header';
+import { AccessibleText } from '../../src/components/accessibility/AccessibleText';
 import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import type { AccessibilityPrefs, Language, TextSize } from '../../src/stores/accessibility.store';
 import { useAuthStore } from '../../src/stores/auth.store';
@@ -84,8 +85,8 @@ export default function AccessibilityScreen() {
 function Field({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldTitle}>{title}</Text>
-      <Text style={styles.fieldSub}>{subtitle}</Text>
+      <AccessibleText style={styles.fieldTitle}>{title}</AccessibleText>
+      <AccessibleText style={styles.fieldSub}>{subtitle}</AccessibleText>
       {children}
     </View>
   );
@@ -109,7 +110,9 @@ function Segmented({
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
           >
-            <Text style={[styles.segText, active && styles.segTextActive]}>{opt.label}</Text>
+            <AccessibleText style={[styles.segText, active && styles.segTextActive]}>
+              {opt.label}
+            </AccessibleText>
           </TouchableOpacity>
         );
       })}
@@ -125,8 +128,8 @@ function ToggleField({
   return (
     <View style={[styles.field, styles.toggleRow]}>
       <View style={{ flex: 1, marginRight: 12 }}>
-        <Text style={styles.fieldTitle}>{title}</Text>
-        <Text style={[styles.fieldSub, { marginBottom: 0 }]}>{subtitle}</Text>
+        <AccessibleText style={styles.fieldTitle}>{title}</AccessibleText>
+        <AccessibleText style={[styles.fieldSub, { marginBottom: 0 }]}>{subtitle}</AccessibleText>
       </View>
       <Switch
         value={value}

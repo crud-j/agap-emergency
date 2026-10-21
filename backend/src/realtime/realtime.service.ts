@@ -7,6 +7,7 @@ import {
   ESCALATION_EVENTS,
   ANNOUNCEMENT_EVENTS,
   NOTIFICATION_EVENTS,
+  BARANGAY_EVENTS,
   IncidentStatus,
 } from '@agap/shared';
 import type {
@@ -17,8 +18,12 @@ import type {
   IncidentLocationUpdatedPayload,
   IncidentMessagePayload,
   ResponderStatusChangedPayload,
+  ResponderLocationUpdatedPayload,
+  ResponderEtaUpdatedPayload,
+  DispatchUpdatedPayload,
   AnnouncementPublishedPayload,
   NotificationCreatedPayload,
+  BarangayNoticeUpdatedPayload,
 } from '@agap/shared';
 
 // MOD-40 transport payloads defined locally to avoid requiring a shared rebuild.
@@ -116,6 +121,21 @@ export class RealtimeService {
     });
   }
 
+  /**
+   * Crew accepted or declined a dispatch. Lets the dispatch dashboard switch
+   * from "Awaiting crew acceptance" to live tracking without waiting to poll.
+   */
+  dispatchUpdated(
+    incidentId: string,
+    payload: Omit<DispatchUpdatedPayload, 'incidentId' | 'updatedAt'>,
+  ): void {
+    const envelope: DispatchUpdatedPayload = { incidentId, updatedAt: new Date().toISOString(), ...payload };
+    this.safe('dispatchUpdated', () => {
+      this.gateway.emitToOps(DISPATCH_EVENTS.UPDATED, envelope);
+      this.gateway.emitToIncident(DISPATCH_EVENTS.UPDATED, incidentId, envelope);
+    });
+  }
+
   incidentAssigned(payload: IncidentAssignedPayload): void {
     this.safe('incidentAssigned', () => {
       this.gateway.emitToOps(INCIDENT_EVENTS.ASSIGNED, payload);
@@ -199,20 +219,20 @@ export class RealtimeService {
     });
   }
 
+  /** Barangay notice changed. Ops room only: never the citizen's incident room. */
+  barangayNoticeUpdated(payload: BarangayNoticeUpdatedPayload): void {
+    this.safe('barangayNoticeUpdated', () => {
+      this.gateway.emitToOps(BARANGAY_EVENTS.NOTICE_UPDATED, payload);
+    });
+  }
+
   // ── Responder ─────────────────────────────────────────────────────────────
 
   responderLocation(
     incidentId: string,
-    payload: {
-      responderId: string;
-      lat: number;
-      lng: number;
-      heading?: number | null;
-      speed?: number | null;
-      updatedAt: string;
-    },
+    payload: Omit<ResponderLocationUpdatedPayload, 'incidentId'>,
   ): void {
-    const envelope = { incidentId, ...payload };
+    const envelope: ResponderLocationUpdatedPayload = { incidentId, ...payload };
     this.safe('responderLocation', () => {
       this.gateway.emitToOps(RESPONDER_EVENTS.LOCATION_UPDATED, envelope);
       this.gateway.emitToIncident(RESPONDER_EVENTS.LOCATION_UPDATED, incidentId, envelope);
@@ -257,14 +277,7 @@ export class RealtimeService {
 
   notifyResponderLocationUpdated(
     incidentId: string,
-    payload: {
-      responderId: string;
-      lat: number;
-      lng: number;
-      heading?: number | null;
-      speed?: number | null;
-      updatedAt: string;
-    },
+    payload: Omit<ResponderLocationUpdatedPayload, 'incidentId'>,
   ): void {
     this.responderLocation(incidentId, payload);
   }
@@ -296,9 +309,9 @@ export class RealtimeService {
 
   notifyEtaUpdated(
     incidentId: string,
-    payload: { dispatchId: string; etaSeconds: number; isEstimate: true; calculatedAt: string },
+    payload: Omit<ResponderEtaUpdatedPayload, 'incidentId'>,
   ): void {
-    const envelope = { incidentId, ...payload };
+    const envelope: ResponderEtaUpdatedPayload = { incidentId, ...payload };
     this.safe('notifyEtaUpdated', () => {
       this.gateway.emitToIncident(RESPONDER_EVENTS.ETA_UPDATED, incidentId, envelope);
       this.gateway.emitToOps(RESPONDER_EVENTS.ETA_UPDATED, envelope);

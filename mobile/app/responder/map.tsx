@@ -14,9 +14,13 @@ import { useRouteLine } from '@/src/hooks/useRouteLine';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { categoryColor } from '@/src/lib/incident-visuals';
+import { shouldShareLocation } from '@/src/lib/assignment-progress';
+import { ResponderHeader } from '@/src/components/responder/responder-header';
 
 const LiveTrackingMap = React.lazy(
-  () => import('@/src/components/tracking/live-tracking-map'),
+  () => Promise.resolve({
+    default: require('../../src/components/tracking/live-tracking-map').default as typeof import('../../src/components/tracking/live-tracking-map').default,
+  }),
 );
 
 // Keyless OpenFreeMap fallback — real OSM streets at municipal zoom (the old
@@ -65,9 +69,9 @@ class MapErrorBoundary extends Component<
 
 /**
  * Responder Map tab (MOD-32 / MOD-43). Shows the active assignment destination,
- * responder live position, and route geometry. Location sharing is enabled only
- * for active (ACCEPTED + operational incident status) assignments; accepted-
- * awaiting-progress assignments show the destination without sharing.
+ * responder live position, and route geometry. Location sharing starts once the
+ * crew has accepted (same rule as the assignment screen — see
+ * `shouldShareLocation`) and stops when the incident reaches a terminal status.
  */
 export default function MapScreen() {
   const router = useRouter();
@@ -99,17 +103,22 @@ export default function MapScreen() {
   const primaryAssignment =
     activeAssignments[0] ?? acceptedAwaitingProgressAssignments[0] ?? null;
 
-  // Location sharing only for active (in-progress) missions
+  // Accepted + incident not terminal → share with the citizen. Identical rule to
+  // the assignment screen so the two never disagree about visibility.
+  const canShare =
+    !!primaryAssignment?.incident_id &&
+    shouldShareLocation(primaryAssignment.status, primaryAssignment.incidents?.status);
   const share = useResponderLocationShare(
-    isActive ? (primaryAssignment?.incident_id ?? undefined) : undefined,
-    isActive && !!primaryAssignment?.incident_id,
+    canShare ? primaryAssignment?.incident_id : undefined,
+    canShare,
   );
 
-  const responderPoint: (LatLngLite & { heading?: number }) | null = share.myPosition
+  const responderPoint: (LatLngLite & { heading?: number; updatedAt?: string }) | null = share.myPosition
     ? {
         lat: share.myPosition.lat,
         lng: share.myPosition.lng,
         ...(share.myPosition.heading != null ? { heading: share.myPosition.heading } : {}),
+        updatedAt: share.myPosition.updatedAt,
       }
     : null;
 
@@ -120,8 +129,8 @@ export default function MapScreen() {
       : null;
 
   const route = useRouteLine(
-    mapAvailable && isActive ? responderPoint : null,
-    mapAvailable && isActive ? destination : null,
+    mapAvailable && canShare ? responderPoint : null,
+    mapAvailable && canShare ? destination : null,
   );
 
   // Use any non-null styleUrl from the backend; fall back to demo only when null.
@@ -148,7 +157,7 @@ export default function MapScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
-        <View style={styles.topBar}><Text style={styles.title}>Map</Text></View>
+        <ResponderHeader title="Map" />
         <View style={styles.center}>
           <View style={styles.iconWrap}>
             <Ionicons name="cloud-offline-outline" size={32} color="#8795A3" />
@@ -168,7 +177,7 @@ export default function MapScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
-        <View style={styles.topBar}><Text style={styles.title}>Map</Text></View>
+        <ResponderHeader title="Map" />
         <View style={styles.center}>
           <View style={[styles.iconWrap, { backgroundColor: '#FFFBEB', borderColor: 'rgba(217,119,6,0.20)' }]}>
             <Ionicons name="warning-outline" size={32} color="#D97706" />
@@ -194,7 +203,7 @@ export default function MapScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
-        <View style={styles.topBar}><Text style={styles.title}>Map</Text></View>
+        <ResponderHeader title="Map" />
         <View style={styles.center}>
           <View style={styles.iconWrap}>
             <Ionicons name="map-outline" size={32} color="#8795A3" />
@@ -220,6 +229,10 @@ export default function MapScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
 
+      <SafeAreaView edges={['top']} style={styles.headerSafe}>
+        <ResponderHeader title="Map" subtitle={incident?.public_reference ?? undefined} />
+      </SafeAreaView>
+
       {/* Map area */}
       {mapAvailable ? (
         <MapErrorBoundary
@@ -237,10 +250,13 @@ export default function MapScreen() {
               <LiveTrackingMap
                 styleUrl={styleUrl}
                 incident={destination}
-                responder={isActive ? responderPoint : null}
-                routeGeometry={isActive ? (route.geometry ?? null) : null}
-                pitch={isActive ? 50 : 0}
-                navigationHeading={isActive && responderPoint?.heading != null ? responderPoint.heading : null}
+                responder={canShare ? responderPoint : null}
+                routeGeometry={canShare ? (route.geometry ?? null) : null}
+                responderIcon="ambulance"
+                citizenSex={incident?.reporter_sex ?? null}
+                priority={incident?.priority}
+                pitch={canShare && responderPoint ? 50 : 0}
+                navigationHeading={canShare && responderPoint?.heading != null ? responderPoint.heading : null}
                 supports3dBuildings={mapConfig?.supports3dBuildings ?? false}
               />
             </View>
@@ -288,23 +304,42 @@ export default function MapScreen() {
             {!isActive && (
               <View style={styles.waitingRow}>
                 <Ionicons name="time-outline" size={13} color="#D97706" />
-                <Text style={styles.waitingText}>Accepted — awaiting dispatch progress. Location sharing not yet active.</Text>
+                <Text style={styles.waitingText}>Accepted — awaiting dispatch progress. Open the mission and tap Mark En Route when you leave.</Text>
               </View>
             )}
           </View>
 
-          {/* Location sharing status (active missions only) */}
-          {isActive && (
+          {/* Location sharing status (accepted missions) */}
+          {canShare && (
             <View style={styles.shareStrip}>
-              <View style={[styles.shareDot, { backgroundColor: share.sharing ? '#0D6053' : '#8795A3' }]} />
+              <View
+                style={[
+                  styles.shareDot,
+                  { backgroundColor: share.sharing && share.push !== 'error' ? '#0D6053' : '#8795A3' },
+                ]}
+              />
               <Text style={styles.shareText}>
-                {share.sharing ? 'Live location sharing active' : 'Starting location sharing…'}
+                {share.sharing
+                  ? share.push === 'ok'
+                    ? 'Live location sharing active — visible to the citizen'
+                    : 'Live location sharing active'
+                  : 'Starting location sharing…'}
               </Text>
               {route.durationSeconds != null && (
                 <Text style={styles.etaText}>
                   ~{Math.round(route.durationSeconds / 60)} min est.
                 </Text>
               )}
+            </View>
+          )}
+
+          {/* Upload failing — the citizen is NOT seeing this unit */}
+          {canShare && share.sharing && share.push === 'error' && (
+            <View style={[styles.warnRow, styles.errorRow]}>
+              <Ionicons name="cloud-offline" size={14} color="#D44858" />
+              <Text style={[styles.warnText, { color: '#D44858' }]}>
+                Your location is not reaching the citizen: {share.pushError ?? 'upload failed'}
+              </Text>
             </View>
           )}
 
@@ -326,8 +361,7 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F2F5F8' },
 
-  topBar: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8, backgroundColor: '#F2F5F8' },
-  title:  { fontSize: 22, fontWeight: '800', color: '#1C2B3A' },
+  headerSafe: { backgroundColor: '#F2F5F8' },
 
   center:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
   iconWrap:       { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EDF1F4', alignItems: 'center', justifyContent: 'center', marginBottom: 8, borderWidth: 1, borderColor: BEVEL },
@@ -364,6 +398,7 @@ const styles = StyleSheet.create({
   shareText:  { flex: 1, fontSize: 12, color: '#40536D' },
   etaText:    { fontSize: 12, color: '#0D6053', fontWeight: '700' },
 
-  warnRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#FFFBEB', borderRadius: 10, padding: 10, borderWidth: 1, borderColor: 'rgba(217,119,6,0.20)' },
+  warnRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#FFFBEB', borderRadius: 10, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(217,119,6,0.20)' },
+  errorRow: { backgroundColor: '#FDF0F1', borderColor: 'rgba(212,72,88,0.20)' },
   warnText: { flex: 1, fontSize: 12, color: '#D97706', lineHeight: 16 },
 });

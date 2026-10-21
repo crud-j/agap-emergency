@@ -21,10 +21,10 @@ export interface AccessibleTextProps extends TextProps {
 }
 
 export function AccessibleText({ tone = 'default', style, ...rest }: AccessibleTextProps) {
-  const { scale } = useFontScale();
+  const { fs } = useFontScale();
   const highContrast = useAccessibilityStore((s) => s.highContrast);
 
-  const flat = (StyleSheet.flatten(style) ?? {}) as TextStyle;
+  const flat: TextStyle = StyleSheet.flatten(style) ?? {};
   const baseSize = typeof flat.fontSize === 'number' ? flat.fontSize : 15;
 
   const color = toneColor(tone, highContrast, flat.color as string | undefined);
@@ -34,7 +34,7 @@ export function AccessibleText({ tone = 'default', style, ...rest }: AccessibleT
       {...rest}
       // Respect OS font scaling too, but cap it so layouts don't break.
       maxFontSizeMultiplier={1.6}
-      style={[style, { fontSize: Math.round(baseSize * scale), ...(color ? { color } : {}) }]}
+      style={[style, { fontSize: fs(baseSize), ...(color ? { color } : {}) }]}
     />
   );
 }

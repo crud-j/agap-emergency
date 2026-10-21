@@ -1,7 +1,6 @@
 import '../global.css';
-import { useEffect } from 'react';
-import { AppState, Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import { useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -10,7 +9,8 @@ import { useAuthStore } from '../src/stores/auth.store';
 import { useAccessibilityStore } from '../src/stores/accessibility.store';
 import { homeRouteForRole } from '../src/lib/role-routing';
 import { OfflineBanner } from '../src/components/ui/OfflineBanner';
-import { registerFcmToken } from '../src/services/api/notifications.api';
+import { registerPushToken } from '../src/services/push/push-registration';
+import { AgapSplash } from '../src/components/splash/AgapSplash';
 
 // Wire React Native's AppState into TanStack Query's focus manager so
 // refetchOnWindowFocus works when the app comes back to the foreground.
@@ -33,7 +33,8 @@ const queryClient = new QueryClient({
   },
 });
 
-const PUBLIC_SEGMENTS = ['auth', 'onboarding'];
+const PUBLIC_SEGMENTS = ['auth', 'onboarding', 'emergency'];
+const AUTH_ONLY_SEGMENTS = ['auth', 'onboarding'];
 
 function AuthGuard() {
   const router = useRouter();
@@ -45,39 +46,8 @@ function AuthGuard() {
   const accessibilityLoaded = useAccessibilityStore((s) => s.isLoaded);
 
   useEffect(() => {
-    if (!isAuthenticated || !accessToken || Platform.OS === 'web') return;
-    const token = accessToken;
-
-    let cancelled = false;
-    async function registerDevice() {
-      try {
-        const current = await Notifications.getPermissionsAsync();
-        const permissions = current.granted
-          ? current
-          : await Notifications.requestPermissionsAsync();
-        if (!permissions.granted || cancelled) return;
-
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('default', {
-            name: 'AGAP announcements',
-            importance: Notifications.AndroidImportance.DEFAULT,
-          });
-        }
-
-        const deviceToken = await Notifications.getDevicePushTokenAsync();
-        if (!cancelled && typeof deviceToken.data === 'string') {
-          await registerFcmToken(token, deviceToken.data);
-        }
-      } catch (error) {
-        // Push is optional; the in-app notification feed remains authoritative.
-        console.warn('Unable to register push notification token', error);
-      }
-    }
-
-    void registerDevice();
-    return () => {
-      cancelled = true;
-    };
+    if (!isAuthenticated || !accessToken) return;
+    void registerPushToken(accessToken);
   }, [accessToken, isAuthenticated]);
 
   useEffect(() => {
@@ -89,13 +59,16 @@ function AuthGuard() {
     // Wait until both SecureStore and accessibility prefs have been read.
     if (isLoading || !accessibilityLoaded) return;
 
-    const atRoot   = segments.length === 0;
+    // Typed routes declare segments as a non-empty tuple, but at the app root it
+    // is [] at runtime — widen the type so this check isn't flagged as impossible.
+    const atRoot   = (segments as string[]).length === 0;
     const inPublic = PUBLIC_SEGMENTS.some((s) => segments[0] === s);
+    const inAuthOnly = AUTH_ONLY_SEGMENTS.some((s) => segments[0] === s);
 
     if (isAuthenticated) {
-      // Move out of the splash root or any public screen (onboarding/auth)
-      // and go straight to the role-specific home screen.
-      if (atRoot || inPublic) {
+      // Authenticated users can still enter the emergency flow from home.
+      // Only redirect away from auth/onboarding screens, not emergency routes.
+      if (atRoot || inAuthOnly) {
         router.replace(homeRouteForRole(user?.role) as never);
       }
     } else {
@@ -110,6 +83,24 @@ function AuthGuard() {
   }, [isAuthenticated, isLoading, accessibilityLoaded, segments, user?.role]);
 
   return null;
+}
+
+// Shown once per cold start, over the router, so AuthGuard can route to
+// onboarding (or home) underneath while the animation plays.
+function LaunchSplash() {
+  const [done, setDone] = useState(false);
+  const authLoading = useAuthStore((s) => s.isLoading);
+  const accessibilityLoaded = useAccessibilityStore((s) => s.isLoaded);
+  const reducedMotion = useAccessibilityStore((s) => s.reducedMotion);
+
+  if (done) return null;
+  return (
+    <AgapSplash
+      ready={!authLoading && accessibilityLoaded}
+      reducedMotion={accessibilityLoaded && reducedMotion}
+      onFinish={() => setDone(true)}
+    />
+  );
 }
 
 export default function RootLayout() {
@@ -127,10 +118,12 @@ export default function RootLayout() {
             <Stack.Screen name="announcements/index" options={{ animation: 'none' }} />
             <Stack.Screen name="announcements/[id]" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="announcements/subscribe" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="archive/index" options={{ animation: 'none' }} />
             <Stack.Screen name="profile/index" options={{ animation: 'none' }} />
           </Stack>
           {/* Global offline indicator — position:absolute overlay, never blocks taps */}
           <OfflineBanner />
+          <LaunchSplash />
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

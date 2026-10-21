@@ -15,6 +15,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   MEDICAL:      '#0D6053',
   ROAD_ACCIDENT:'#EA580C',
   FLOOD:        '#3B82F6',
+  NATURAL_DISASTER: '#0E7490',
   RESCUE:       '#D97706',
   FIRE:         '#DC2626',
   INDUSTRIAL:   '#CA8A04',

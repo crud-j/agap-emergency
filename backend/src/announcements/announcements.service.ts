@@ -126,6 +126,17 @@ export class AnnouncementsService {
     return rows.map((r) => this.toPublic(r));
   }
 
+  async findPublicArchive() {
+    const rows = await this.prisma.announcement.findMany({
+      where: {
+        status: { in: ['ARCHIVED', 'CANCELLED', 'SUPERSEDED'] },
+        published_at: { not: null },
+      },
+      orderBy: { published_at: 'desc' },
+    });
+    return rows.map((r) => this.toPublic(r));
+  }
+
   /** Public detail — drafts and scheduled items are never exposed. */
   async findPublicById(id: string) {
     const a = await this.prisma.announcement.findUnique({ where: { id } });

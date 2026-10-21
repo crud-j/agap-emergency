@@ -3,6 +3,7 @@ import {
   Activity,
   Car,
   Waves,
+  CloudLightning,
   Flame,
   AlertTriangle,
   Layers,
@@ -34,6 +35,26 @@ export function titleCase(value?: string | null): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+export function formatAffectedCount(
+  hazardFlags?: readonly string[] | null,
+  recordedPatientCount?: number | null,
+): string | null {
+  const countFlag = hazardFlags?.find((flag) => flag.startsWith('AFFECTED_COUNT:'));
+  const countBucket = countFlag?.slice('AFFECTED_COUNT:'.length);
+  const reportedCounts: Record<string, string> = {
+    '1': '1 person (caller estimate)',
+    '2-5': '2–5 people (caller estimate)',
+    '5+': '5 or more people (caller estimate)',
+    unknown: 'Count unknown to caller',
+  };
+
+  if (countBucket) return reportedCounts[countBucket] ?? 'Reported count range unavailable';
+  if (recordedPatientCount != null) {
+    return `${recordedPatientCount} on record (source not specified)`;
+  }
+  return null;
+}
+
 export function categoryIcon(category?: string | null): LucideIcon {
   switch (category) {
     case 'MEDICAL':
@@ -42,6 +63,8 @@ export function categoryIcon(category?: string | null): LucideIcon {
       return Car;
     case 'FLOOD':
       return Waves;
+    case 'NATURAL_DISASTER':
+      return CloudLightning;
     case 'FIRE':
       return Flame;
     case 'INDUSTRIAL':

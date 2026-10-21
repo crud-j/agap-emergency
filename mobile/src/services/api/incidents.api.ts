@@ -8,8 +8,8 @@ const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 export async function submitIncident(
   payload: CreateIncidentInput,
   token?: string,
-): Promise<{ id: string; ticketNumber: string }> {
-  return apiFetch(`${API_BASE}/v1/incidents`, {
+): Promise<{ id: string; public_reference: string; priority?: string }> {
+  return apiFetch<{ id: string; public_reference: string; priority?: string }>(`${API_BASE}/v1/incidents`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: JSON.stringify(payload),
@@ -71,8 +71,9 @@ export async function uploadIncidentVideo(
   incidentId: string,
   uri: string,
   token: string,
+  meta?: PhotoCaptureMeta,
 ): Promise<void> {
-  return uploadIncidentPhoto(incidentId, uri, token);
+  return uploadIncidentPhoto(incidentId, uri, token, meta);
 }
 
 export async function getIncidentStatus(id: string, token?: string) {

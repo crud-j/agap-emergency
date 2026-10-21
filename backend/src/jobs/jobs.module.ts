@@ -8,6 +8,7 @@ import { EmergencyAlertsModule } from '../emergency-alerts/emergency-alerts.modu
 import { LocationsModule } from '../locations/locations.module';
 import { MapsModule } from '../locations/maps/maps.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
 import { QUEUE_NAMES } from '@agap/shared';
 import { NotificationProcessor } from './processors/notification.processor';
 import { SmsProcessor } from './processors/sms.processor';
@@ -27,6 +28,7 @@ import { AnnouncementPushProcessor } from './processors/announcement-push.proces
     LocationsModule,
     MapsModule,
     AnalyticsModule,
+    BarangayCoordinationModule,
     ScheduleModule.forRoot(),
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }),

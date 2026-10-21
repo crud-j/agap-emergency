@@ -9,6 +9,7 @@ import {
   fetchPriorityRecommendation,
   fetchAvailableUnits,
   fetchDispatchIncidents,
+  fetchIncidentDispatches,
   type CreateDispatchBody,
 } from './api';
 
@@ -16,6 +17,16 @@ export function useDispatches(incidentId?: string) {
   return useQuery({
     queryKey: ['dispatches', incidentId],
     queryFn: () => fetchDispatches(incidentId),
+    staleTime: 30_000,
+  });
+}
+
+/** Dispatches (unit + crew names) for one incident — the dispatch tracking card. */
+export function useIncidentDispatches(incidentId: string | null) {
+  return useQuery({
+    queryKey: ['incident-dispatches', incidentId],
+    queryFn: () => fetchIncidentDispatches(incidentId!),
+    enabled: !!incidentId,
     staleTime: 30_000,
   });
 }

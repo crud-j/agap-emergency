@@ -7,13 +7,14 @@ export interface AuditLogEntry {
   action: AuditAction | string;
   actorId?: string;
   actorRole?: string;
-  entityId?: string;
-  entityType?: string;
+  entityId?: string | undefined;
+  entityType?: string | undefined;
   moduleId?: string;
   incidentId?: string;
   oldValues?: Record<string, unknown>;
   newValues?: Record<string, unknown>;
-  ipAddress?: string;
+  ipAddress?: string | undefined;
+  userAgent?: string | undefined;
 }
 
 @Injectable()
@@ -43,6 +44,7 @@ export class AuditService {
         old_values: entry.oldValues as any,
         new_values: entry.newValues as any,
         ip_address: entry.ipAddress,
+        user_agent: entry.userAgent,
       } as any,
     });
   }
@@ -65,6 +67,7 @@ export class AuditService {
           old_values: entry.oldValues as any,
           new_values: entry.newValues as any,
           ip_address: entry.ipAddress,
+          user_agent: entry.userAgent,
         } as any,
       });
     } catch (err) {

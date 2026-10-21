@@ -6,6 +6,8 @@ import {
   fetchRiskData,
   fetchLiveResponderPositions,
   fetchIncidentLocations,
+  fetchLatestUnitPositions,
+  fetchRoute,
   type LiveResponderPosition,
 } from './api';
 
@@ -54,4 +56,42 @@ export function usePatchResponderPosition() {
       return old.map((r, i) => (i === idx ? { ...r, ...patch } : r));
     });
   };
+}
+
+/**
+ * Units actively responding to one incident (GET /locations/tracking/:id/latest).
+ * Seeds the dispatch card's per-unit ETA and a position for units the ops feed
+ * hasn't seen yet; `responder.eta_updated` patches it (see SocketProvider).
+ */
+export function useIncidentUnits(incidentId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['incident-units', incidentId],
+    queryFn: () => fetchLatestUnitPositions(incidentId!),
+    enabled: !!incidentId && enabled,
+    staleTime: 15_000,
+    refetchInterval: 60_000,
+  });
+}
+
+// ~11 m precision: avoids refetching the route on GPS jitter (same as mobile useRouteLine).
+const round4 = (n: number) => n.toFixed(4);
+
+/**
+ * Driving route from the tracked unit to the scene (MOD-43). Keyed on rounded
+ * coordinates and refreshed every 20 s. Best-effort: a routing failure just
+ * means no line; the markers and the rest of the map still render.
+ */
+export function useRouteLine(
+  from: { lat: number; lng: number } | null,
+  to: { lat: number; lng: number } | null,
+) {
+  const key = from && to ? `${round4(from.lat)},${round4(from.lng)}->${round4(to.lat)},${round4(to.lng)}` : null;
+  return useQuery({
+    queryKey: ['route-line', key],
+    queryFn: () => fetchRoute(from!, to!),
+    enabled: !!key,
+    staleTime: 15_000,
+    refetchInterval: 20_000,
+    retry: false,
+  });
 }

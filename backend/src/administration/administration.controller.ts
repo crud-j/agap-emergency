@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Put,
   Delete,
@@ -17,6 +18,9 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { AdminUserActionDto } from './dto/admin-user-action.dto';
+import { RequireRecentAuth } from '../common/decorators/recent-auth.decorator';
+import { RecentAuthGuard } from '../common/guards/recent-auth.guard';
 
 @ApiTags('administration')
 @ApiBearerAuth()
@@ -35,6 +39,7 @@ export class AdministrationController {
     @Query('status') status?: string,
     @Query('search') search?: string,
     @Query('organizationId') organizationId?: string,
+    @Query('mfa') mfa?: string,
   ) {
     return this.administrationService.findAllUsers({
       ...(page !== undefined && { page: +page }),
@@ -43,7 +48,56 @@ export class AdministrationController {
       ...(status && { status }),
       ...(search && { search }),
       ...(organizationId && { organizationId }),
+      ...(mfa && { mfa }),
     });
+  }
+
+  @Post('users/:id/unlock')
+  @UseGuards(JwtAuthGuard, RolesGuard, RecentAuthGuard)
+  @RequireRecentAuth()
+  @ApiOperation({ summary: 'Unlock a user account' })
+  async unlock(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AdminUserActionDto,
+    @Request() req: any,
+  ) {
+    return this.administrationService.unlock(id, body, req.user.id);
+  }
+
+  @Post('users/:id/temporary-password')
+  @UseGuards(JwtAuthGuard, RolesGuard, RecentAuthGuard)
+  @RequireRecentAuth()
+  @ApiOperation({ summary: 'Issue a one-time temporary password' })
+  async temporaryPassword(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AdminUserActionDto,
+    @Request() req: any,
+  ) {
+    return this.administrationService.issueTemporaryPassword(id, body, req.user.id);
+  }
+
+  @Post('users/:id/mfa/reset')
+  @UseGuards(JwtAuthGuard, RolesGuard, RecentAuthGuard)
+  @RequireRecentAuth()
+  @ApiOperation({ summary: 'Reset a user MFA enrollment' })
+  async resetMfa(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AdminUserActionDto,
+    @Request() req: any,
+  ) {
+    return this.administrationService.resetMfa(id, body, req.user.id);
+  }
+
+  @Delete('users/:id/sessions')
+  @UseGuards(JwtAuthGuard, RolesGuard, RecentAuthGuard)
+  @RequireRecentAuth()
+  @ApiOperation({ summary: 'Revoke all sessions for a user' })
+  async revokeSessions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AdminUserActionDto,
+    @Request() req: any,
+  ) {
+    return this.administrationService.revokeSessions(id, body, req.user.id);
   }
 
   @Patch('users/:id/role')
@@ -82,6 +136,8 @@ export class AdministrationController {
   }
 
   @Put('config/:key')
+  @UseGuards(JwtAuthGuard, RolesGuard, RecentAuthGuard)
+  @RequireRecentAuth()
   @ApiOperation({ summary: 'Upsert a system configuration value' })
   async upsertConfig(
     @Param('key') key: string,

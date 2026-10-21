@@ -13,6 +13,9 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
+/** Optional, self-declared — only picks the reporter's map icon. Mirrors shared `UserSex`. */
+export type UserSexValue = 'MALE' | 'FEMALE' | 'PREFER_NOT_TO_SAY';
+
 export interface SafeUser {
   id: string;
   full_name: string;
@@ -31,6 +34,8 @@ export interface SafeUser {
   text_size: string;
   high_contrast: boolean;
   reduced_motion: boolean;
+  /** null = never asked. Absent on sessions stored before this field existed. */
+  sex?: UserSexValue | null;
   profile_completeness: number;
   last_login_at: string | null;
   created_at: string;
@@ -47,6 +52,8 @@ export interface RegisterDto {
   email?: string;
   password: string;
   confirmPassword: string;
+  /** Omit when nothing was chosen — never required. */
+  sex?: UserSexValue;
   latitude?: number;
   longitude?: number;
 }
@@ -78,7 +85,16 @@ export async function loginWithPassword(dto: {
   identifier: string;
   password: string;
 }): Promise<AuthResponse> {
-  return api('/v1/auth/login', { method: 'POST', body: JSON.stringify(dto) });
+  const res = await api<AuthResponse | { mfaRequired: true }>('/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(dto),
+  });
+  // Web-console staff roles owe a second step the mobile app does not implement yet.
+  // Citizens and responders never receive this.
+  if ('mfaRequired' in res) {
+    throw new ApiError('This account signs in on the Operations Center web console.', 403, res);
+  }
+  return res;
 }
 
 export async function loginWithPhone(phoneNumber: string): Promise<{ message: string }> {
@@ -113,6 +129,7 @@ export async function forgotPassword(phoneNumber: string): Promise<{ message: st
 }
 
 export async function resetPassword(dto: {
+  phoneNumber: string;
   token: string;
   newPassword: string;
 }): Promise<{ message: string }> {

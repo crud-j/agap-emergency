@@ -2,7 +2,9 @@ import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AgapGateway } from './agap.gateway';
 import { RealtimeService } from './realtime.service';
+import { SessionsModule } from '../auth/sessions/sessions.module';
 import { WsJwtGuard } from './ws-jwt.guard';
+import { IncidentParticipantService } from './incident-participant.service';
 import { PrismaModule } from '../common/prisma/prisma.module';
 
 /**
@@ -16,8 +18,9 @@ import { PrismaModule } from '../common/prisma/prisma.module';
   imports: [
     JwtModule.register({}),
     PrismaModule,
+    SessionsModule,
   ],
-  providers: [AgapGateway, RealtimeService, WsJwtGuard],
-  exports: [RealtimeService],
+  providers: [AgapGateway, RealtimeService, WsJwtGuard, IncidentParticipantService],
+  exports: [RealtimeService, IncidentParticipantService],
 })
 export class RealtimeModule {}

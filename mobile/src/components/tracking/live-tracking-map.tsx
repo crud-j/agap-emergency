@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, type NativeSyntheticEvent } from 'react-native';
+import { View, Text, Image, Modal, StyleSheet, TouchableOpacity, type NativeSyntheticEvent } from 'react-native';
 import {
   Map,
   Camera,
@@ -18,6 +18,9 @@ import {
   BOCAUE_MAX_ZOOM,
 } from '@/src/config/bocaue-geo';
 import { BocaueBarangayBoundaryLayer } from './bocaue-boundary-layer';
+import { isSignalLost, isWestbound, priorityRingColor } from '@agap/shared';
+import { AMBULANCE_ICON, citizenIconFor } from '@/src/lib/map-icons';
+import { colors } from '@/src/theme/tokens';
 
 export interface LatLngLite {
   lat: number;
@@ -58,6 +61,9 @@ export function LiveTrackingMap({
   incident,
   responder,
   routeGeometry,
+  responderIcon = 'ambulance',
+  citizenSex = null,
+  priority,
   pitch: externalPitch = 0,
   navigationHeading = null,
   supports3dBuildings = false,
@@ -65,8 +71,11 @@ export function LiveTrackingMap({
 }: {
   styleUrl: string;
   incident: LatLngLite | null;
-  responder: (LatLngLite & { heading?: number }) | null;
+  responder: (LatLngLite & { heading?: number; updatedAt?: string }) | null;
   routeGeometry?: Array<[number, number]> | null;
+  responderIcon?: 'ambulance';
+  citizenSex?: 'MALE' | 'FEMALE' | null;
+  priority?: string | null;
   /** Camera tilt in degrees (0 = top-down). Responders get 50° en-route, citizens 20°. */
   pitch?: number;
   /** When set, camera bearing rotates to face travel direction (navigation mode). */
@@ -82,9 +91,17 @@ export function LiveTrackingMap({
   // Increment to force a full native GL remount on retry (changing `key` unmounts + remounts).
   const [mapKey, setMapKey]       = useState(0);
   const [tileError, setTileError] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [ambulanceImageFailed, setAmbulanceImageFailed] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastFollowUpdateRef = useRef(0);
 
   const center = responder ?? incident;
+  const responderSignalLost = responder?.updatedAt
+    ? isSignalLost(responder.updatedAt, now)
+    : false;
+  const citizenIcon = citizenIconFor(citizenSex);
 
   // is3d: use external pitch + bearing from navigationHeading
   // flat: pitch=0, north-up bearing (undefined)
@@ -103,6 +120,11 @@ export function LiveTrackingMap({
     };
   }, [styleUrl, mapKey]);
 
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const onStyleLoaded = useCallback(() => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     setTileError(false);
@@ -116,12 +138,15 @@ export function LiveTrackingMap({
   // Track the moving unit — update center (and pitch/bearing) whenever position changes.
   useEffect(() => {
     if (!follow || !center) return;
+    const now = Date.now();
+    if (now - lastFollowUpdateRef.current < 750) return;
+    lastFollowUpdateRef.current = now;
     try {
       cameraRef.current?.easeTo({
         center: [center.lng, center.lat],
         pitch:  activePitch,
         ...(activeBearing != null ? { bearing: activeBearing } : {}),
-        duration: 600,
+        duration: 350,
       });
     } catch {
       // Camera not ready yet — the next position update will retry.
@@ -189,7 +214,7 @@ export function LiveTrackingMap({
     setMapKey((k) => k + 1);
   }
 
-  return (
+  const mapContent = (
     <View style={StyleSheet.absoluteFill}>
       <Map
         key={mapKey}
@@ -257,26 +282,61 @@ export function LiveTrackingMap({
 
         {incident && (
           <Marker id="incident" lngLat={[incident.lng, incident.lat]}>
-            <View style={[styles.pin, styles.incidentPin]}>
-              <Ionicons name="alert" size={16} color="#FFFFFF" />
-            </View>
+            {citizenIcon ? (
+              <View style={[styles.citizenMarker, { borderColor: priorityRingColor(priority) }]}>
+                <Image source={citizenIcon} style={styles.citizenImage} resizeMode="contain" />
+              </View>
+            ) : (
+              <View style={[styles.pin, styles.incidentPin]}>
+                <Ionicons name="alert" size={16} color="#FFFFFF" />
+              </View>
+            )}
           </Marker>
         )}
 
         {responder && (
           <Marker id="responder" lngLat={[responder.lng, responder.lat]}>
-            <View style={[styles.pin, styles.responderPin]}>
-              {responder.heading != null ? (
-                // Heading is degrees clockwise from north; the map is north-up, so
-                // rotating an up-arrow by the heading points it along travel.
-                <Ionicons
-                  name="arrow-up"
-                  size={20}
-                  color="#FFFFFF"
-                  style={{ transform: [{ rotate: `${responder.heading}deg` }] }}
-                />
-              ) : (
-                <Ionicons name="medkit" size={14} color="#FFFFFF" />
+            <View style={styles.responderMarkerWrap}>
+              <View
+                style={[
+                  styles.responderMarker,
+                  ambulanceImageFailed && !responderSignalLost && styles.responderFallback,
+                  responderSignalLost && styles.responderSignalLost,
+                ]}
+              >
+                {!ambulanceImageFailed && responderIcon === 'ambulance' ? (
+                  <Image
+                    source={AMBULANCE_ICON}
+                    onError={() => setAmbulanceImageFailed(true)}
+                    resizeMode="contain"
+                    style={[
+                      styles.ambulanceImage,
+                      isWestbound(responder.heading) && styles.westbound,
+                      responderSignalLost && styles.signalLostImage,
+                    ]}
+                  />
+                ) : (
+                  <Ionicons
+                    name="medkit"
+                    size={18}
+                    color={responderSignalLost ? colors.textSub : '#FFFFFF'}
+                  />
+                )}
+                {responder.heading != null && (
+                  <View style={styles.headingChevron}>
+                    <Ionicons
+                      name="chevron-up"
+                      size={16}
+                      color={responderSignalLost ? colors.textSub : colors.primary}
+                      style={{ transform: [{ rotate: `${responder.heading}deg` }] }}
+                    />
+                  </View>
+                )}
+              </View>
+              {responderSignalLost && (
+                <View style={styles.signalLostBadge}>
+                  <Text style={styles.signalLostText}>Signal lost</Text>
+                </View>
               )}
             </View>
           </Marker>
@@ -328,7 +388,30 @@ export function LiveTrackingMap({
           </TouchableOpacity>
         </View>
       )}
+
+      <TouchableOpacity
+        style={styles.fullscreenBtn}
+        onPress={() => setFullscreen((value) => !value)}
+        accessibilityRole="button"
+        accessibilityLabel={fullscreen ? 'Exit fullscreen map' : 'View fullscreen map'}
+      >
+        <Ionicons name={fullscreen ? 'contract-outline' : 'expand-outline'} size={20} color="#0D6053" />
+      </TouchableOpacity>
     </View>
+  );
+
+  return (
+    <>
+      <View style={StyleSheet.absoluteFill}>{!fullscreen && mapContent}</View>
+      <Modal
+        visible={fullscreen}
+        animationType="fade"
+        onRequestClose={() => setFullscreen(false)}
+        statusBarTranslucent
+      >
+        {fullscreen && <View style={styles.fullscreenRoot}>{mapContent}</View>}
+      </Modal>
+    </>
   );
 }
 
@@ -343,9 +426,71 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   incidentPin: { backgroundColor: '#DC2626' },
-  responderPin: { backgroundColor: '#0D6053' },
+  citizenMarker: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 3,
+    backgroundColor: colors.white,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  citizenImage: { width: 40, height: 40, borderRadius: 20 },
+  responderMarkerWrap: { alignItems: 'center', justifyContent: 'center' },
+  responderMarker: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.white,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  responderSignalLost: { backgroundColor: '#E5E7EB', borderColor: colors.textSub },
+  responderFallback: { backgroundColor: colors.primary },
+  ambulanceImage: { width: 40, height: 40 },
+  westbound: { transform: [{ scaleX: -1 }] },
+  signalLostImage: { tintColor: colors.textSub, opacity: 0.8 },
+  headingChevron: {
+    position: 'absolute',
+    top: -9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.white,
+  },
+  signalLostBadge: {
+    position: 'absolute',
+    top: 47,
+    backgroundColor: '#4B5563',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  signalLostText: { color: colors.white, fontSize: 9, fontWeight: '700' },
 
   controls: { position: 'absolute', right: 12, bottom: 12, gap: 10 },
+  fullscreenRoot: { flex: 1, backgroundColor: '#F2F5F8' },
+  fullscreenBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
   ctrlBtn: {
     width: 44,
     height: 44,
@@ -362,7 +507,7 @@ const styles = StyleSheet.create({
   ctrlBtnActive: { backgroundColor: '#0D6053' },
 
   errorOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(249,250,251,0.94)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -383,4 +528,4 @@ const styles = StyleSheet.create({
   retryText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
 });
 
-export default LiveTrackingMap;
+export default React.memo(LiveTrackingMap);

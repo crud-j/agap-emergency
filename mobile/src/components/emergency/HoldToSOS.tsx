@@ -12,7 +12,6 @@ import {
 import Svg, {
   Circle,
   Defs,
-  Ellipse,
   LinearGradient as SvgLinearGradient,
   RadialGradient,
   Stop,
@@ -121,6 +120,22 @@ export function HoldToSOS({
     [press],
   );
 
+  const completeHold = useCallback(() => {
+    if (!holdingRef.current || completedRef.current) return;
+
+    holdingRef.current = false;
+    completedRef.current = true;
+    startedAtRef.current = null;
+    stopAnimation();
+    stopAudio();
+    Vibration.cancel();
+    Haptics?.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    springPress(0);
+    setHolding(false);
+    setRemaining(0);
+    onCompleteRef.current();
+  }, [springPress, stopAnimation, stopAudio]);
+
   const resetProgress = useCallback(() => {
     holdingRef.current = false;
     stopAnimation();
@@ -191,9 +206,6 @@ export function HoldToSOS({
     }, 100);
 
     animationRef.current.start(({ finished }) => {
-      clearTimer();
-      animationRef.current = null;
-
       if (
         !finished ||
         !holdingRef.current ||
@@ -202,22 +214,10 @@ export function HoldToSOS({
         return;
       }
 
-      holdingRef.current = false;
-      completedRef.current = true;
-      startedAtRef.current = null;
-
-      stopAudio();
-      Vibration.cancel();
-      Haptics?.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-
-      springPress(0);
-      setHolding(false);
-      setRemaining(0);
-
-      onCompleteRef.current();
+      completeHold();
     });
   }, [
-    clearTimer,
+    completeHold,
     disabled,
     holdDuration,
     progress,
@@ -230,8 +230,13 @@ export function HoldToSOS({
 
   const cancelHold = useCallback(() => {
     if (!holdingRef.current) return;
+    const startedAt = startedAtRef.current;
+    if (startedAt !== null && Date.now() - startedAt >= holdDuration) {
+      completeHold();
+      return;
+    }
     resetProgress();
-  }, [resetProgress]);
+  }, [completeHold, holdDuration, resetProgress]);
 
   useEffect(() => {
     if (disabled && holdingRef.current) {
@@ -1118,4 +1123,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

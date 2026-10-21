@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { colors, cardShadow, radius } from '@/src/theme/tokens';
+import { ResponderHeader } from '@/src/components/responder/responder-header';
 import {
   submitAssessment,
   type SubmitAssessmentInput,
@@ -53,7 +55,8 @@ function parseNum(s: string): number | undefined {
  * responder can retry immediately — nothing is held back for later delivery.
  */
 export default function AssessmentScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `[id]` here is the INCIDENT id (the assignment screen's `[id]` is the dispatch id).
+  const { id: incidentId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const token = useAuthStore((s) => s.accessToken);
 
@@ -71,8 +74,6 @@ export default function AssessmentScreen() {
   const [notes, setNotes] = useState('');
 
   const [saveState, setSaveState] = useState<SaveState>('idle');
-
-  const incidentId = id as string;
 
   function buildPayload(): SubmitAssessmentInput {
     const vitals = {
@@ -111,12 +112,12 @@ export default function AssessmentScreen() {
 
   return (
     <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
       <SafeAreaView edges={['top']} style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} accessibilityLabel="Back">
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>On-Scene Assessment</Text>
-        <View style={styles.iconBtn} />
+        <ResponderHeader
+          onBack={() => (router.canGoBack() ? router.back() : router.replace('/responder/home' as never))}
+          title="On-Scene Assessment"
+        />
       </SafeAreaView>
 
       <SyncBanner state={saveState} />
@@ -300,13 +301,7 @@ function VitalInput({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingBottom: 10, backgroundColor: colors.white,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 17, fontWeight: '800', color: colors.text },
+  header: { backgroundColor: colors.bg },
 
   banner: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10 },
   bannerText: { fontSize: 13, fontWeight: '700' },

@@ -12,6 +12,7 @@ import { useTranslations } from '../../src/hooks/useAccessibility';
 import { logout as logoutApi } from '../../src/services/api/auth.api';
 import { updateUserPreferences } from '../../src/services/api/users.api';
 import { BottomNav } from '../../src/components/ui/bottom-nav';
+import { MapIconCard } from '../../src/components/profile/map-icon-card';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -135,6 +136,9 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           ) : null}
 
+          {/* ── Map icon (optional reporter sex) ──────────────────────── */}
+          <MapIconCard promptOnce />
+
           {/* ── Emergency hotlines (safety — rule 9) ──────────────────── */}
           <View style={styles.hotlineCard}>
             <View style={styles.hotlineHeader}>
@@ -159,7 +163,24 @@ export default function ProfileScreen() {
             {!user?.is_guest && (
               <MenuRow icon="finger-print-outline" label={t.profile.passkeys} sub={t.profile.passkeysSub} onPress={() => router.push('/profile/passkeys')} />
             )}
-            <MenuRow icon="document-text-outline" label={t.profile.history} sub={t.profile.historySub} last onPress={() => router.push('/history')} />
+          </View>
+
+          {/* ── Resident archives ─────────────────────────────────────── */}
+          <SectionHeader title={t.profile.sectionArchive} />
+          <View style={styles.group}>
+            <MenuRow
+              icon="document-text-outline"
+              label={t.profile.history}
+              sub={t.profile.historySub}
+              onPress={() => router.push({ pathname: '/archive', params: { tab: 'incidents' } } as never)}
+            />
+            <MenuRow
+              icon="megaphone-outline"
+              label={t.profile.announcementArchive}
+              sub={t.profile.announcementArchiveSub}
+              last
+              onPress={() => router.push({ pathname: '/archive', params: { tab: 'announcements' } } as never)}
+            />
           </View>
 
           {/* ── Preferences (MOD-04) ──────────────────────────────────── */}
@@ -256,72 +277,66 @@ function MenuRow({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F7F8FA' },
-  scroll: { paddingHorizontal: 16, paddingTop: 4 },
+  root: { flex: 1, backgroundColor: '#F3F6F5' },
+  scroll: { paddingHorizontal: 20, paddingTop: 8 },
 
-  // Top bar
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, marginTop: 4 },
-  topTitle: { fontSize: 26, fontWeight: '800', color: '#111827' },
-  langPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: '#F0F7F4', borderWidth: 1, borderColor: '#D7EAE3' },
-  langPillText: { fontSize: 13, fontWeight: '600', color: '#0D6053' },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, marginTop: 4 },
+  topTitle: { fontSize: 29, fontWeight: '800', color: '#14231F', letterSpacing: -0.7 },
+  langPill: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 12, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DCE5E1' },
+  langPillText: { fontSize: 12, fontWeight: '700', color: '#0D6053' },
 
-  // Identity card
   identityCard: {
-    backgroundColor: '#FFFFFF', borderRadius: 20, padding: 20, alignItems: 'center', marginBottom: 16,
-    borderWidth: 1, borderColor: '#EEF0F3',
-    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.05, shadowRadius: 16 }, android: { elevation: 2 } }),
+    backgroundColor: '#12362F', borderRadius: 22, padding: 22, alignItems: 'center', marginBottom: 18,
+    borderWidth: 1, borderColor: '#245248',
+    ...Platform.select({ ios: { shadowColor: '#12362F', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.16, shadowRadius: 18 }, android: { elevation: 4 } }),
   },
-  avatar: { width: 84, height: 84, borderRadius: 42, backgroundColor: '#0D6053', alignItems: 'center', justifyContent: 'center', marginBottom: 12, borderWidth: 3, borderColor: '#E7F2EE' },
-  avatarInitial: { fontSize: 34, fontWeight: '800', color: '#FFFFFF' },
-  name: { fontSize: 22, fontWeight: '800', color: '#111827', marginBottom: 8 },
-  roleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  roleBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F7F4', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  roleBadgeText: { fontSize: 12, fontWeight: '700', color: '#0D6053' },
-  memberSince: { fontSize: 12, color: '#9CA3AF' },
-  contactBlock: { width: '100%', gap: 8, borderTopWidth: 1, borderTopColor: '#F0F1F4', paddingTop: 14 },
+  avatar: { width: 78, height: 78, borderRadius: 22, backgroundColor: '#E2F0EA', alignItems: 'center', justifyContent: 'center', marginBottom: 14, borderWidth: 1, borderColor: '#A8C9BB' },
+  avatarInitial: { fontSize: 32, fontWeight: '800', color: '#0D6053' },
+  name: { fontSize: 23, fontWeight: '800', color: '#FFFFFF', marginBottom: 9, letterSpacing: -0.4 },
+  roleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 9, marginBottom: 18 },
+  roleBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DDEFE8', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9 },
+  roleBadgeText: { fontSize: 11, fontWeight: '800', color: '#0D6053' },
+  memberSince: { fontSize: 12, color: '#B7CEC6', fontWeight: '500' },
+  contactBlock: { width: '100%', gap: 11, borderTopWidth: 1, borderTopColor: '#31574E', paddingTop: 16 },
   verifyRow: { flexDirection: 'row', alignItems: 'center' },
-  verifyValue: { flex: 1, fontSize: 14, color: '#374151', fontWeight: '500' },
-  verifyChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
-  verifyChipOk: { backgroundColor: '#F0F7F4' },
-  verifyChipWarn: { backgroundColor: '#FEF3E2' },
-  verifyChipText: { fontSize: 11, fontWeight: '700' },
+  verifyValue: { flex: 1, fontSize: 13, color: '#F0F6F3', fontWeight: '500', marginRight: 8 },
+  verifyChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8 },
+  verifyChipOk: { backgroundColor: '#DDEFE8' },
+  verifyChipWarn: { backgroundColor: '#FFF0D7' },
+  verifyChipText: { fontSize: 10, fontWeight: '800' },
 
-  // Completeness
-  completeCard: { backgroundColor: '#0D6053', borderRadius: 16, padding: 16, marginBottom: 16 },
-  completeHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  completeTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
-  completePct: { fontSize: 14, fontWeight: '800', color: '#FFFFFF' },
-  progressTrack: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden', marginBottom: 12 },
-  progressFill: { height: '100%', borderRadius: 4, backgroundColor: '#FFFFFF' },
+  completeCard: { backgroundColor: '#FFFFFF', borderRadius: 17, padding: 17, marginBottom: 18, borderWidth: 1, borderColor: '#DEE7E3' },
+  completeHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  completeTitle: { fontSize: 14, fontWeight: '700', color: '#21352F' },
+  completePct: { fontSize: 13, fontWeight: '800', color: '#0D6053' },
+  progressTrack: { height: 7, borderRadius: 4, backgroundColor: '#E5EEEA', overflow: 'hidden', marginBottom: 13 },
+  progressFill: { height: '100%', borderRadius: 4, backgroundColor: '#0D7461' },
   completeCtaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  completeCta: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
+  completeCta: { fontSize: 13, fontWeight: '700', color: '#0D6053' },
 
-  // Hotlines
-  hotlineCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#FBE0E0' },
-  hotlineHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  hotlineIconWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FEECEC', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  hotlineTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  call911Btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 48, borderRadius: 24, backgroundColor: '#DC2626', marginBottom: 10 },
-  call911Text: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
-  hotlineNote: { fontSize: 12, color: '#9CA3AF', textAlign: 'center', lineHeight: 16 },
+  hotlineCard: { backgroundColor: '#FFFDFC', borderRadius: 17, padding: 17, marginBottom: 22, borderWidth: 1, borderColor: '#F2D9D5' },
+  hotlineHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  hotlineIconWrap: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#FDEBE8', alignItems: 'center', justifyContent: 'center', marginRight: 11 },
+  hotlineTitle: { fontSize: 15, fontWeight: '800', color: '#25332F' },
+  call911Btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 50, borderRadius: 12, backgroundColor: '#C92F2A', marginBottom: 11 },
+  call911Text: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+  hotlineNote: { fontSize: 12, color: '#78847F', textAlign: 'center', lineHeight: 17 },
 
-  // Sections + menu groups
-  sectionHeader: { fontSize: 13, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8, marginLeft: 4 },
+  sectionHeader: { fontSize: 11, fontWeight: '800', color: '#71817A', textTransform: 'uppercase', letterSpacing: 1.05, marginBottom: 9, marginLeft: 3 },
   group: {
-    backgroundColor: '#FFFFFF', borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#EEF0F3', overflow: 'hidden',
-    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 10 }, android: { elevation: 1 } }),
+    backgroundColor: '#FFFFFF', borderRadius: 17, marginBottom: 22, borderWidth: 1, borderColor: '#E1E8E5', overflow: 'hidden',
+    ...Platform.select({ ios: { shadowColor: '#183A31', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 10 }, android: { elevation: 1 } }),
   },
-  menuRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 14 },
-  menuRowDivider: { borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  menuIconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#F0F7F4', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  menuRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 13 },
+  menuRowDivider: { borderBottomWidth: 1, borderBottomColor: '#EEF2F0' },
+  menuIconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#EEF6F2', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   sensitiveDot: { position: 'absolute', top: -3, right: -3, width: 16, height: 16, borderRadius: 8, backgroundColor: '#B45309', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#FFFFFF' },
   menuTextWrap: { flex: 1 },
-  menuLabel: { fontSize: 15, fontWeight: '600', color: '#111827' },
-  menuSub: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
-  menuValue: { fontSize: 14, color: '#6B7280', fontWeight: '600', marginRight: 6 },
+  menuLabel: { fontSize: 14, fontWeight: '700', color: '#1F302A' },
+  menuSub: { fontSize: 11, color: '#7C8983', marginTop: 3 },
+  menuValue: { fontSize: 12, color: '#60736B', fontWeight: '700', marginRight: 7 },
 
-  // Sign out
-  signOutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 26, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#FBD5D5', marginBottom: 16 },
-  signOutText: { fontSize: 15, fontWeight: '700', color: '#EF4444' },
-  wordmark: { fontSize: 12, color: '#C4C9D1', textAlign: 'center', fontWeight: '600', letterSpacing: 0.3 },
+  signOutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 13, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F0D8D5', marginBottom: 18 },
+  signOutText: { fontSize: 14, fontWeight: '800', color: '#C83A34' },
+  wordmark: { fontSize: 11, color: '#97A49E', textAlign: 'center', fontWeight: '700', letterSpacing: 0.7 },
 });

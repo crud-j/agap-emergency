@@ -7,14 +7,19 @@
 // Android needs no app-side config; the domain's /.well-known/assetlinks.json
 // (also served by the backend) vouches for the signing certificate.
 module.exports = ({ config }) => {
+  const plugins = [...(config.plugins ?? [])];
+  if (!plugins.some((plugin) => (Array.isArray(plugin) ? plugin[0] : plugin) === 'expo-sharing')) {
+    plugins.push('expo-sharing');
+  }
+  const configured = { ...config, plugins };
   const rpId = process.env.EXPO_PUBLIC_PASSKEY_RP_ID;
-  if (!rpId) return config;
+  if (!rpId) return configured;
 
-  const existing = config.ios?.associatedDomains ?? [];
+  const existing = configured.ios?.associatedDomains ?? [];
   return {
-    ...config,
+    ...configured,
     ios: {
-      ...config.ios,
+      ...configured.ios,
       associatedDomains: [...new Set([...existing, `webcredentials:${rpId}`])],
     },
   };

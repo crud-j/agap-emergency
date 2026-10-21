@@ -8,6 +8,8 @@ export interface IncidentLocation {
   latitude: number | null;
   longitude: number | null;
   formatted_address: string | null;
+  /** Caller-provided nearest landmark (MOD-09). */
+  landmark?: string | null;
   barangay: string | null;
   municipality: string | null;
   province: string | null;
@@ -26,12 +28,34 @@ export interface IncidentListItem {
   dispatched_at: string | null;
   on_scene_at: string | null;
   incident_locations: IncidentLocation | null;
+  incident_reporters?: { is_guest: boolean; reporter_status?: string | null } | null;
+  /** Structured caller intake (MOD-09 / MOD-24). The list endpoint loads only priority_reasons. */
+  incident_details?: IncidentIntakeDetails | null;
+  /** Reporter map icon, staff-only (WP3.6). PREFER_NOT_TO_SAY / guest / unknown → null. */
+  reporter_sex?: 'MALE' | 'FEMALE' | null;
+  hazard_flags?: string[];
+  /** Barangay tag (ops-only). The list loads the name and last report; the detail loads the full notice. */
+  barangay_notices?: Array<{
+    is_approximate: boolean;
+    last_report: string | null;
+    last_report_at: string | null;
+    barangay: { id: string; name: string };
+  }>;
+}
+
+export interface IncidentIntakeDetails {
+  /** Intake question key -> option values, validated against the @agap/shared catalog. */
+  caller_answers?: Record<string, string[]> | null;
+  /** Caller answers that raised the priority at intake. */
+  priority_reasons: string[];
 }
 
 export interface IncidentReporter {
   reporter_name: string | null;
   reporter_phone: string | null;
   is_guest: boolean;
+  /** SAFE (reporting for others) or NEEDS_HELP (reporter is also hurt or in danger). */
+  reporter_status?: string | null;
 }
 
 export interface IncidentPatient {
@@ -96,6 +120,7 @@ export interface IncidentDetail extends IncidentListItem {
 
 export interface IncidentListParams {
   status?: string;
+  statuses?: string[];
   category?: string;
   priority?: string;
   barangay?: string;
@@ -117,6 +142,7 @@ export interface SubmitAssessmentBody {
 export function fetchIncidents(params?: IncidentListParams): Promise<PaginatedResult<IncidentListItem>> {
   const qs = new URLSearchParams();
   if (params?.status)    qs.set('status', params.status);
+  if (params?.statuses?.length) qs.set('statuses', params.statuses.join(','));
   if (params?.category)  qs.set('category', params.category);
   if (params?.priority)  qs.set('priority', params.priority);
   if (params?.barangay)  qs.set('barangay', params.barangay);
@@ -130,6 +156,11 @@ export function fetchIncident(id: string): Promise<IncidentDetail> {
   return api.get(`/incidents/${id}`, getToken());
 }
 
+/** Citizen photo/video bytes, streamed through the API with the dispatcher's token (MOD-10). */
+export function fetchAttachmentBlob(incidentId: string, attachmentId: string): Promise<Blob> {
+  return api.blob(`/incidents/${incidentId}/attachments/${attachmentId}/file`, getToken());
+}
+
 export function acknowledgeIncident(id: string): Promise<IncidentDetail> {
   return api.patch(`/incidents/${id}/acknowledge`, {}, getToken());
 }
@@ -139,7 +170,7 @@ export function assessIncident(id: string): Promise<IncidentDetail> {
 }
 
 export function closeIncident(id: string, notes?: string): Promise<IncidentDetail> {
-  return api.patch(`/incidents/${id}/close`, { notes }, getToken());
+  return api.post(`/incidents/${id}/close`, { notes }, getToken());
 }
 
 // ─── Resolution (MOD-45) ─────────────────────────────────────────────────────
@@ -204,4 +235,3 @@ export function mergeIncident(id: string, masterIncidentId: string): Promise<Inc
 export function submitAssessment(incidentId: string, body: SubmitAssessmentBody): Promise<IncidentAssessment> {
   return api.post(`/incidents/${incidentId}/assessment`, body, getToken());
 }
-

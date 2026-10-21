@@ -25,6 +25,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       idleTimeoutMillis: 10_000,
       // Fail fast instead of hanging if the DB is unreachable
       connectionTimeoutMillis: 10_000,
+      // Prisma's pg adapter sends a Date as UTC wall-clock digits with no offset, and
+      // Postgres reads them in the SESSION time zone. On a server that isn't on UTC
+      // (e.g. Asia/Kuala_Lumpur) every timestamp the app writes lands hours early, so
+      // a 5-minute SMS code is stored already expired and a 12 h trusted-browser window
+      // lasts 4 h. Pinning the session to UTC makes writes land on the right instant.
+      options: '-c timezone=UTC',
     });
 
     // A pooled client can emit 'error' asynchronously when the server drops it.

@@ -2,12 +2,13 @@
 
 import type { JSX } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { useAuthUser } from '@/lib/use-auth';
-import { clearToken } from '@/lib/auth';
+import { logout } from '@/lib/session';
 import { useWsState } from '@/lib/use-ws-state';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { cn } from '@/lib/utils';
-import { LogOut, ChevronRight } from 'lucide-react';
+import { LogOut, ChevronRight, ShieldCheck } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 
 // ─── Role display labels ────────────────────────────────────────────────────────
@@ -43,6 +44,8 @@ const PATH_LABELS: Record<string, string> = {
   announcements:   'Announcements',
   administration:  'Admin',
   audit:           'Audit Log',
+  account:         'Account',
+  security:        'Security',
   ops:             'Ops',
   'kitchen-sink':  'Kitchen Sink',
 };
@@ -63,9 +66,10 @@ export function Topbar(): JSX.Element {
   const wsState = useWsState();
   const crumbs = buildBreadcrumb(pathname);
 
-  function handleLogout() {
-    clearToken();
-    router.push('/login');
+  async function handleLogout() {
+    // Revokes the session server-side (cuts every tab and socket), clears the cookie.
+    await logout();
+    router.replace('/login');
   }
 
   return (
@@ -117,6 +121,15 @@ export function Topbar(): JSX.Element {
             <span className="hidden md:block text-[13px] font-semibold text-agap-textMain max-w-[120px] truncate">
               {user.name ?? user.email}
             </span>
+
+            <Link
+              href="/account/security"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-agap-textSub hover:bg-agap-surface hover:text-agap-green transition-colors focus:outline-none focus:ring-2 focus:ring-agap-green"
+              aria-label="Account security"
+              title="Account security"
+            >
+              <ShieldCheck size={14} />
+            </Link>
 
             <button
               onClick={handleLogout}

@@ -6,14 +6,14 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import type { AgapWebSocketEvent, AgapEventName } from '@agap/shared';
-import { PrismaService } from '../common/prisma/prisma.service';
-
-const DISPATCHER_ROLES = ['DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR', 'ORG_ADMINISTRATOR'];
+import { IncidentParticipantService } from './incident-participant.service';
+import { SessionRevocationService } from '../auth/sessions/session-revocation.service';
 
 /**
  * AGAP WebSocket Gateway — real-time event distribution.
@@ -26,7 +26,9 @@ const DISPATCHER_ROLES = ['DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR', 'O
   },
   namespace: '/agap',
 })
-export class AgapGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class AgapGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+{
   @WebSocketServer()
   server: Server;
 
@@ -34,10 +36,25 @@ export class AgapGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(
     private readonly jwtService: JwtService,
-    private readonly prisma: PrismaService,
+    private readonly participants: IncidentParticipantService,
+    private readonly sessions: SessionRevocationService,
   ) {}
 
-  handleConnection(client: Socket) {
+  private stopRevocationListener?: () => void;
+
+  afterInit() {
+    // Logout / password reset / deactivation: drop that session's live sockets now,
+    // instead of letting them keep receiving incident events until they reconnect.
+    this.stopRevocationListener = this.sessions.onRevoked((sessionIds) => {
+      for (const sid of sessionIds) this.server.in(`session:${sid}`).disconnectSockets(true);
+    });
+  }
+
+  onModuleDestroy() {
+    this.stopRevocationListener?.();
+  }
+
+  async handleConnection(client: Socket) {
     try {
       const token =
         client.handshake.auth?.token ??
@@ -48,7 +65,18 @@ export class AgapGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
       const payload = this.jwtService.verify(token, { secret: process.env['JWT_SECRET'] ?? '' });
+      if (payload.pwc === true) {
+        this.logger.warn(`Forced password change required on WS connection, disconnecting: ${client.id}`);
+        client.disconnect();
+        return;
+      }
+      if (await this.sessions.isRevoked(payload.sid)) {
+        this.logger.warn(`Revoked session on WS connection, disconnecting: ${client.id}`);
+        client.disconnect();
+        return;
+      }
       client.data.user = payload;
+      if (payload.sid) client.join(`session:${payload.sid}`);
       // Every authenticated socket auto-joins its own user room so per-user
       // events (e.g. notification.created) reach only that user.
       if (payload.sub) client.join(`user:${payload.sub}`);
@@ -75,24 +103,16 @@ export class AgapGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    if (!DISPATCHER_ROLES.includes(user.role)) {
-      // Non-staff may only join an incident room if they are a participant:
-      // the reporter, or an assigned responder (dispatch crew). This keeps the
-      // incident-scoped chat/events restricted to participants (MOD-33).
-      const incident = await this.prisma.incident.findFirst({
-        where: { id: data.incidentId },
-        include: { incident_reporters: true },
-      });
-      const isOwner = incident?.incident_reporters?.user_id === user.sub;
-      const isCrew = isOwner
-        ? false
-        : (await this.prisma.dispatch_crew.count({
-            where: { user_id: user.sub, dispatches: { incident_id: data.incidentId } },
-          })) > 0;
-      if (!isOwner && !isCrew) {
-        client.emit('error', 'Forbidden: not a participant of this incident');
-        return;
-      }
+    // Staff, the reporter, or an assigned crew member only. This keeps the
+    // incident-scoped chat/events restricted to participants (MOD-33). Same rule
+    // as the REST tracking endpoints — see IncidentParticipantService.
+    const participation = await this.participants.getParticipation(
+      { id: user.sub, role: user.role },
+      data.incidentId,
+    );
+    if (!participation) {
+      client.emit('error', 'Forbidden: not a participant of this incident');
+      return;
     }
 
     client.join(`incident:${data.incidentId}`);
@@ -106,7 +126,7 @@ export class AgapGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.emit('error', 'Unauthorized');
       return;
     }
-    if (!DISPATCHER_ROLES.includes(user.role)) {
+    if (!this.participants.isStaff(user.role)) {
       client.emit('error', 'Forbidden: insufficient role for ops room');
       return;
     }

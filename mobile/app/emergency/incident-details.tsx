@@ -9,170 +9,145 @@ import {
   Image,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
-import { IncidentType } from '@agap/shared';
+import {
+  IncidentType,
+  isCoordinateInBocaue,
+  ReporterStatus,
+  LANDMARK_MAX_LENGTH,
+  intakeQuestionsFor,
+  visibleIntakeQuestions,
+  type IntakeAnswers,
+  type IntakeOption,
+  type IntakeQuestion,
+} from '@agap/shared';
 import { useIncidentStore } from '@/src/stores/incident.store';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { reverseGeocode } from '@/src/services/api/locations.api';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
-type PatientChoice = 'me' | 'other' | 'unknown';
 type GpsState = 'locating' | 'ready' | 'unavailable';
+type Answers = IntakeAnswers;
 
-// ─── Type-specific quick prompts (MOD-09) ────────────────────────────────────
+// ─── Type-specific questions (MOD-09) ────────────────────────────────────────
+//
+// Questions and options come from the shared intake catalog in @agap/shared,
+// so the backend validates the same list and the dashboard labels answers the
+// same way. Each question maps to a dispatch decision; nothing is required.
+// Icons below are presentation only.
 
-type PromptOption = { value: string; label: string };
-type PromptDef    = { key: string; question: string; options: PromptOption[] };
-
-const YN  = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }];
-const YNU = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'unknown', label: 'Unknown' }];
-
-// Each incident type collects the triage information its responders actually need.
-// Every type has at least one prompt so no incident is submitted without situational context.
-const QUICK_PROMPTS: Partial<Record<IncidentType, PromptDef[]>> = {
-  [IncidentType.MEDICAL]: [
-    { key: 'conscious', question: 'Is the person conscious?', options: YNU },
-    { key: 'breathing', question: 'Is the person breathing?', options: YNU },
-    { key: 'bleeding',  question: 'Severe bleeding?',          options: YN  },
-  ],
-  [IncidentType.ROAD_ACCIDENT]: [
-    { key: 'injuries',     question: 'Injuries visible?', options: YNU },
-    { key: 'road_blocked', question: 'Road blocked?',     options: YN  },
-  ],
-  [IncidentType.FIRE]: [
-    { key: 'trapped', question: 'Anyone trapped?',             options: YNU },
-    { key: 'gas',     question: 'Gas or chemicals involved?', options: YNU },
-  ],
-  [IncidentType.FLOOD]: [
-    { key: 'stranded',    question: 'People stranded?',          options: YN },
-    {
-      key: 'water_level',
-      question: 'Approximate water level?',
-      options: [
-        { value: 'ankle', label: 'Ankle' },
-        { value: 'knee',  label: 'Knee'  },
-        { value: 'waist', label: 'Waist' },
-        { value: 'above', label: 'Above waist' },
-      ],
-    },
-  ],
-  [IncidentType.RESCUE]: [
-    { key: 'trapped',     question: 'Anyone trapped or stranded?', options: YNU },
-    { key: 'hard_access', question: 'Area hard to reach?',         options: YN  },
-  ],
-  [IncidentType.INDUSTRIAL]: [
-    { key: 'gas',       question: 'Gas or chemicals involved?', options: YNU },
-    { key: 'explosion', question: 'Explosion or fire risk?',    options: YNU },
-  ],
-  [IncidentType.DEBRIS]: [
-    { key: 'trapped',  question: 'Anyone trapped?',      options: YNU },
-    { key: 'unstable', question: 'Structure unstable?',  options: YNU },
-  ],
-  [IncidentType.OTHER]: [
-    { key: 'injuries', question: 'Anyone injured?', options: YNU },
-  ],
+const OPTION_ICONS: Record<string, IoniconName> = {
+  'vehicles.motorcycle': 'bicycle',
+  'vehicles.tricycle':   'bicycle-outline',
+  'vehicles.car':        'car',
+  'vehicles.truck':      'bus',
+  'vehicles.pedestrian': 'walk',
+  'burning.house':       'home',
+  'burning.store':       'storefront',
+  'burning.fireworks':   'sparkles',
+  'burning.warehouse':   'business',
+  'burning.vehicle':     'car',
+  'burning.wires':       'flash',
+  'burning.grass':       'leaf',
+  'event.flood':         'water',
+  'event.wind':          'thunderstorm',
+  'event.tree':          'leaf',
+  'event.collapse':      'home',
+  'event.wires':         'flash',
 };
 
-// Human-readable hazard strings sent to the dispatcher
-const HAZARD_LABELS: Record<string, Record<string, string>> = {
-  injuries:    { yes: 'Injuries reported visible', no: 'No visible injuries' },
-  road_blocked:{ yes: 'Road is blocked', no: 'Road passable' },
-  trapped:     { yes: 'Person(s) may be trapped', unknown: 'Possible entrapment — unconfirmed' },
-  gas:         { yes: 'Gas/chemicals may be involved', unknown: 'Possible gas/chemicals — unconfirmed' },
-  stranded:    { yes: 'People are stranded' },
-  water_level: {
-    ankle: 'Water level: ankle-deep',
-    knee:  'Water level: knee-deep',
-    waist: 'Water level: waist-deep',
-    above: 'Water level: above waist',
-  },
-  conscious:   { yes: 'Person is conscious', no: 'Person is UNCONSCIOUS', unknown: 'Consciousness unknown' },
-  breathing:   { yes: 'Person is breathing', no: 'Person is NOT breathing', unknown: 'Breathing status unknown' },
-  bleeding:    { yes: 'Severe bleeding reported', no: 'No severe bleeding' },
-  hard_access: { yes: 'Area is hard to reach' },
-  explosion:   { yes: 'Explosion/fire risk reported', unknown: 'Possible explosion/fire risk' },
-  unstable:    { yes: 'Structure may be unstable', unknown: 'Structural stability unknown' },
-};
+// ─── Reporter's own situation ────────────────────────────────────────────────
+//
+// Replaces "Who needs help?". The reporter is usually a bystander, so asking
+// whether the reporter is also hurt is what actually changes dispatch (a call
+// back, a rescue for the caller). Reporter and patient stay separate: only
+// "I need help too" records the reporter as a patient; otherwise no patient is
+// guessed, and an unknown patient never blocks dispatch.
 
-function buildHazards(answers: Record<string, string>): string[] {
-  return Object.entries(answers)
-    .map(([k, v]) => HAZARD_LABELS[k]?.[v])
-    .filter((x): x is string => Boolean(x));
-}
-
-// ─── Static option lists ─────────────────────────────────────────────────────
+const SELF_OPTIONS: { key: ReporterStatus; label: string; desc: string; icon: IoniconName }[] = [
+  { key: ReporterStatus.SAFE,       label: "I'm safe",        desc: "I'm reporting for others",   icon: 'shield-checkmark' },
+  { key: ReporterStatus.NEEDS_HELP, label: 'I need help too', desc: "I'm hurt or still in danger", icon: 'hand-left' },
+];
 
 const AFFECTED_OPTIONS: { key: string; label: string; icon: IoniconName }[] = [
-  { key: '1',       label: '1 person',    icon: 'person-outline'  },
-  { key: '2-5',     label: '2–5 people',  icon: 'people-outline'  },
-  { key: '5+',      label: '5+ people',   icon: 'people'          },
-  { key: 'unknown', label: 'Unknown',     icon: 'help-circle-outline' },
+  { key: '1',       label: '1',        icon: 'person'              },
+  { key: '2-5',     label: '2–5',      icon: 'people'              },
+  { key: '5+',      label: '5+',       icon: 'people-circle'       },
+  { key: 'unknown', label: 'Not sure', icon: 'help-circle-outline' },
 ];
 
-const PATIENT_OPTIONS: { key: PatientChoice; label: string; icon: IoniconName; desc: string }[] = [
-  { key: 'me',      label: 'Me',            icon: 'person',       desc: 'I need assistance'           },
-  { key: 'other',   label: 'Someone else',  icon: 'people',       desc: 'Another person needs help'   },
-  { key: 'unknown', label: 'Unknown',       icon: 'help-circle',  desc: 'Not sure who needs help'     },
-];
-
-const TYPE_LABELS: Record<string, string> = {
-  MEDICAL: 'Medical Emergency', ROAD_ACCIDENT: 'Road Traffic Accident',
-  FLOOD: 'Flood / Water Emergency', RESCUE: 'Search & Rescue',
-  FIRE: 'Fire Emergency', INDUSTRIAL: 'Industrial Hazard',
-  DEBRIS: 'Debris / Structural', OTHER: 'Other Emergency',
+const TYPE_META: Partial<Record<IncidentType, { label: string; icon: IoniconName; color: string; notes: string }>> = {
+  [IncidentType.ROAD_ACCIDENT]: {
+    label: 'Road incident',
+    icon: 'car',
+    color: '#2563EB',
+    notes: 'e.g. Motorcycle and jeep collided, rider is on the road, near the Petron station',
+  },
+  [IncidentType.FIRE]: {
+    label: 'Fire',
+    icon: 'flame',
+    color: '#EA580C',
+    notes: 'e.g. Second floor of a two-storey house, black smoke, residents are outside',
+  },
+  [IncidentType.NATURAL_DISASTER]: {
+    label: 'Natural disaster',
+    icon: 'thunderstorm',
+    color: '#0E7490',
+    notes: 'e.g. Family of 5 on the roof, water still rising, road to the house is impassable',
+  },
+  [IncidentType.FLOOD]: {
+    label: 'Natural disaster',
+    icon: 'thunderstorm',
+    color: '#0E7490',
+    notes: 'e.g. Family of 5 on the roof, water still rising, road to the house is impassable',
+  },
 };
 
-const TYPE_ICONS: Record<string, IoniconName> = {
-  MEDICAL: 'pulse', ROAD_ACCIDENT: 'car-sport', FLOOD: 'water',
-  RESCUE: 'hand-left', FIRE: 'flame', INDUSTRIAL: 'warning',
-  DEBRIS: 'layers', OTHER: 'alert-circle',
+const FALLBACK_META = {
+  label: 'Emergency',
+  icon: 'alert-circle' as IoniconName,
+  color: '#0D6053',
+  notes: 'Anything responders should know before they arrive',
 };
 
-const TYPE_COLORS: Record<string, string> = {
-  MEDICAL: '#DC2626', ROAD_ACCIDENT: '#EA580C', FLOOD: '#2563EB',
-  RESCUE: '#7C3AED', FIRE: '#EA580C', INDUSTRIAL: '#D97706',
-  DEBRIS: '#6B7280', OTHER: '#0D6053',
-};
-
-// ─── Design tokens ────────────────────────────────────────────────────────────
+// ─── Design tokens (shared with the bottom nav) ──────────────────────────────
 
 const C = {
-  bg:          '#F4F6F9',
+  bg:          '#F2F5F8',
   white:       '#FFFFFF',
-  navy:        '#1A2B4A',
+  ink:         '#1D2B3A',
+  muted:       '#66768A',
   primary:     '#0D6053',
-  primarySoft: '#EEF7F4',
-  text:        '#1A2B4A',
-  textMid:     '#374151',
-  textSub:     '#6B7280',
-  border:      '#E5E7EB',
+  primarySoft: '#E6F4F1',
+  surface:     '#F6F8FA',
+  border:      '#E9ECEB',
   green:       '#16A34A',
   greenSoft:   '#DCFCE7',
   red:         '#DC2626',
   redSoft:     '#FEF2F2',
-  amber:       '#D97706',
-  amberSoft:   '#FFFBEB',
+  amber:       '#B45309',
+  amberSoft:   '#FEF3E2',
 };
 
-const SHADOW = {
-  shadowColor: '#1A2B4A',
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.07,
-  shadowRadius: 10,
-  elevation: 3,
-};
+const shadow = (opacity: number, radius: number, y: number, elevation: number) =>
+  Platform.select({
+    ios: { shadowColor: '#18231F', shadowOpacity: opacity, shadowRadius: radius, shadowOffset: { width: 0, height: y } },
+    android: { elevation },
+  });
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 /**
  * MOD-09 / MOD-11 / MOD-14 — Step 4 of 4.
- * Collects optional context: photo, GPS, affected count, type-specific hazard
- * prompts, response needs, description, and patient identity. Nothing here blocks
- * submission — every field is optional (Architectural Rule #5).
+ * Collects optional context that changes what dispatch sends: location and
+ * landmark, type-specific questions, people count, the reporter's own
+ * situation, a photo, and notes. Nothing here blocks submission — every field
+ * is optional (Architectural Rule #5).
  */
 export default function IncidentDetailsScreen() {
   const router      = useRouter();
@@ -182,26 +157,31 @@ export default function IncidentDetailsScreen() {
     setDescription,
     setPatient,
     setLocation,
+    clearLocation,
     setAffectedCount,
     setHazards,
     setManualAddress,
+    setIntake,
   } = useIncidentStore();
 
-  const [description,       setDescriptionText]   = useState(draft.description ?? '');
-  const [patient,           setPatientChoice]      = useState<PatientChoice | null>(null);
-  const [gps,               setGps]                = useState<GpsState>('locating');
-  const [gpsAccuracy,       setGpsAccuracy]        = useState<number | null>(null);
-  const [reverseAddress,    setReverseAddress]     = useState<string | null>(null);
-  const [affectedCount,     setAffectedCountLocal] = useState<string | null>(null);
-  const [quickAnswers,      setQuickAnswers]       = useState<Record<string, string>>({});
-  const [manualAddressText, setManualAddressText]  = useState('');
+  const prompts = intakeQuestionsFor(draft.type);
+  const meta    = (draft.type && TYPE_META[draft.type]) || FALLBACK_META;
+
+  const [description,   setDescriptionText]   = useState(draft.description ?? '');
+  const [answers,       setAnswers]           = useState<Answers>(() => draft.intake?.answers ?? {});
+  const [selfStatus,    setSelfStatus]        = useState<ReporterStatus | null>(
+    () => draft.intake?.reporterStatus ?? (draft.patient?.isReporter ? ReporterStatus.NEEDS_HELP : null),
+  );
+  const [affectedCount, setAffectedCountLocal] = useState<string | null>(draft.affectedCount);
+  const [landmark,      setLandmark]          = useState(() => draft.intake?.landmark ?? draft.manualAddress ?? '');
+  const [gps,            setGps]            = useState<GpsState>('locating');
+  const [gpsAccuracy,    setGpsAccuracy]    = useState<number | null>(null);
+  const [reverseAddress, setReverseAddress] = useState<string | null>(null);
 
   const photoUri = draft.photoUris?.[0];
   const videoUri = draft.videoUri;
-  const prompts  = draft.type ? (QUICK_PROMPTS[draft.type] ?? []) : [];
-  const typeColor = draft.type ? (TYPE_COLORS[draft.type] ?? C.primary) : C.primary;
-  const typeIcon  = draft.type ? (TYPE_ICONS[draft.type]  ?? 'alert-circle') : 'alert-circle';
-  const typeLabel = draft.type ? (TYPE_LABELS[draft.type] ?? draft.type) : 'Emergency';
+  const shown    = visibleIntakeQuestions(prompts, answers);
+  const answered = shown.filter((p) => answers[p.key]?.length).length;
 
   useEffect(() => {
     (async () => {
@@ -226,6 +206,14 @@ export default function IncidentDetailsScreen() {
   }, []);
 
   function applyCoords(coords: Location.LocationObjectCoords) {
+    if (
+      draft.isGuestReport &&
+      !isCoordinateInBocaue(coords.latitude, coords.longitude)
+    ) {
+      clearLocation();
+      setGps('unavailable');
+      return;
+    }
     setLocation({ lat: coords.latitude, lng: coords.longitude, accuracy: coords.accuracy ?? undefined });
     setGpsAccuracy(coords.accuracy ?? null);
     setGps('ready');
@@ -236,32 +224,67 @@ export default function IncidentDetailsScreen() {
   async function resolveAddress(lat: number, lng: number) {
     try {
       const result = await reverseGeocode(lat, lng, accessToken ?? undefined);
-      if (result.formatted_address) setReverseAddress(result.formatted_address);
+      if (!result.formatted_address) return;
+      setReverseAddress(result.formatted_address);
+      // Send the resolved address with the report so dispatch sees a street, not just coordinates.
+      const current = useIncidentStore.getState().draft.location;
+      if (current && current.lat === lat && current.lng === lng) {
+        setLocation({ ...current, address: result.formatted_address, barangay: result.barangay ?? current.barangay });
+      }
     } catch { /* non-critical — GPS coords are already persisted */ }
   }
 
-  function toggleQuickAnswer(promptKey: string, value: string) {
-    setQuickAnswers((prev) => {
-      if (prev[promptKey] === value) {
-        const next = { ...prev };
-        delete next[promptKey];
-        return next;
+  function toggleAnswer(prompt: IntakeQuestion, option: IntakeOption) {
+    setAnswers((prev) => {
+      const current = prev[prompt.key] ?? [];
+      const selected = current.includes(option.value);
+      let next: string[];
+      if (!prompt.multi) {
+        next = selected ? [] : [option.value];
+      } else if (selected) {
+        next = current.filter((v) => v !== option.value);
+      } else if (option.exclusive) {
+        next = [option.value];
+      } else {
+        const exclusive = new Set(prompt.options.filter((o) => o.exclusive).map((o) => o.value));
+        next = [...current.filter((v) => !exclusive.has(v)), option.value];
       }
-      return { ...prev, [promptKey]: value };
+      const updated = { ...prev };
+      if (next.length) updated[prompt.key] = next;
+      else delete updated[prompt.key];
+      return updated;
     });
   }
 
   function submit() {
-    if (description.trim()) setDescription(description.trim());
-    if (patient) setPatient({ isReporter: patient === 'me', isUnknown: patient === 'unknown' });
-    if (affectedCount) setAffectedCount(affectedCount);
-    const hazardList = buildHazards(quickAnswers);
-    if (hazardList.length) setHazards(hazardList);
-    if (gps === 'unavailable' && manualAddressText.trim()) setManualAddress(manualAddressText.trim());
+    if (
+      draft.isGuestReport &&
+      (!draft.location || !isCoordinateInBocaue(draft.location.lat, draft.location.lng))
+    ) {
+      Alert.alert(
+        'Bocaue location required',
+        'A report without an account can only be sent with a GPS location inside Bocaue Municipality.',
+        [{ text: 'Retry location', onPress: () => router.replace('/emergency/location') }],
+      );
+      return;
+    }
+    const trimmedLandmark = landmark.trim();
+    // Answers to questions that are no longer shown (e.g. water depth after
+    // un-ticking flooding) are not sent.
+    const shownAnswers: Answers = Object.fromEntries(
+      shown.filter((q) => answers[q.key]?.length).map((q) => [q.key, answers[q.key]!]),
+    );
+
+    setDescription(description.trim() || null);
+    setPatient(selfStatus === ReporterStatus.NEEDS_HELP ? { isReporter: true, isUnknown: false } : null);
+    setAffectedCount(affectedCount);
+    // The backend builds the dispatcher-readable lines from the structured answers.
+    setHazards([]);
+    setIntake({ answers: shownAnswers, reporterStatus: selfStatus, landmark: trimmedLandmark || null });
+    // Without GPS the landmark is also the address dispatch works from.
+    setManualAddress(gps === 'unavailable' ? trimmedLandmark || null : null);
     router.push('/emergency/transmission');
   }
-
-  // ── GPS state helpers ──────────────────────────────────────────────────────
 
   const gpsReady       = gps === 'ready';
   const gpsLocating    = gps === 'locating';
@@ -278,7 +301,7 @@ export default function IncidentDetailsScreen() {
             onPress={() => router.back()}
             accessibilityLabel="Back"
           >
-            <Ionicons name="chevron-back" size={20} color={C.navy} />
+            <Ionicons name="chevron-back" size={20} color={C.ink} />
           </TouchableOpacity>
 
           <View style={styles.brandRow}>
@@ -291,23 +314,29 @@ export default function IncidentDetailsScreen() {
             />
           </View>
 
-          {/* Step indicator */}
           <View style={styles.stepBadge}>
             <Text style={styles.stepBadgeText}>4 / 4</Text>
           </View>
         </View>
 
-        {/* Progress bar */}
         <View style={styles.progressBarTrack}>
           <View style={[styles.progressBarFill, { width: '100%' }]} />
         </View>
 
-        {/* Page title row */}
         <View style={styles.pageTitleRow}>
-          <View>
-            <Text style={styles.pageTitle}>Incident Details</Text>
-            <Text style={styles.pageSubtitle}>All fields are optional — send the alert now if needed.</Text>
+          <View style={[styles.typeIcon, { backgroundColor: `${meta.color}18` }]}>
+            <Ionicons name={meta.icon} size={22} color={meta.color} />
           </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pageEyebrow}>{meta.label}</Text>
+            <Text style={styles.pageTitle}>Tell responders what you see</Text>
+          </View>
+        </View>
+        <View style={styles.sendNowNote}>
+          <Ionicons name="flash" size={13} color={C.primary} style={{ marginRight: 6 }} />
+          <Text style={styles.sendNowText}>
+            Every question is optional. If it's urgent, send now.
+          </Text>
         </View>
       </SafeAreaView>
 
@@ -318,160 +347,28 @@ export default function IncidentDetailsScreen() {
         keyboardShouldPersistTaps="handled"
       >
 
-        {/* ── Incident type context card ─────────────────────────────────── */}
-        <View style={[styles.typeContextCard, { borderLeftColor: typeColor }]}>
-          <View style={[styles.typeIconCircle, { backgroundColor: `${typeColor}15` }]}>
-            <Ionicons name={typeIcon} size={20} color={typeColor} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.typeContextLabel}>Reporting</Text>
-            <Text style={styles.typeContextValue}>{typeLabel}</Text>
-          </View>
-          <View style={[styles.urgencyBadge, { backgroundColor: `${typeColor}15` }]}>
-            <View style={[styles.urgencyDot, { backgroundColor: typeColor }]} />
-            <Text style={[styles.urgencyText, { color: typeColor }]}>Active</Text>
-          </View>
-        </View>
-
-        {/* ── Type-specific triage (MOD-09) — leads the form so each incident ──
-             collects the information its responders actually need. */}
-        {prompts.length > 0 && (
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionIconWrap}>
-                <Ionicons name="clipboard-outline" size={15} color={C.primary} />
-              </View>
-              <Text style={styles.sectionTitle}>Quick Situation Info</Text>
-              <Text style={styles.optionalTag}>helps dispatch prepare</Text>
-            </View>
-
-            {prompts.map((prompt, pi) => (
-              <View key={prompt.key} style={[styles.promptBlock, pi < prompts.length - 1 && styles.promptBorder]}>
-                <Text style={styles.promptQuestion}>{prompt.question}</Text>
-                <View style={styles.pillRow}>
-                  {prompt.options.map((opt) => {
-                    const active = quickAnswers[prompt.key] === opt.value;
-                    return (
-                      <TouchableOpacity
-                        key={opt.value}
-                        style={[styles.pill, active && styles.pillActive]}
-                        activeOpacity={0.8}
-                        onPress={() => toggleQuickAnswer(prompt.key, opt.value)}
-                      >
-                        {active && (
-                          <Ionicons name="checkmark" size={12} color={C.primary} style={{ marginRight: 4 }} />
-                        )}
-                        <Text style={[styles.pillText, active && styles.pillTextActive]}>
-                          {opt.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* ── Photo / Video card (MOD-10) ───────────────────────────────── */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionIconWrap}>
-              <Ionicons name={videoUri ? 'videocam-outline' : 'camera-outline'} size={15} color={C.primary} />
-            </View>
-            <Text style={styles.sectionTitle}>Incident Photo / Video</Text>
-          </View>
-
-          <View style={styles.photoContainer}>
-            {videoUri ? (
-              <>
-                <View style={styles.videoPoster}>
-                  <View style={styles.videoPlayCircle}>
-                    <Ionicons name="videocam" size={28} color={C.primary} />
-                  </View>
-                  <Text style={styles.videoCapturedTitle}>Video evidence captured</Text>
-                  <Text style={styles.videoCapturedSub}>Will be sent with your report</Text>
-                </View>
-                <View style={styles.photoOverlay}>
-                  <TouchableOpacity
-                    style={styles.photoOverlayBtn}
-                    onPress={() => router.replace('/emergency/capture?retake=1')}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="refresh" size={14} color={C.white} style={{ marginRight: 5 }} />
-                    <Text style={styles.photoOverlayText}>Re-record</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : photoUri ? (
-              <>
-                <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="cover" />
-                <View style={styles.photoOverlay}>
-                  <TouchableOpacity
-                    style={styles.photoOverlayBtn}
-                    onPress={() => router.replace('/emergency/capture?retake=1')}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="refresh" size={14} color={C.white} style={{ marginRight: 5 }} />
-                    <Text style={styles.photoOverlayText}>Retake</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <TouchableOpacity
-                style={styles.photoEmpty}
-                onPress={() => router.replace('/emergency/capture?retake=1')}
-                activeOpacity={0.8}
-              >
-                <View style={styles.photoEmptyIcon}>
-                  <Ionicons name="camera" size={24} color={C.primary} />
-                </View>
-                <Text style={styles.photoEmptyTitle}>Add a photo or video</Text>
-                <Text style={styles.photoEmptyDesc}>Helps responders assess the scene faster</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {/* ── GPS status card ───────────────────────────────────────────────── */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionIconWrap}>
-              <Ionicons name="location-outline" size={15} color={C.primary} />
-            </View>
-            <Text style={styles.sectionTitle}>Location</Text>
-            {gpsReady && (
-              <View style={styles.confirmedBadge}>
-                <Ionicons name="checkmark-circle" size={12} color={C.green} style={{ marginRight: 3 }} />
-                <Text style={styles.confirmedText}>Captured</Text>
-              </View>
-            )}
-          </View>
-
+        {/* ── 1. Location (MOD-11 / MOD-12) ──────────────────────────────── */}
+        <Section icon="location" title="Where is it?">
           <View style={[
             styles.gpsRow,
             gpsReady       && styles.gpsRowOk,
             gpsUnavailable && styles.gpsRowWarn,
-            gpsLocating    && styles.gpsRowLocating,
           ]}>
             {gpsLocating ? (
               <ActivityIndicator size="small" color={C.primary} style={{ marginRight: 10 }} />
             ) : (
               <Ionicons
-                name={gpsReady ? 'location' : 'location-outline'}
-                size={18}
-                color={gpsReady ? C.green : gpsUnavailable ? C.red : C.amber}
+                name={gpsReady ? 'navigate-circle' : 'alert-circle'}
+                size={20}
+                color={gpsReady ? C.green : C.red}
                 style={{ marginRight: 10 }}
               />
             )}
             <View style={{ flex: 1 }}>
-              <Text style={[
-                styles.gpsTitle,
-                { color: gpsReady ? C.green : gpsUnavailable ? C.red : C.navy },
-              ]}>
+              <Text style={[styles.gpsTitle, { color: gpsReady ? C.green : gpsUnavailable ? C.red : C.ink }]}>
                 {gpsLocating    ? 'Getting your location…'
-                 : gpsReady     ? `Location captured${gpsAccuracy != null ? ` (±${Math.round(gpsAccuracy)} m)` : ''}`
-                 :                'GPS unavailable — report still accepted'}
+                 : gpsReady     ? `GPS location captured${gpsAccuracy != null ? ` (±${Math.round(gpsAccuracy)} m)` : ''}`
+                 :                'GPS unavailable. Your report will still be sent.'}
               </Text>
               {reverseAddress && (
                 <Text style={styles.gpsAddress} numberOfLines={2}>{reverseAddress}</Text>
@@ -479,158 +376,251 @@ export default function IncidentDetailsScreen() {
             </View>
           </View>
 
-          {/* Manual address fallback */}
-          {gpsUnavailable && (
-            <View style={styles.manualAddressWrap}>
-              <Text style={styles.manualAddressLabel}>
-                Nearest landmark or street
-                <Text style={styles.optionalInline}> (helps dispatch find you)</Text>
-              </Text>
-              <TextInput
-                style={styles.manualInput}
-                placeholder="e.g. Near Bocaue Market, MacArthur Hwy"
-                placeholderTextColor="#9CA3AF"
-                value={manualAddressText}
-                onChangeText={setManualAddressText}
-                returnKeyType="done"
-              />
-            </View>
-          )}
-        </View>
+          <Text style={styles.fieldLabel}>
+            {gpsUnavailable ? 'Street or nearest landmark' : 'Nearest landmark'}
+          </Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. Beside the barangay hall, Purok 3"
+            placeholderTextColor="#9CA3AF"
+            value={landmark}
+            onChangeText={setLandmark}
+            maxLength={LANDMARK_MAX_LENGTH}
+            returnKeyType="done"
+            accessibilityLabel="Nearest landmark"
+          />
+          <Text style={styles.fieldHint}>
+            Responders find you faster with a landmark than with GPS alone.
+          </Text>
+        </Section>
 
-        {/* ── Affected count ────────────────────────────────────────────────── */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionIconWrap}>
-              <Ionicons name="people-outline" size={15} color={C.primary} />
+        {/* ── 2. Type-specific questions (MOD-09) ────────────────────────── */}
+        <Section
+          icon="clipboard"
+          title="What's happening?"
+          badge={shown.length ? `${answered} of ${shown.length}` : undefined}
+        >
+          {shown.map((prompt, pi) => (
+            <View key={prompt.key} style={[styles.promptBlock, pi > 0 && styles.promptDivider]}>
+              <Text style={styles.promptQuestion}>{prompt.question}</Text>
+              {prompt.multi && <Text style={styles.promptMeta}>Select all that apply</Text>}
+              {prompt.hint && (
+                <View style={styles.hintRow}>
+                  <Ionicons name="information-circle" size={13} color={C.amber} style={{ marginRight: 5 }} />
+                  <Text style={styles.hintText}>{prompt.hint}</Text>
+                </View>
+              )}
+              <View style={styles.pillRow}>
+                {prompt.options.map((opt) => {
+                  const active = !!answers[prompt.key]?.includes(opt.value);
+                  const icon = OPTION_ICONS[`${prompt.key}.${opt.value}`];
+                  return (
+                    <TouchableOpacity
+                      key={opt.value}
+                      style={[styles.pill, active && styles.pillActive]}
+                      activeOpacity={0.8}
+                      onPress={() => toggleAnswer(prompt, opt)}
+                      accessibilityRole={prompt.multi ? 'checkbox' : 'radio'}
+                      accessibilityState={prompt.multi ? { checked: active } : { selected: active }}
+                      accessibilityLabel={`${prompt.question} ${opt.label}`}
+                    >
+                      {active ? (
+                        <Ionicons name="checkmark-circle" size={15} color={C.primary} style={{ marginRight: 6 }} />
+                      ) : icon ? (
+                        <Ionicons name={icon} size={15} color={C.muted} style={{ marginRight: 6 }} />
+                      ) : null}
+                      <Text style={[styles.pillText, active && styles.pillTextActive]}>{opt.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
-            <Text style={styles.sectionTitle}>People Affected</Text>
-          </View>
+          ))}
+        </Section>
 
-          <View style={styles.chipGrid}>
+        {/* ── 3. People ──────────────────────────────────────────────────── */}
+        <Section icon="people" title="People">
+          <Text style={styles.promptQuestion}>How many are hurt or in danger?</Text>
+          <View style={styles.countRow}>
             {AFFECTED_OPTIONS.map((opt) => {
               const active = affectedCount === opt.key;
               return (
                 <TouchableOpacity
                   key={opt.key}
-                  style={[styles.chipCard, active && styles.chipCardActive]}
+                  style={[styles.countCard, active && styles.countCardActive]}
                   activeOpacity={0.8}
                   onPress={() => setAffectedCountLocal(active ? null : opt.key)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`People hurt or in danger: ${opt.label}`}
                 >
-                  <Ionicons
-                    name={opt.icon}
-                    size={16}
-                    color={active ? C.primary : C.textSub}
-                    style={{ marginBottom: 4 }}
-                  />
-                  <Text style={[styles.chipCardText, active && styles.chipCardTextActive]}>
-                    {opt.label}
-                  </Text>
+                  <Ionicons name={opt.icon} size={18} color={active ? C.primary : C.muted} />
+                  <Text style={[styles.countText, active && styles.countTextActive]}>{opt.label}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-        </View>
 
-        {/* ── Description ───────────────────────────────────────────────────── */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionIconWrap}>
-              <Ionicons name="document-text-outline" size={15} color={C.primary} />
-            </View>
-            <Text style={styles.sectionTitle}>Describe the Situation</Text>
+          <View style={styles.promptDivider} />
+
+          <Text style={[styles.promptQuestion, { marginTop: 14 }]}>Are you hurt or in danger yourself?</Text>
+          <View style={styles.selfRow}>
+            {SELF_OPTIONS.map((opt) => {
+              const active = selfStatus === opt.key;
+              const needsHelp = opt.key === ReporterStatus.NEEDS_HELP;
+              const tone = needsHelp ? C.red : C.primary;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[
+                    styles.selfCard,
+                    active && { borderColor: tone, backgroundColor: needsHelp ? C.redSoft : C.primarySoft },
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={() => setSelfStatus(active ? null : opt.key)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`${opt.label}. ${opt.desc}`}
+                >
+                  <Ionicons name={opt.icon} size={20} color={active ? tone : C.muted} />
+                  <Text style={[styles.selfLabel, active && { color: tone }]}>{opt.label}</Text>
+                  <Text style={styles.selfDesc}>{opt.desc}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
+        </Section>
 
+        {/* ── 4. Photo / Video (MOD-10) ──────────────────────────────────── */}
+        <Section icon={videoUri ? 'videocam' : 'camera'} title="Photo or video">
+          <View style={styles.photoContainer}>
+            {videoUri ? (
+              <>
+                <View style={styles.videoPoster}>
+                  <View style={styles.videoPlayCircle}>
+                    <Ionicons name="videocam" size={26} color={C.primary} />
+                  </View>
+                  <Text style={styles.videoCapturedTitle}>Video captured</Text>
+                  <Text style={styles.videoCapturedSub}>It will be sent with your report</Text>
+                </View>
+                <RetakeButton label="Re-record" onPress={() => router.replace('/emergency/capture?retake=1')} />
+              </>
+            ) : photoUri ? (
+              <>
+                <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="cover" />
+                <RetakeButton label="Retake" onPress={() => router.replace('/emergency/capture?retake=1')} />
+              </>
+            ) : (
+              <TouchableOpacity
+                style={styles.photoEmpty}
+                onPress={() => router.replace('/emergency/capture?retake=1')}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Add a photo or video"
+              >
+                <View style={styles.photoEmptyIcon}>
+                  <Ionicons name="camera" size={22} color={C.primary} />
+                </View>
+                <Text style={styles.photoEmptyTitle}>Add a photo or video</Text>
+                <Text style={styles.photoEmptyDesc}>Only if it's safe to take one</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </Section>
+
+        {/* ── 5. Notes ───────────────────────────────────────────────────── */}
+        <Section icon="create" title="Anything else?">
           <TextInput
             style={styles.textArea}
-            placeholder="Landmarks, injuries, hazards, or anything responders should know…"
+            placeholder={meta.notes}
             placeholderTextColor="#9CA3AF"
             value={description}
             onChangeText={setDescriptionText}
             multiline
             maxLength={1000}
             textAlignVertical="top"
+            accessibilityLabel="Anything else responders should know"
           />
           <Text style={styles.charCount}>{description.length} / 1000</Text>
-        </View>
+        </Section>
 
-        {/* ── Who needs help ────────────────────────────────────────────────── */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionIconWrap}>
-              <Ionicons name="person-outline" size={15} color={C.primary} />
-            </View>
-            <Text style={styles.sectionTitle}>Who Needs Help?</Text>
-          </View>
-
-          <View style={styles.patientList}>
-            {PATIENT_OPTIONS.map((p) => {
-              const active = patient === p.key;
-              return (
-                <TouchableOpacity
-                  key={p.key}
-                  style={[styles.patientRow, active && styles.patientRowActive]}
-                  activeOpacity={0.8}
-                  onPress={() => setPatientChoice(active ? null : p.key)}
-                >
-                  <View style={[
-                    styles.patientIconCircle,
-                    { backgroundColor: active ? C.primarySoft : C.bg },
-                  ]}>
-                    <Ionicons name={p.icon} size={18} color={active ? C.primary : C.textSub} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.patientLabel, active && styles.patientLabelActive]}>
-                      {p.label}
-                    </Text>
-                    <Text style={styles.patientDesc}>{p.desc}</Text>
-                  </View>
-                  <View style={[
-                    styles.patientRadio,
-                    active && styles.patientRadioActive,
-                  ]}>
-                    {active && <View style={styles.patientRadioDot} />}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* ── Disclaimer ────────────────────────────────────────────────────── */}
         <View style={styles.disclaimerRow}>
-          <Ionicons name="information-circle-outline" size={14} color={C.textSub} style={{ marginRight: 6 }} />
+          <Ionicons name="call-outline" size={14} color={C.muted} style={{ marginRight: 6 }} />
           <Text style={styles.disclaimerText}>
-            AGAP complements — never replaces — 911 and the MDRRMO hotline.
+            AGAP complements, never replaces, 911 and the Bocaue MDRRMO hotline.
           </Text>
         </View>
 
         {/* Bottom padding for fixed footer */}
-        <View style={{ height: 100 }} />
+        <View style={{ height: 110 }} />
       </ScrollView>
 
       {/* ── Fixed submit footer ──────────────────────────────────────────────── */}
       <View style={styles.footer}>
-        <View style={styles.footerInner}>
-          <TouchableOpacity
-            style={styles.submitBtn}
-            onPress={submit}
-            activeOpacity={0.87}
-            accessibilityRole="button"
-            accessibilityLabel="Send emergency report"
-          >
-            <View style={styles.submitIconWrap}>
-              <Ionicons name="send" size={18} color={C.white} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.submitTitle}>Send Emergency Report</Text>
-              <Text style={styles.submitSubtitle}>Dispatching to nearest responders</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.7)" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.submitBtn}
+          onPress={submit}
+          activeOpacity={0.87}
+          accessibilityRole="button"
+          accessibilityLabel="Send emergency report"
+        >
+          <View style={styles.submitIconWrap}>
+            <Ionicons name="send" size={18} color={C.white} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.submitTitle}>Send Emergency Report</Text>
+            <Text style={styles.submitSubtitle}>
+              {answered > 0 || affectedCount || selfStatus
+                ? 'Your answers go straight to the dispatcher'
+                : 'You can send now, even without answers'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.75)" />
+        </TouchableOpacity>
       </View>
 
+    </View>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function Section({
+  icon,
+  title,
+  badge,
+  children,
+}: {
+  icon: IoniconName;
+  title: string;
+  badge?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.sectionCard}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionIconWrap}>
+          <Ionicons name={icon} size={16} color={C.primary} />
+        </View>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {badge && (
+          <View style={styles.sectionBadge}>
+            <Text style={styles.sectionBadgeText}>{badge}</Text>
+          </View>
+        )}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function RetakeButton({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <View style={styles.photoOverlay}>
+      <TouchableOpacity style={styles.photoOverlayBtn} onPress={onPress} activeOpacity={0.85}>
+        <Ionicons name="refresh" size={14} color={C.white} style={{ marginRight: 5 }} />
+        <Text style={styles.photoOverlayText}>{label}</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -641,293 +631,180 @@ const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: C.bg },
 
   // ── Header ─────────────────────────────────────────────────────────────────
-  safeTop: { backgroundColor: C.white },
+  safeTop: { backgroundColor: C.white, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   header:  {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingTop: 6,
-    paddingBottom: 8,
-    gap: 10,
-    backgroundColor: C.white,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 10,
+    gap: 12,
   },
   backBtn: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: C.bg,
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: C.surface,
     alignItems: 'center', justifyContent: 'center',
   },
-  brandRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  brandLogo: { width: 128, height: 38 },
-  stepBadge: {
-    backgroundColor: C.primarySoft,
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: `${C.primary}25`,
-  },
-  stepBadgeText: { fontSize: 12, fontWeight: '800', color: C.primary },
+  brandRow:  { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  brandLogo: { width: 122, height: 36 },
+  stepBadge: { backgroundColor: C.primary, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
+  stepBadgeText: { fontSize: 11, fontWeight: '800', color: C.white, letterSpacing: 0.2 },
 
-  // Progress bar
-  progressBarTrack: { height: 3, backgroundColor: C.border },
-  progressBarFill:  { height: 3, backgroundColor: C.primary, borderRadius: 2 },
+  progressBarTrack: { height: 3, backgroundColor: '#E8EDF2' },
+  progressBarFill:  { height: 3, backgroundColor: C.primary },
 
-  // Page title
   pageTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 10,
-    backgroundColor: C.white,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-  },
-  pageTitle:    { fontSize: 22, fontWeight: '800', color: C.navy },
-  pageSubtitle: { fontSize: 12, color: C.textSub, marginTop: 2 },
-
-  // ── Body ───────────────────────────────────────────────────────────────────
-  scroll: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 16 },
-
-  // ── Type context card ──────────────────────────────────────────────────────
-  typeContextCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: C.white,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderWidth: 1,
-    borderColor: C.border,
-    ...SHADOW,
+    paddingHorizontal: 20,
+    paddingTop: 16,
   },
-  typeIconCircle: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  typeContextLabel: { fontSize: 11, color: C.textSub, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4 },
-  typeContextValue: { fontSize: 14, fontWeight: '800', color: C.navy },
-  urgencyBadge: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderRadius: 20,
-  },
-  urgencyDot:  { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
-  urgencyText: { fontSize: 11, fontWeight: '700' },
-
-  // ── Section card ───────────────────────────────────────────────────────────
-  sectionCard: {
-    backgroundColor: C.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 16,
-    marginBottom: 12,
-    ...SHADOW,
-  },
-  sectionHeader: {
+  typeIcon: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  pageEyebrow: { fontSize: 11, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.7 },
+  pageTitle:   { fontSize: 21, fontWeight: '800', color: C.ink, letterSpacing: -0.3, marginTop: 2 },
+  sendNowNote: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    marginHorizontal: 20,
+    marginTop: 12,
     marginBottom: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: C.primarySoft,
   },
+  sendNowText: { flex: 1, fontSize: 12, fontWeight: '600', color: C.primary },
+
+  // ── Body ───────────────────────────────────────────────────────────────────
+  scroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 20 },
+
+  sectionCard: {
+    backgroundColor: C.white,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.border,
+    padding: 16,
+    marginBottom: 14,
+    ...shadow(0.06, 12, 4, 2),
+  },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   sectionIconWrap: {
-    width: 28, height: 28, borderRadius: 14,
+    width: 34, height: 34, borderRadius: 17,
     backgroundColor: C.primarySoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  sectionTitle: { flex: 1, fontSize: 14, fontWeight: '800', color: C.navy },
-  optionalTag:  { fontSize: 11, color: C.textSub, fontStyle: 'italic' },
+  sectionTitle: { flex: 1, fontSize: 16, fontWeight: '800', color: C.ink, letterSpacing: -0.1 },
+  sectionBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, backgroundColor: C.surface },
+  sectionBadgeText: { fontSize: 11, fontWeight: '700', color: C.muted },
+
+  // ── Location ───────────────────────────────────────────────────────────────
+  gpsRow: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    padding: 12, borderRadius: 16,
+    backgroundColor: C.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border,
+  },
+  gpsRowOk:   { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
+  gpsRowWarn: { backgroundColor: C.redSoft, borderColor: '#FECACA' },
+  gpsTitle:   { fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  gpsAddress: { fontSize: 12, color: C.muted, marginTop: 3, lineHeight: 17 },
+  fieldLabel: { fontSize: 13, fontWeight: '700', color: C.ink, marginTop: 14, marginBottom: 8 },
+  fieldHint:  { fontSize: 11.5, color: C.muted, marginTop: 6, lineHeight: 16 },
+  input: {
+    height: 48,
+    borderWidth: 1,
+    borderColor: '#DCE3EA',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    fontSize: 14,
+    color: C.ink,
+    backgroundColor: C.white,
+  },
+
+  // ── Questions ──────────────────────────────────────────────────────────────
+  promptBlock:   { paddingVertical: 12 },
+  promptDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border },
+  promptQuestion:{ fontSize: 14, fontWeight: '700', color: C.ink, lineHeight: 20, marginBottom: 10 },
+  promptMeta:    { fontSize: 11.5, color: C.muted, marginTop: -6, marginBottom: 10 },
+  hintRow: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    marginTop: -4, marginBottom: 10,
+    paddingHorizontal: 10, paddingVertical: 7,
+    borderRadius: 10, backgroundColor: C.amberSoft,
+  },
+  hintText: { flex: 1, fontSize: 11.5, color: C.amber, fontWeight: '600', lineHeight: 16 },
+  pillRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pill: {
+    flexDirection: 'row', alignItems: 'center',
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.surface,
+  },
+  pillActive:     { borderColor: C.primary, backgroundColor: C.primarySoft },
+  pillText:       { fontSize: 13, fontWeight: '600', color: C.ink },
+  pillTextActive: { color: C.primary, fontWeight: '800' },
+
+  // ── People ─────────────────────────────────────────────────────────────────
+  countRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  countCard: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+  },
+  countCardActive: { borderColor: C.primary, backgroundColor: C.primarySoft },
+  countText:       { fontSize: 13, fontWeight: '700', color: C.ink },
+  countTextActive: { color: C.primary, fontWeight: '800' },
+  selfRow:  { flexDirection: 'row', gap: 10 },
+  selfCard: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+  },
+  selfLabel: { fontSize: 14, fontWeight: '800', color: C.ink, marginTop: 8 },
+  selfDesc:  { fontSize: 12, color: C.muted, marginTop: 2, lineHeight: 16 },
 
   // ── Photo ──────────────────────────────────────────────────────────────────
-  photoContainer: {
-    height: 190,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: C.bg,
-  },
+  photoContainer: { height: 170, borderRadius: 16, overflow: 'hidden', backgroundColor: C.surface },
   photo: { width: '100%', height: '100%' },
-  photoOverlay: {
-    position: 'absolute',
-    bottom: 10, right: 10,
-  },
+  photoOverlay: { position: 'absolute', bottom: 10, right: 10 },
   photoOverlayBtn: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(26,43,74,0.80)',
+    backgroundColor: 'rgba(29,43,58,0.82)',
     borderRadius: 20,
     paddingHorizontal: 12, paddingVertical: 7,
   },
   photoOverlayText: { color: C.white, fontSize: 12, fontWeight: '700' },
   photoEmpty: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: C.border, borderStyle: 'dashed',
-    borderRadius: 12,
+    borderWidth: 1.5, borderColor: '#D7E0E8', borderStyle: 'dashed',
+    borderRadius: 16,
     gap: 6, padding: 20,
   },
   photoEmptyIcon: {
-    width: 52, height: 52, borderRadius: 26,
+    width: 50, height: 50, borderRadius: 25,
     backgroundColor: C.primarySoft,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 4,
   },
-  photoEmptyTitle: { fontSize: 14, fontWeight: '700', color: C.navy },
-  photoEmptyDesc:  { fontSize: 12, color: C.textSub, textAlign: 'center' },
-
-  // ── GPS card ───────────────────────────────────────────────────────────────
-  gpsRow: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    padding: 12, borderRadius: 12,
-    backgroundColor: C.bg, borderWidth: 1, borderColor: C.border,
-  },
-  gpsRowOk:       { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
-  gpsRowWarn:     { backgroundColor: C.redSoft, borderColor: '#FECACA' },
-  gpsRowLocating: { backgroundColor: C.bg,      borderColor: C.border  },
-  gpsTitle:       { fontSize: 13, fontWeight: '700', lineHeight: 18 },
-  gpsAddress:     { fontSize: 12, color: C.textMid, marginTop: 3, lineHeight: 17 },
-  manualAddressWrap: { marginTop: 12 },
-  manualAddressLabel: { fontSize: 13, fontWeight: '600', color: C.navy, marginBottom: 8 },
-  optionalInline:     { color: C.textSub, fontWeight: '400', fontSize: 12 },
-  manualInput: {
-    height: 46,
-    borderWidth: 1.5,
-    borderColor: C.border,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    fontSize: 14,
-    color: C.navy,
-    backgroundColor: C.white,
-  },
-
-  // ── Chip grid (affected count) ─────────────────────────────────────────────
-  chipGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chipCard: {
-    flex: 1, minWidth: '22%',
-    alignItems: 'center',
-    paddingVertical: 12, paddingHorizontal: 8,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: C.border,
-    backgroundColor: C.bg,
-  },
-  chipCardActive:     { borderColor: C.primary, backgroundColor: C.primarySoft },
-  chipCardText:       { fontSize: 12, fontWeight: '600', color: C.textSub, textAlign: 'center' },
-  chipCardTextActive: { color: C.primary, fontWeight: '700' },
-
-  // ── Quick prompts ──────────────────────────────────────────────────────────
-  promptBlock:  { paddingVertical: 12 },
-  promptBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
-  promptQuestion:{ fontSize: 13, fontWeight: '700', color: C.navy, marginBottom: 10 },
-  pillRow:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pill: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1.5, borderColor: C.border,
-    backgroundColor: C.bg,
-  },
-  pillActive:     { borderColor: C.primary, backgroundColor: C.primarySoft },
-  pillText:       { fontSize: 13, fontWeight: '600', color: C.textSub },
-  pillTextActive: { color: C.primary, fontWeight: '700' },
-
-  // ── Description ────────────────────────────────────────────────────────────
-  textArea: {
-    minHeight: 100,
-    borderWidth: 1.5,
-    borderColor: C.border,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 14,
-    color: C.navy,
-    backgroundColor: C.bg,
-    lineHeight: 20,
-  },
-  charCount: { fontSize: 11, color: C.textSub, textAlign: 'right', marginTop: 6 },
-
-  // ── Patient selector ───────────────────────────────────────────────────────
-  patientList: { gap: 8 },
-  patientRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    padding: 14, borderRadius: 14,
-    borderWidth: 1.5, borderColor: C.border,
-    backgroundColor: C.bg,
-  },
-  patientRowActive: { borderColor: C.primary, backgroundColor: C.primarySoft },
-  patientIconCircle: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  patientLabel:       { fontSize: 14, fontWeight: '700', color: C.navy },
-  patientLabelActive: { color: C.primary },
-  patientDesc:        { fontSize: 12, color: C.textSub, marginTop: 1 },
-  patientRadio: {
-    width: 20, height: 20, borderRadius: 10,
-    borderWidth: 2, borderColor: C.border,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  patientRadioActive: { borderColor: C.primary },
-  patientRadioDot: {
-    width: 10, height: 10, borderRadius: 5,
-    backgroundColor: C.primary,
-  },
-
-  // ── Disclaimer ─────────────────────────────────────────────────────────────
-  disclaimerRow: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    marginTop: 4,
-    paddingHorizontal: 4,
-  },
-  disclaimerText: { flex: 1, fontSize: 11, color: C.textSub, lineHeight: 17 },
-
-  // ── Submit footer ──────────────────────────────────────────────────────────
-  footer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: C.white,
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
-    paddingHorizontal: 16,
-    ...SHADOW,
-    shadowOffset: { width: 0, height: -3 },
-  },
-  footerInner: {},
-  submitBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: C.red,
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    ...SHADOW,
-    shadowColor: C.red,
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  submitIconWrap: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  submitTitle:    { fontSize: 15, fontWeight: '800', color: C.white },
-  submitSubtitle: { fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
-
-  // ── Video poster ───────────────────────────────────────────────────────────
+  photoEmptyTitle: { fontSize: 14, fontWeight: '800', color: C.ink },
+  photoEmptyDesc:  { fontSize: 12, color: C.muted, textAlign: 'center', lineHeight: 18 },
   videoPoster: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#0F172A',
-    borderRadius: 12,
     gap: 8, padding: 20,
   },
   videoPlayCircle: {
-    width: 64, height: 64, borderRadius: 32,
+    width: 60, height: 60, borderRadius: 30,
     backgroundColor: C.primarySoft,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 4,
@@ -935,12 +812,48 @@ const styles = StyleSheet.create({
   videoCapturedTitle: { fontSize: 14, fontWeight: '700', color: C.white },
   videoCapturedSub:   { fontSize: 12, color: 'rgba(255,255,255,0.6)', textAlign: 'center' },
 
-  // ── Shared ─────────────────────────────────────────────────────────────────
-  confirmedBadge: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.greenSoft,
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderRadius: 20,
+  // ── Notes ──────────────────────────────────────────────────────────────────
+  textArea: {
+    minHeight: 104,
+    borderWidth: 1,
+    borderColor: '#DCE3EA',
+    borderRadius: 16,
+    padding: 14,
+    fontSize: 14,
+    color: C.ink,
+    backgroundColor: C.white,
+    lineHeight: 21,
   },
-  confirmedText: { fontSize: 11, fontWeight: '700', color: C.green },
+  charCount: { fontSize: 11, color: C.muted, textAlign: 'right', marginTop: 8 },
+
+  disclaimerRow:  { flexDirection: 'row', alignItems: 'flex-start', marginTop: 2, paddingHorizontal: 6 },
+  disclaimerText: { flex: 1, fontSize: 11.5, color: C.muted, lineHeight: 17 },
+
+  // ── Submit footer ──────────────────────────────────────────────────────────
+  footer: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: C.white,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.border,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    paddingHorizontal: 16,
+    ...shadow(0.08, 12, -3, 8),
+  },
+  submitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: C.red,
+    borderRadius: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  submitIconWrap: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  submitTitle:    { fontSize: 15, fontWeight: '800', color: C.white },
+  submitSubtitle: { fontSize: 11.5, color: 'rgba(255,255,255,0.85)', marginTop: 3 },
 });

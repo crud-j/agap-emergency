@@ -1,8 +1,9 @@
 import type { IncidentEventName, IncidentCreatedPayload, IncidentStatusChangedPayload, IncidentLocationUpdatedPayload, IncidentAssignedPayload, IncidentMessagePayload } from './incident.events';
-import type { ResponderEventName, ResponderLocationUpdatedPayload, ResponderStatusChangedPayload } from './responder.events';
-import type { DispatchEventName, DispatchCreatedPayload, DispatchCancelledPayload } from './dispatch.events';
+import type { ResponderEventName, ResponderLocationUpdatedPayload, ResponderStatusChangedPayload, ResponderEtaUpdatedPayload } from './responder.events';
+import type { DispatchEventName, DispatchCreatedPayload, DispatchCancelledPayload, DispatchUpdatedPayload } from './dispatch.events';
 import type { EscalationEventName, EscalationPayload } from './escalation.events';
 import type { AnnouncementEventName, AnnouncementPublishedPayload } from './announcement.events';
+import type { BarangayEventName, BarangayNoticeUpdatedPayload } from './barangay.events';
 import type { NotificationEventName, NotificationCreatedPayload } from './notification.events';
 
 export type AgapEventName =
@@ -11,7 +12,8 @@ export type AgapEventName =
   | DispatchEventName
   | EscalationEventName
   | AnnouncementEventName
-  | NotificationEventName;
+  | NotificationEventName
+  | BarangayEventName;
 
 export interface AgapWebSocketEvent<T = unknown> {
   event: AgapEventName;
@@ -26,13 +28,14 @@ export type AgapWebSocketPayloadMap = {
   'incident.assigned': IncidentAssignedPayload;
   'responder.location_updated': ResponderLocationUpdatedPayload;
   'responder.status_changed': ResponderStatusChangedPayload;
-  'responder.eta_updated': Record<string, unknown>;
+  'responder.eta_updated': ResponderEtaUpdatedPayload;
   'dispatch.created': DispatchCreatedPayload;
-  'dispatch.updated': Record<string, unknown>;
+  'dispatch.updated': DispatchUpdatedPayload;
   'dispatch.cancelled': DispatchCancelledPayload;
   'escalation.created': EscalationPayload;
   'escalation.updated': EscalationPayload;
   'announcement.published': AnnouncementPublishedPayload;
   'notification.created': NotificationCreatedPayload;
   'message.created': IncidentMessagePayload;
+  'barangay.notice_updated': BarangayNoticeUpdatedPayload;
 };

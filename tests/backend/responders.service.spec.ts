@@ -89,7 +89,7 @@ describe('RespondersService', () => {
 
     it('returns user, availability, and active assignment count', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
-      mockPrisma.responderAvailability.findUnique.mockResolvedValue(availabilityAvailable);
+      mockPrisma.responderAvailability.upsert.mockResolvedValue(availabilityAvailable);
       mockPrisma.dispatches.count.mockResolvedValue(2);
 
       const result = await service.getMySummary(USER_ID);
@@ -103,7 +103,7 @@ describe('RespondersService', () => {
 
     it('organizations is empty array when no active memberships', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ ...mockUser, organization_memberships: [] });
-      mockPrisma.responderAvailability.findUnique.mockResolvedValue(availabilityAvailable);
+      mockPrisma.responderAvailability.upsert.mockResolvedValue(availabilityAvailable);
       mockPrisma.dispatches.count.mockResolvedValue(0);
 
       const result = await service.getMySummary(USER_ID);
@@ -115,13 +115,28 @@ describe('RespondersService', () => {
       await expect(service.getMySummary(USER_ID)).rejects.toThrow(NotFoundException);
     });
 
-    it('throws 500 AVAILABILITY_RECORD_MISSING when no availability row', async () => {
+    it('creates an OFF_DUTY availability row when none exists', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
-      mockPrisma.responderAvailability.findUnique.mockResolvedValue(null);
+      mockPrisma.responderAvailability.upsert.mockResolvedValue({
+        user_id: USER_ID,
+        status: 'OFF_DUTY',
+        changed_at: NOW,
+        source: 'SYSTEM',
+      });
 
-      const err = await service.getMySummary(USER_ID).catch((e) => e);
-      expect(err).toBeInstanceOf(InternalServerErrorException);
-      expect(err.message).toContain('AVAILABILITY_RECORD_MISSING');
+      const result = await service.getMySummary(USER_ID);
+
+      expect(result.availability.status).toBe('OFF_DUTY');
+      expect(mockPrisma.responderAvailability.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { user_id: USER_ID },
+          create: expect.objectContaining({
+            user_id: USER_ID,
+            status: 'OFF_DUTY',
+            source: 'SYSTEM',
+          }),
+        }),
+      );
     });
   });
 

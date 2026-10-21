@@ -8,6 +8,25 @@ Citizen/guest reporter accounts are intentionally excluded.
 - **Roles** match the `user_role` enum and MOD-47 (RBAC).
 
 > ⚠️ **Development credentials only.** Change every password before any non-dev deployment. Never commit real secrets (`CLAUDE.md`).
+>
+> **First web login:** every seeded web-console account must change its password before opening the console.
+> Passwords must be 12–128 characters and must not contain the account holder's name, email local-part,
+> `AGAP`, or `Bocaue`, or be among the common-password list. Mobile-only Responder accounts are not forced
+> through this web flow.
+>
+> **Second step (MFA):** web-console staff (System Administrator, Org Administrator, Supervisor, Dispatcher,
+> Hospital User, Announcements Publisher) use an authenticator app, a passkey, or a backup code in addition to
+> the password. While `AUTH_MFA_ENFORCED=false` it is optional and offered under **Account security**
+> (shield icon in the top bar). After a forced password change, a staff member without a factor is guided through
+> optional passkey and authenticator setup; either step can be skipped. The authenticator step shows ten one-time
+> backup codes and requires confirmation that they were saved. Once `AUTH_MFA_ENFORCED=true`, a staff account with
+> no second factor is taken through the separate mandatory enrollment flow at its next sign-in, with no skip.
+> Citizens, bystanders and Responders (mobile) never see this step.
+>
+> **Lockout:** five wrong passwords or codes lock a staff account for 15 minutes (then 30, then 60). A browser the
+> user chose to *trust for this shift* (12 h) is exempt from the lock. A System Administrator can use the
+> administration unlock action; until supervisor/organization-admin scoping ships, other locked accounts are
+> released by waiting or by a System Administrator.
 
 ---
 
@@ -90,4 +109,13 @@ Citizen/guest reporter accounts are intentionally excluded.
 ## Notes
 - All accounts above are created with `is_email_verified = true`, so they can log in immediately after seeding.
 - Passwords are bcrypt-hashed at seed time; the plaintext dev password is `AgapDev2026!` (printed by the seed summary).
+- Web-console accounts are seeded with `must_change_password = true`; the shared development password is only for the first sign-in and is rejected as a replacement because it contains `AGAP`.
+- Responder accounts are not part of the web forced-change rollout, so their mobile login flow remains unchanged.
+- Seeded accounts start with **no** second factor. With `AUTH_MFA_ENFORCED=false` they sign in with the password alone until they enroll.
+- A staff account that signs in from the mobile app receives “This account signs in on the Operations Center web console” once it has a second factor; mobile MFA is a follow-up.
+- Web sign-in starts with the email address and offers passkey sign-in first. Password mode remains available, and
+  browsers without WebAuthn support use password mode automatically.
+- After a successful web sign-in, this browser may remember up to five account names and email addresses for an
+  account picker. It stores no passwords, tokens or MFA data; users can remove entries or use another account.
+- Password reset for staff is by a person (Supervisor / System Administrator), not self-service; the web “Forgot password?” page says so.
 - RBAC is enforced server-side in order: identity → role → organization → ownership → permission (`CLAUDE.md` Security Model). The accounts above only *have* a login; actual capabilities are gated by these checks.

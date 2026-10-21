@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { IncidentType } from '@agap/shared';
+import type { IncidentType, IntakeAnswers, ReporterStatus } from '@agap/shared';
 import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
 
 interface LocationData {
@@ -20,8 +20,16 @@ interface PatientData {
   sex?: 'male' | 'female' | 'other' | 'unknown';
 }
 
+/** MOD-09 structured caller intake, validated by the backend against the shared catalog. */
+export interface IntakeDraft {
+  answers: IntakeAnswers;
+  reporterStatus: ReporterStatus | null;
+  landmark: string | null;
+}
+
 interface IncidentDraft {
   idempotencyKey: string | null;
+  isGuestReport: boolean;
   type: IncidentType | null;
   description: string | null;
   location: LocationData | null;
@@ -34,6 +42,7 @@ interface IncidentDraft {
   hazards: string[];
   responseNeeds: string[];
   manualAddress: string | null;
+  intake: IntakeDraft | null;
 }
 
 interface IncidentState {
@@ -41,25 +50,29 @@ interface IncidentState {
   activeIncidentId: string | null;
 
   startSOS: () => void;
+  beginGuestReport: () => void;
   setIncidentType: (type: IncidentType) => void;
   setPatientIsReporter: (isReporter: boolean) => void;
-  setPatient: (patient: PatientData) => void;
+  setPatient: (patient: PatientData | null) => void;
   setLocation: (location: LocationData) => void;
+  clearLocation: () => void;
   addPhoto: (uri: string) => void;
   setPhotos: (uris: string[]) => void;
   setPhotoCaptureMeta: (meta: PhotoCaptureMeta | null) => void;
   setVideoUri: (uri: string | null) => void;
-  setDescription: (desc: string) => void;
+  setDescription: (desc: string | null) => void;
   setAffectedCount: (count: string | null) => void;
   setHazards: (hazards: string[]) => void;
   setResponseNeeds: (needs: string[]) => void;
   setManualAddress: (address: string | null) => void;
+  setIntake: (intake: IntakeDraft | null) => void;
   reset: () => void;
   setActiveIncidentId: (id: string | null) => void;
 }
 
 const DEFAULT_DRAFT: IncidentDraft = {
   idempotencyKey: null,
+  isGuestReport: false,
   type: null,
   description: null,
   location: null,
@@ -71,6 +84,7 @@ const DEFAULT_DRAFT: IncidentDraft = {
   hazards: [],
   responseNeeds: [],
   manualAddress: null,
+  intake: null,
 };
 
 export const useIncidentStore = create<IncidentState>((set) => ({
@@ -83,6 +97,16 @@ export const useIncidentStore = create<IncidentState>((set) => ({
         ...DEFAULT_DRAFT,
         idempotencyKey: generateUUID(),
       },
+    })),
+
+  beginGuestReport: () =>
+    set(() => ({
+      draft: {
+        ...DEFAULT_DRAFT,
+        idempotencyKey: generateUUID(),
+        isGuestReport: true,
+      },
+      activeIncidentId: null,
     })),
 
   setIncidentType: (type) =>
@@ -101,6 +125,9 @@ export const useIncidentStore = create<IncidentState>((set) => ({
 
   setLocation: (location) =>
     set((s) => ({ draft: { ...s.draft, location } })),
+
+  clearLocation: () =>
+    set((s) => ({ draft: { ...s.draft, location: null } })),
 
   addPhoto: (uri) =>
     set((s) => ({
@@ -133,6 +160,9 @@ export const useIncidentStore = create<IncidentState>((set) => ({
 
   setManualAddress: (manualAddress) =>
     set((s) => ({ draft: { ...s.draft, manualAddress } })),
+
+  setIntake: (intake) =>
+    set((s) => ({ draft: { ...s.draft, intake } })),
 
   reset: () => set({ draft: { ...DEFAULT_DRAFT }, activeIncidentId: null }),
 

@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   RefreshControl,
   StatusBar,
-  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,11 +15,10 @@ import { useAuthStore } from '@/src/stores/auth.store';
 import type { Assignment } from '@/src/services/api/responders.api';
 import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
 import { categoryIcon, categoryColor, priorityColor, titleCase } from '@/src/lib/incident-visuals';
-
-const AGAP_ICON = require('../../assets/icons/agap-solo-icon.png') as number;
+import { AgapLogo } from '@/src/components/brand/AgapLogo';
 
 const COLORS = {
-  pearl: '#F5F7FA',
+  pearl: '#F2F5F8',
   white: '#FFFFFF',
   green: '#0D6053',
   greenSoft: '#EEF7F4',
@@ -98,13 +96,7 @@ export default function AssignmentsScreen() {
         {/* ── Header bar ───────────────────────────────────────────────── */}
         <View style={styles.headerTopRow}>
           <View style={styles.headerLeft}>
-            <View style={styles.logoWrap}>
-              <Image source={AGAP_ICON} style={styles.logoIcon} resizeMode="contain" />
-            </View>
-            <View>
-              <Text style={styles.logoName}>AGAP</Text>
-              <Text style={styles.logoOrg}>MDRRMO Bocaue</Text>
-            </View>
+            <AgapLogo />
           </View>
           <View style={styles.headerRight}>
             <View style={[
@@ -366,10 +358,6 @@ const styles = StyleSheet.create({
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   headerLeft:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerRight:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logoWrap:     { width: 38, height: 38, borderRadius: 10, backgroundColor: '#0D6053', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  logoIcon:     { width: 38, height: 38 },
-  logoName:     { fontSize: 15, fontWeight: '800', color: '#1C2B3A', lineHeight: 18 },
-  logoOrg:      { fontSize: 11, color: '#8795A3', lineHeight: 15 },
   connPill:     { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
   connDot:      { width: 7, height: 7, borderRadius: 4 },
   connText:     { fontSize: 12, fontWeight: '600' },

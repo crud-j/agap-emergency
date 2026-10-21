@@ -27,6 +27,7 @@ export function useIncidentEvent<T>(
 /**
  * Join an incident-scoped WS room so the component receives events for
  * that specific incident (e.g. citizen status screen, responder view).
+ * Rejoins after every reconnect (the server forgets rooms when a socket drops).
  * Leaves the room on unmount or when incidentId changes.
  */
 export function useJoinIncidentRoom(incidentId: string | null): void {
@@ -35,8 +36,9 @@ export function useJoinIncidentRoom(incidentId: string | null): void {
     const s = getSocket();
     const join = () => s.emit('join:incident', { incidentId });
     if (s.connected) join();
-    else s.once('connect', join);
+    s.on('connect', join);
     return () => {
+      s.off('connect', join);
       s.emit('leave:incident', { incidentId });
     };
   }, [incidentId]);

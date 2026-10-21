@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
@@ -12,9 +13,22 @@ import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentStatusService } from './incident-status/incident-status.service';
 import { DuplicateDetectionService } from './duplicate-detection/duplicate-detection.service';
 import { PriorityService } from './priority/priority.service';
-import { IncidentStatus, IncidentType, IncidentPriority, isCoordinateInBocaue } from '@agap/shared';
+import { BarangayNotifyService } from '../barangay-coordination/barangay-notify.service';
+import {
+  IncidentStatus,
+  IncidentType,
+  IncidentPriority,
+  UserRole,
+  TERMINAL_INCIDENT_STATUSES,
+  isCoordinateInBocaue,
+  sanitizeIntakeAnswers,
+  intakeReportLines,
+  resolveIntakeCategory,
+  type IntakeAnswers,
+} from '@agap/shared';
 import { Prisma, type Incident } from '@prisma/client';
 import { EmergencyContactNotificationService } from '../emergency-contacts/emergency-contact-notification.service';
+import { REPORTER_SEX_INCLUDE, reporterSexFrom, type ReporterSex } from '../common/utils/reporter-sex';
 
 @Injectable()
 export class IncidentsService {
@@ -28,11 +42,17 @@ export class IncidentsService {
     private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
     private readonly contactNotification: EmergencyContactNotificationService,
+    @Optional() private readonly barangayNotify?: BarangayNotifyService,
   ) {}
 
-  async create(dto: CreateIncidentDto, actorId?: string): Promise<Incident> {
+  async create(dto: CreateIncidentDto, actorId?: string, actorRole?: UserRole): Promise<Incident> {
     if ((dto.lat === undefined) !== (dto.lng === undefined)) {
       throw new BadRequestException('Latitude and longitude must be provided together.');
+    }
+    if (!actorId && (dto.lat === undefined || dto.lng === undefined)) {
+      throw new BadRequestException(
+        'Guest emergency reports require GPS coordinates within Bocaue Municipality, Bulacan.',
+      );
     }
     if (dto.lat !== undefined && dto.lng !== undefined && !isCoordinateInBocaue(dto.lat, dto.lng)) {
       throw new BadRequestException('Incident location must be within Bocaue Municipality, Bulacan.');
@@ -46,39 +66,48 @@ export class IncidentsService {
       return existing;
     }
 
+    // MOD-09: keep only answers the shared intake catalog defines, then file the
+    // report under the category the answers describe (natural disaster + flooding → FLOOD).
+    const intakeAnswers: IntakeAnswers = sanitizeIntakeAnswers(dto.type, dto.intake?.answers);
+    const category = resolveIntakeCategory(dto.type, intakeAnswers);
+    const hasIntakeAnswers = Object.keys(intakeAnswers).length > 0;
+    const landmark = dto.intake?.landmark?.trim() || null;
+
     if (dto.lat !== undefined && dto.lng !== undefined) {
-      const possible = await this.duplicateService.findNearbyRecent(dto.lat, dto.lng, dto.type);
+      const possible = await this.duplicateService.findNearbyRecent(dto.lat, dto.lng, category);
       if (possible) {
         this.logger.warn(`Possible duplicate of ${possible.id} detected`);
       }
     }
 
-    const priority = dto.priority ?? this.priorityService.recommend(dto.type);
+    const recommendation = this.priorityService.recommend(category, intakeAnswers);
+    const priority = dto.priority ?? recommendation.priority;
     const reference = await this.generateReference();
 
-    // Merge citizen-supplied hazard observations + response need requests into one flags array.
+    // Keep caller estimates as ranges; never turn a range into a fabricated count.
+    // Intake answers are also flattened into hazard_flags so older consumers
+    // (queue, SMS summaries, exports) keep reading one list.
     const hazardFlags: string[] = [
+      ...intakeReportLines(category, intakeAnswers),
       ...(dto.hazards ?? []),
       ...(dto.responseNeeds ?? []).map((n) => `DISPATCH:${n}`),
+      ...(dto.affectedCount ? [`AFFECTED_COUNT:${dto.affectedCount}`] : []),
     ];
 
-    // Map the affected-count bucket to a numeric estimate for priority scoring.
-    const numberOfPatients = dto.affectedCount
-      ? ({ '1': 1, '2-5': 3, '5+': 10 } as Record<string, number>)[dto.affectedCount] ?? null
-      : null;
+    const numberOfPatients = dto.affectedCount === '1' ? 1 : null;
 
     const incident = await this.prisma.$transaction(async (tx) => {
       const inc = await tx.incident.create({
         data: {
           public_reference: reference,
-          category: dto.type as any,
+          category: category as any,
           priority: priority as any,
           status: IncidentStatus.SUBMITTED as any,
           description: dto.description ?? null,
+          number_of_patients: numberOfPatients,
           client_event_id: dto.idempotencyKey,
           trigger_method: 'MANUAL_REPORT' as any,
           hazard_flags: hazardFlags,
-          ...(numberOfPatients !== null ? { number_of_patients: numberOfPatients } : {}),
         },
       });
 
@@ -89,8 +118,27 @@ export class IncidentsService {
           is_guest: !actorId,
           reporter_name: dto.reporter?.name ?? null,
           reporter_phone: dto.reporter?.phone ?? null,
+          reporter_status: dto.intake?.reporterStatus ?? null,
         },
       });
+
+      if (hasIntakeAnswers || recommendation.reasons.length) {
+        await tx.incident_details.create({
+          data: {
+            incident_id: inc.id,
+            caller_answers: intakeAnswers as Prisma.InputJsonValue,
+            priority_reasons: recommendation.reasons,
+            // Legacy columns, filled only from an explicit caller answer.
+            people_affected: numberOfPatients,
+            property_damage: null,
+            fire_spreading: yesNo(intakeAnswers.spreading),
+            road_blocked: intakeAnswers.traffic
+              ? intakeAnswers.traffic[0] !== 'clear'
+              : null,
+            water_level_note: intakeReportLines(category, pick(intakeAnswers, 'water_level', 'water_trend')).join('; ') || null,
+          },
+        });
+      }
 
       if (dto.patient != null) {
         await tx.incident_patients.create({
@@ -114,6 +162,7 @@ export class IncidentsService {
             latitude: dto.lat,
             longitude: dto.lng,
             formatted_address: dto.address ?? null,
+            landmark,
             source: locationSource,
           },
         });
@@ -127,6 +176,7 @@ export class IncidentsService {
             latitude: 0,
             longitude: 0,
             formatted_address: dto.address,
+            landmark,
             source: 'MANUAL',
           },
         });
@@ -172,6 +222,9 @@ export class IncidentsService {
       );
     }
 
+    // Tag the incident with its barangay. Never throws; the incident is already saved.
+    void this.barangayNotify?.notifyForIncident(incident.id);
+
     return incident;
   }
 
@@ -181,9 +234,11 @@ export class IncidentsService {
       include: {
         incident_reporters: true,
         incident_patients: true,
+        incident_details: { select: { caller_answers: true, priority_reasons: true } },
         incident_attachments: true,
         incident_events: { orderBy: { occurred_at: 'asc' } },
         incident_locations: true,
+        barangay_notices: { include: { barangay: { select: { id: true, name: true } } } },
         dispatches: true,
         on_scene_assessments: { orderBy: { assessed_at: 'desc' } },
       },
@@ -192,10 +247,23 @@ export class IncidentsService {
     return incident;
   }
 
+  /**
+   * Derived reporter map-icon sex. Callers must restrict this to staff and
+   * assigned crew (see IncidentsController.findOne).
+   */
+  async getReporterSex(incidentId: string): Promise<ReporterSex> {
+    const reporter = await this.prisma.incidentReporter.findUnique({
+      where: { incident_id: incidentId },
+      ...REPORTER_SEX_INCLUDE,
+    });
+    return reporterSexFrom(reporter);
+  }
+
   async findAll(params: {
     page?: number | undefined;
     perPage?: number | undefined;
     status?: IncidentStatus | undefined;
+    statuses?: IncidentStatus[] | undefined;
   }) {
     const page = params.page ?? 1;
     const perPage = Math.min(params.perPage ?? 20, 100);
@@ -204,6 +272,8 @@ export class IncidentsService {
     const where: Prisma.IncidentWhereInput = {};
     if (params.status) {
       where.status = params.status as any;
+    } else if (params.statuses?.length) {
+      where.status = { in: params.statuses as any[] };
     }
 
     // NOTE: run sequentially (not via `$transaction([...])`). Prisma 7 drops
@@ -213,7 +283,23 @@ export class IncidentsService {
       where,
       // Include location so the dispatch dashboard + map can place incidents
       // without an N+1 fetch (MOD-21/MOD-22).
-      include: { incident_locations: true },
+      include: {
+        incident_locations: true,
+        incident_reporters: {
+          select: { ...REPORTER_SEX_INCLUDE.select, reporter_status: true },
+        },
+        // Lets the queue show why an incident was raised to CRITICAL (MOD-24).
+        incident_details: { select: { priority_reasons: true } },
+        // Barangay chip + last barangay report for the queue.
+        barangay_notices: {
+          select: {
+            is_approximate: true,
+            last_report: true,
+            last_report_at: true,
+            barangay: { select: { id: true, name: true } },
+          },
+        },
+      },
       orderBy: { submitted_at: 'desc' },
       ...(skip > 0 ? { skip } : {}),
       take: perPage,
@@ -221,7 +307,15 @@ export class IncidentsService {
     const total = await this.prisma.incident.count({ where });
 
     return {
-      data,
+      // Ops-only list: expose the derived reporter_sex (map icon) and strip the
+      // raw users.sex so PREFER_NOT_TO_SAY never leaves the server.
+      data: data.map(({ incident_reporters, ...incident }) => ({
+        ...incident,
+        incident_reporters: incident_reporters
+          ? { is_guest: incident_reporters.is_guest, reporter_status: incident_reporters.reporter_status }
+          : null,
+        reporter_sex: reporterSexFrom(incident_reporters),
+      })),
       meta: {
         total,
         page,
@@ -398,6 +492,11 @@ export class IncidentsService {
       this.logger.warn(`Realtime emit failed for incident.status_changed: ${String(err)}`);
     }
 
+    if (newStatus === IncidentStatus.RESOLVED || TERMINAL_INCIDENT_STATUSES.has(newStatus)) {
+      // Frees the barangay short code for reuse.
+      void this.barangayNotify?.closeNoticesForIncident(id);
+    }
+
     return updated;
   }
 
@@ -451,6 +550,15 @@ export class IncidentsService {
     }
 
     return attachment;
+  }
+
+  /** Best-effort fan-out so open dashboards pick up newly uploaded evidence. */
+  notifyAttachmentAdded(incidentId: string, attachmentId: string): void {
+    try {
+      this.realtime.incidentUpdated(incidentId, { change: 'attachment_added', attachmentId });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for attachment ${attachmentId}: ${String(err)}`);
+    }
   }
 
   async listAttachments(incidentId: string) {
@@ -555,6 +663,8 @@ export class IncidentsService {
       this.logger.warn(`Realtime emit failed for false-alert status change: ${String(err)}`);
     }
 
+    void this.barangayNotify?.closeNoticesForIncident(id);
+
     return updated;
   }
 
@@ -591,6 +701,8 @@ export class IncidentsService {
     } catch (err) {
       this.logger.warn(`Realtime emit failed for duplicate status change: ${String(err)}`);
     }
+
+    void this.barangayNotify?.closeNoticesForIncident(id);
 
     return updated;
   }
@@ -663,6 +775,8 @@ export class IncidentsService {
     } catch (err) {
       this.logger.warn(`Realtime emit failed for duplicate merge: ${String(err)}`);
     }
+
+    void this.barangayNotify?.closeNoticesForIncident(id);
 
     return updated;
   }
@@ -1004,4 +1118,15 @@ export class IncidentsService {
     this.realtime.incidentUpdated(incidentId, { agencyRemoved: organizationId });
     return { message: 'Agency removed from incident' };
   }
+}
+
+/** yes → true, no → false, unknown or unanswered → null (never a guess). */
+function yesNo(values: string[] | undefined): boolean | null {
+  if (values?.includes('yes')) return true;
+  if (values?.includes('no')) return false;
+  return null;
+}
+
+function pick(answers: IntakeAnswers, ...keys: string[]): IntakeAnswers {
+  return Object.fromEntries(keys.filter((k) => answers[k]).map((k) => [k, answers[k]!]));
 }

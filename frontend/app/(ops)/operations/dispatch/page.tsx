@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type JSX, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import {
   Siren, Truck, MapPin, Users, Sparkles, CheckCircle2, ExternalLink,
@@ -18,11 +18,14 @@ import {
 } from '@/features/dispatch/hooks';
 import { useResponders } from '@/features/responders/hooks';
 import { useIncident, useUpdateIncidentStatus } from '@/features/incidents/hooks';
-import { useLiveResponders } from '@/features/map/hooks';
-import { categoryIcon, titleCase, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
+import { useIncidentUnits, useLiveResponders, useRouteLine } from '@/features/map/hooks';
+import { formatEta, trackingPhase } from '@/features/map/live-tracking';
+import { UnitTrackingCard } from '@/components/dispatch/UnitTrackingCard';
+import { categoryIcon, formatAffectedCount, titleCase, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
 import type { ResourceRecommendation } from '@/features/dispatch/api';
 import type { MapIncident } from '@/components/incidents/IncidentMapView';
+import type { IncidentDetail } from '@/features/incidents/api';
 
 const PRIORITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const DISPATCHABLE = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
@@ -38,6 +41,7 @@ const STEPS: Array<{ label: string; reached: string }> = [
   { label: 'Assess',      reached: 'ASSESSED' },
   { label: 'Dispatch',    reached: 'DISPATCHED' },
   { label: 'On scene',    reached: 'ON_SCENE' },
+  { label: 'Resolved',    reached: 'RESOLVED' },
 ];
 
 const PRIORITY_STRIP: Record<string, string> = {
@@ -59,6 +63,7 @@ function km(meters: number | null): string {
   return `${(meters / 1000).toFixed(2)} km`;
 }
 
+/** Pre-dispatch "nearest unit" hint only (~2 min/km). Once a unit accepts, the routed ETA is shown. */
 function etaMins(meters: number | null): number | null {
   if (meters == null) return null;
   return Math.max(1, Math.round((meters / 1000) * 2));
@@ -88,6 +93,12 @@ export default function DispatchPage(): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [search, setSearch] = useState('');
+  // Assigned-unit tracking (WP5): follow camera + fit requests for the map.
+  const [followUnit, setFollowUnit] = useState(false);
+  const [fitRequest, setFitRequest] = useState(0);
+  useEffect(() => {
+    setFollowUnit(false);
+  }, [selectedId]);
 
   const queue = useMemo(
     () =>
@@ -122,6 +133,8 @@ export default function DispatchPage(): JSX.Element {
           status: i.status,
           lat: i.incident_locations?.latitude ?? null,
           lng: i.incident_locations?.longitude ?? null,
+          reporter_sex: i.reporter_sex ?? null,
+          reporter_is_guest: i.incident_reporters?.is_guest ?? null,
         })),
     [incidents],
   );
@@ -137,7 +150,28 @@ export default function DispatchPage(): JSX.Element {
   );
   const availableCount = availableUnits.length;
 
-  const recQuery = useDispatchRecommendations(selectedId);
+  // Selected incident's accepted unit (shares the ['incident', id] cache with DispatchDetail).
+  const { data: selectedIncident } = useIncident(selectedId);
+  const phase = trackingPhase(selectedIncident?.dispatches);
+  const tracked = useMemo(
+    () => pickTrackedUnit(selectedIncident, responders ?? []),
+    [selectedIncident, responders],
+  );
+  const scene = useMemo(() => {
+    const loc = selectedIncident?.incident_locations;
+    return loc?.latitude != null && loc?.longitude != null
+      ? { lat: Number(loc.latitude), lng: Number(loc.longitude) }
+      : null;
+  }, [selectedIncident]);
+  const route = useRouteLine(
+    phase === 'accepted' && tracked.position ? tracked.position : null,
+    phase === 'accepted' ? scene : null,
+  );
+  const { data: units } = useIncidentUnits(selectedId, phase === 'accepted');
+  const trackedEtaSeconds =
+    units?.find((u) => u.dispatchId === tracked.dispatchId)?.eta.seconds ?? route.data?.durationSeconds ?? null;
+
+  const recQuery = useDispatchRecommendations(phase === 'none' ? selectedId : null);
   const nearestMeters = useMemo(() => {
     const ds = (recQuery.data ?? [])
       .map((r) => r.distanceMeters)
@@ -154,6 +188,13 @@ export default function DispatchPage(): JSX.Element {
           responders={responders ?? []}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          tracking={{
+            dispatchId: tracked.dispatchId,
+            follow: followUnit,
+            onFollowChange: setFollowUnit,
+            fitRequest,
+          }}
+          routeGeometry={phase === 'accepted' ? route.data?.geometry ?? null : null}
         />
       </div>
 
@@ -243,13 +284,39 @@ export default function DispatchPage(): JSX.Element {
               onOpenFullDetail={() => setDrawerOpen(true)}
               onClose={() => setSelectedId(null)}
               onDispatched={() => setSelectedId(null)}
+              trackedDispatchId={tracked.dispatchId}
+              followUnit={followUnit}
+              onToggleFollow={() => setFollowUnit((f) => !f)}
+              onFit={() => {
+                setFollowUnit(false);
+                setFitRequest((n) => n + 1);
+              }}
             />
           </div>
         )}
       </div>
 
       {/* ── Center-bottom: ETA pill ────────────────────────────────────── */}
-      {selectedId && nearestMeters != null && (
+      {/* Accepted unit → routed live ETA. Before dispatch → "nearest unit" heuristic. */}
+      {selectedId && phase === 'accepted' && tracked.dispatchId ? (
+        <div className="pointer-events-none absolute bottom-5 left-1/2 z-[1000] -translate-x-1/2">
+          <div className="pointer-events-auto flex items-center gap-2.5 rounded-full bg-agap-sidebar/90 px-5 py-2.5 shadow-[0_4px_20px_rgba(10,22,40,0.4)] backdrop-blur-sm border border-white/10">
+            <Navigation size={14} className="text-agap-green shrink-0" />
+            <span className="text-sm font-semibold text-white">{tracked.callSign ?? 'Assigned unit'}</span>
+            {route.data?.distanceMeters != null && (
+              <>
+                <span className="text-white/30">·</span>
+                <span className="font-mono text-sm text-white/80 tabular-nums">{km(route.data.distanceMeters)}</span>
+              </>
+            )}
+            <span className="text-white/30">·</span>
+            <span className="text-sm text-white/80 tabular-nums">{formatEta(trackedEtaSeconds)}</span>
+            <span className="rounded-full bg-agap-green/20 border border-agap-green/30 px-2 py-0.5 text-[10px] font-semibold text-agap-green uppercase tracking-wide">
+              estimate
+            </span>
+          </div>
+        </div>
+      ) : selectedId && phase === 'none' && nearestMeters != null ? (
         <div className="pointer-events-none absolute bottom-5 left-1/2 z-[1000] -translate-x-1/2">
           <div className="pointer-events-auto flex items-center gap-2.5 rounded-full bg-agap-sidebar/90 px-5 py-2.5 shadow-[0_4px_20px_rgba(10,22,40,0.4)] backdrop-blur-sm border border-white/10">
             <Navigation size={14} className="text-agap-green shrink-0" />
@@ -263,11 +330,32 @@ export default function DispatchPage(): JSX.Element {
             </span>
           </div>
         </div>
-      )}
+      ) : null}
 
       <IncidentDetailDrawer incidentId={selectedId} open={drawerOpen} onOpenChange={setDrawerOpen} />
     </div>
   );
+}
+
+// ─── Tracked unit ────────────────────────────────────────────────────────────
+
+/**
+ * The selected incident's accepted unit to highlight, follow and route: the
+ * first ACCEPTED dispatch, with its live position from the ops feed (one row
+ * per dispatch). Position is null until the crew's first GPS fix.
+ */
+function pickTrackedUnit(
+  incident: IncidentDetail | undefined,
+  responders: ReadonlyArray<{ dispatchId?: string; lat: number; lng: number; call_sign?: string | null }>,
+): { dispatchId: string | null; position: { lat: number; lng: number } | null; callSign: string | null } {
+  const accepted = incident?.dispatches?.find((d) => d.status === 'ACCEPTED');
+  if (!accepted) return { dispatchId: null, position: null, callSign: null };
+  const fix = responders.find((r) => r.dispatchId === accepted.id);
+  return {
+    dispatchId: accepted.id,
+    position: fix ? { lat: fix.lat, lng: fix.lng } : null,
+    callSign: fix?.call_sign ?? null,
+  };
 }
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
@@ -346,6 +434,11 @@ function QueueRow({
           </span>
         </div>
         <StatusChip status={incident.status} />
+        {incident.incident_reporters?.is_guest && (
+          <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">
+            Guest report
+          </span>
+        )}
       </div>
     </button>
   );
@@ -425,11 +518,16 @@ function RoutePoints({
 
 function DispatchDetail({
   incidentId, onOpenFullDetail, onClose, onDispatched,
+  trackedDispatchId, followUnit, onToggleFollow, onFit,
 }: {
   incidentId: string;
   onOpenFullDetail: () => void;
   onClose: () => void;
   onDispatched: () => void;
+  trackedDispatchId: string | null;
+  followUnit: boolean;
+  onToggleFollow: () => void;
+  onFit: () => void;
 }): JSX.Element {
   const { data: incident, isLoading } = useIncident(incidentId);
   const [tab, setTab] = useState<'dispatch' | 'route'>('dispatch');
@@ -448,8 +546,14 @@ function DispatchDetail({
   const address =
     loc?.formatted_address ??
     ([loc?.barangay, loc?.municipality, loc?.province].filter(Boolean).join(', ') || 'Address not available');
-  const hasDispatch = (incident.dispatches?.length ?? 0) > 0;
+  const phase = trackingPhase(incident.dispatches);
+  const hasDispatch = phase !== 'none';
   const dispatchable = DISPATCHABLE.includes(incident.status);
+  const unitLabel =
+    phase === 'accepted' ? 'Unit accepted — tracking live'
+    : phase === 'awaiting' ? 'Awaiting crew acceptance'
+    : phase === 'closed' ? 'No active unit'
+    : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -507,13 +611,13 @@ function DispatchDetail({
           <div className="space-y-3">
             <RoutePoints
               sceneAddress={address}
-              unitLabel={hasDispatch ? 'Unit dispatched — tracking live' : null}
+              unitLabel={unitLabel}
               destination={null}
             />
-            {incident.number_of_patients != null && (
+            {formatAffectedCount(incident.hazard_flags, incident.number_of_patients) && (
               <div className="flex items-center gap-2 rounded-lg bg-agap-surface px-3 py-2 text-[13px] text-agap-textMid">
                 <Users size={13} className="shrink-0 text-agap-textSub" />
-                <span>{incident.number_of_patients} patient(s) reported</span>
+                <span>People affected: {formatAffectedCount(incident.hazard_flags, incident.number_of_patients)}</span>
               </div>
             )}
           </div>
@@ -525,10 +629,14 @@ function DispatchDetail({
             </div>
 
             {hasDispatch ? (
-              <div className="flex items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">
-                <CheckCircle2 size={16} />
-                <span className="text-[13px] font-semibold">Unit dispatched — tracking live.</span>
-              </div>
+              <UnitTrackingCard
+                incidentId={incident.id}
+                dispatches={incident.dispatches}
+                trackedDispatchId={trackedDispatchId}
+                follow={followUnit}
+                onToggleFollow={onToggleFollow}
+                onFit={onFit}
+              />
             ) : dispatchable ? (
               <RecommendationPanel incidentId={incident.id} onDispatched={onDispatched} />
             ) : (

@@ -1,10 +1,23 @@
-import { BadRequestException, Controller, HttpCode, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, ParseUUIDPipe, Ip } from '@nestjs/common';
+import { BadRequestException, Controller, HttpCode, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, ParseUUIDPipe, Ip, Res, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { CookieOptions, Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { WebAuthnService } from './webauthn.service';
+import { MfaService } from './mfa/mfa.service';
+import { shapeSessionResponse } from './sessions/session-response';
+import { authContextFromRequest } from './request-context';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
+import { PasswordChangeAllowed } from './guards/password-change.guard';
+import {
+  REFRESH_COOKIE,
+  SESSION_TTL_MS,
+  isWebClient,
+  refreshCookieOptions,
+} from './sessions/session-cookie';
 import { Public } from '../common/decorators/public.decorator';
 import { RegisterDto } from './dto/register.dto';
 import { GeoCheckDto } from './dto/geo-check.dto';
@@ -15,6 +28,9 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { StepUpDto } from './dto/step-up.dto';
+import { RequireRecentAuth } from '../common/decorators/recent-auth.decorator';
+import { RecentAuthGuard } from '../common/guards/recent-auth.guard';
 import { WebAuthnRegisterBeginDto } from './dto/webauthn-register-begin.dto';
 import { WebAuthnRegisterCompleteDto } from './dto/webauthn-register-complete.dto';
 import { WebAuthnAuthenticateBeginDto } from './dto/webauthn-authenticate-begin.dto';
@@ -23,10 +39,25 @@ import { WebAuthnAuthenticateCompleteDto } from './dto/webauthn-authenticate-com
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
+  private readonly cookieOptions: CookieOptions;
+
   constructor(
     private readonly authService: AuthService,
     private readonly webAuthnService: WebAuthnService,
-  ) {}
+    private readonly mfa: MfaService,
+    config: ConfigService,
+  ) {
+    this.cookieOptions = refreshCookieOptions(config);
+  }
+
+  /** See shapeSessionResponse: web gets the refresh cookie, mobile the body tokens. */
+  private sessionResponse<T extends { accessToken: string; refreshToken: string; user: { id: string } }>(
+    req: any,
+    res: Response,
+    session: T,
+  ) {
+    return shapeSessionResponse(this.authService, this.cookieOptions, req, res, session);
+  }
 
   @Post('geo-check')
   @Public()
@@ -59,8 +90,17 @@ export class AuthController {
   @UseGuards(AuthGuard('local'))
   @Throttle({ burst: { ttl: 60000, limit: 5 }, sustained: { ttl: 900000, limit: 10 } })
   @ApiOperation({ summary: 'Login with email/password' })
-  async login(@Request() req: any) {
-    return this.authService.login(req.user);
+  async login(@Request() req: any, @Res({ passthrough: true }) res: Response) {
+    const ctx = authContextFromRequest(req);
+    // The password was accepted. Staff roles may still owe a second step (or first-time
+    // enrollment); everyone else — citizens, bystanders, responders — gets a session as before.
+    const decision = await this.mfa.evaluateLogin(req.user, ctx);
+    if (decision.kind === 'challenge') {
+      res.status(200);
+      return decision.challenge;
+    }
+    const session = await this.authService.login(req.user, ctx, 'password', decision.amr);
+    return this.sessionResponse(req, res, session);
   }
 
   @Post('login/phone')
@@ -74,17 +114,79 @@ export class AuthController {
   @Post('refresh')
   @Public()
   @ApiOperation({ summary: 'Rotate access + refresh tokens' })
-  async refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshToken(dto.refreshToken);
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const web = isWebClient(req);
+    // Web: the cookie only, and only with the X-AGAP-Client header (CSRF guard).
+    // Mobile: the body token only — a stray cookie is never honoured without the header.
+    const token: string | undefined = web ? req.cookies?.[REFRESH_COOKIE] : dto.refreshToken;
+    try {
+      if (!token) throw new UnauthorizedException('Invalid or expired refresh token');
+      const { accessToken, refreshToken, userId } = await this.authService.refreshToken(token);
+      if (!web) return { accessToken, refreshToken };
+      res.cookie(REFRESH_COOKIE, refreshToken, { ...this.cookieOptions, maxAge: SESSION_TTL_MS });
+      return { accessToken, user: await this.authService.getSessionUser(userId) };
+    } catch (err) {
+      // A dead cookie is useless — drop it so middleware stops treating the browser as signed in.
+      if (web) res.clearCookie(REFRESH_COOKIE, this.cookieOptions);
+      throw err;
+    }
   }
 
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  @PasswordChangeAllowed()
+  // Optional: an expired access token must not stop someone from signing out.
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Revoke current session' })
-  async logout(@Request() req: any, @Headers('authorization') auth?: string) {
-    const token = auth?.replace('Bearer ', '');
-    return this.authService.logout(req.user.id, token);
+  async logout(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: RefreshTokenDto,
+    @Headers('authorization') auth?: string,
+  ) {
+    const web = isWebClient(req);
+    const result = await this.authService.logout(
+      {
+        userId: req.user?.id,
+        sessionId: req.user?.sid,
+        accessToken: req.user ? auth?.replace('Bearer ', '') : undefined,
+        refreshToken: web ? req.cookies?.[REFRESH_COOKIE] : dto.refreshToken,
+      },
+      authContextFromRequest(req),
+    );
+    if (web) res.clearCookie(REFRESH_COOKIE, this.cookieOptions);
+    return result;
+  }
+
+  @Post('step-up')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ burst: { ttl: 60000, limit: 5 }, sustained: { ttl: 900000, limit: 10 } })
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Re-authenticate the current session for a sensitive action' })
+  async stepUp(@Body() dto: StepUpDto, @Request() req: any) {
+    return this.authService.stepUp(req.user.id, req.user.sid, dto.password, authContextFromRequest(req));
+  }
+
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List active sessions for the current user' })
+  async sessions(@Request() req: any) {
+    return this.authService.listSessions(req.user.id, req.user.sid);
+  }
+
+  @Delete('sessions/:id')
+  @UseGuards(JwtAuthGuard, RecentAuthGuard)
+  @RequireRecentAuth()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoke one session for the current user' })
+  async revokeSession(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.authService.revokeSession(req.user.id, id, authContextFromRequest(req));
   }
 
   @Post('verify/email')
@@ -120,11 +222,12 @@ export class AuthController {
   }
 
   @Post('change-password')
+  @PasswordChangeAllowed()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Change password (authenticated)' })
   async changePassword(@Request() req: any, @Body() dto: ChangePasswordDto) {
-    return this.authService.changePassword(req.user.id, dto);
+    return this.authService.changePassword(req.user.id, dto, req.user.sid);
   }
 
   // ---------------------------------------------------------------------------
@@ -188,10 +291,18 @@ export class AuthController {
   @ApiResponse({ status: 201, description: 'Authenticated via passkey' })
   async passkeyAuthenticateComplete(
     @Body() dto: WebAuthnAuthenticateCompleteDto,
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ) {
-    return this.webAuthnService.completeAuthentication(dto.challengeId, dto.response, ip, userAgent);
+    const session = await this.webAuthnService.completeAuthentication(
+      dto.challengeId,
+      dto.response,
+      ip,
+      userAgent,
+    );
+    return this.sessionResponse(req, res, session);
   }
 
   @Get('passkey/credentials')

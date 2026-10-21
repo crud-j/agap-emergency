@@ -14,10 +14,12 @@ export function createMockPrisma() {
     user_sessions: {
       create: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
     user_verifications: {
+      count: jest.fn(),
       create: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
@@ -68,6 +70,7 @@ export function createMockPrisma() {
     responderAvailability: {
       findUnique: jest.fn(),
       update: jest.fn(),
+      upsert: jest.fn(),
     },
     location_history: {
       create: jest.fn(),

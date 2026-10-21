@@ -20,6 +20,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { useAuthStore } from '../../src/stores/auth.store';
 import { useIncidentStore } from '../../src/stores/incident.store';
+import { ApiError } from '../../src/services/api/http';
 import {
   getIncidentHistoryDetail,
   type IncidentHistoryDetail,
@@ -32,7 +33,9 @@ import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { isNativeMapAvailable } from '../../src/components/tracking/native-map-available';
 
 const CitizenLocationMap = React.lazy(
-  () => import('../../src/components/tracking/citizen-location-map'),
+  () => Promise.resolve({
+    default: require('../../src/components/tracking/citizen-location-map').default as typeof import('../../src/components/tracking/citizen-location-map').default,
+  }),
 );
 
 // Keyless OpenFreeMap fallback — real OSM streets at municipal zoom (the old
@@ -56,19 +59,19 @@ const TABS: { key: TabKey; label: string }[] = [
 
 const TYPE_LABELS: Record<string, string> = {
   MEDICAL: 'Medical', ROAD_ACCIDENT: 'Road Traffic', FLOOD: 'Flood',
-  RESCUE: 'Search & Rescue', FIRE: 'Fire', INDUSTRIAL: 'Industrial',
+  NATURAL_DISASTER: 'Natural Disaster', RESCUE: 'Search & Rescue', FIRE: 'Fire', INDUSTRIAL: 'Industrial',
   DEBRIS: 'Debris', OTHER: 'Other',
 };
 
 const TYPE_ICONS: Record<string, React.ComponentProps<typeof Ionicons>['name']> = {
   MEDICAL: 'pulse', ROAD_ACCIDENT: 'car-sport', FLOOD: 'water',
-  RESCUE: 'hand-left', FIRE: 'flame', INDUSTRIAL: 'warning',
+  NATURAL_DISASTER: 'thunderstorm', RESCUE: 'hand-left', FIRE: 'flame', INDUSTRIAL: 'warning',
   DEBRIS: 'layers', OTHER: 'alert-circle',
 };
 
 const TYPE_COLORS: Record<string, string> = {
   MEDICAL: '#DC2626', ROAD_ACCIDENT: '#EA580C', FLOOD: '#2563EB',
-  RESCUE: '#7C3AED', FIRE: '#EA580C', INDUSTRIAL: '#D97706',
+  NATURAL_DISASTER: '#0E7490', RESCUE: '#7C3AED', FIRE: '#EA580C', INDUSTRIAL: '#D97706',
   DEBRIS: '#6B7280', OTHER: '#0D6053',
 };
 
@@ -690,9 +693,11 @@ function ResolutionTab({
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function IncidentDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const routeParams = useLocalSearchParams<{ id?: string | string[] }>();
+  const id = Array.isArray(routeParams.id) ? routeParams.id[0] : routeParams.id;
   const router  = useRouter();
   const token   = useAuthStore((s) => s.accessToken);
+  const authLoading = useAuthStore((s) => s.isLoading);
   const setActiveIncidentId = useIncidentStore((s) => s.setActiveIncidentId);
   const { isOnline } = useNetworkStatus();
   const mapAvailable = useMemo(() => isNativeMapAvailable(), []);
@@ -706,9 +711,13 @@ export default function IncidentDetailScreen() {
     isStale,
     isRefetching,
     refetch,
+    error,
   } = useQuery<IncidentHistoryDetail>({
     queryKey: ['incident', id],
-    queryFn: () => getIncidentHistoryDetail(id!, token as string),
+    queryFn: () => {
+      if (!id || !token) throw new Error('Incident details require an incident ID and an active session.');
+      return getIncidentHistoryDetail(id, token);
+    },
     enabled: !!id && !!token,
     staleTime: 15_000,
     refetchInterval: 30_000,
@@ -761,8 +770,7 @@ export default function IncidentDetailScreen() {
   }
 
   function handleBack() {
-    if (router.canGoBack()) router.back();
-    else router.replace('/incidents');
+    router.replace('/incidents');
   }
 
   // ── Loading ──────────────────────────────────────────────────────────────────
@@ -780,7 +788,32 @@ export default function IncidentDetailScreen() {
 
   // ── Error ────────────────────────────────────────────────────────────────────
 
-  if (isError || !raw) {
+  if (authLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+        <SafeAreaView style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} edges={['top']}>
+          <ActivityIndicator size="large" color={C.primary} />
+          <Text style={[styles.infoLabel, { marginTop: 12 }]}>Restoring your session…</Text>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  if (!token || !id || isError || !raw) {
+    const status = error instanceof ApiError ? error.status : null;
+    const sessionExpired = error instanceof Error && /session expired/i.test(error.message);
+    const needsSignIn = !token || status === 401 || sessionExpired;
+    const errorMessage = !id
+      ? 'This incident link is incomplete. Return to your incident list and open the report again.'
+      : needsSignIn
+        ? 'Your session is no longer active. Sign in to view your incident details.'
+        : status === 403
+          ? 'This incident belongs to a different account. Sign in with the account that submitted it.'
+          : status === 404
+            ? 'This incident could not be found. It may have been removed or the link may be incorrect.'
+            : 'We could not reach the incident service. Check your connection and try again.';
+
     return (
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
@@ -796,14 +829,24 @@ export default function IncidentDetailScreen() {
               Could not load incident
             </Text>
             <Text style={[styles.infoLabel, { textAlign: 'center', marginTop: 6, marginBottom: 24 }]}>
-              Check your connection and try again.
+              {errorMessage}
             </Text>
-            <TouchableOpacity
-              style={[styles.liveCard, { paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14 }]}
-              onPress={() => refetch()}
-            >
-              <Text style={styles.liveLabel}>Retry</Text>
-            </TouchableOpacity>
+            {needsSignIn ? (
+              <TouchableOpacity
+                style={[styles.liveCard, { paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14 }]}
+                onPress={() => router.replace('/auth/login')}
+              >
+                <Text style={styles.liveLabel}>Sign in</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.liveCard, { paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14 }]}
+                onPress={() => refetch()}
+                disabled={!id}
+              >
+                <Text style={styles.liveLabel}>Retry</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </SafeAreaView>
       </View>

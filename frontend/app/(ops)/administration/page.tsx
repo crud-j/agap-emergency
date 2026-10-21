@@ -4,8 +4,9 @@ import { useState, type JSX } from 'react';
 import {
   Users, Shield, Activity, Search, ChevronLeft, ChevronRight,
   UserCheck, UserX, Trash2, Edit, Lock, CheckCircle2, XCircle,
-  Database, Cpu, Clock, Settings, KeyRound, Plus,
+  Database, Cpu, Clock, Settings, KeyRound, Plus, Landmark,
 } from 'lucide-react';
+import { BarangayDirectoryTab } from '@/components/admin/BarangayDirectoryTab';
 import {
   Button, Badge, DataTable,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -43,7 +44,7 @@ const USER_ROLES = [
 
 const USER_STATUSES = ['ACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED', 'DEACTIVATED'] as const;
 const PER_PAGE = 20;
-type AdminTab = 'users' | 'permissions' | 'health' | 'config';
+type AdminTab = 'users' | 'permissions' | 'barangays' | 'health' | 'config';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -710,6 +711,7 @@ export default function AdministrationPage(): JSX.Element {
   const tabs: { key: AdminTab; label: string; icon: typeof Users }[] = [
     { key: 'users', label: 'Users', icon: Users },
     { key: 'permissions', label: 'Roles & Permissions', icon: KeyRound },
+    { key: 'barangays', label: 'Barangay Directory', icon: Landmark },
     { key: 'health', label: 'System Health', icon: Activity },
     { key: 'config', label: 'Configuration', icon: Settings },
   ];
@@ -768,6 +770,7 @@ export default function AdministrationPage(): JSX.Element {
       {/* Content */}
       {tab === 'users' && <UsersTab />}
       {tab === 'permissions' && <PermissionsTab />}
+      {tab === 'barangays' && <BarangayDirectoryTab />}
       {tab === 'health' && <HealthTab />}
       {tab === 'config' && <ConfigTab />}
     </div>

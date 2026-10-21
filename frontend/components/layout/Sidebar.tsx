@@ -1,14 +1,15 @@
 'use client';
 
-import type { JSX } from 'react';
+import type { JSX, SyntheticEvent } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuthUser } from '@/lib/use-auth';
+import styles from './Sidebar.module.css';
 import {
-  LayoutDashboard, List, Map, Filter, Radio,
+  LayoutDashboard, List, Map as MapIcon, Filter, Radio,
   Truck, Package, Building2, HeartPulse, AlarmClock,
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
@@ -54,7 +55,7 @@ const NAV: NavGroup[] = [
     label: 'Incidents',
     items: [
       { href: '/operations/incidents', label: 'Queue',    icon: List,   roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
-      { href: '/operations/map',       label: 'Map',      icon: Map,    roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
+      { href: '/operations/map',       label: 'Map',      icon: MapIcon,    roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
       { href: '/operations/triage',    label: 'Triage',   icon: Filter, roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
       { href: '/operations/dispatch',  label: 'Dispatch', icon: Radio,  roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
     ],
@@ -106,12 +107,126 @@ const NAV: NavGroup[] = [
   },
 ];
 
+// ─── Motion ─────────────────────────────────────────────────────────────────────
+//
+// Collapsing morphs the sidebar into a floating dock: a fixed "panel" layer
+// animates its clip-path from the sidebar's rect to the dock's rect while every
+// icon flies (FLIP) from its sidebar row into its dock slot, staggered. Expanding
+// plays the same thing in reverse.
+
+type Mode = 'sidebar' | 'dock';
+
+const STORAGE_KEY = 'agap.ops.nav';
+const DESKTOP_QUERY = '(min-width: 1024px)';
+const SPRING = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const MORPH_MS = 700;
+const STAGGER_MS = 28;
+const MAX_STAGGER_MS = 240;
+const SIDEBAR_BG = '#eaf1fd';
+const DOCK_BG = '#ffffff';
+const SIDEBAR_RADIUS = 0;
+const DOCK_RADIUS = 22;
+const TOGGLE_FLIP_KEY = '__toggle';
+const SIDEBAR_WIDTH = 220;
+
+interface Snapshot {
+  panel: DOMRect;
+  icons: Map<string, DOMRect>;
+}
+
+function takeSnapshot(root: HTMLElement | null): Snapshot | null {
+  if (!root) return null;
+  const icons = new Map<string, DOMRect>();
+  root.querySelectorAll<HTMLElement>('[data-flip]').forEach((el) => {
+    icons.set(el.dataset.flip!, el.getBoundingClientRect());
+  });
+  return { panel: root.getBoundingClientRect(), icons };
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** Fixed layer whose clip-path travels between two rects. Returns a canceller. */
+function morphPanel(
+  from: { rect: DOMRect; radius: number; color: string },
+  to: { rect: DOMRect; radius: number; color: string },
+  onDone: () => void,
+): () => void {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const inset = (r: DOMRect, radius: number) =>
+    `inset(${r.top}px ${vw - r.right}px ${vh - r.bottom}px ${r.left}px round ${radius}px)`;
+
+  // Shadow lives on the parent: clip-path would cut a box-shadow on the fill.
+  const shell = document.createElement('div');
+  shell.className = styles.morphShell ?? '';
+  const fill = document.createElement('div');
+  fill.className = styles.morphFill ?? '';
+  shell.appendChild(fill);
+  document.body.appendChild(shell);
+
+  const anim = fill.animate(
+    [
+      { clipPath: inset(from.rect, from.radius), backgroundColor: from.color },
+      { clipPath: inset(to.rect, to.radius), backgroundColor: to.color },
+    ],
+    { duration: MORPH_MS, easing: SPRING, fill: 'forwards' },
+  );
+
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    shell.remove();
+    onDone();
+  };
+  anim.onfinish = finish;
+  return () => {
+    anim.cancel();
+    finish();
+  };
+}
+
+/** Fly every [data-flip] icon inside `root` from where it was in the snapshot. */
+function flipIcons(root: HTMLElement, snap: Snapshot) {
+  let i = 0;
+  root.querySelectorAll<HTMLElement>('[data-flip]').forEach((el) => {
+    const from = snap.icons.get(el.dataset.flip!);
+    const delay = Math.min(i++ * STAGGER_MS, MAX_STAGGER_MS);
+    if (!from) {
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: 250, fill: 'backwards' });
+      return;
+    }
+    const to = el.getBoundingClientRect();
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    const scale = to.width ? from.width / to.width : 1;
+    el.animate(
+      [{ transform: `translate(${dx}px, ${dy}px) scale(${scale})` }, { transform: 'none' }],
+      { duration: MORPH_MS, easing: SPRING, delay, fill: 'backwards' },
+    );
+  });
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────────
 
 export function Sidebar(): JSX.Element {
   const pathname = usePathname();
   const user = useAuthUser();
-  const [collapsed, setCollapsed] = useState(false);
+
+  const [isDesktop, setIsDesktop] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [mode, setMode] = useState<Mode>('sidebar');
+  // Keeps the sidebar mounted while it hands its icons over to the dock.
+  const [asideMounted, setAsideMounted] = useState(true);
+  const [tip, setTip] = useState<{ label: string; x: number; y: number } | null>(null);
+
+  const asideRef = useRef<HTMLElement>(null);
+  const dockRef = useRef<HTMLElement>(null);
+  const navContentRef = useRef<HTMLDivElement>(null);
+  const pendingSnapshot = useRef<Snapshot | null>(null);
+  const [activePosition, setActivePosition] = useState<{ top: number; height: number } | null>(null);
 
   function isActive(item: NavItem) {
     return item.exact ? pathname === item.href : pathname.startsWith(item.href);
@@ -122,100 +237,337 @@ export function Sidebar(): JSX.Element {
     return item.roles.includes(user.role);
   }
 
+  const groups = NAV.map((g) => ({ ...g, items: g.items.filter(canSee) })).filter(
+    (g) => g.items.length > 0,
+  );
+
+  const docked = mode === 'dock';
+  const overlay = !isDesktop && !docked;
+
+  /* ── Breakpoint + saved preference ─────────────────────────────────────── */
+
+  useLayoutEffect(() => {
+    const mq = window.matchMedia(DESKTOP_QUERY);
+    const apply = (desktop: boolean) => {
+      let saved: Mode | null = null;
+      try {
+        saved = window.localStorage.getItem(STORAGE_KEY) as Mode | null;
+      } catch {
+        /* storage unavailable — fall back to defaults */
+      }
+      // Below lg the dock is the resting state; the sidebar opens as an overlay.
+      const next: Mode = desktop ? (saved === 'dock' ? 'dock' : 'sidebar') : 'dock';
+      pendingSnapshot.current = null;
+      setIsDesktop(desktop);
+      setMode(next);
+      setAsideMounted(next === 'sidebar');
+    };
+    apply(mq.matches);
+    setReady(true);
+    const onChange = (e: MediaQueryListEvent) => apply(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  /* ── Toggle ─────────────────────────────────────────────────────────────── */
+
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  const toggle = useCallback(() => {
+    const current = modeRef.current;
+    const next: Mode = current === 'sidebar' ? 'dock' : 'sidebar';
+    pendingSnapshot.current = prefersReducedMotion()
+      ? null
+      : takeSnapshot(current === 'sidebar' ? asideRef.current : dockRef.current);
+    setTip(null);
+    if (next === 'sidebar') setAsideMounted(true);
+    setMode(next);
+    if (window.matchMedia(DESKTOP_QUERY).matches) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        /* storage unavailable — preference just won't persist */
+      }
+    }
+  }, []);
+
+  /* ── Run the morph after the new layout is in the DOM, before paint ────── */
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.opsNav = mode;
+
+    const snap = pendingSnapshot.current;
+    pendingSnapshot.current = null;
+
+    if (mode === 'dock' && !snap) setAsideMounted(false);
+    if (!snap) return;
+
+    const target = mode === 'dock' ? dockRef.current : asideRef.current;
+    if (!target) return;
+
+    target.dataset.morphing = 'true';
+    flipIcons(target, snap);
+
+    const cancel = morphPanel(
+      {
+        rect: snap.panel,
+        radius: mode === 'dock' ? SIDEBAR_RADIUS : DOCK_RADIUS,
+        color: mode === 'dock' ? SIDEBAR_BG : DOCK_BG,
+      },
+      {
+        rect: target.getBoundingClientRect(),
+        radius: mode === 'dock' ? DOCK_RADIUS : SIDEBAR_RADIUS,
+        color: mode === 'dock' ? DOCK_BG : SIDEBAR_BG,
+      },
+      () => {
+        delete target.dataset.morphing;
+        // Re-check: a quick second toggle cancels this morph after mode flipped back.
+        if (modeRef.current === 'dock') setAsideMounted(false);
+      },
+    );
+    return cancel;
+  }, [mode]);
+
+  useEffect(() => () => {
+    delete document.documentElement.dataset.opsNav;
+  }, []);
+
+  /* ── Overlay (below lg): close on navigation and on Escape ─────────────── */
+
+  const lastPath = useRef(pathname);
+  useEffect(() => {
+    if (lastPath.current === pathname) return;
+    lastPath.current = pathname;
+    if (overlay) toggle();
+  }, [pathname, overlay, toggle]);
+
+  useEffect(() => {
+    if (!overlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') toggle();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [overlay, toggle]);
+
+  /* ── ⌘/Ctrl + B ─────────────────────────────────────────────────────────── */
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'b') return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      e.preventDefault();
+      toggle();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggle]);
+
+  /* ── Active notch (sidebar) / active slot in view (dock) ───────────────── */
+
+  useLayoutEffect(() => {
+    const activeLink = navContentRef.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    setActivePosition(activeLink ? { top: activeLink.offsetTop, height: activeLink.offsetHeight } : null);
+  }, [asideMounted, pathname, user?.role]);
+
+  useEffect(() => {
+    if (!docked) return;
+    dockRef.current
+      ?.querySelector<HTMLElement>('[aria-current="page"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [docked, pathname]);
+
+  const showTip = (label: string) => (e: SyntheticEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setTip({ label, x: r.left + r.width / 2, y: r.top });
+  };
+  const hideTip = () => setTip(null);
+
+  /* ── Render ─────────────────────────────────────────────────────────────── */
+
   return (
-    <aside
-      className={cn(
-        'flex h-full flex-col bg-agap-sidebar border-r border-white/[0.06] transition-all duration-200 shrink-0',
-        collapsed ? 'w-[60px]' : 'w-[220px]',
-      )}
-    >
-      {/* Brand */}
-      <div className={cn(
-        'flex h-14 shrink-0 items-center border-b border-white/[0.06]',
-        collapsed ? 'justify-center px-0' : 'gap-2.5 px-4',
-      )}>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
-          <Image
-            src="/agap-solo-icon.png"
-            alt="AGAP"
-            width={32}
-            height={32}
-            unoptimized
-            style={{ width: 32, height: 32, objectFit: 'contain' }}
-            priority
+    <>
+      {/* In-flow column: holds the sidebar's space on desktop, nothing below lg. */}
+      <div
+        className={styles.column}
+        data-ready={ready || undefined}
+        style={{ width: isDesktop && !docked ? SIDEBAR_WIDTH : 0 }}
+      >
+        {overlay && (
+          <button
+            type="button"
+            aria-label="Close navigation"
+            className={styles.backdrop}
+            onClick={toggle}
           />
-        </div>
-        {!collapsed && (
-          <div className="min-w-0">
-            <p className="text-[13px] font-bold text-white leading-tight tracking-wide">AGAP</p>
-            <p className="text-[10px] font-medium text-white/40 leading-tight uppercase tracking-widest">
-              Ops Center
-            </p>
-          </div>
+        )}
+
+        {asideMounted && (
+          <aside
+            ref={asideRef}
+            data-state={docked ? 'closing' : 'open'}
+            {...(docked ? ({ inert: '' } as object) : {})}
+            className={cn(
+              'flex h-full flex-col border-r',
+              styles.sidebar,
+              overlay ? styles.sidebarOverlay : styles.sidebarDocked,
+            )}
+            style={{ width: SIDEBAR_WIDTH }}
+          >
+            {/* Brand */}
+            <div className={cn('flex h-14 shrink-0 items-center gap-2.5 border-b px-4', styles.brand)}>
+              <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', styles.brandIcon)}>
+                <Image
+                  src="/agap-solo-icon.png"
+                  alt="AGAP"
+                  width={32}
+                  height={32}
+                  unoptimized
+                  style={{ width: 32, height: 32, objectFit: 'contain' }}
+                  priority
+                />
+              </div>
+              <div className={cn('min-w-0', styles.fadeText)}>
+                <p className={cn('text-[13px] font-bold leading-tight tracking-wide', styles.brandTitle)}>AGAP</p>
+                <p className={cn('text-[10px] font-medium leading-tight uppercase tracking-widest', styles.brandSubtitle)}>
+                  Ops Center
+                </p>
+              </div>
+            </div>
+
+            {/* Nav */}
+            <nav aria-label="Operations navigation" className="flex-1 overflow-y-auto py-3 px-2 scrollbar-thin">
+              <div ref={navContentRef} className={styles.navContent}>
+                {activePosition && (
+                  <span
+                    aria-hidden="true"
+                    className={styles.activeNotch}
+                    style={{
+                      height: activePosition.height,
+                      transform: `translateY(${activePosition.top}px)`,
+                    }}
+                  />
+                )}
+                {groups.map((group) => (
+                  <div key={group.label} className="mb-4">
+                    <p
+                      className={cn(
+                        'mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-widest select-none',
+                        styles.groupLabel,
+                        styles.fadeText,
+                      )}
+                    >
+                      {group.label}
+                    </p>
+                    {group.items.map((item) => {
+                      const active = isActive(item);
+                      const Icon = item.icon;
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          aria-current={active ? 'page' : undefined}
+                          className={cn(
+                            'relative z-10 mb-0.5 flex h-9 items-center gap-2.5 rounded-l-2xl px-2.5 text-[13px] font-medium transition-colors duration-200',
+                            active ? styles.activeLink : styles.inactiveLink,
+                          )}
+                        >
+                          <span data-flip={item.href} className={styles.flipIcon}>
+                            <Icon
+                              size={16}
+                              className={cn('shrink-0 transition-colors', active ? styles.activeIcon : styles.inactiveIcon)}
+                            />
+                          </span>
+                          <span className={cn('truncate', styles.fadeText)}>{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </nav>
+
+            {/* Collapse toggle */}
+            <div className={cn('shrink-0 border-t p-2', styles.footer)}>
+              <button
+                type="button"
+                onClick={toggle}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-medium transition-colors duration-150',
+                  styles.collapseButton,
+                )}
+                aria-label="Collapse sidebar to dock"
+                aria-expanded={!docked}
+                title="Collapse (Ctrl+B)"
+              >
+                <span data-flip={TOGGLE_FLIP_KEY} className={styles.flipIcon}>
+                  <PanelLeftClose size={16} />
+                </span>
+                <span className={styles.fadeText}>Collapse</span>
+              </button>
+            </div>
+          </aside>
         )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 scrollbar-thin">
-        {NAV.map((group) => {
-          const visible = group.items.filter(canSee);
-          if (visible.length === 0) return null;
-          return (
-            <div key={group.label} className="mb-4">
-              {!collapsed && (
-                <p className="mb-1 px-2.5 text-[10px] font-semibold text-white/30 uppercase tracking-widest select-none">
-                  {group.label}
-                </p>
-              )}
-              {visible.map((item) => {
-                const active = isActive(item);
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    title={collapsed ? item.label : undefined}
-                    className={cn(
-                      'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-all duration-150 mb-0.5',
-                      active
-                        ? 'bg-agap-green/25 text-white border-l-2 border-agap-green pl-[9px]'
-                        : 'text-white/55 hover:bg-white/[0.06] hover:text-white/85 border-l-2 border-transparent pl-[9px]',
-                      collapsed && 'justify-center px-0 border-l-0 pl-0',
-                    )}
-                  >
-                    <Icon
-                      size={16}
-                      className={cn(
-                        'shrink-0 transition-colors',
-                        active ? 'text-agap-green' : 'text-white/40',
-                        !active && 'group-hover:text-white/70',
-                      )}
-                    />
-                    {!collapsed && <span className="truncate">{item.label}</span>}
-                  </Link>
-                );
-              })}
-            </div>
-          );
-        })}
-      </nav>
+      {/* Floating dock */}
+      {docked && (
+        <nav ref={dockRef} aria-label="Operations navigation" className={styles.dock}>
+          <div className={styles.dockScroll} onScroll={hideTip}>
+            {groups.map((group, gi) => (
+              <Fragment key={group.label}>
+                {gi > 0 && <span aria-hidden="true" className={styles.dockDivider} />}
+                {group.items.map((item) => {
+                  const active = isActive(item);
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      aria-label={item.label}
+                      aria-current={active ? 'page' : undefined}
+                      className={cn(styles.dockItem, active && styles.dockItemActive)}
+                      onMouseEnter={showTip(item.label)}
+                      onMouseLeave={hideTip}
+                      onFocus={showTip(item.label)}
+                      onBlur={hideTip}
+                    >
+                      <span data-flip={item.href} className={styles.flipIcon}>
+                        <Icon size={18} />
+                      </span>
+                    </Link>
+                  );
+                })}
+              </Fragment>
+            ))}
+            <span aria-hidden="true" className={styles.dockDivider} />
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label="Expand sidebar"
+              aria-expanded={false}
+              className={styles.dockItem}
+              onMouseEnter={showTip('Expand (Ctrl+B)')}
+              onMouseLeave={hideTip}
+              onFocus={showTip('Expand (Ctrl+B)')}
+              onBlur={hideTip}
+            >
+              <span data-flip={TOGGLE_FLIP_KEY} className={styles.flipIcon}>
+                <PanelLeftOpen size={18} />
+              </span>
+            </button>
+          </div>
+        </nav>
+      )}
 
-      {/* Collapse toggle */}
-      <div className="shrink-0 border-t border-white/[0.06] p-2">
-        <button
-          onClick={() => setCollapsed((c) => !c)}
-          className={cn(
-            'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-white/35 hover:bg-white/[0.06] hover:text-white/65 transition-all duration-150',
-            collapsed && 'justify-center px-0',
-          )}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {collapsed
-            ? <PanelLeftOpen size={16} />
-            : <><PanelLeftClose size={16} /><span>Collapse</span></>
-          }
-        </button>
-      </div>
-    </aside>
+      {docked && tip && (
+        <div role="tooltip" className={styles.tooltip} style={{ left: tip.x, top: tip.y }}>
+          {tip.label}
+        </div>
+      )}
+    </>
   );
 }
+

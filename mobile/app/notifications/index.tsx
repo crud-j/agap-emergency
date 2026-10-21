@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   View, Text, TouchableOpacity, FlatList, StyleSheet,
   StatusBar, RefreshControl, ActivityIndicator,
 } from 'react-native';
@@ -8,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useNotificationList, useMarkNotificationRead, useMarkAllNotificationsRead } from '@/src/hooks/useNotifications';
 import type { AppNotification } from '@/src/services/api/notifications.api';
+import { useAccessibilityStore } from '@/src/stores/accessibility.store';
 
 // ─── Event display config ─────────────────────────────────────────────────────
 
@@ -77,6 +79,7 @@ function NotifRow({
       activeOpacity={0.75}
       accessibilityRole="button"
       accessibilityLabel={item.title ?? item.body}
+      accessibilityHint={unread ? 'Opens this update and marks it as read' : 'Opens this update'}
     >
       <View style={[styles.iconWrap, { backgroundColor: cfg.bg }]}>
         <Ionicons name={cfg.icon} size={18} color={cfg.color} />
@@ -118,7 +121,11 @@ type ListItem =
 
 export default function NotificationsScreen() {
   const router = useRouter();
+  const reducedMotion = useAccessibilityStore((s) => s.reducedMotion);
   const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const [filterWidth, setFilterWidth] = useState(0);
+  const filterProgress = useRef(new Animated.Value(0)).current;
 
   const { data, isLoading, isError, refetch } = useNotificationList(1);
   const { mutate: markRead } = useMarkNotificationRead();
@@ -126,11 +133,37 @@ export default function NotificationsScreen() {
 
   const notifications = data?.data ?? [];
   const unread = notifications.filter((n) => n.status === 'PENDING').length;
+  const visibleNotifications = filter === 'unread'
+    ? notifications.filter((n) => n.status === 'PENDING')
+    : notifications;
+
+  useEffect(() => {
+    const target = filter === 'unread' ? 1 : 0;
+    if (reducedMotion) {
+      filterProgress.setValue(target);
+      return;
+    }
+
+    const animation = Animated.spring(filterProgress, {
+      toValue: target,
+      tension: 220,
+      friction: 18,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [filter, filterProgress, reducedMotion]);
+
+  const segmentWidth = Math.max(0, (filterWidth - 8) / 2);
+  const indicatorX = filterProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, segmentWidth],
+  });
 
   // Build grouped flat list
   const listItems: ListItem[] = [];
   let lastDateLabel = '';
-  for (const n of notifications) {
+  for (const n of visibleNotifications) {
     const label = formatDate(n.created_at);
     if (label !== lastDateLabel) {
       listItems.push({ type: 'header', key: `h-${label}`, label });
@@ -148,52 +181,10 @@ export default function NotificationsScreen() {
   function handlePress(notif: AppNotification) {
     if (notif.status === 'PENDING') markRead(notif.id);
     if (notif.incident_id) {
-      router.push({ pathname: '/incident/[id]', params: { id: notif.incident_id } } as never);
+      router.push({ pathname: '/incidents/[id]', params: { id: notif.incident_id } } as never);
     } else if (notif.event_type === 'ANNOUNCEMENT' && typeof notif.data_payload?.announcementId === 'string') {
       router.push({ pathname: '/announcements/[id]', params: { id: notif.data_payload.announcementId } } as never);
     }
-  }
-
-  // ── Loading state ────────────────────────────────────────────────────────────
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#1C2B3A" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Notifications</Text>
-          <View style={styles.backBtn} />
-        </View>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#0D6053" />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ── Error state ──────────────────────────────────────────────────────────────
-  if (isError) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#1C2B3A" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Notifications</Text>
-          <View style={styles.backBtn} />
-        </View>
-        <View style={styles.center}>
-          <Ionicons name="cloud-offline-outline" size={40} color="#C3CDD8" />
-          <Text style={styles.errorTitle}>Could not load notifications</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
   }
 
   return (
@@ -202,33 +193,135 @@ export default function NotificationsScreen() {
 
       {/* ── Header ────────────────────────────────────────────────────── */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#1C2B3A" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          Notifications{unread > 0 ? ` (${unread})` : ''}
-        </Text>
-        {unread > 0 ? (
+        <View style={styles.headerTop}>
           <TouchableOpacity
-            onPress={() => markAll()}
-            disabled={markingAll}
-            style={styles.markAllBtn}
+            onPress={() => router.back()}
+            style={styles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
           >
-            <Ionicons name="checkmark-done-outline" size={20} color="#0D6053" />
+            <Ionicons name="arrow-back" size={21} color="#1C2B3A" />
           </TouchableOpacity>
-        ) : (
-          <View style={styles.backBtn} />
-        )}
+          <View style={styles.headerCopy}>
+            <Text style={styles.headerTitle}>Notifications</Text>
+            <Text style={styles.headerSub}>Emergency and community updates</Text>
+          </View>
+          {unread > 0 ? (
+            <TouchableOpacity
+              onPress={() => markAll()}
+              disabled={markingAll}
+              style={[styles.markAllBtn, markingAll && styles.markAllBtnDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Mark all notifications as read"
+            >
+              {markingAll ? (
+                <ActivityIndicator size="small" color="#0D6053" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-done-outline" size={16} color="#0D6053" />
+                  <Text style={styles.markAllText}>Mark read</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.markAllPlaceholder} />
+          )}
+        </View>
+
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryIcon}>
+            <Ionicons name="notifications" size={18} color="#0D6053" />
+          </View>
+          <View style={styles.summaryCopy}>
+            <Text style={styles.summaryTitle}>
+              {unread > 0 ? `${unread} unread ${unread === 1 ? 'update' : 'updates'}` : 'You’re all caught up'}
+            </Text>
+            <Text style={styles.summarySub}>
+              {unread > 0 ? 'Review important updates below.' : 'New updates will appear here.'}
+            </Text>
+          </View>
+          <View style={[styles.summaryStatus, unread > 0 && styles.summaryStatusActive]} />
+        </View>
+
+        <View
+          style={styles.filterTrack}
+          onLayout={(event) => setFilterWidth(event.nativeEvent.layout.width)}
+          accessibilityRole="tablist"
+        >
+          {filterWidth > 0 && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.filterIndicator,
+                { width: segmentWidth, transform: [{ translateX: indicatorX }] },
+              ]}
+            />
+          )}
+          <TouchableOpacity
+            style={styles.filterTab}
+            onPress={() => setFilter('all')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: filter === 'all' }}
+          >
+            <Text style={[styles.filterLabel, filter === 'all' && styles.filterLabelActive]}>All</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.filterTab}
+            onPress={() => setFilter('unread')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: filter === 'unread' }}
+          >
+            <Text style={[styles.filterLabel, filter === 'unread' && styles.filterLabelActive]}>Unread</Text>
+            {unread > 0 && (
+              <View style={[styles.filterCount, filter === 'unread' && styles.filterCountActive]}>
+                <Text style={[styles.filterCountText, filter === 'unread' && styles.filterCountTextActive]}>
+                  {unread > 99 ? '99+' : unread}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ── List ──────────────────────────────────────────────────────── */}
-      {listItems.length === 0 ? (
+      {isLoading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#0D6053" />
+          <Text style={styles.loadingText}>Loading your updates…</Text>
+        </View>
+      ) : isError ? (
         <View style={styles.center}>
           <View style={styles.emptyIcon}>
-            <Ionicons name="notifications-off-outline" size={36} color="#C3CDD8" />
+            <Ionicons name="cloud-offline-outline" size={34} color="#8795A3" />
           </View>
-          <Text style={styles.emptyTitle}>All caught up</Text>
-          <Text style={styles.emptySub}>No notifications yet.</Text>
+          <Text style={styles.errorTitle}>Could not load notifications</Text>
+          <Text style={styles.emptySub}>Check your connection and try again.</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => void refetch()}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : listItems.length === 0 ? (
+        <View style={styles.center}>
+          <View style={styles.emptyIcon}>
+            <Ionicons
+              name={filter === 'unread' ? 'checkmark-done-outline' : 'notifications-off-outline'}
+              size={34}
+              color={filter === 'unread' ? '#0D6053' : '#8795A3'}
+            />
+          </View>
+          <Text style={styles.emptyTitle}>
+            {filter === 'unread' ? 'You’re all caught up' : 'No notifications yet'}
+          </Text>
+          <Text style={styles.emptySub}>
+            {filter === 'unread'
+              ? 'You have no unread updates right now.'
+              : 'Incident and announcement updates will appear here.'}
+          </Text>
+          {filter === 'unread' && notifications.length > 0 && (
+            <TouchableOpacity style={styles.showAllBtn} onPress={() => setFilter('all')}>
+              <Text style={styles.showAllText}>View all notifications</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <FlatList
@@ -266,36 +359,144 @@ const BEVEL = 'rgba(168,181,193,0.18)';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F7FA' },
-  center:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },
 
-  header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#F5F7FA', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BEVEL },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#1C2B3A', flex: 1, textAlign: 'center' },
-  backBtn:     { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
-  markAllBtn:  { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: BEVEL,
+    gap: 13,
+  },
+  headerTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerCopy: { flex: 1, minWidth: 0 },
+  headerTitle: { fontSize: 22, fontWeight: '800', color: '#1C2B3A', letterSpacing: -0.4 },
+  headerSub: { marginTop: 2, fontSize: 11, color: '#718096' },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F6F8',
+  },
+  markAllBtn: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: '#E6F4F1',
+  },
+  markAllBtnDisabled: { opacity: 0.65 },
+  markAllText: { fontSize: 11, fontWeight: '800', color: '#0D6053' },
+  markAllPlaceholder: { width: 40, height: 40 },
 
-  list: { paddingBottom: 120 },
+  summaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 11,
+    borderRadius: 15,
+    backgroundColor: '#F1F7F5',
+    borderWidth: 1,
+    borderColor: 'rgba(13,96,83,0.09)',
+  },
+  summaryIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  summaryCopy: { flex: 1 },
+  summaryTitle: { fontSize: 13, fontWeight: '800', color: '#1D2B3A' },
+  summarySub: { marginTop: 2, fontSize: 11, color: '#718096' },
+  summaryStatus: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#B8C3CE' },
+  summaryStatusActive: { backgroundColor: '#0D9B79' },
 
-  sectionHeader: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 6 },
-  sectionLabel:  { fontSize: 12, fontWeight: '700', color: '#8795A3', letterSpacing: 0.5, textTransform: 'uppercase' },
+  filterTrack: {
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 4,
+    borderRadius: 14,
+    backgroundColor: '#E9EEF1',
+  },
+  filterIndicator: {
+    position: 'absolute',
+    left: 4,
+    top: 4,
+    bottom: 4,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#172B26',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.09,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  filterTab: {
+    zIndex: 1,
+    flex: 1,
+    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderRadius: 11,
+  },
+  filterLabel: { fontSize: 12, fontWeight: '700', color: '#718096' },
+  filterLabelActive: { color: '#0D6053', fontWeight: '800' },
+  filterCount: { minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: '#D9E1E6' },
+  filterCountActive: { backgroundColor: '#E6F4F1' },
+  filterCountText: { fontSize: 10, fontWeight: '800', color: '#637589' },
+  filterCountTextActive: { color: '#0D6053' },
 
-  row:       { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#FFFFFF', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BEVEL },
-  rowUnread: { backgroundColor: '#F3FAF7' },
-  rowBody:   { flex: 1, gap: 2 },
-  rowTop:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
+  list: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 30 },
+  sectionHeader: { paddingTop: 15, paddingBottom: 8 },
+  sectionLabel: { fontSize: 11, fontWeight: '800', color: '#718096', letterSpacing: 0.7, textTransform: 'uppercase' },
 
-  iconWrap:   { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
-  typeLabel:  { fontSize: 11, fontWeight: '700', color: '#8795A3', textTransform: 'uppercase', letterSpacing: 0.4 },
-  timeText:   { fontSize: 11, color: '#C3CDD8' },
-  titleText:  { fontSize: 14, fontWeight: '700', color: '#1C2B3A', lineHeight: 19 },
-  titleRead:  { fontWeight: '500' },
-  bodyText:   { fontSize: 13, color: '#40536D', lineHeight: 18 },
-  unreadDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: '#0D6053', marginTop: 6 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 9,
+    paddingHorizontal: 13,
+    paddingVertical: 13,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(168,181,193,0.22)',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#8795A3',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  rowUnread: { backgroundColor: '#F8FCFA', borderColor: 'rgba(13,96,83,0.20)' },
+  rowBody: { flex: 1, minWidth: 0, gap: 3 },
+  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 1 },
+  iconWrap: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  typeLabel: { flex: 1, fontSize: 10, fontWeight: '800', color: '#718096', textTransform: 'uppercase', letterSpacing: 0.5 },
+  timeText: { fontSize: 10, color: '#8795A3' },
+  titleText: { fontSize: 14, fontWeight: '800', color: '#1C2B3A', lineHeight: 19 },
+  titleRead: { fontWeight: '600' },
+  bodyText: { fontSize: 12, color: '#526477', lineHeight: 18 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#0D9076', marginTop: 5 },
 
-  emptyIcon:  { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EDF1F4', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#1C2B3A' },
-  emptySub:   { fontSize: 13, color: '#8795A3' },
-
-  errorTitle: { fontSize: 15, fontWeight: '600', color: '#1C2B3A' },
-  retryBtn:   { marginTop: 8, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
-  retryText:  { color: '#FFFFFF', fontWeight: '700' },
+  emptyIcon: { width: 68, height: 68, borderRadius: 23, backgroundColor: '#EAF2F0', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptyTitle: { fontSize: 16, fontWeight: '800', color: '#1C2B3A', textAlign: 'center' },
+  emptySub: { fontSize: 13, color: '#718096', lineHeight: 19, textAlign: 'center' },
+  loadingText: { fontSize: 13, color: '#718096' },
+  errorTitle: { fontSize: 15, fontWeight: '700', color: '#1C2B3A' },
+  retryBtn: { marginTop: 8, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
+  retryText: { color: '#FFFFFF', fontWeight: '800' },
+  showAllBtn: { marginTop: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: '#E6F4F1' },
+  showAllText: { color: '#0D6053', fontSize: 12, fontWeight: '800' },
 });

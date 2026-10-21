@@ -13,6 +13,7 @@ import { MediaModule } from '../media/media.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AuditModule } from '../audit/audit.module';
 import { EmergencyContactsModule } from '../emergency-contacts/emergency-contacts.module';
+import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
@@ -23,6 +24,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     RealtimeModule,
     AuditModule,
     EmergencyContactsModule,
+    BarangayCoordinationModule,
   ],
   controllers: [IncidentsController],
   providers: [

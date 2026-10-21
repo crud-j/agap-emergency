@@ -1,7 +1,9 @@
 import type { Config } from 'jest';
 
 const config: Config = {
-  moduleFileExtensions: ['js', 'json', 'ts'],
+  // 'ts' first: shared/src still holds stale compiled .js twins of some .ts files,
+  // and resolving those would hide newer enums/exports from the tests.
+  moduleFileExtensions: ['ts', 'js', 'json'],
   rootDir: '..',
   testMatch: ['**/test/**/*.spec.ts'],
   // isolatedModules = per-file transpile (no cross-file type-checking). Types are

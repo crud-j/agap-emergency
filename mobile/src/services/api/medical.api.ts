@@ -17,18 +17,22 @@ export interface MedicalProfile {
 }
 
 export interface MedicalProfileDto {
-  bloodType?: string;
+  bloodType?: string | null;
   allergies?: string[];
   currentMedications?: string[];
   medicalConditions?: string[];
   disabilities?: string[];
-  responderNotes?: string;
+  responderNotes?: string | null;
 }
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new ApiError((err as any).message ?? `HTTP ${res.status}`, res.status);
+    const message = (err as any).message;
+    throw new ApiError(
+      Array.isArray(message) ? message.join('\n') : message ?? `HTTP ${res.status}`,
+      res.status,
+    );
   }
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;

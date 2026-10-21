@@ -1,37 +1,30 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/login'];
+// '/b' is where a barangay types the access code from the alert SMS, '/b/<code>' the status page
+// it opens: no login, the code is the credential.
+// '/v1/public/barangay/' is the two public endpoints that page uses (forwarded by next.config.mjs).
+const PUBLIC_PATHS = ['/login', '/b/', '/v1/public/barangay/'];
+const PUBLIC_EXACT = ['/b'];
 
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const b64 = parts[1]!.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-const HOSPITAL_ALLOWED = ['/hospitals', '/api'];
+/**
+ * HttpOnly refresh cookie set by the backend. Its presence only means "may have a
+ * session" — it is not verified here. AuthGate restores (and validates) the session
+ * client-side, and the backend enforces every permission. Role-based scoping
+ * (e.g. hospital users) lives in AuthGate because the role is no longer readable
+ * from a cookie.
+ */
+const SESSION_COOKIE = 'agap_refresh';
 
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
 
-  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return NextResponse.next();
+  if (PUBLIC_EXACT.includes(pathname) || PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return NextResponse.next();
 
-  const token = request.cookies.get('agap_token')?.value;
-  if (!token) {
-    return NextResponse.redirect(new URL('/login', request.url));
-  }
-
-  // Scope hospital users to their portal only
-  const payload = decodeJwtPayload(token);
-  if (payload?.['role'] === 'HOSPITAL_USER') {
-    if (!HOSPITAL_ALLOWED.some((p) => pathname.startsWith(p))) {
-      return NextResponse.redirect(new URL('/hospitals', request.url));
-    }
+  if (!request.cookies.has(SESSION_COOKIE)) {
+    const login = new URL('/login', request.url);
+    login.searchParams.set('next', pathname + search);
+    return NextResponse.redirect(login);
   }
 
   return NextResponse.next();

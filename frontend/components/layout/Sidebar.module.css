@@ -1,0 +1,400 @@
+.sidebar {
+  background:
+    radial-gradient(90% 70% at 88% 108%, #dce9fb 0%, transparent 72%),
+    #eaf1fd;
+  border-color: #d9e4f2;
+}
+
+.brand {
+  border-color: #d9e4f2;
+}
+
+.brandIcon {
+  background: #d9f3ed;
+}
+
+.brandTitle {
+  color: #1d2939;
+}
+
+.brandSubtitle {
+  color: #788ba1;
+}
+
+.navContent {
+  position: relative;
+}
+
+.activeNotch {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: -0.5rem;
+  left: 0.5rem;
+  border-radius: 1.1rem 0 0 1.1rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 5px 14px rgb(16 24 40 / 5%);
+  pointer-events: none;
+  transition: transform 587ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.activeNotch::before,
+.activeNotch::after {
+  position: absolute;
+  right: 0;
+  width: 1rem;
+  height: 1rem;
+  content: '';
+}
+
+.activeNotch::before {
+  top: -1rem;
+  background: radial-gradient(circle at 0 0, transparent 1rem, #fff calc(1rem + 0.5px));
+}
+
+.activeNotch::after {
+  bottom: -1rem;
+  background: radial-gradient(circle at 0 100%, transparent 1rem, #fff calc(1rem + 0.5px));
+}
+
+.groupLabel {
+  color: #8192a6;
+}
+
+.activeLink {
+  color: #0d6053;
+  font-weight: 600;
+}
+
+.inactiveLink {
+  color: #52657b;
+}
+
+.inactiveLink:hover {
+  color: #1d2939;
+  background: rgb(255 255 255 / 42%);
+}
+
+.activeIcon {
+  color: #0d6053;
+}
+
+.inactiveIcon {
+  color: #8294a8;
+}
+
+.inactiveLink:hover .inactiveIcon {
+  color: #52657b;
+}
+
+.activeLink:focus-visible,
+.inactiveLink:focus-visible,
+.collapseButton:focus-visible {
+  outline: 2px solid #0d6053;
+  outline-offset: -2px;
+}
+
+.footer {
+  border-color: #d9e4f2;
+}
+
+.collapseButton {
+  color: #718399;
+}
+
+.collapseButton:hover {
+  color: #1d2939;
+  background: rgb(255 255 255 / 58%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .activeNotch {
+    transition: none;
+  }
+}
+
+/* ── Sidebar ⇄ floating dock ──────────────────────────────────────────────── */
+
+/* In-flow column. Its width is what pushes <main>; the sidebar itself is
+   positioned inside so it never gets squeezed while the column animates. */
+.column {
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+  transition: width 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Before the breakpoint is known (SSR / first paint), keep small screens clean. */
+@media (max-width: 1023px) {
+  .column:not([data-ready]) {
+    width: 0 !important;
+  }
+  .column:not([data-ready]) .sidebar {
+    display: none;
+  }
+}
+
+.sidebarDocked {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 50;
+}
+
+.sidebarOverlay {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 50;
+  box-shadow: 0 0 0 1px #d9e4f2, 0 24px 60px rgb(16 24 40 / 22%);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  border: 0;
+  background: rgb(15 23 42 / 32%);
+  cursor: default;
+  animation: fadeIn 260ms ease both;
+}
+
+.flipIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+}
+
+.fadeText {
+  transition: opacity 200ms ease 150ms;
+}
+
+/* While the morph layer stands in for the panel, the real panel is see-through. */
+.sidebar[data-morphing],
+.sidebar[data-state='closing'] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.sidebar[data-morphing] .brand,
+.sidebar[data-morphing] .footer,
+.sidebar[data-state='closing'] .brand,
+.sidebar[data-state='closing'] .footer {
+  border-color: transparent;
+}
+
+.sidebar[data-morphing] .fadeText {
+  animation: fadeIn 260ms ease 220ms both;
+}
+
+.sidebar[data-morphing] .activeNotch {
+  animation: fadeIn 260ms ease 300ms both;
+}
+
+/* Collapsing: icons have already flown to the dock; labels fade quickly. */
+.sidebar[data-state='closing'] {
+  pointer-events: none;
+}
+
+.sidebar[data-state='closing'] .flipIcon,
+.sidebar[data-state='closing'] .brandIcon {
+  opacity: 0;
+}
+
+.sidebar[data-state='closing'] .fadeText,
+.sidebar[data-state='closing'] .activeNotch {
+  opacity: 0;
+  transition: opacity 130ms ease-in;
+}
+
+.sidebar[data-state='closing'] .inactiveLink,
+.sidebar[data-state='closing'] .collapseButton {
+  background: transparent;
+}
+
+/* Morph layer (created imperatively for the length of one transition). */
+.morphShell {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  filter: drop-shadow(0 0 1px rgb(16 24 40 / 18%)) drop-shadow(0 8px 20px rgb(16 24 40 / 16%));
+}
+
+.morphFill {
+  position: absolute;
+  inset: 0;
+}
+
+/* ── Dock ───────────────────────────────────────────────────────────────── */
+
+.dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 1rem;
+  z-index: 50;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  margin: 0 auto;
+  padding: 6px;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e3e9f2, 0 2px 4px rgb(16 24 40 / 6%), 0 18px 40px rgb(16 24 40 / 14%);
+}
+
+.dock[data-morphing] {
+  background: transparent;
+  box-shadow: none;
+}
+
+.dockScroll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  border-radius: 16px;
+}
+
+.dockScroll::-webkit-scrollbar {
+  display: none;
+}
+
+.dockItem {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  color: #52657b;
+  cursor: pointer;
+  transition: color 200ms ease;
+}
+
+.dockItem::after {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: rgb(16 24 40 / 6%);
+  opacity: 0;
+  content: '';
+  transition: opacity 300ms ease, background-color 200ms ease;
+}
+
+.dockItem:hover {
+  color: #1d2939;
+}
+
+.dockItem:hover::after {
+  opacity: 1;
+}
+
+.dockItem:focus-visible {
+  outline: 2px solid #0d6053;
+  outline-offset: -2px;
+}
+
+.dockItemActive,
+.dockItemActive:hover {
+  color: #0d6053;
+}
+
+.dockItemActive::after,
+.dockItemActive:hover::after {
+  background: #e3f3ef;
+  opacity: 1;
+}
+
+.dockScroll {
+  isolation: isolate;
+}
+
+.dock[data-morphing] .dockItemActive::after {
+  animation: fadeIn 300ms ease 380ms both;
+}
+
+.dockDivider {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: #e3e9f2;
+}
+
+.dock[data-morphing] .dockDivider {
+  animation: fadeIn 260ms ease 420ms both;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 60;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: #1d2939;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 10px));
+  animation: tipIn 140ms ease-out both;
+}
+
+@media (max-width: 639px) {
+  .dock {
+    bottom: 0.75rem;
+    max-width: calc(100vw - 1.5rem);
+    padding: 5px;
+    border-radius: 20px;
+  }
+  .dockItem {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+  }
+  .dockDivider {
+    margin: 0 2px;
+  }
+}
+
+/* Keep the last rows of a page clear of the floating dock. */
+:global(html[data-ops-nav='dock']) .main {
+  padding-bottom: 6rem;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes tipIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 4px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .column,
+  .fadeText,
+  .dockItem,
+  .dockItem::after {
+    transition: none;
+  }
+  .backdrop,
+  .tooltip {
+    animation: none;
+  }
+}

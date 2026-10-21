@@ -1,6 +1,7 @@
 import {
   Injectable,
   Logger,
+  Optional,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
@@ -9,6 +10,7 @@ import { IncidentsService } from '../incidents/incidents.service';
 import { IncidentStatusService } from '../incidents/incident-status/incident-status.service';
 import { AuditService } from '../audit/audit.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { BarangayNotifyService } from '../barangay-coordination/barangay-notify.service';
 import { IncidentStatus, AuditAction, UserRole } from '@agap/shared';
 import { type Incident } from '@prisma/client';
 import { CancellationReason } from './dto/cancel-incident.dto';
@@ -40,6 +42,7 @@ export class FalseAlertsService {
     private readonly statusService: IncidentStatusService,
     private readonly audit: AuditService,
     private readonly realtime: RealtimeService,
+    @Optional() private readonly barangayNotify?: BarangayNotifyService,
   ) {}
 
   /**
@@ -120,6 +123,9 @@ export class FalseAlertsService {
 
       return result;
     });
+
+    // Frees the barangay short code; a still-queued barangay SMS is then skipped.
+    void this.barangayNotify?.closeNoticesForIncident(incidentId);
 
     // Audit — insert-only, never blocks the operation
     void this.audit.log({
@@ -210,6 +216,8 @@ export class FalseAlertsService {
       oldValues: { status: currentStatus },
       newValues: { status: IncidentStatus.FALSE_ALERT, notes },
     });
+
+    void this.barangayNotify?.closeNoticesForIncident(incidentId);
 
     try {
       this.realtime.statusChanged({

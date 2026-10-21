@@ -88,6 +88,20 @@ export class LocationsController {
     return this.locationsService.getLiveTracking(incidentId);
   }
 
+  @Get('tracking/:incidentId/latest')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Latest position + estimated ETA of each unit responding to an incident',
+    description:
+      'Staff, the incident reporter, or assigned crew only (same rule as the WebSocket ' +
+      'room join). One entry per accepted dispatch while the incident is active. Returns ' +
+      'unit call sign/name and type only, never a responder name or phone. ETA is an estimate.',
+  })
+  async latest(@Param('incidentId', ParseUUIDPipe) incidentId: string, @Request() req: any) {
+    return this.locationsService.getLatestUnitPositions(incidentId, { id: req.user.id, role: req.user.role });
+  }
+
   @Get('tracking/:incidentId/eta')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

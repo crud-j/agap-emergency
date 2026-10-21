@@ -22,6 +22,11 @@ function fmtSec(s: number): string {
  * continues to Rapid Incident Details (MOD-09). Both captures are OPTIONAL:
  * "Skip" always lets the report proceed so evidence capture never blocks help.
  */
+// ~2.5 Mbps keeps a 60-second 720p clip near 19 MB; maxFileSize stops the
+// recording before the backend's 25 MB video limit.
+const VIDEO_BITRATE = 2_500_000;
+const MAX_VIDEO_BYTES = 24 * 1024 * 1024;
+
 export default function CaptureScreen() {
   const router  = useRouter();
   const { retake } = useLocalSearchParams<{ retake?: string }>();
@@ -86,7 +91,7 @@ export default function CaptureScreen() {
     setRecording(true);
     try {
       // recordAsync resolves when stopRecording() is called or maxDuration is hit.
-      const video = await cameraRef.current.recordAsync({ maxDuration: 60 });
+      const video = await cameraRef.current.recordAsync({ maxDuration: 60, maxFileSize: MAX_VIDEO_BYTES });
       if (video?.uri) {
         setVideoUri(video.uri);
         setPhotos([]);
@@ -166,6 +171,10 @@ export default function CaptureScreen() {
         style={StyleSheet.absoluteFill}
         facing={facing}
         mode={isVideo ? 'video' : 'picture'}
+        // Sized for upload over weak mobile data, and to stay under the
+        // backend's video limit (see MAX_VIDEO_UPLOAD_BYTES).
+        videoQuality="720p"
+        videoBitrate={VIDEO_BITRATE}
       />
 
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">

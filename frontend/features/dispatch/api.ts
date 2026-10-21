@@ -49,6 +49,8 @@ export interface PriorityRecommendation {
   incidentId: string;
   currentPriority: string;
   recommendedPriority: string;
+  /** Caller answers behind a raised recommendation; empty when the category default applies. */
+  reasons?: string[];
   note: string;
 }
 
@@ -59,7 +61,26 @@ export interface CreateDispatchBody {
   dispatchNotes?: string;
 }
 
+/**
+ * A dispatch as returned by the staff-only GET /dispatch?incidentId= (array,
+ * not paginated). Crew names are staff-only and shown on the tracking card.
+ */
+export interface IncidentDispatch {
+  id: string;
+  incident_id: string;
+  resource_id: string;
+  status: string;
+  accepted_at: string | null;
+  created_at: string;
+  resources: { id: string; name: string; call_sign: string | null; resource_type: string } | null;
+  dispatch_crew: Array<{ user_id: string; users: { id: string; full_name: string } | null }>;
+}
+
 // ─── Fetchers ────────────────────────────────────────────────────────────────
+
+export function fetchIncidentDispatches(incidentId: string): Promise<IncidentDispatch[]> {
+  return api.get(`/dispatch?incidentId=${encodeURIComponent(incidentId)}`, getToken());
+}
 
 export function fetchDispatches(incidentId?: string): Promise<PaginatedResult<DispatchItem>> {
   const qs = incidentId ? `?incidentId=${incidentId}` : '';

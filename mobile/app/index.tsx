@@ -1,7 +1,8 @@
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 
 /**
- * Root entry point — renders only a neutral splash while AuthGuard in
+ * Root entry point — renders a blank white screen (the animated AgapSplash
+ * overlay from _layout.tsx sits on top) while AuthGuard in
  * _layout.tsx reads SecureStore and decides where to navigate.
  *
  * Do NOT redirect from here. Any unconditional <Redirect> fires before
@@ -10,17 +11,13 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
  */
 export default function Index() {
   return (
-    <View style={styles.root}>
-      <ActivityIndicator size="large" color="#0D6053" />
-    </View>
+    <View style={styles.root} />
   );
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#F2F5F8',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
 });

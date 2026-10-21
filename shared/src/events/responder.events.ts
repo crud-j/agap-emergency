@@ -13,9 +13,27 @@ export interface ResponderLocationUpdatedPayload {
   responderId: string;
   lat: number;
   lng: number;
-  heading?: number;
-  speed?: number;
+  heading?: number | null;
+  speed?: number | null;
   updatedAt: string;
+  /**
+   * Additive, optional fields (older clients ignore them). The envelope sent to
+   * the ops and incident rooms always carries `incidentId`; `dispatchId` and
+   * `callSign` let maps group crew phones into one unit marker. Never carries
+   * the responder's name or phone — this event reaches the reporter.
+   */
+  incidentId?: string;
+  dispatchId?: string;
+  callSign?: string | null;
+}
+
+/** `responder.eta_updated` — ETA is always an estimate (Rule 13). */
+export interface ResponderEtaUpdatedPayload {
+  incidentId: string;
+  dispatchId: string;
+  etaSeconds: number;
+  isEstimate: true;
+  calculatedAt: string;
 }
 
 export interface ResponderStatusChangedPayload {

@@ -21,7 +21,7 @@ const CATEGORIES: {
 }[] = [
   {
     type: IncidentType.ROAD_ACCIDENT,
-    label: 'Road / Vehicle Accident',
+    label: 'Road incident',
     description: 'Car, motorcycle, or\nother vehicle accident',
     icon: 'car',
     iconColor: '#3B82F6',
@@ -38,13 +38,13 @@ const CATEGORIES: {
     cardBg: '#FFFBEB',
   },
   {
-    type: IncidentType.FLOOD,
-    label: 'Disaster / Weather',
-    description: 'Flood, earthquake,\nor other natural disaster',
+    type: IncidentType.NATURAL_DISASTER,
+    label: 'Natural disaster',
+    description: 'Flooding, typhoon damage,\nfallen trees, collapse',
     icon: 'thunderstorm',
-    iconColor: '#6B7280',
-    iconBg: '#E5E7EB',
-    cardBg: '#F9FAFB',
+    iconColor: '#2563EB',
+    iconBg: '#DBEAFE',
+    cardBg: '#EFF6FF',
   },
 ];
 
@@ -52,12 +52,16 @@ export default function IncidentTypeScreen() {
   const router = useRouter();
   const { draft, setIncidentType } = useIncidentStore();
 
-  const [type, setType] = useState<IncidentType | null>(draft.type ?? null);
-
-  const isOddCount = CATEGORIES.length % 2 !== 0;
+  // A natural-disaster report with flooding is filed as FLOOD by the backend;
+  // either value selects the natural-disaster card.
+  const draftType = draft.type === IncidentType.FLOOD ? IncidentType.NATURAL_DISASTER : draft.type;
+  const [type, setType] = useState<IncidentType | null>(
+    CATEGORIES.some((category) => category.type === draftType) ? draftType : null,
+  );
 
   function handleContinue() {
-    if (type) setIncidentType(type);
+    if (!type || !CATEGORIES.some((category) => category.type === type)) return;
+    setIncidentType(type);
     router.push('/emergency/incident-details');
   }
 
@@ -90,9 +94,8 @@ export default function IncidentTypeScreen() {
         </Text>
 
         <View style={styles.grid}>
-          {CATEGORIES.map((c, idx) => {
+          {CATEGORIES.map((c) => {
             const active = type === c.type;
-            const isLastOdd = isOddCount && idx === CATEGORIES.length - 1;
             return (
               <TouchableOpacity
                 key={c.type}
@@ -100,7 +103,6 @@ export default function IncidentTypeScreen() {
                   styles.card,
                   { backgroundColor: active ? c.iconBg : c.cardBg },
                   active && styles.cardActive,
-                  isLastOdd && styles.cardFull,
                 ]}
                 activeOpacity={0.8}
                 onPress={() => setType(active ? null : c.type)}
@@ -128,6 +130,9 @@ export default function IncidentTypeScreen() {
           style={[styles.continueBtn, !type && styles.continueBtnMuted]}
           onPress={handleContinue}
           activeOpacity={0.85}
+          disabled={!type}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !type }}
         >
           <Text style={styles.continueTxt}>Continue</Text>
         </TouchableOpacity>
@@ -164,7 +169,6 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: 'transparent', minHeight: 140,
   },
   cardActive: { borderColor: '#0D6053' },
-  cardFull: { width: '100%' },
   iconCircle: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   cardLabel: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 4 },
   cardDesc: { fontSize: 12, color: '#6B7280', lineHeight: 17 },

@@ -42,26 +42,26 @@ const TABS: { key: TabKey; label: string }[] = [
 
 const TYPE_LABELS: Record<string, string> = {
   MEDICAL: 'Medical Emergency', ROAD_ACCIDENT: 'Road Traffic Accident',
-  FLOOD: 'Flood / Water Emergency', RESCUE: 'Search & Rescue',
+  FLOOD: 'Flood / Water Emergency', NATURAL_DISASTER: 'Natural Disaster', RESCUE: 'Search & Rescue',
   FIRE: 'Fire Emergency', INDUSTRIAL: 'Industrial Hazard',
   DEBRIS: 'Debris / Structural', OTHER: 'Other Emergency',
 };
 
 const TYPE_LABELS_SHORT: Record<string, string> = {
   MEDICAL: 'Medical', ROAD_ACCIDENT: 'Road Traffic', FLOOD: 'Flood',
-  RESCUE: 'Search & Rescue', FIRE: 'Fire', INDUSTRIAL: 'Industrial',
+  NATURAL_DISASTER: 'Natural Disaster', RESCUE: 'Search & Rescue', FIRE: 'Fire', INDUSTRIAL: 'Industrial',
   DEBRIS: 'Debris', OTHER: 'Other',
 };
 
 const TYPE_ICONS: Record<string, IoniconName> = {
   MEDICAL: 'pulse', ROAD_ACCIDENT: 'car-sport', FLOOD: 'water',
-  RESCUE: 'hand-left', FIRE: 'flame', INDUSTRIAL: 'warning',
+  NATURAL_DISASTER: 'thunderstorm', RESCUE: 'hand-left', FIRE: 'flame', INDUSTRIAL: 'warning',
   DEBRIS: 'layers', OTHER: 'alert-circle',
 };
 
 const TYPE_COLORS: Record<string, string> = {
   MEDICAL: '#DC2626', ROAD_ACCIDENT: '#EA580C', FLOOD: '#2563EB',
-  RESCUE: '#7C3AED', FIRE: '#EA580C', INDUSTRIAL: '#D97706',
+  NATURAL_DISASTER: '#0E7490', RESCUE: '#7C3AED', FIRE: '#EA580C', INDUSTRIAL: '#D97706',
   DEBRIS: '#6B7280', OTHER: '#0D6053',
 };
 
@@ -151,8 +151,7 @@ export default function HistoryIncidentDetailScreen() {
   });
 
   function handleBack() {
-    if (router.canGoBack()) router.back();
-    else router.replace('/history');
+    router.replace('/history');
   }
 
   async function handleShare() {

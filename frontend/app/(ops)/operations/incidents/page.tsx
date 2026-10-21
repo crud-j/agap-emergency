@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, type JSX } from 'react';
-import { Search } from 'lucide-react';
+import { Archive, Search } from 'lucide-react';
 import {
   DataTable, PriorityBadge, StatusChip, Button,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
@@ -9,6 +9,7 @@ import {
 } from '@/components/ui';
 import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
 import { IncidentDetailDrawer } from '@/components/incidents/IncidentDetailDrawer';
+import { cn } from '@/lib/utils';
 import { useWsState } from '@/lib/use-ws-state';
 import { useIncidents } from '@/features/incidents/hooks';
 import { categoryIcon, titleCase, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
@@ -17,13 +18,20 @@ import type { IncidentListItem } from '@/features/incidents/api';
 const ALL = 'ALL';
 const PRIORITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
-const CATEGORIES = ['MEDICAL', 'ROAD_ACCIDENT', 'FLOOD', 'RESCUE', 'FIRE', 'INDUSTRIAL', 'DEBRIS', 'OTHER'];
+const CATEGORIES = ['MEDICAL', 'ROAD_ACCIDENT', 'FLOOD', 'NATURAL_DISASTER', 'RESCUE', 'FIRE', 'INDUSTRIAL', 'DEBRIS', 'OTHER'];
 const PRIORITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 const STATUSES = [
   'SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING',
   'DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING',
   'RESOLVED', 'CLOSED', 'CANCELLED', 'FALSE_ALERT', 'DUPLICATE',
+  'UNABLE_TO_RESPOND', 'REFERRED',
 ];
+const ARCHIVE_STATUSES = [
+  'RESOLVED', 'CLOSED', 'CANCELLED', 'FALSE_ALERT', 'DUPLICATE',
+  'UNABLE_TO_RESPOND', 'REFERRED',
+];
+const QUEUE_VIEWS = ['ACTIVE', 'ARCHIVE', 'ALL'] as const;
+type QueueView = (typeof QUEUE_VIEWS)[number];
 
 type SortKey = 'newest' | 'oldest' | 'priority';
 
@@ -44,7 +52,18 @@ interface QueueRow {
  */
 export default function IncidentQueuePage(): JSX.Element {
   const wsState = useWsState();
-  const { data, isLoading, isError, refetch } = useIncidents({ perPage: 100 });
+  const [view, setView] = useState<QueueView>('ACTIVE');
+  const [page, setPage] = useState(1);
+  const queryStatuses = view === 'ACTIVE'
+    ? ACTIVE_STATUSES
+    : view === 'ARCHIVE'
+      ? ARCHIVE_STATUSES
+      : undefined;
+  const { data, isLoading, isError, refetch } = useIncidents({
+    perPage: 100,
+    page,
+    ...(queryStatuses && { statuses: queryStatuses }),
+  });
   const incidents = useMemo<IncidentListItem[]>(() => data?.data ?? [], [data]);
 
   const [search, setSearch] = useState('');
@@ -53,7 +72,6 @@ export default function IncidentQueuePage(): JSX.Element {
   const [priority, setPriority] = useState(ALL);
   const [barangay, setBarangay] = useState(ALL);
   const [sort, setSort] = useState<SortKey>('newest');
-  const [onlyActive, setOnlyActive] = useState(true);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -70,7 +88,6 @@ export default function IncidentQueuePage(): JSX.Element {
   const rows = useMemo<QueueRow[]>(() => {
     const q = search.trim().toLowerCase();
     return incidents
-      .filter((i) => (onlyActive ? ACTIVE_STATUSES.includes(i.status) : true))
       .filter((i) => (status === ALL ? true : i.status === status))
       .filter((i) => (category === ALL ? true : i.category === category))
       .filter((i) => (priority === ALL ? true : i.priority === priority))
@@ -100,7 +117,7 @@ export default function IncidentQueuePage(): JSX.Element {
         barangay: i.incident_locations?.barangay ?? '—',
         submitted_at: i.submitted_at,
       }));
-  }, [incidents, search, status, category, priority, barangay, sort, onlyActive]);
+  }, [incidents, search, status, category, priority, barangay, sort]);
 
   const columns: Column<QueueRow>[] = [
     {
@@ -139,11 +156,38 @@ export default function IncidentQueuePage(): JSX.Element {
         <div>
           <h1 className="text-2xl font-extrabold text-agap-textMain">Incident Queue</h1>
           <p className="mt-1 text-sm text-agap-textSub">
-            {rows.length} {onlyActive ? 'active' : 'total'} incident{rows.length === 1 ? '' : 's'}
+            {rows.length} shown · {data?.meta.total ?? rows.length}{' '}
+            {view === 'ACTIVE' ? 'active' : view === 'ARCHIVE' ? 'archived' : 'total'} incidents
           </p>
         </div>
         <ConnectionIndicator state={wsState} />
       </div>
+
+      <div role="tablist" aria-label="Incident views" className="flex w-fit flex-wrap gap-1 rounded-xl bg-agap-surface p-1">
+        {QUEUE_VIEWS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={view === tab}
+            onClick={() => { setView(tab); setPage(1); setStatus(ALL); }}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-colors',
+              view === tab
+                ? 'bg-white text-agap-textMain shadow-tile'
+                : 'text-agap-textSub hover:text-agap-textMain',
+            )}
+          >
+            {tab === 'ARCHIVE' && <Archive size={14} aria-hidden />}
+            {tab === 'ACTIVE' ? 'Active' : tab === 'ARCHIVE' ? 'Archive' : 'All incidents'}
+          </button>
+        ))}
+      </div>
+      {view === 'ARCHIVE' && (
+        <p className="text-xs text-agap-textSub">
+          Resolved and terminal incidents, including cancelled, duplicate, and false-alert reports.
+        </p>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
@@ -171,9 +215,6 @@ export default function IncidentQueuePage(): JSX.Element {
           </SelectContent>
         </Select>
 
-        <Button variant={onlyActive ? 'primary' : 'secondary'} size="sm" onClick={() => setOnlyActive((v) => !v)}>
-          {onlyActive ? 'Active only' : 'All statuses'}
-        </Button>
       </div>
 
       {/* Table */}
@@ -191,8 +232,22 @@ export default function IncidentQueuePage(): JSX.Element {
           onRowClick={(r) => openRow(r.id)}
           selectedKey={selectedId ?? undefined}
           emptyTitle="No incidents match"
-          emptyDescription="Adjust the filters above, or wait for new reports to arrive live."
+          emptyDescription={
+            view === 'ARCHIVE'
+              ? 'Resolved, cancelled, duplicate, and false-alert incidents will appear here.'
+              : 'Adjust the filters above, or wait for new reports to arrive live.'
+          }
         />
+      )}
+
+      {data && data.meta.totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-agap-textSub">
+          <span>Page {data.meta.page} of {data.meta.totalPages} · {data.meta.total} incidents</span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" disabled={!data.meta.hasPrev} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+            <Button size="sm" variant="secondary" disabled={!data.meta.hasNext} onClick={() => setPage((p) => p + 1)}>Next</Button>
+          </div>
+        </div>
       )}
 
       <IncidentDetailDrawer incidentId={selectedId} open={drawerOpen} onOpenChange={setDrawerOpen} />

@@ -14,6 +14,7 @@ const config: Config = {
   testEnvironment: 'node',
   setupFiles: ['<rootDir>/tests/mobile/jest.setup.ts'],
   moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/mobile/$1',
     // SVG assets → null component
     '\\.svg$': '<rootDir>/tests/mobile/__mocks__/svg.ts',
     // PNG/JPG assets

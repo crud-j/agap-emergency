@@ -1,60 +1,87 @@
 'use client';
 
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
   MapPin, User, Users, FileText, Image as ImageIcon, Activity, Sparkles,
-  AlertTriangle, HeartPulse, MessageSquare, CheckCircle2,
-  Shield, ShieldCheck, ShieldAlert, Video, Play,
+  AlertTriangle, HeartPulse, CheckCircle2, ChevronDown, ChevronRight, Copy, Check,
+  Shield, ShieldCheck, ShieldAlert, Video, Play, Landmark, Ban,
 } from 'lucide-react';
 import { IncidentChatPanel } from './IncidentChatPanel';
+import { BarangayPanel, BARANGAY_REPORT, barangayHasNotReported } from './BarangayPanel';
 import {
   Drawer, DrawerContent, DrawerHeader, DrawerBody, DrawerFooter, DrawerTitle,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+  Tabs, TabsList, TabsTrigger, TabsContent,
   PriorityBadge, StatusChip, Button, Skeleton, EmptyState, EtaLabel,
 } from '@/components/ui';
 import {
   useIncident, useUpdateIncidentStatus, useCreateResolution, useCloseIncident,
 } from '@/features/incidents/hooks';
 import { usePriorityRecommendation } from '@/features/dispatch/hooks';
-import { categoryIcon, titleCase, timeAgo } from '@/lib/incident-format';
-import type { IncidentDetail, IncidentAttachment } from '@/features/incidents/api';
+import { useIncidentBarangay } from '@/hooks/useBarangay';
+import { categoryIcon, formatAffectedCount, titleCase, timeAgo } from '@/lib/incident-format';
+import {
+  REPORTER_STATUS_LABELS,
+  ReporterStatus,
+  describeIntakeAnswers,
+  intakeReportLines,
+} from '@agap/shared';
+import {
+  fetchAttachmentBlob, type IncidentDetail, type IncidentAttachment, type IncidentEvent,
+} from '@/features/incidents/api';
 
-const TERMINAL = ['CLOSED', 'CANCELLED', 'FALSE_ALERT', 'DUPLICATE', 'UNABLE_TO_RESPOND', 'REFERRED'];
+/** In-field statuses advanced by the responder app, not the dashboard. */
+const IN_FIELD = ['DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING'];
+
+/** Statuses that end the incident without going through the normal path. */
+const ENDED_EARLY: Record<string, string> = {
+  CANCELLED: 'Cancelled',
+  FALSE_ALERT: 'Marked as a false alert',
+  DUPLICATE: 'Merged as a duplicate',
+  UNABLE_TO_RESPOND: 'Unable to respond',
+  REFERRED: 'Referred to the barangay',
+};
 
 interface StatusAction {
   label: string;
   to: string;
-  variant: 'primary' | 'danger';
 }
 
-const FALSE_ALERT: StatusAction = { label: 'False Alert', to: 'FALSE_ALERT', variant: 'danger' };
-
 /**
- * Lifecycle transitions offered in the Drawer footer, following
- * INCIDENT_STATUS_TRANSITIONS exactly.
- *  SUBMITTED  → RECEIVED (only; Acknowledge requires RECEIVED first)
- *  RECEIVED   → ACKNOWLEDGED
- *  ACKNOWLEDGED → ASSESSED | FALSE_ALERT
- *  ASSESSED   → DISPATCH_PENDING | FALSE_ALERT
- *  RESOLVED   → CLOSED
- *  Terminal / in-field statuses → no actions (handled by dispatch/responder screens)
+ * What the dispatcher does next, following INCIDENT_STATUS_TRANSITIONS exactly.
+ *  SUBMITTED → RECEIVED → ACKNOWLEDGED → ASSESSED → DISPATCH_PENDING
+ *  ACKNOWLEDGED / ASSESSED may also become FALSE_ALERT (offered separately, with a confirm)
+ *  RESOLVED → CLOSED through the resolution dialog; REFERRED → CLOSED directly
+ *  Other statuses → no action here (dispatch console / responder app)
  */
-function statusActions(status: string): StatusAction[] {
+function nextStep(status: string): { hint: string; action?: StatusAction; falseAlert?: boolean } {
   switch (status) {
     case 'SUBMITTED':
-      return [{ label: 'Mark Received', to: 'RECEIVED', variant: 'primary' }];
+      return { hint: 'New report. Confirm you have it.', action: { label: 'Mark received', to: 'RECEIVED' } };
     case 'RECEIVED':
-      return [{ label: 'Acknowledge', to: 'ACKNOWLEDGED', variant: 'primary' }];
+      return { hint: 'Let the reporter know MDRRMO is on it.', action: { label: 'Acknowledge', to: 'ACKNOWLEDGED' } };
     case 'ACKNOWLEDGED':
-      return [{ label: 'Mark Assessed', to: 'ASSESSED', variant: 'primary' }, FALSE_ALERT];
+      return { hint: 'Review the details, then mark it assessed.', action: { label: 'Mark assessed', to: 'ASSESSED' }, falseAlert: true };
     case 'ASSESSED':
-      return [{ label: 'Ready for Dispatch', to: 'DISPATCH_PENDING', variant: 'primary' }, FALSE_ALERT];
+      return {
+        hint: 'Send it to dispatch, or let the barangay handle it (Barangay tab).',
+        action: { label: 'Ready for dispatch', to: 'DISPATCH_PENDING' },
+        falseAlert: true,
+      };
+    case 'DISPATCH_PENDING':
+      return { hint: 'Waiting for a unit. Assign one in the dispatch console.' };
     case 'RESOLVED':
-      return [{ label: 'Close Incident', to: 'CLOSED', variant: 'primary' }];
+      return { hint: 'Field work is done. Record the outcome to close it.', action: { label: 'Resolve & close', to: 'CLOSED' } };
+    case 'REFERRED':
+      return { hint: 'The barangay is handling it. Close when they report it done.', action: { label: 'Close incident', to: 'CLOSED' } };
     default:
-      return [];
+      return {
+        hint: IN_FIELD.includes(status)
+          ? 'The responder updates this from the field and marks it resolved.'
+          : 'No further actions.',
+      };
   }
 }
 
@@ -67,7 +94,10 @@ interface IncidentDetailDrawerProps {
 /**
  * Shared incident detail Drawer (MOD-14/15). Opened from the incident queue
  * (WS-4.2) and the live map (WS-4.3) alike. One GET /incidents/:id fetch powers
- * the whole view: timeline, reporter≠patient, location, media, and status actions.
+ * the whole view; the barangay tab has its own query.
+ *
+ * Layout: a summary (what, where, how far along) stays on top, the details sit in
+ * tabs so nothing is a wall of text, and the footer always says what to do next.
  */
 export function IncidentDetailDrawer({ incidentId, open, onOpenChange }: IncidentDetailDrawerProps): JSX.Element {
   const { data: incident, isLoading, isError, refetch } = useIncident(incidentId);
@@ -94,13 +124,12 @@ export function IncidentDetailDrawer({ incidentId, open, onOpenChange }: Inciden
               action={<Button variant="secondary" size="sm" onClick={() => void refetch()}>Retry</Button>}
             />
           ) : (
-            <IncidentDetailBody incident={incident} />
+            // Keyed so the tab resets to Overview when another incident opens.
+            <IncidentDetailBody key={incident.id} incident={incident} />
           )}
         </DrawerBody>
 
-        {incident && !isLoading && !isError && (
-          <StatusActionFooter incident={incident} />
-        )}
+        {incident && !isLoading && !isError && <StatusActionFooter incident={incident} />}
       </DrawerContent>
     </Drawer>
   );
@@ -109,201 +138,246 @@ export function IncidentDetailDrawer({ incidentId, open, onOpenChange }: Inciden
 // ─── Body ─────────────────────────────────────────────────────────────────────
 
 function IncidentDetailBody({ incident }: { incident: IncidentDetail }): JSX.Element {
-  const Icon = categoryIcon(incident.category);
-  const loc = incident.incident_locations;
-  const address =
-    loc?.formatted_address ??
-    ([loc?.barangay, loc?.municipality, loc?.province].filter(Boolean).join(', ') || null);
-  const hasCoords =
-    loc?.latitude != null && loc?.longitude != null && Number(loc.latitude) !== 0;
+  const [tab, setTab] = useState('overview');
   const events = incident.incident_events ?? [];
-  const attachments = incident.incident_attachments ?? [];
-  const latestDispatch = incident.dispatches?.[incident.dispatches.length - 1];
-  const latestAssessment = incident.on_scene_assessments?.[0]; // backend orders desc
+  const barangayAttention = useBarangayAttention(incident.id);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start gap-3">
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-agap-greenSoft text-agap-green">
-          <Icon size={22} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-extrabold text-agap-textMain">{titleCase(incident.category)}</h2>
-          <p className="font-mono text-xs text-agap-textSub">{incident.public_reference}</p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <PriorityBadge priority={incident.priority} />
-            <StatusChip status={incident.status} />
-            <span className="text-xs text-agap-textSub">· reported {timeAgo(incident.submitted_at)}</span>
-          </div>
-        </div>
-      </div>
+    <div className="space-y-4">
+      <SummaryHeader incident={incident} />
+      <LifecycleTracker status={incident.status} />
 
-      {/* MOD-24 priority recommendation */}
-      <PriorityRecommendationChip incidentId={incident.id} currentPriority={incident.priority} />
-
-      {/* Location */}
-      <Section icon={MapPin} title="Location">
-        <p className="text-sm text-agap-textMain">{address ?? 'Address not available'}</p>
-        {hasCoords && (
-          <p className="mt-0.5 font-mono text-xs text-agap-textSub">
-            {Number(loc!.latitude).toFixed(5)}, {Number(loc!.longitude).toFixed(5)}
-          </p>
-        )}
-        {incident.description && (
-          <p className="mt-2 text-sm text-agap-textMid">{incident.description}</p>
-        )}
-      </Section>
-
-      {/* Reporter ≠ Patient — always separate concepts (CLAUDE.md rule 2) */}
-      <div className="grid grid-cols-2 gap-3">
-        <Section icon={User} title="Reporter">
-          <p className="text-sm text-agap-textMain">
-            {incident.incident_reporters?.is_guest
-              ? 'Guest / bystander'
-              : incident.incident_reporters?.reporter_name ?? 'Registered citizen'}
-          </p>
-          {incident.incident_reporters?.reporter_phone && (
-            <p className="mt-0.5 text-xs text-agap-textSub">{incident.incident_reporters.reporter_phone}</p>
-          )}
-        </Section>
-
-        <Section icon={Users} title="Patient(s)">
-          {incident.incident_patients && incident.incident_patients.length > 0 ? (
-            <ul className="space-y-1">
-              {incident.incident_patients.map((p) => (
-                <li key={p.id} className="text-sm text-agap-textMain">
-                  {p.is_unknown ? 'Unknown patient' : p.patient_name ?? 'Unnamed'}
-                  {(p.approximate_age != null || p.sex) && (
-                    <span className="text-xs text-agap-textSub">
-                      {' '}· {[p.approximate_age ? `~${p.approximate_age}y` : null, p.sex].filter(Boolean).join(', ')}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-agap-textSub">
-              Unidentified — does not block dispatch
-            </p>
-          )}
-        </Section>
-      </div>
-
-      {/* Response / ETA */}
-      <Section icon={Activity} title="Response">
-        {latestDispatch ? (
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <StatusChip status={incident.status} />
-              <span className="text-xs text-agap-textSub">dispatch {titleCase(latestDispatch.status)}</span>
-            </div>
-            <EtaLabel updatedAt={incident.dispatched_at} />
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm text-agap-textSub">No unit dispatched yet.</p>
-            <Link href="/operations/dispatch" className="text-sm font-semibold text-agap-green hover:underline">
-              Dispatch console →
-            </Link>
-          </div>
-        )}
-      </Section>
-
-      {/* On-scene assessment (MOD-37) */}
-      {latestAssessment && (
-        <Section icon={HeartPulse} title="On-Scene Assessment">
-          <div className="rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface/50 p-3">
-            <div className="flex flex-wrap gap-2">
-              {latestAssessment.consciousness_state && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-agap-textMain">
-                  Consciousness: {titleCase(latestAssessment.consciousness_state)}
-                </span>
-              )}
-              {latestAssessment.breathing_status && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-agap-textMain">
-                  Breathing: {titleCase(latestAssessment.breathing_status)}
-                </span>
-              )}
-              {latestAssessment.triage_tag && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-agap-textMain">
-                  Triage: {latestAssessment.triage_tag}
-                </span>
-              )}
-            </div>
-
-            {(() => {
-              const a = latestAssessment;
-              const vitals = [
-                a.blood_pressure_sys != null && a.blood_pressure_dia != null
-                  ? `BP ${a.blood_pressure_sys}/${a.blood_pressure_dia}`
-                  : null,
-                a.pulse_bpm != null ? `HR ${a.pulse_bpm}` : null,
-                a.respiratory_rate != null ? `RR ${a.respiratory_rate}` : null,
-                a.oxygen_saturation != null ? `SpO₂ ${a.oxygen_saturation}%` : null,
-                a.temperature_celsius != null ? `T ${a.temperature_celsius}°C` : null,
-                a.gcs_score != null ? `GCS ${a.gcs_score}` : null,
-              ].filter(Boolean);
-              return vitals.length > 0 ? (
-                <p className="mt-2 text-xs text-agap-textMid tabular-nums">{vitals.join(' · ')}</p>
-              ) : null;
-            })()}
-
-            {latestAssessment.visible_injuries.length > 0 && (
-              <p className="mt-1.5 text-xs text-agap-textMid">
-                <span className="text-agap-textSub">Injuries:</span> {latestAssessment.visible_injuries.join(', ')}
-              </p>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="barangay" className="gap-1.5">
+            Barangay
+            {barangayAttention && (
+              <span className="h-2 w-2 rounded-full bg-agap-danger" aria-label="Needs attention" />
             )}
-            {latestAssessment.interventions.length > 0 && (
-              <p className="mt-1 text-xs text-agap-textMid">
-                <span className="text-agap-textSub">Interventions:</span> {latestAssessment.interventions.join(', ')}
-              </p>
-            )}
-            {latestAssessment.assessment_notes && (
-              <p className="mt-1.5 text-sm text-agap-textMain">{latestAssessment.assessment_notes}</p>
-            )}
-            <p className="mt-1.5 text-[11px] text-agap-textSub">Updated {timeAgo(latestAssessment.assessed_at)}</p>
-          </div>
-        </Section>
-      )}
+          </TabsTrigger>
+          <TabsTrigger value="timeline" className="gap-1.5">
+            Timeline
+            {events.length > 0 && <span className="text-[11px] font-medium text-agap-textSub">{events.length}</span>}
+          </TabsTrigger>
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+        </TabsList>
 
-      {/* Citizen Photo Reference (MOD-10) — read-only preview of photos submitted from the mobile app */}
-      <CitizenPhotoStrip attachments={attachments} />
-
-      {/* Timeline */}
-      <Section icon={FileText} title="Timeline">
-        {events.length === 0 ? (
-          <p className="text-sm text-agap-textSub">No status events yet.</p>
-        ) : (
-          <ol className="relative space-y-3 border-l border-agap-track pl-4">
-            {events.map((e) => (
-              <li key={e.id} className="relative">
-                <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-agap-green ring-2 ring-white" />
-                <div className="flex items-center gap-2">
-                  <StatusChip status={e.to_status} />
-                  <span className="text-xs text-agap-textSub">{timeAgo(e.occurred_at)}</span>
-                </div>
-                {e.notes && <p className="mt-0.5 text-xs text-agap-textMid">{e.notes}</p>}
-                {e.triggered_by_role && (
-                  <p className="text-[11px] text-agap-textSub">{titleCase(e.triggered_by_role)}</p>
-                )}
-              </li>
-            ))}
-          </ol>
-        )}
-      </Section>
-
-      {/* Communications (MOD-33) */}
-      <Section icon={MessageSquare} title="Communications">
-        <IncidentChatPanel incidentId={incident.id} />
-      </Section>
+        <TabsContent value="overview">
+          <Overview incident={incident} onOpenBarangay={() => setTab('barangay')} />
+        </TabsContent>
+        <TabsContent value="barangay">
+          <BarangayPanel incidentId={incident.id} incidentStatus={incident.status} />
+        </TabsContent>
+        <TabsContent value="timeline">
+          <Timeline events={events} />
+        </TabsContent>
+        <TabsContent value="chat">
+          <IncidentChatPanel incidentId={incident.id} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
 
-// ─── MOD-24 chip ────────────────────────────────────────────────────────────────
+/** True when the barangay needs the dispatcher: asked for backup, or has gone quiet. */
+function useBarangayAttention(incidentId: string): boolean {
+  const { data } = useIncidentBarangay(incidentId);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, []);
+  const notice = data?.notice;
+  if (!notice || notice.closed_at) return false;
+  return notice.last_report === 'NEEDS_BACKUP' || barangayHasNotReported(notice, now);
+}
 
-function PriorityRecommendationChip({
+function SummaryHeader({ incident }: { incident: IncidentDetail }): JSX.Element {
+  const Icon = categoryIcon(incident.category);
+  return (
+    <div className="flex items-start gap-3">
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-agap-greenSoft text-agap-green">
+        <Icon size={22} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="truncate text-lg font-extrabold text-agap-textMain">{titleCase(incident.category)}</h2>
+          <PriorityBadge priority={incident.priority} />
+        </div>
+        <p className="font-mono text-xs text-agap-textSub">
+          {incident.public_reference} · reported {timeAgo(incident.submitted_at)}
+        </p>
+        <div className="mt-1.5">
+          <StatusChip status={incident.status} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Lifecycle tracker ───────────────────────────────────────────────────────
+
+const STAGES: Array<{ label: string; statuses: string[] }> = [
+  { label: 'Reported', statuses: ['DRAFT', 'SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED'] },
+  { label: 'Assessed', statuses: ['ASSESSED', 'DISPATCH_PENDING'] },
+  { label: 'Dispatched', statuses: ['DISPATCHED', 'EN_ROUTE'] },
+  { label: 'On scene', statuses: ['ON_SCENE', 'TRANSPORTING', 'ASSISTING'] },
+  { label: 'Resolved', statuses: ['RESOLVED'] },
+  { label: 'Closed', statuses: ['CLOSED'] },
+];
+
+/** Where the incident is in its life, at a glance. Early endings replace the bar with one line. */
+function LifecycleTracker({ status }: { status: string }): JSX.Element {
+  const ended = ENDED_EARLY[status];
+  if (ended) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl bg-agap-surface px-3 py-2 text-sm text-agap-textMid">
+        {status === 'REFERRED' ? <Landmark size={15} /> : <Ban size={15} />}
+        <span className="font-semibold">{ended}</span>
+      </div>
+    );
+  }
+
+  const current = Math.max(0, STAGES.findIndex((s) => s.statuses.includes(status)));
+  return (
+    <ol className="flex items-start" aria-label={`Progress: ${STAGES[current]!.label}`}>
+      {STAGES.map((stage, i) => {
+        const done = i < current;
+        const active = i === current;
+        return (
+          <li key={stage.label} className="relative flex flex-1 flex-col items-center text-center">
+            {i > 0 && (
+              <span
+                className={`absolute right-1/2 top-[7px] h-0.5 w-full ${i <= current ? 'bg-agap-green' : 'bg-agap-track'}`}
+                aria-hidden
+              />
+            )}
+            <span
+              className={`relative z-10 flex h-4 w-4 items-center justify-center rounded-full ring-4 ring-white ${
+                done ? 'bg-agap-green' : active ? 'bg-agap-green ring-agap-greenSoft' : 'bg-agap-track'
+              }`}
+            >
+              {done && <Check size={10} className="text-white" strokeWidth={3} />}
+            </span>
+            <span
+              className={`mt-1 text-[10px] leading-tight ${
+                active ? 'font-bold text-agap-green' : done ? 'text-agap-textMid' : 'text-agap-textSub'
+              }`}
+              aria-current={active ? 'step' : undefined}
+            >
+              {stage.label}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// ─── Overview tab ─────────────────────────────────────────────────────────────
+
+function Overview({ incident, onOpenBarangay }: { incident: IncidentDetail; onOpenBarangay: () => void }): JSX.Element {
+  const loc = incident.incident_locations;
+  const address =
+    loc?.formatted_address ??
+    ([loc?.barangay, loc?.municipality, loc?.province].filter(Boolean).join(', ') || null);
+  const hasCoords = loc?.latitude != null && loc?.longitude != null && Number(loc.latitude) !== 0;
+  const coords = hasCoords ? `${Number(loc!.latitude).toFixed(5)}, ${Number(loc!.longitude).toFixed(5)}` : null;
+  const attachments = incident.incident_attachments ?? [];
+  const latestAssessment = incident.on_scene_assessments?.[0]; // backend orders desc
+
+  return (
+    <div className="space-y-5">
+      {incident.description && (
+        <p className="rounded-xl border-l-4 border-agap-green bg-agap-greenSoft/50 px-3 py-2 text-sm text-agap-textMain">
+          “{incident.description}”
+        </p>
+      )}
+
+      <Section icon={MapPin} title="Location">
+        <p className="text-sm font-semibold text-agap-textMain">{address ?? 'Address not available'}</p>
+        {loc?.landmark && <p className="mt-0.5 text-sm text-agap-textMid">Near {loc.landmark}</p>}
+        {coords && <CopyCoordinates coords={coords} />}
+      </Section>
+
+      <BarangaySummary incidentId={incident.id} onOpen={onOpenBarangay} />
+
+      <PriorityRecommendation incidentId={incident.id} currentPriority={incident.priority} />
+
+      <People incident={incident} />
+
+      <CallerDetails incident={incident} />
+
+      <Response incident={incident} />
+
+      {latestAssessment && <Assessment assessment={latestAssessment} />}
+
+      {/* Citizen Photo Reference (MOD-10) — read-only preview of photos submitted from the mobile app */}
+      <CitizenPhotoStrip incidentId={incident.id} attachments={attachments} />
+    </div>
+  );
+}
+
+function CopyCoordinates({ coords }: { coords: string }): JSX.Element {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(coords.replace(' ', '')).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="mt-1 inline-flex items-center gap-1.5 rounded-md font-mono text-xs text-agap-textSub hover:text-agap-textMain"
+      title="Copy coordinates"
+    >
+      {coords}
+      {copied ? <Check size={12} className="text-agap-green" /> : <Copy size={12} />}
+    </button>
+  );
+}
+
+/** One line on the Overview; the full controls live in the Barangay tab. */
+function BarangaySummary({ incidentId, onOpen }: { incidentId: string; onOpen: () => void }): JSX.Element | null {
+  const { data } = useIncidentBarangay(incidentId);
+  const attention = useBarangayAttention(incidentId);
+  if (!data) return null;
+  const notice = data.notice;
+  const report = notice?.last_report ? BARANGAY_REPORT[notice.last_report] : null;
+  const state = !notice
+    ? 'Not set'
+    : report
+      ? report.label
+      : notice.closed_at
+        ? 'Closed'
+        : attention
+          ? 'No reply yet'
+          : 'Waiting for reply';
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors hover:bg-agap-surface ${
+        attention ? 'border-red-200 bg-red-50/60' : 'border-[rgba(168,181,193,0.25)]'
+      }`}
+    >
+      <Landmark size={16} className="shrink-0 text-agap-textSub" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs text-agap-textSub">Barangay</span>
+        <span className="block truncate text-sm font-semibold text-agap-textMain">
+          {notice ? `Brgy ${notice.barangay.name}` : 'Barangay not set'}
+          <span className={`font-normal ${attention ? 'text-agap-danger' : 'text-agap-textMid'}`}> · {state}</span>
+        </span>
+      </span>
+      <ChevronRight size={16} className="shrink-0 text-agap-textSub" />
+    </button>
+  );
+}
+
+function PriorityRecommendation({
   incidentId, currentPriority,
 }: {
   incidentId: string;
@@ -313,76 +387,300 @@ function PriorityRecommendationChip({
   if (isLoading || !data) return null;
 
   const differs = data.recommendedPriority !== currentPriority;
+  const reasons = data.reasons ?? [];
   return (
-    <div
-      className="flex items-start gap-2 rounded-xl border border-agap-infoSoft bg-agap-infoSoft/60 px-3 py-2"
-      title={data.note}
-    >
-      <Sparkles size={16} className="mt-0.5 shrink-0 text-agap-info" />
-      <div className="text-sm">
-        <span className="font-semibold text-agap-textMain">Recommended priority: </span>
-        <PriorityBadge priority={data.recommendedPriority} />
-        <span className="ml-1 text-xs text-agap-textSub">
-          {differs ? '— differs from current (assistive; dispatcher decides)' : '— matches current (assistive)'}
+    <Collapsible
+      icon={Sparkles}
+      title={
+        <span className="flex flex-wrap items-center gap-1.5">
+          Suggested priority <PriorityBadge priority={data.recommendedPriority} />
+          <span className="text-xs font-normal normal-case tracking-normal text-agap-textSub">
+            {differs ? 'differs from current' : 'matches current'}
+          </span>
         </span>
-      </div>
+      }
+      tone={differs ? 'info' : 'plain'}
+    >
+      {reasons.length > 0 && (
+        <ul className="list-disc space-y-0.5 pl-4 text-xs text-agap-textMid">
+          {reasons.map((reason) => <li key={reason}>{reason}</li>)}
+        </ul>
+      )}
+      <p className="mt-1 text-[11px] text-agap-textSub">Assistive only. The dispatcher decides.</p>
+    </Collapsible>
+  );
+}
+
+/** Reporter ≠ Patient: always separate concepts (CLAUDE.md rule 2). */
+function People({ incident }: { incident: IncidentDetail }): JSX.Element {
+  const reporter = incident.incident_reporters;
+  const reporterStatus = reporter?.reporter_status as ReporterStatus | null | undefined;
+  const patients = incident.incident_patients ?? [];
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Section icon={User} title="Reporter">
+        <p className="text-sm text-agap-textMain">
+          {reporter?.is_guest ? 'Guest / bystander' : reporter?.reporter_name ?? 'Registered citizen'}
+        </p>
+        {reporter?.reporter_phone && <p className="mt-0.5 text-xs text-agap-textSub">{reporter.reporter_phone}</p>}
+        {reporterStatus && REPORTER_STATUS_LABELS[reporterStatus] && (
+          <p
+            className={`mt-1 text-xs font-semibold ${
+              reporterStatus === ReporterStatus.NEEDS_HELP ? 'text-red-600' : 'text-agap-green'
+            }`}
+          >
+            {REPORTER_STATUS_LABELS[reporterStatus]}
+          </p>
+        )}
+      </Section>
+
+      <Section icon={Users} title={patients.length > 1 ? `Patients (${patients.length})` : 'Patient'}>
+        {patients.length > 0 ? (
+          <ul className="space-y-1">
+            {patients.map((p) => (
+              <li key={p.id} className="text-sm text-agap-textMain">
+                {p.is_unknown ? 'Unknown patient' : p.patient_name ?? 'Unnamed'}
+                {(p.approximate_age != null || p.sex) && (
+                  <span className="text-xs text-agap-textSub">
+                    {' '}· {[p.approximate_age ? `~${p.approximate_age}y` : null, p.sex].filter(Boolean).join(', ')}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-agap-textSub">Unidentified. Does not block dispatch.</p>
+        )}
+      </Section>
     </div>
+  );
+}
+
+function CallerDetails({ incident }: { incident: IncidentDetail }): JSX.Element | null {
+  const reportedCount = formatAffectedCount(incident.hazard_flags, incident.number_of_patients);
+  // Structured answers (MOD-09) are labelled from the shared intake catalog;
+  // their flattened copies in hazard_flags are skipped so nothing shows twice.
+  const callerAnswers = incident.incident_details?.caller_answers ?? {};
+  const intakeAnswers = describeIntakeAnswers(incident.category, callerAnswers);
+  const intakeLines = new Set(intakeReportLines(incident.category, callerAnswers));
+  const flags = incident.hazard_flags ?? [];
+  const callerDetails = flags.filter(
+    (flag) => !flag.startsWith('AFFECTED_COUNT:') && !flag.startsWith('DISPATCH:') && !intakeLines.has(flag),
+  );
+  const requestedResponses = flags.filter((f) => f.startsWith('DISPATCH:')).map((f) => f.slice('DISPATCH:'.length));
+  const count = intakeAnswers.length + callerDetails.length;
+
+  if (!reportedCount && count === 0 && requestedResponses.length === 0) return null;
+
+  return (
+    <Collapsible
+      icon={AlertTriangle}
+      title="Caller-reported details"
+      summary={[reportedCount && `${reportedCount} affected`, count > 0 && `${count} answer${count === 1 ? '' : 's'}`]
+        .filter(Boolean)
+        .join(' · ')}
+    >
+      {intakeAnswers.length > 0 && (
+        <dl className="grid grid-cols-[minmax(0,auto)_1fr] gap-x-3 gap-y-1 text-sm">
+          {intakeAnswers.map((a) => (
+            <div key={a.key} className="contents">
+              <dt className="text-agap-textSub">{a.question}</dt>
+              <dd className="font-semibold text-agap-textMain">{a.answer}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {callerDetails.length > 0 && (
+        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-agap-textMain">
+          {callerDetails.map((detail, index) => <li key={`${index}-${detail}`}>{detail}</li>)}
+        </ul>
+      )}
+      {requestedResponses.length > 0 && (
+        <p className="mt-1 text-sm text-agap-textMain">Response requested: {requestedResponses.join(', ')}</p>
+      )}
+      <p className="mt-1.5 text-[11px] text-agap-textSub">Reported at intake; not independently verified.</p>
+    </Collapsible>
+  );
+}
+
+function Response({ incident }: { incident: IncidentDetail }): JSX.Element {
+  const latestDispatch = incident.dispatches?.[incident.dispatches.length - 1];
+  return (
+    <Section icon={Activity} title="Response">
+      {latestDispatch ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-agap-textMain">Unit {titleCase(latestDispatch.status)}</span>
+          <EtaLabel updatedAt={incident.dispatched_at} />
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-agap-textSub">No unit dispatched yet.</p>
+          <Link href="/operations/dispatch" className="text-sm font-semibold text-agap-green hover:underline">
+            Dispatch console →
+          </Link>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function Assessment({
+  assessment: a,
+}: {
+  assessment: NonNullable<IncidentDetail['on_scene_assessments']>[number];
+}): JSX.Element {
+  const vitals = [
+    a.blood_pressure_sys != null && a.blood_pressure_dia != null ? `BP ${a.blood_pressure_sys}/${a.blood_pressure_dia}` : null,
+    a.pulse_bpm != null ? `HR ${a.pulse_bpm}` : null,
+    a.respiratory_rate != null ? `RR ${a.respiratory_rate}` : null,
+    a.oxygen_saturation != null ? `SpO₂ ${a.oxygen_saturation}%` : null,
+    a.temperature_celsius != null ? `T ${a.temperature_celsius}°C` : null,
+    a.gcs_score != null ? `GCS ${a.gcs_score}` : null,
+  ].filter(Boolean);
+  const chips = [
+    a.consciousness_state && `Consciousness: ${titleCase(a.consciousness_state)}`,
+    a.breathing_status && `Breathing: ${titleCase(a.breathing_status)}`,
+    a.triage_tag && `Triage: ${a.triage_tag}`,
+  ].filter(Boolean) as string[];
+
+  return (
+    <Section icon={HeartPulse} title={`On-scene assessment · ${timeAgo(a.assessed_at)}`}>
+      <div className="rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface/50 p-3">
+        {chips.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {chips.map((c) => (
+              <span key={c} className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-agap-textMain">{c}</span>
+            ))}
+          </div>
+        )}
+        {vitals.length > 0 && <p className="mt-2 text-xs tabular-nums text-agap-textMid">{vitals.join(' · ')}</p>}
+        {a.visible_injuries.length > 0 && (
+          <p className="mt-1.5 text-xs text-agap-textMid">
+            <span className="text-agap-textSub">Injuries:</span> {a.visible_injuries.join(', ')}
+          </p>
+        )}
+        {a.interventions.length > 0 && (
+          <p className="mt-1 text-xs text-agap-textMid">
+            <span className="text-agap-textSub">Interventions:</span> {a.interventions.join(', ')}
+          </p>
+        )}
+        {a.assessment_notes && <p className="mt-1.5 text-sm text-agap-textMain">{a.assessment_notes}</p>}
+      </div>
+    </Section>
+  );
+}
+
+// ─── Timeline tab ─────────────────────────────────────────────────────────────
+
+/** Newest first: the latest change is what the dispatcher looks for. */
+function Timeline({ events }: { events: IncidentEvent[] }): JSX.Element {
+  if (events.length === 0) {
+    return <p className="text-sm text-agap-textSub">No events yet.</p>;
+  }
+  const newestFirst = [...events].sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+
+  return (
+    <ol className="relative space-y-4 border-l border-agap-track pl-5">
+      {newestFirst.map((e, i) => {
+        // Same status before and after = a note on the incident (a barangay call,
+        // a status-page report), not a lifecycle step: do not draw it as a status.
+        const isNote = !!e.from_status && e.from_status === e.to_status;
+        const at = new Date(e.occurred_at);
+        return (
+          <li key={e.id} className="relative">
+            <span
+              className={`absolute -left-[26px] top-1 h-3 w-3 rounded-full ring-4 ring-white ${
+                isNote ? 'bg-agap-track' : i === 0 ? 'bg-agap-green' : 'bg-agap-green/60'
+              }`}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              {isNote ? (
+                <span className="text-xs font-semibold text-agap-textMid">Note</span>
+              ) : (
+                <StatusChip status={e.to_status} />
+              )}
+              <time className="text-xs text-agap-textSub" dateTime={e.occurred_at} title={at.toLocaleString()}>
+                {at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {timeAgo(e.occurred_at)}
+              </time>
+            </div>
+            {e.notes && <p className="mt-1 text-sm text-agap-textMain">{e.notes}</p>}
+            {e.triggered_by_role && (
+              <p className="mt-0.5 text-[11px] text-agap-textSub">by {titleCase(e.triggered_by_role)}</p>
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
 // ─── Footer status actions ────────────────────────────────────────────────────
 
-function StatusActionFooter({ incident }: { incident: IncidentDetail }): JSX.Element | null {
+function StatusActionFooter({ incident }: { incident: IncidentDetail }): JSX.Element {
   const update = useUpdateIncidentStatus();
   const [resolveOpen, setResolveOpen] = useState(false);
-  const actions = statusActions(incident.status);
+  // False alert ends the incident: first click arms it, second click confirms.
+  const [armFalseAlert, setArmFalseAlert] = useState(false);
+  const { hint, action, falseAlert } = nextStep(incident.status);
 
-  // RESOLVED → CLOSED must capture an outcome first (MOD-45).
-  const isResolved = incident.status === 'RESOLVED';
-
-  if (actions.length === 0) {
-    return (
-      <DrawerFooter>
-        <span className="text-sm text-agap-textSub">
-          Incident is {titleCase(incident.status)} — no further actions.
-        </span>
-      </DrawerFooter>
-    );
-  }
+  useEffect(() => {
+    setArmFalseAlert(false);
+  }, [incident.status]);
 
   return (
     <DrawerFooter className="flex-col items-stretch gap-2">
+      <p className="text-xs text-agap-textSub">
+        <span className="font-semibold text-agap-textMid">Next: </span>
+        {hint}
+      </p>
       {update.isError && (
         <p className="text-xs text-agap-danger">
-          {(update.error as Error)?.message ?? 'Action failed — the transition may not be allowed.'}
+          {(update.error as Error)?.message ?? 'Action failed. The change may not be allowed.'}
         </p>
       )}
-      <div className="flex justify-end gap-2">
-        {isResolved ? (
-          <Button variant="primary" size="sm" onClick={() => setResolveOpen(true)}>
-            <CheckCircle2 size={14} className="mr-1.5" /> Resolve &amp; Close
-          </Button>
-        ) : (
-          actions.map((a) => (
+      {(action || falseAlert || incident.status === 'DISPATCH_PENDING') && (
+        <div className="flex items-center gap-2">
+          {falseAlert && (
             <Button
-              key={a.to}
-              variant={a.variant === 'danger' ? 'danger' : 'primary'}
+              variant={armFalseAlert ? 'danger' : 'ghost'}
               size="sm"
-              loading={update.isPending && update.variables?.status === a.to}
-              onClick={() => update.mutate({ id: incident.id, status: a.to })}
+              loading={update.isPending && update.variables?.status === 'FALSE_ALERT'}
+              onClick={() => {
+                if (!armFalseAlert) { setArmFalseAlert(true); return; }
+                update.mutate({ id: incident.id, status: 'FALSE_ALERT' });
+              }}
+              onBlur={() => setArmFalseAlert(false)}
             >
-              {a.label}
+              {armFalseAlert ? 'Confirm false alert' : 'False alert'}
             </Button>
-          ))
-        )}
-      </div>
+          )}
+          <span className="flex-1" />
+          {incident.status === 'DISPATCH_PENDING' && (
+            <Link href="/operations/dispatch">
+              <Button variant="primary" size="sm">Open dispatch console</Button>
+            </Link>
+          )}
+          {action && incident.status === 'RESOLVED' && (
+            <Button variant="primary" size="sm" onClick={() => setResolveOpen(true)}>
+              <CheckCircle2 size={14} /> {action.label}
+            </Button>
+          )}
+          {action && incident.status !== 'RESOLVED' && (
+            <Button
+              variant="primary"
+              size="sm"
+              loading={update.isPending && update.variables?.status === action.to}
+              onClick={() => update.mutate({ id: incident.id, status: action.to })}
+            >
+              {action.label}
+            </Button>
+          )}
+        </div>
+      )}
 
-      {isResolved && (
-        <ResolutionDialog
-          incidentId={incident.id}
-          open={resolveOpen}
-          onOpenChange={setResolveOpen}
-        />
+      {incident.status === 'RESOLVED' && (
+        <ResolutionDialog incidentId={incident.id} open={resolveOpen} onOpenChange={setResolveOpen} />
       )}
     </DrawerFooter>
   );
@@ -575,8 +873,14 @@ function photoTitle(a: IncidentAttachment): string {
  * drawer — a new-tab link was unreliable and caused playback glitches.
  * Returns null when the citizen didn't capture any media.
  */
-function CitizenPhotoStrip({ attachments }: { attachments: IncidentAttachment[] }): JSX.Element | null {
+function CitizenPhotoStrip({
+  incidentId, attachments,
+}: {
+  incidentId: string;
+  attachments: IncidentAttachment[];
+}): JSX.Element | null {
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
+  const mediaUrls = useAttachmentUrls(incidentId, attachments);
 
   if (attachments.length === 0) return null;
 
@@ -592,20 +896,31 @@ function CitizenPhotoStrip({ attachments }: { attachments: IncidentAttachment[] 
             const v = photoVerdict(a);
             const isVideo = a.file_type?.startsWith('video/');
             const isImage = a.file_type?.startsWith('image/');
+            const url = mediaUrls[a.id];
 
-            if (a.storage_url && isVideo) {
+            if ((isVideo || isImage) && url === undefined) {
+              return (
+                <div
+                  key={a.id}
+                  className="h-24 w-24 animate-pulse rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface"
+                  aria-label="Loading media"
+                />
+              );
+            }
+
+            if (url && isVideo) {
               return (
                 <button
                   key={a.id}
                   type="button"
-                  onClick={() => setActiveVideoUrl(a.storage_url!)}
+                  onClick={() => setActiveVideoUrl(url)}
                   title={`${a.file_name} · click to play`}
                   className="group relative overflow-hidden rounded-xl border border-[rgba(168,181,193,0.20)] transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
                 >
                   {/* Video thumbnail — seeks to 0.1 s to paint the first frame */}
                   {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                   <video
-                    src={a.storage_url}
+                    src={url}
                     className="h-24 w-24 bg-black object-cover"
                     muted
                     preload="metadata"
@@ -628,11 +943,11 @@ function CitizenPhotoStrip({ attachments }: { attachments: IncidentAttachment[] 
               );
             }
 
-            if (a.storage_url && isImage) {
+            if (url && isImage) {
               return (
                 <a
                   key={a.id}
-                  href={a.storage_url}
+                  href={url}
                   target="_blank"
                   rel="noreferrer"
                   title={photoTitle(a)}
@@ -640,7 +955,7 @@ function CitizenPhotoStrip({ attachments }: { attachments: IncidentAttachment[] 
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={a.storage_url}
+                    src={url}
                     alt={a.file_name}
                     className="h-24 w-24 object-cover"
                   />
@@ -657,10 +972,10 @@ function CitizenPhotoStrip({ attachments }: { attachments: IncidentAttachment[] 
             return (
               <a
                 key={a.id}
-                href={a.storage_url ?? '#'}
+                href={url ?? '#'}
                 target="_blank"
                 rel="noreferrer"
-                title={a.file_name}
+                title={url === null ? `${a.file_name} · could not be loaded` : a.file_name}
                 className="flex h-24 w-24 flex-col items-center justify-center gap-1.5 rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface text-agap-textSub transition-colors hover:bg-agap-surface/80"
               >
                 <FileText size={20} />
@@ -718,14 +1033,50 @@ function CitizenPhotoStrip({ attachments }: { attachments: IncidentAttachment[] 
   );
 }
 
-// ─── Small section wrapper ──────────────────────────────────────────────────────
+/**
+ * Loads each attachment through the authenticated API and exposes it as a
+ * blob: URL. undefined = still loading, null = failed. Object URLs are revoked
+ * on unmount / when the attachment set changes.
+ */
+function useAttachmentUrls(
+  incidentId: string,
+  attachments: IncidentAttachment[],
+): Record<string, string | null> {
+  const [urls, setUrls] = useState<Record<string, string | null>>({});
+  const ids = attachments.map((a) => a.id).join(',');
+
+  useEffect(() => {
+    let cancelled = false;
+    const created: string[] = [];
+    setUrls({});
+    for (const id of ids ? ids.split(',') : []) {
+      fetchAttachmentBlob(incidentId, id)
+        .then((blob) => {
+          const objectUrl = URL.createObjectURL(blob);
+          created.push(objectUrl);
+          if (!cancelled) setUrls((prev) => ({ ...prev, [id]: objectUrl }));
+        })
+        .catch(() => {
+          if (!cancelled) setUrls((prev) => ({ ...prev, [id]: null }));
+        });
+    }
+    return () => {
+      cancelled = true;
+      created.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [incidentId, ids]);
+
+  return urls;
+}
+
+// ─── Section wrappers ─────────────────────────────────────────────────────────
 
 function Section({
   icon: Icon, title, children,
 }: {
   icon: typeof MapPin;
-  title: string;
-  children: React.ReactNode;
+  title: ReactNode;
+  children: ReactNode;
 }): JSX.Element {
   return (
     <div>
@@ -734,6 +1085,39 @@ function Section({
         <span className="text-xs font-semibold uppercase tracking-wide text-agap-textSub">{title}</span>
       </div>
       {children}
+    </div>
+  );
+}
+
+/** A section that starts folded, showing a one-line summary, for detail that is useful but not urgent. */
+function Collapsible({
+  icon: Icon, title, summary, tone = 'plain', children,
+}: {
+  icon: typeof MapPin;
+  title: ReactNode;
+  summary?: string;
+  tone?: 'plain' | 'info';
+  children: ReactNode;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className={`rounded-xl border ${
+        tone === 'info' ? 'border-agap-infoSoft bg-agap-infoSoft/50' : 'border-[rgba(168,181,193,0.25)]'
+      }`}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
+      >
+        <Icon size={14} className="shrink-0 text-agap-textSub" />
+        <span className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-wide text-agap-textSub">{title}</span>
+        {summary && !open && <span className="shrink-0 text-xs text-agap-textSub">{summary}</span>}
+        <ChevronDown size={14} className={`shrink-0 text-agap-textSub transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && <div className="px-3 pb-3">{children}</div>}
     </div>
   );
 }

@@ -8,6 +8,38 @@ export interface LatLng {
   lng: number;
 }
 
+export interface LatestUnitPosition {
+  dispatchId: string;
+  callSign: string | null;
+  unitName: string | null;
+  resourceType: string | null;
+  position: {
+    lat: number;
+    lng: number;
+    heading: number | null;
+    speedKmh: number | null;
+    updatedAt: string;
+  } | null;
+  eta: {
+    seconds: number | null;
+    isEstimate: true;
+    calculatedAt: string | null;
+  };
+}
+
+/** Safe latest responder positions for a participant in an incident (MOD-13). */
+export function getLatestTrackingPositions(
+  incidentId: string,
+  token: string,
+): Promise<LatestUnitPosition[]> {
+  return apiFetch<LatestUnitPosition[]>(
+    `${API_BASE}/v1/locations/tracking/${encodeURIComponent(incidentId)}/latest`,
+    {
+    headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+}
+
 /** Driving route + ETA between two points for the in-app route line (MOD-43). */
 export function getRoute(from: LatLng, to: LatLng, token: string): Promise<RouteResult> {
   return apiFetch(`${API_BASE}/v1/locations/route`, {

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getToken } from './auth';
+import { useSyncExternalStore } from 'react';
+import { getSessionUser, subscribeSession } from './auth';
 
 export interface AuthUser {
   id: string;
@@ -10,41 +10,39 @@ export interface AuthUser {
   orgId?: string | undefined;
   orgName?: string | undefined;
   name?: string | undefined;
+  mustChangePassword: boolean;
 }
 
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const b64 = parts[1]!.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-/** Read and decode the auth user from the agap_token cookie (client-side only). */
+/** The signed-in user from the in-memory session (null before sign-in / restore). */
 export function getAuthUser(): AuthUser | null {
-  const token = getToken();
-  if (!token) return null;
-  const p = decodeJwtPayload(token);
-  if (!p) return null;
-  if (p['exp'] && Date.now() / 1000 > (p['exp'] as number)) return null;
+  const user = getSessionUser();
+  if (!user) return null;
   return {
-    id: String(p['sub'] ?? p['userId'] ?? ''),
-    email: p['email'] as string | undefined,
-    role: String(p['role'] ?? ''),
-    orgId: p['orgId'] as string | undefined,
-    orgName: p['orgName'] as string | undefined,
-    name: (p['name'] ?? p['full_name']) as string | undefined,
+    id: user.id,
+    email: user.email ?? undefined,
+    role: user.role,
+    orgId: user.orgId ?? undefined,
+    orgName: user.orgName ?? undefined,
+    name: user.name,
+    mustChangePassword: user.mustChangePassword,
   };
 }
 
-/** React hook — hydrates after mount so SSR stays clean. */
+// useSyncExternalStore needs a stable snapshot between changes.
+let cachedSource: ReturnType<typeof getSessionUser> = null;
+let cachedUser: AuthUser | null = null;
+function getSnapshot(): AuthUser | null {
+  const source = getSessionUser();
+  if (source !== cachedSource) {
+    cachedSource = source;
+    cachedUser = getAuthUser();
+  }
+  return cachedUser;
+}
+
+/** React hook — re-renders on sign-in, refresh and sign-out. Null during SSR. */
 export function useAuthUser(): AuthUser | null {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  useEffect(() => { setUser(getAuthUser()); }, []);
-  return user;
+  return useSyncExternalStore(subscribeSession, getSnapshot, () => null);
 }
 
 export function hasRole(user: AuthUser | null, ...roles: string[]): boolean {

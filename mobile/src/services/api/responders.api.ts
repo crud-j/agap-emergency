@@ -25,6 +25,7 @@ export interface AssignmentIncident {
   category: string;
   status: string;
   priority: string;
+  reporter_sex: 'MALE' | 'FEMALE' | null;
   description: string | null;
   number_of_patients: number | null;
   incident_locations: AssignmentIncidentLocation | null;

@@ -3,12 +3,14 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { SosAlertDto } from './dto/sos-alert.dto';
 import { RealtimeService } from '../realtime/realtime.service';
+import { BarangayNotifyService, configuredOpsPhone } from '../barangay-coordination/barangay-notify.service';
 import { IncidentStatus, QUEUE_NAMES } from '@agap/shared';
 import * as crypto from 'crypto';
 
@@ -22,6 +24,7 @@ export class EmergencyAlertsService {
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
     @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue: Queue,
     @InjectQueue(QUEUE_NAMES.SLA_MONITOR) private readonly slaQueue: Queue,
+    @Optional() private readonly barangayNotify?: BarangayNotifyService,
   ) {}
 
   async createFromSos(
@@ -139,11 +142,16 @@ export class EmergencyAlertsService {
       const unixTs = Math.floor(incident.created_at.getTime() / 1000);
       const smsPayload = `AGAP|${incident.public_reference}|${lat},${lng}|${unixTs}|${incident.category}|C:${hasCoords}`;
 
-      await this.smsQueue.add('emergency-sms', {
-        phone: process.env['MDRRMO_OPS_PHONE'] ?? '',
-        message: smsPayload.slice(0, 160),
-        incidentId: incident.id,
-      });
+      const opsPhone = configuredOpsPhone(process.env['MDRRMO_OPS_PHONE']);
+      if (opsPhone) {
+        await this.smsQueue.add('emergency-sms', {
+          phone: opsPhone,
+          message: smsPayload.slice(0, 160),
+          incidentId: incident.id,
+        });
+      } else {
+        this.logger.warn(`Ops SMS skipped for ${incident.public_reference}: MDRRMO_OPS_PHONE unset or placeholder`);
+      }
 
       await this.notificationQueue.add('ops-center-alert', {
         channel: 'PUSH',
@@ -169,6 +177,9 @@ export class EmergencyAlertsService {
     } catch (err) {
       this.logger.error(`Queue jobs failed for ${incident.id}: ${String(err)}. Incident unaffected.`);
     }
+
+    // Tag the incident with its barangay. Never throws; the incident is already saved.
+    void this.barangayNotify?.notifyForIncident(incident.id);
 
     this.logger.log(`SOS incident created: ${incident.public_reference}`);
     return { incident, duplicate: false };
@@ -207,6 +218,9 @@ export class EmergencyAlertsService {
         notes: 'Cancelled by reporter within grace window',
       },
     });
+
+    // Frees the barangay short code; a still-queued barangay SMS is then skipped.
+    void this.barangayNotify?.closeNoticesForIncident(incidentId);
 
     return incident;
   }

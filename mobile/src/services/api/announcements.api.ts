@@ -67,6 +67,10 @@ export function getAnnouncements(params: AnnouncementParams = {}): Promise<Annou
   return apiFetch(`${API_BASE}/v1/announcements${qs ? `?${qs}` : ''}`);
 }
 
+export function getAnnouncementArchive(): Promise<Announcement[]> {
+  return apiFetch<Announcement[]>(`${API_BASE}/v1/announcements/archive`);
+}
+
 export function getAnnouncementById(id: string): Promise<Announcement> {
   return apiFetch(`${API_BASE}/v1/announcements/${id}`);
 }

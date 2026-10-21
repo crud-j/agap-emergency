@@ -8,6 +8,7 @@ import { PriorityService } from '@backend/incidents/priority/priority.service';
 import { PrismaService } from '@backend/common/prisma/prisma.service';
 import { RealtimeService } from '@backend/realtime/realtime.service';
 import { AuditService } from '@backend/audit/audit.service';
+import { EmergencyContactNotificationService } from '@backend/emergency-contacts/emergency-contact-notification.service';
 import { IncidentStatus, IncidentType, ReporterType } from '@agap/shared';
 import { createMockPrisma } from './helpers/prisma.mock';
 
@@ -62,6 +63,10 @@ describe('IncidentsService', () => {
         { provide: DuplicateDetectionService, useValue: mockDuplicateService },
         { provide: RealtimeService, useValue: mockRealtime },
         { provide: AuditService, useValue: mockAudit },
+        {
+          provide: EmergencyContactNotificationService,
+          useValue: { notifyContactsOfIncident: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -87,6 +92,8 @@ describe('IncidentsService', () => {
         type: IncidentType.MEDICAL,
         idempotencyKey: 'evt-new',
         description: 'Patient unconscious',
+        lat: 14.7969,
+        lng: 120.9268,
       });
 
       expect(result.status).toBe(IncidentStatus.SUBMITTED);
@@ -103,6 +110,8 @@ describe('IncidentsService', () => {
       const result = await service.create({
         type: IncidentType.MEDICAL,
         idempotencyKey: 'evt-abc',
+        lat: 14.7969,
+        lng: 120.9268,
       });
 
       expect(result.id).toBe('inc-1');
@@ -113,7 +122,12 @@ describe('IncidentsService', () => {
       mockPrisma.incident.count.mockResolvedValue(5);
       const expectedYear = new Date().getFullYear();
 
-      await service.create({ type: IncidentType.FIRE, idempotencyKey: 'evt-fire' });
+      await service.create({
+        type: IncidentType.FIRE,
+        idempotencyKey: 'evt-fire',
+        lat: 14.7969,
+        lng: 120.9268,
+      });
 
       const createCall = mockPrisma.incident.create.mock.calls[0]?.[0] as any;
       expect(createCall.data.public_reference).toMatch(
@@ -127,6 +141,8 @@ describe('IncidentsService', () => {
         idempotencyKey: 'evt-rep',
         reporter: { type: ReporterType.REGISTERED_CITIZEN, name: 'Maria Santos', phone: '+639181234567' },
         patient: { isReporter: false, isUnknown: true },
+        lat: 14.7969,
+        lng: 120.9268,
       });
 
       expect(mockPrisma.incidentReporter.create).toHaveBeenCalledWith(
@@ -146,6 +162,8 @@ describe('IncidentsService', () => {
         type: IncidentType.RESCUE,
         idempotencyKey: 'evt-unknown',
         patient: { isReporter: false, isUnknown: true },
+        lat: 14.7969,
+        lng: 120.9268,
       });
 
       expect(mockPrisma.incident_patients.create).toHaveBeenCalledWith(
@@ -156,7 +174,12 @@ describe('IncidentsService', () => {
     });
 
     it('creates an incident event for the SUBMITTED status transition', async () => {
-      await service.create({ type: IncidentType.MEDICAL, idempotencyKey: 'evt-ev' });
+      await service.create({
+        type: IncidentType.MEDICAL,
+        idempotencyKey: 'evt-ev',
+        lat: 14.7969,
+        lng: 120.9268,
+      });
 
       expect(mockPrisma.incidentEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -177,7 +200,12 @@ describe('IncidentsService', () => {
     });
 
     it('marks reporter as guest when no userId is provided', async () => {
-      await service.create({ type: IncidentType.FIRE, idempotencyKey: 'evt-guest' });
+      await service.create({
+        type: IncidentType.FIRE,
+        idempotencyKey: 'evt-guest',
+        lat: 14.7969,
+        lng: 120.9268,
+      });
 
       expect(mockPrisma.incidentReporter.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -218,7 +246,8 @@ describe('IncidentsService', () => {
     });
 
     it('caps perPage at 100', async () => {
-      mockPrisma.$transaction.mockResolvedValue([[], 0]);
+      mockPrisma.incident.findMany.mockResolvedValue([]);
+      mockPrisma.incident.count.mockResolvedValue(0);
       const result = await service.findAll({ page: 1, perPage: 9999 });
       expect(result.meta.perPage).toBe(100);
     });

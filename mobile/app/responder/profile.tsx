@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { useResponderSummary } from '@/src/hooks/useResponderSummary';
 import { AvailabilityControl } from '@/src/components/responder/availability-control';
+import { AgapLogo } from '@/src/components/brand/AgapLogo';
 
 const AVAILABILITY_COLOR: Record<string, string> = {
   AVAILABLE:   '#0D6053',
@@ -98,8 +99,9 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         <View style={styles.header}>
-          <Text style={styles.pageTitle}>Profile</Text>
+          <AgapLogo />
         </View>
+        <Text style={[styles.pageTitle, { marginBottom: 14 }]}>Profile</Text>
 
         {/* Identity card */}
         <View style={styles.card}>

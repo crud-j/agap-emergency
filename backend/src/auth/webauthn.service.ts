@@ -23,6 +23,8 @@ import { AuditAction } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from './auth.service';
+import { isAccountBlocked } from './account-status';
+import { authContextFromRequest } from './request-context';
 
 /** WebAuthn transport string ↔ Prisma webauthn_transport enum. Transports not in
  *  the DB enum (e.g. the legacy "cable") are dropped instead of failing the insert. */
@@ -59,7 +61,6 @@ function csv(value: string | undefined): string[] {
 }
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
-const BLOCKED_STATUSES = new Set(['SUSPENDED', 'DEACTIVATED']);
 
 @Injectable()
 export class WebAuthnService {
@@ -227,7 +228,24 @@ export class WebAuthnService {
    */
   async beginAuthentication(identifier?: string, ipAddress?: string, userAgent?: string) {
     const user = identifier ? await this._resolveUser(identifier) : null;
+    return this._beginAuthenticationFor(user, !!identifier, ipAddress, userAgent);
+  }
 
+  /**
+   * Second-step ceremony for a user who already passed the password step: scoped to
+   * their own passkeys, and the challenge is bound to them.
+   */
+  async beginAuthenticationForUser(userId: string, ipAddress?: string, userAgent?: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    return this._beginAuthenticationFor(user, true, ipAddress, userAgent);
+  }
+
+  private async _beginAuthenticationFor(
+    user: { id: string } | null,
+    scoped: boolean,
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
     let allowCredentials: { id: string; transports?: AuthenticatorTransport[] }[] = [];
     if (user) {
       const credentials = await this.prisma.webauthn_credentials.findMany({
@@ -239,7 +257,7 @@ export class WebAuthnService {
         transports: c.transports.map(toTransport),
       }));
     }
-    if (identifier && allowCredentials.length === 0) {
+    if (scoped && allowCredentials.length === 0) {
       allowCredentials = [{ id: randomBytes(32).toString('base64url') }];
     }
 
@@ -290,6 +308,11 @@ export class WebAuthnService {
     response: Record<string, unknown>,
     ipAddress?: string,
     userAgent?: string,
+    /**
+     * Second-step use: the passkey must belong to `expectedUserId`, and the session
+     * records `amr` (e.g. ["pwd","hwk"]) instead of the passkey-first ["hwk"].
+     */
+    options: { expectedUserId?: string; amr?: string[] } = {},
   ) {
     const challengeRecord = await this._claimChallenge(challengeId, 'AUTHENTICATION');
 
@@ -309,7 +332,10 @@ export class WebAuthnService {
     }
 
     // A ceremony begun for a specific user may only be completed with that user's passkey.
-    if (challengeRecord.user_id && challengeRecord.user_id !== storedCredential.user_id) {
+    if (
+      (options.expectedUserId && options.expectedUserId !== storedCredential.user_id) ||
+      (challengeRecord.user_id && challengeRecord.user_id !== storedCredential.user_id)
+    ) {
       await this._writeAuthLog(storedCredential.user_id, storedCredential.id, false, 'Credential does not belong to challenge user', ipAddress, userAgent);
       throw new UnauthorizedException('Passkey verification failed');
     }
@@ -342,7 +368,7 @@ export class WebAuthnService {
     const user = await this.prisma.user.findUnique({
       where: { id: storedCredential.user_id },
     });
-    if (!user || BLOCKED_STATUSES.has(user.status)) {
+    if (!user || isAccountBlocked(user.status)) {
       await this._writeAuthLog(storedCredential.user_id, storedCredential.id, false, 'Account not active', ipAddress, userAgent);
       throw new UnauthorizedException('Passkey verification failed');
     }
@@ -362,7 +388,10 @@ export class WebAuthnService {
 
     // Same response shape as password login: tokens + the full safe user record.
     const { password_hash: _, ...safeUser } = user;
-    return this.authService.login(safeUser);
+    const ctx = authContextFromRequest({ ip: ipAddress, headers: { 'user-agent': userAgent } });
+    return options.amr
+      ? this.authService.login(safeUser, ctx, 'passkey', options.amr)
+      : this.authService.login(safeUser, ctx, 'passkey');
   }
 
   // ---------------------------------------------------------------------------

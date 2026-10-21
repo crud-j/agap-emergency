@@ -62,6 +62,13 @@ export class AnnouncementsController {
     });
   }
 
+  @Get('archive')
+  @Public()
+  @ApiOperation({ summary: 'List previously released public announcements' })
+  async findPublicArchive() {
+    return this.announcementsService.findPublicArchive();
+  }
+
   @Post('subscribe')
   @Public()
   @ApiOperation({ summary: 'Subscribe to SMS announcements' })

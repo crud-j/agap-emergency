@@ -13,10 +13,10 @@
     "strictPropertyInitialization": false,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "ignoreDeprecations": "6.0",
     "types": ["jest", "node"],
     "baseUrl": "./",
     "paths": {
+      "@/*": ["../mobile/*"],
       "@backend/*": ["../backend/src/*"],
       "@agap/shared": ["../shared/src/index.ts"],
       "@agap/shared/*": ["../shared/src/*"]

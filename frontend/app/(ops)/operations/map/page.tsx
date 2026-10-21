@@ -10,6 +10,8 @@ import { useIncidentLocations, useLiveResponders } from '@/features/map/hooks';
 import { ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { MapIncident } from '@/components/incidents/IncidentMapView';
 import { isWithinBocaue } from '@/lib/bocaue-geo';
+import { PRIORITY_RING_COLORS } from '@agap/shared';
+import { AMBULANCE_ICON_URL } from '@/lib/map-icons';
 
 // MapLibre GL uses WebGL + Web Workers; must be client-side only.
 const IncidentMapView = dynamic(
@@ -24,12 +26,12 @@ const IncidentMapView = dynamic(
   },
 );
 
+// Same palette as the scene markers and reporter-icon rings (@agap/shared PRIORITY_RING_COLORS).
 const LEGEND = [
-  { label: 'Critical', color: '#DC2626' },
-  { label: 'High', color: '#EA580C' },
-  { label: 'Medium', color: '#CA8A04' },
-  { label: 'Low', color: '#16A34A' },
-  { label: 'Responder', color: '#0D6053' },
+  { label: 'Critical', color: PRIORITY_RING_COLORS.CRITICAL },
+  { label: 'High', color: PRIORITY_RING_COLORS.HIGH },
+  { label: 'Medium', color: PRIORITY_RING_COLORS.MEDIUM },
+  { label: 'Low', color: PRIORITY_RING_COLORS.LOW },
 ];
 
 /**
@@ -107,6 +109,16 @@ export default function MapPage(): JSX.Element {
               {l.label}
             </span>
           ))}
+          <span className="flex items-center gap-2 text-xs text-agap-textMid">
+            {/* eslint-disable-next-line @next/next/no-img-element -- legend icon */}
+            <img src={AMBULANCE_ICON_URL} alt="" width={14} height={14} />
+            Responder unit (grey = signal lost)
+          </span>
+          <span className="flex items-center gap-2 text-xs text-agap-textMid">
+            {/* eslint-disable-next-line @next/next/no-img-element -- legend icon */}
+            <img src="/map-icons/citizen-female.png" alt="" width={14} height={14} className="rounded-full" />
+            Reporter (when shared)
+          </span>
           <span className="flex items-center gap-2 text-xs text-agap-textMid">
             <span className="h-2.5 w-2.5 rounded-full border border-[#3B82F6] bg-[#3B82F6]/20" />
             Flood-prone barangay

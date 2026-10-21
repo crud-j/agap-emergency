@@ -86,7 +86,9 @@ export default function PasskeysScreen() {
           ? t.passkeys.unsupported
           : e.reason === 'already-exists'
             ? t.passkeys.alreadyExists
-            : t.passkeys.failed;
+            : e.reason === 'no-provider'
+              ? t.passkeys.noProvider
+              : t.passkeys.failed;
         setBanner({ kind: 'error', text });
         return;
       }
@@ -132,6 +134,7 @@ export default function PasskeysScreen() {
             <Ionicons name="finger-print" size={28} color="#0D6053" />
           </View>
           <Text style={styles.introText}>{t.passkeys.intro}</Text>
+          {Platform.OS === 'android' && <Text style={styles.introHint}>{t.passkeys.verifyHint}</Text>}
         </View>
 
         {!supported && <Notice kind="info" text={t.passkeys.unsupported} />}
@@ -240,6 +243,7 @@ const styles = StyleSheet.create({
   },
   introIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#F0F7F4', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   introText: { fontSize: 14, color: '#374151', textAlign: 'center', lineHeight: 21 },
+  introHint: { fontSize: 12, color: '#6B7280', textAlign: 'center', lineHeight: 18, marginTop: 10 },
 
   notice: { flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 16 },
   noticeText: { flex: 1, fontSize: 13, lineHeight: 18, fontWeight: '500' },

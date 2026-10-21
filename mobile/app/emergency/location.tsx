@@ -28,7 +28,9 @@ import { isCoordinateInBocaue, MapProvider, type MapClientConfig } from '@agap/s
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 
 const CitizenLocationMap = React.lazy(
-  () => import('@/src/components/tracking/citizen-location-map'),
+  () => Promise.resolve({
+    default: require('../../src/components/tracking/citizen-location-map').default as typeof import('../../src/components/tracking/citizen-location-map').default,
+  }),
 );
 
 // Keyless OpenFreeMap fallback — real OSM streets at municipal zoom (the old
@@ -82,6 +84,8 @@ export default function LocationScreen() {
   const setLocation = useIncidentStore((s) => s.setLocation);
   const setManualAddress = useIncidentStore((s) => s.setManualAddress);
   const manualAddress = useIncidentStore((s) => s.draft.manualAddress);
+  const isGuestReport = useIncidentStore((s) => s.draft.isGuestReport);
+  const clearLocation = useIncidentStore((s) => s.clearLocation);
   const accessToken = useAuthStore((s) => s.accessToken);
 
   const mapAvailable = useMemo(() => isNativeMapAvailable(), []);
@@ -112,6 +116,7 @@ export default function LocationScreen() {
   async function locate() {
     setLocationWarning(null);
     setGpsStatus('locating');
+    if (isGuestReport) clearLocation();
     // Reusable MOD-11 capture: handles permission, best-of-N sampling, and a
     // bounded timeout. Returns a typed outcome — it never throws.
     const outcome = await captureBestFix();
@@ -122,8 +127,11 @@ export default function LocationScreen() {
     if (!isCoordinateInBocaue(outcome.fix.lat, outcome.fix.lng)) {
       setCoords(null);
       setGpsStatus('error');
+      if (isGuestReport) clearLocation();
       setLocationWarning(
-        'Your GPS fix is outside Bocaue Municipality. Retry your location, or continue without precise GPS and describe the Bocaue location.',
+        isGuestReport
+          ? 'Guest emergency reports can only be sent from within Bocaue Municipality. Move into Bocaue and retry your GPS location.'
+          : 'Your GPS fix is outside Bocaue Municipality. Retry your location, or continue without precise GPS and describe the Bocaue location.',
       );
       return;
     }
@@ -172,10 +180,12 @@ export default function LocationScreen() {
   }
 
   function continuePrecise() {
+    if (isGuestReport && (!coords || !isCoordinateInBocaue(coords.lat, coords.lng))) return;
     router.push('/emergency/incident-type');
   }
 
   function continueWithout() {
+    if (isGuestReport) return;
     // Proceeding without a precise location is always allowed. Keep any manual
     // address the reporter typed so dispatchers still have context.
     router.push('/emergency/incident-type');
@@ -280,7 +290,11 @@ export default function LocationScreen() {
             </View>
             <View style={styles.statusBody}>
               <Text style={styles.statusTitle}>GPS Status</Text>
-              <Text style={styles.statusDesc}>{gpsStatusDescription(gpsStatus)}</Text>
+              <Text style={styles.statusDesc}>
+                {isGuestReport && gpsStatus !== 'ready'
+                  ? 'A GPS fix inside Bocaue is required for a report without an account.'
+                  : gpsStatusDescription(gpsStatus)}
+              </Text>
             </View>
             <View style={styles.statusTrail}>
               {gpsStatus === 'locating' ? (
@@ -354,15 +368,32 @@ export default function LocationScreen() {
           )}
         </View>
 
+        {isGuestReport && gpsStatus !== 'ready' && (
+          <TouchableOpacity
+            style={styles.secondaryBtn}
+            activeOpacity={0.8}
+            onPress={locate}
+            disabled={gpsStatus === 'locating'}
+          >
+            <Text style={styles.secondaryText}>
+              {gpsStatus === 'locating' ? 'Getting GPS location…' : 'Retry GPS location'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* Info banner */}
         <View style={styles.infoBanner}>
           <View style={styles.infoIcon}>
             <Ionicons name="information" size={14} color="#FFFFFF" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.infoTitle}>Can't get a precise location?</Text>
+            <Text style={styles.infoTitle}>
+              {isGuestReport ? 'Guest reports are limited to Bocaue' : "Can't get a precise location?"}
+            </Text>
             <Text style={styles.infoBody}>
-              You can still continue. Our team will assist you based on the information you provide.
+              {isGuestReport
+                ? 'A current GPS location inside Bocaue is required to send a report without an account.'
+                : 'You can still continue. Our team will assist you based on the information you provide.'}
             </Text>
           </View>
         </View>
@@ -370,9 +401,14 @@ export default function LocationScreen() {
 
       {/* Footer actions */}
       <View style={styles.footer}>
-        <TouchableOpacity activeOpacity={0.9} onPress={continuePrecise}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={continuePrecise}
+          disabled={isGuestReport && !detailsReady}
+          accessibilityState={{ disabled: isGuestReport && !detailsReady }}
+        >
           <LinearGradient
-            colors={['#117C70', '#0A443F']}
+            colors={isGuestReport && !detailsReady ? ['#9CA3AF', '#6B7280'] : ['#117C70', '#0A443F']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.continueBtn}
@@ -381,9 +417,11 @@ export default function LocationScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryBtn} activeOpacity={0.8} onPress={continueWithout}>
-          <Text style={styles.secondaryText}>Continue without precise location</Text>
-        </TouchableOpacity>
+        {!isGuestReport && (
+          <TouchableOpacity style={styles.secondaryBtn} activeOpacity={0.8} onPress={continueWithout}>
+            <Text style={styles.secondaryText}>Continue without precise location</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.safetyRow}>
           <Ionicons name="information-circle" size={16} color="#9CA3AF" style={{ marginRight: 6 }} />

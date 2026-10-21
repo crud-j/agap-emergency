@@ -1,5 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { IsEnum, IsNumber, IsOptional, IsString, validateSync } from 'class-validator';
+import { parseEncryptionKey } from '../common/crypto/secret-box';
+import { normalizePhPhone } from '@agap/shared';
 
 enum Environment {
   Development = 'development',
@@ -31,6 +33,42 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   CORS_ORIGIN: string = 'http://localhost:3001';
+
+  // Web session cookie (docs/plans/WEB_AUTH_SECURITY_PLAN.md §6.2).
+  // COOKIE_SECURE: 'true' | 'false'; unset = Secure only when NODE_ENV=production.
+  @IsString()
+  @IsOptional()
+  COOKIE_SECURE?: string;
+
+  // Blank = host-only cookie (recommended).
+  @IsString()
+  @IsOptional()
+  COOKIE_DOMAIN?: string;
+
+  // Web-console MFA (docs/plans/WEB_AUTH_SECURITY_PLAN.md §6.4).
+  // MFA_ENCRYPTION_KEY: 32 random bytes, base64 — seals TOTP seeds at rest. Generate with
+  //   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+  // Without it authenticator-app enrollment is unavailable (passkeys still work).
+  @IsString()
+  @IsOptional()
+  MFA_ENCRYPTION_KEY?: string;
+
+  // 'true' = staff roles without a second factor must enroll at next sign-in. Leave
+  // 'false' during the enrollment window: enrollment is offered but skippable.
+  @IsString()
+  @IsOptional()
+  AUTH_MFA_ENFORCED?: string;
+
+  // 'true' = allow an SMS code as a fallback second factor. Off by default: the single
+  // Textbee SIM also carries emergency traffic, and SIM-swap is a known attack.
+  @IsString()
+  @IsOptional()
+  AUTH_SMS_MFA_ENABLED?: string;
+
+  // Express 'trust proxy': which hops may set X-Forwarded-For (real client IP).
+  @IsString()
+  @IsOptional()
+  TRUST_PROXY: string = 'loopback, linklocal, uniquelocal';
 
   @IsString()
   @IsOptional()
@@ -65,6 +103,51 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   MDRRMO_OPS_PHONE: string = '';
+
+  // Barangay alert SMS (MOD-17 / MOD-34, docs/plans/BARANGAY_ALERT_AUTOMATION_PLAN.md
+  // Phase 3). 'true' = text the barangay's primary + backup numbers on every report.
+  // Keep 'false' until MDRRMO has verified the barangay numbers.
+  @IsString()
+  @IsOptional()
+  BARANGAY_ALERTS_ENABLED?: string;
+
+  // Every barangay SMS goes to this number instead of the barangay. Required outside
+  // production while alerts are on, so no real barangay phone is texted from dev.
+  @IsString()
+  @IsOptional()
+  BARANGAY_SMS_TEST_OVERRIDE_PHONE?: string;
+
+  // Minutes to wait for the barangay to report back before one reminder SMS and the
+  // "has not reported back" banner (Phase 4). Default 20.
+  @IsString()
+  @IsOptional()
+  BARANGAY_FOLLOWUP_MINUTES?: string;
+
+  // Barangay SMS replies (Phase 5). 'true' = read replies such as `DONE 3526` sent to the
+  // Textbee phone, record them like a status-page tap, and add the reply hint to alerts.
+  // A reply never changes incident status. Default off.
+  @IsString()
+  @IsOptional()
+  BARANGAY_SMS_REPLIES_ENABLED?: string;
+
+  // How replies arrive: 'poll' (default; reads Textbee every 15 s, needs no public URL) or
+  // 'webhook' (receiver not built yet; needs a stable public HTTPS address).
+  @IsString()
+  @IsOptional()
+  BARANGAY_SMS_INBOUND_MODE?: string;
+
+  // Public base URL of the web app (no trailing slash), e.g. https://agap.example.ph.
+  // Barangays save <PUBLIC_APP_URL>/b once and type the access code from the alert SMS.
+  // Never sent in an SMS (carriers drop texts with web addresses); informational for the
+  // dev scripts. Must be reachable from the barangay's phone, so localhost does not work.
+  @IsString()
+  @IsOptional()
+  PUBLIC_APP_URL?: string;
+
+  // Optional dedicated key for signing those links. Falls back to a key derived from JWT_SECRET.
+  @IsString()
+  @IsOptional()
+  BARANGAY_LINK_SECRET?: string;
 
   // Map provider abstraction (MOD-11/12/13/43). Tiles follow MAP_PROVIDER;
   // geocoding + routing default to the OSS/OSM stack regardless. Point the URLs
@@ -105,6 +188,23 @@ export function validateConfig(config: Record<string, unknown>) {
 
   if (errors.length > 0) {
     throw new Error(`Configuration validation failed:\n${errors.toString()}`);
+  }
+
+  // Fail fast at boot rather than at the first dispatcher's sign-in.
+  const mfaKey = parseEncryptionKey(validatedConfig.MFA_ENCRYPTION_KEY);
+  if (validatedConfig.AUTH_MFA_ENFORCED === 'true' && !mfaKey) {
+    throw new Error('Configuration validation failed: AUTH_MFA_ENFORCED=true requires MFA_ENCRYPTION_KEY');
+  }
+
+  if (
+    validatedConfig.BARANGAY_ALERTS_ENABLED === 'true' &&
+    validatedConfig.NODE_ENV !== Environment.Production &&
+    !normalizePhPhone(validatedConfig.BARANGAY_SMS_TEST_OVERRIDE_PHONE).canSms
+  ) {
+    throw new Error(
+      'Configuration validation failed: BARANGAY_ALERTS_ENABLED=true outside production requires ' +
+        'BARANGAY_SMS_TEST_OVERRIDE_PHONE (a PH mobile number)',
+    );
   }
 
   return validatedConfig;

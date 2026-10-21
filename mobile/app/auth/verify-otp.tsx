@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { useAuthStore } from '../../src/stores/auth.store';
-import { verifyPhoneOtp, loginWithPhone } from '../../src/services/api/auth.api';
+import { verifyPhoneOtp, loginWithPhone, forgotPassword } from '../../src/services/api/auth.api';
 import { homeRouteForRole } from '../../src/lib/role-routing';
 
 const OTP_LENGTH = 6;
@@ -60,7 +60,9 @@ export default function VerifyOtpScreen() {
   async function handleResend() {
     if (!phone || countdown > 0) return;
     try {
-      await loginWithPhone(phone);
+      // A reset flow must resend a reset code — a login code cannot reset a password.
+      if (mode === 'forgot-password') await forgotPassword(phone);
+      else await loginWithPhone(phone);
       setCountdown(RESEND_SECONDS);
       setOtp(Array(OTP_LENGTH).fill(''));
       setError('');

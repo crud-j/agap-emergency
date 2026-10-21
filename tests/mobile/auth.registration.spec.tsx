@@ -19,8 +19,15 @@ import { z } from 'zod';
 // ─── Mocks (hoisted by jest before imports) ──────────────────────────────────
 
 const mockPush    = jest.fn();
+const mockReplace = jest.fn();
 const mockBack    = jest.fn();
 const mockRegister = jest.fn();
+const mockGeoCheck = jest.fn().mockResolvedValue({
+  inside: true,
+  barangay: 'Poblacion',
+  municipality: 'Bocaue',
+  province: 'Bulacan',
+});
 
 jest.mock('react-native', () => {
   const React = require('react');
@@ -71,11 +78,22 @@ jest.mock('react-native-safe-area-context', () => {
 });
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush, back: mockBack }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace, back: mockBack }),
 }));
 
 jest.mock('expo-linear-gradient', () => ({
   LinearGradient: ({ children }: any) => children,
+}));
+
+jest.mock('expo-location', () => ({
+  Accuracy: { High: 4 },
+  getCurrentPositionAsync: jest.fn().mockResolvedValue({
+    coords: { latitude: 14.7963, longitude: 120.9272 },
+  }),
+  requestForegroundPermissionsAsync: jest.fn().mockResolvedValue({
+    status: 'granted',
+    canAskAgain: true,
+  }),
 }));
 
 jest.mock('@expo/vector-icons', () => ({
@@ -92,6 +110,7 @@ jest.mock('@react-native-masked-view/masked-view', () => {
 
 jest.mock('../../mobile/src/services/api/auth.api', () => ({
   register: (...args: any[]) => mockRegister(...args),
+  geoCheck: (...args: any[]) => mockGeoCheck(...args),
 }));
 
 jest.mock('../../mobile/src/stores/accessibility.store', () => ({
@@ -144,6 +163,10 @@ let activeRenderer: ReturnType<typeof create> | null = null;
 /** Create the renderer inside act() so all effects are flushed. */
 async function renderRegistration() {
   await act(async () => { activeRenderer = create(<RegistrationScreen />); });
+  await act(async () => {
+    const button = activeRenderer!.root.findByProps({ testID: 'allow-location-btn' });
+    await button.props.onPress();
+  });
   return activeRenderer!;
 }
 
@@ -329,7 +352,7 @@ describe('RegistrationScreen', () => {
     // Component waits 2 400 ms before navigating
     await act(async () => { jest.advanceTimersByTime(2400); });
 
-    expect(mockPush).toHaveBeenCalledWith(
+    expect(mockReplace).toHaveBeenCalledWith(
       expect.objectContaining({
         pathname: '/auth/verify-otp',
         params: expect.objectContaining({ mode: 'register' }),
@@ -406,6 +429,8 @@ describe('RegistrationScreen', () => {
       email:           'maria@example.com',
       password:        'SecurePass1!',
       confirmPassword: 'SecurePass1!',
+      latitude:        14.7963,
+      longitude:       120.9272,
     });
   });
 

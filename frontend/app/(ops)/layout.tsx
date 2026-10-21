@@ -1,16 +1,20 @@
 import type { ReactNode, JSX } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
+import { AuthGate } from '@/components/layout/AuthGate';
+import sidebarStyles from '@/components/layout/Sidebar.module.css';
 
 /** Ops shell — wraps all Operations Center routes with Sidebar + Topbar. */
 export default function OpsLayout({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <div className="flex h-screen overflow-hidden bg-agap-pearl">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Topbar />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+    <AuthGate>
+      <div className="flex h-screen overflow-hidden bg-agap-pearl">
+        <Sidebar />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <Topbar />
+          <main className={`flex-1 overflow-y-auto p-6 ${sidebarStyles.main}`}>{children}</main>
+        </div>
       </div>
-    </div>
+    </AuthGate>
   );
 }

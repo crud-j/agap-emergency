@@ -8,12 +8,16 @@
     "scheme": "agap",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icons/agap-solo-icon.png",
+    "splash": {
+      "backgroundColor": "#FFFFFF"
+    },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/icons/agap-solo-icon.png",
         "backgroundColor": "#0F172A"
       },
       "package": "com.agap.emergency",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",

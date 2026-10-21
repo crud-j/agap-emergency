@@ -5,7 +5,7 @@ generator client {
 
 datasource db {
   provider   = "postgresql"
-  extensions = [postgis, uuid_ossp(map: "uuid-ossp"), pg_trgm]
+  extensions = [pg_trgm, postgis, uuid_ossp(map: "uuid-ossp")]
 }
 
 model User {
@@ -16,6 +16,14 @@ model User {
   password_hash                                                            String?                        @db.VarChar(255)
   role                                                                     user_role                      @default(CITIZEN)
   status                                                                   user_status                    @default(PENDING_VERIFICATION)
+  must_change_password                                                    Boolean                        @default(false)
+  password_changed_at                                                     DateTime?                      @db.Timestamptz(6)
+  /// Failed password / second-factor attempts since the last lock or successful sign-in (web-console roles only).
+  failed_login_count                                                       Int                            @default(0) @db.SmallInt
+  /// While in the future the account refuses sign-ins (trusted browsers are exempt). Cleared by a completed sign-in.
+  locked_until                                                             DateTime?                      @db.Timestamptz(6)
+  /// 0, 1, 2+ → 15, 30, 60 minute locks. Reset by a completed sign-in.
+  lockout_level                                                            Int                            @default(0) @db.SmallInt
   profile_completeness                                                     Int                            @default(0) @db.SmallInt
   is_guest                                                                 Boolean                        @default(false)
   is_email_verified                                                        Boolean                        @default(false)
@@ -25,21 +33,26 @@ model User {
   province                                                                 String?                        @default("Bulacan") @db.VarChar(100)
   full_address                                                             String?
   preferred_language                                                       String                         @default("fil") @db.VarChar(10)
-  text_size                                                                String                         @default("medium") @db.VarChar(10)
-  high_contrast                                                            Boolean                        @default(false)
-  reduced_motion                                                           Boolean                        @default(false)
   last_login_at                                                            DateTime?                      @db.Timestamptz(6)
   created_at                                                               DateTime                       @default(now()) @db.Timestamptz(6)
   updated_at                                                               DateTime                       @default(now()) @db.Timestamptz(6)
   created_by_id                                                            String?                        @db.Uuid
+  high_contrast                                                            Boolean                        @default(false)
+  reduced_motion                                                           Boolean                        @default(false)
+  text_size                                                                String                         @default("medium") @db.VarChar(10)
+  /// Optional, self-declared reporter sex — used only for the reporter's map icon.
+  /// null = never asked (legacy, guests, admin-created); PREFER_NOT_TO_SAY = asked and declined.
+  /// Personal data, NOT patient data (patient sex lives on incident_patients).
+  sex                                                                      user_sex?
   account_lifecycle_events_account_lifecycle_events_performed_by_idTousers account_lifecycle_events[]     @relation("account_lifecycle_events_performed_by_idTousers")
   account_lifecycle_events_account_lifecycle_events_user_idTousers         account_lifecycle_events[]     @relation("account_lifecycle_events_user_idTousers")
   alert_triggers                                                           alert_triggers[]
   announcement_deliveries                                                  announcement_deliveries[]
+  announcements_announcements_approved_by_idTousers                        Announcement[]                 @relation("announcements_approved_by_idTousers")
   announcements                                                            Announcement[]                 @relation("announcement_publisher")
-  announcements_approved                                                   Announcement[]                 @relation("announcement_approver")
   audit_logs                                                               AuditLog[]
   consent_records                                                          consent_records[]
+  device_readiness_reports                                                 device_readiness_reports[]
   dispatch_crew                                                            dispatch_crew[]
   dispatches                                                               dispatches[]
   emergency_contacts                                                       EmergencyContact[]
@@ -66,20 +79,24 @@ model User {
   on_scene_assessments                                                     on_scene_assessments[]
   organization_memberships                                                 organization_memberships[]
   resource_status_log                                                      resource_status_log[]
+  responder_availability_changes                                           ResponderAvailability[]        @relation("responderAvailabilityChangedBy")
+  responder_availability_user                                              ResponderAvailability?         @relation("responderAvailabilityUser")
   sensitive_data_access_log                                                sensitive_data_access_log[]
   sms_subscribers                                                          sms_subscribers[]
   surge_incidents                                                          surge_incidents[]
   system_configurations                                                    system_configurations[]
   triage_tags                                                              triage_tags[]
   user_sessions                                                            user_sessions[]
+  user_mfa_totp                                                            user_mfa_totp?
+  user_backup_codes                                                        user_backup_codes[]
+  trusted_devices                                                          trusted_devices[]
   user_verifications                                                       user_verifications[]
   users                                                                    User?                          @relation("usersTousers", fields: [created_by_id], references: [id], onUpdate: NoAction)
   other_users                                                              User[]                         @relation("usersTousers")
   webauthn_authentication_log                                              webauthn_authentication_log[]
   webauthn_challenges                                                      webauthn_challenges[]
   webauthn_credentials                                                     webauthn_credentials[]
-  responder_availability_user                                              ResponderAvailability?          @relation("responderAvailabilityUser")
-  responder_availability_changes                                           ResponderAvailability[]         @relation("responderAvailabilityChangedBy")
+  barangay_notice_reports                                                  incident_barangay_notices[]    @relation("BarangayNoticeReporter")
 
   @@index([barangay], map: "idx_users_barangay")
   @@index([created_at(sort: Desc)], map: "idx_users_created_at")
@@ -178,7 +195,6 @@ model Incident {
   hazard_flags                 String[]
   river_level_meters           Decimal?                       @db.Decimal(5, 2)
   surge_incident_id            String?                        @db.Uuid
-  duplicate_of_id              String?                        @db.Uuid
   is_surge_incident            Boolean                        @default(false)
   submitted_at                 DateTime                       @default(now()) @db.Timestamptz(6)
   received_at                  DateTime?                      @db.Timestamptz(6)
@@ -192,6 +208,7 @@ model Incident {
   closed_at                    DateTime?                      @db.Timestamptz(6)
   created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
   updated_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  duplicate_of_id              String?                        @db.Uuid
   alert_triggers               alert_triggers[]
   audit_logs                   AuditLog[]
   dispatches                   dispatches[]
@@ -206,14 +223,15 @@ model Incident {
   incident_events              IncidentEvent[]
   incident_handovers           incident_handovers[]
   incident_locations           incident_locations?
+  barangay_notices             incident_barangay_notices[]
   incident_messages            incident_messages[]
   incident_metrics             incident_metrics?
   incident_patients            incident_patients[]
   incident_reporters           IncidentReporter?
   incident_resolutions         incident_resolutions?
-  surge_incidents              surge_incidents?               @relation(fields: [surge_incident_id], references: [id], onUpdate: NoAction, map: "fk_surge_incident")
   duplicate_of                 Incident?                      @relation("incident_duplicates", fields: [duplicate_of_id], references: [id], onUpdate: NoAction, map: "fk_incident_duplicate_of")
   duplicates                   Incident[]                     @relation("incident_duplicates")
+  surge_incidents              surge_incidents?               @relation(fields: [surge_incident_id], references: [id], onUpdate: NoAction, map: "fk_surge_incident")
   location_history             location_history[]
   notifications                Notification[]
   offline_event_queue          offline_event_queue[]
@@ -244,6 +262,8 @@ model IncidentReporter {
   reporter_name    String?  @db.VarChar(255)
   reporter_phone   String?  @db.VarChar(20)
   contact_callback String?  @db.VarChar(20)
+  /// SAFE (reporting for others) or NEEDS_HELP (reporter is also hurt or in danger).
+  reporter_status  String?  @db.VarChar(20)
   created_at       DateTime @default(now()) @db.Timestamptz(6)
   incidents        Incident @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users            User?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
@@ -254,31 +274,28 @@ model IncidentReporter {
 }
 
 model IncidentAttachment {
-  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  incident_id       String              @db.Uuid
-  uploaded_by_id    String?             @db.Uuid
-  file_name         String              @db.VarChar(255)
-  file_type         String              @db.VarChar(50)
-  file_size_bytes   Int?
-  storage_bucket    String              @db.VarChar(255)
-  storage_key       String              @db.VarChar(500)
-  storage_url       String?
-  is_processed      Boolean             @default(false)
-  // Tier 1 photo validation (MOD-25) — trusted capture provenance stamped on-device
-  // at the shutter, plus an advisory authenticity assessment. Advisory only: a low
-  // score never blocks dispatch; it helps a dispatcher verify the photo.
-  capture_timestamp       DateTime?     @db.Timestamptz(6)
-  capture_latitude        Decimal?      @db.Decimal(10, 7)
-  capture_longitude       Decimal?      @db.Decimal(10, 7)
-  capture_accuracy_meters Decimal?      @db.Decimal(8, 2)
-  capture_source          String?       @db.VarChar(30)
-  authenticity_score      Int?          @db.SmallInt
-  authenticity_flags      String[]
-  authenticity_checked_at DateTime?     @db.Timestamptz(6)
-  uploaded_at       DateTime            @default(now()) @db.Timestamptz(6)
-  incidents         Incident            @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users             User?               @relation(fields: [uploaded_by_id], references: [id], onUpdate: NoAction)
-  incident_messages incident_messages[]
+  id                      String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id             String              @db.Uuid
+  uploaded_by_id          String?             @db.Uuid
+  file_name               String              @db.VarChar(255)
+  file_type               String              @db.VarChar(50)
+  file_size_bytes         Int?
+  storage_bucket          String              @db.VarChar(255)
+  storage_key             String              @db.VarChar(500)
+  storage_url             String?
+  is_processed            Boolean             @default(false)
+  uploaded_at             DateTime            @default(now()) @db.Timestamptz(6)
+  capture_timestamp       DateTime?           @db.Timestamptz(6)
+  capture_latitude        Decimal?            @db.Decimal(10, 7)
+  capture_longitude       Decimal?            @db.Decimal(10, 7)
+  capture_accuracy_meters Decimal?            @db.Decimal(8, 2)
+  capture_source          String?             @db.VarChar(30)
+  authenticity_score      Int?                @db.SmallInt
+  authenticity_flags      String[]            @default([])
+  authenticity_checked_at DateTime?           @db.Timestamptz(6)
+  incidents               Incident            @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                   User?               @relation(fields: [uploaded_by_id], references: [id], onUpdate: NoAction)
+  incident_messages       incident_messages[]
 
   @@map("incident_attachments")
 }
@@ -473,49 +490,48 @@ model AuditLog {
 }
 
 model Announcement {
-  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  publisher_id            String                    @db.Uuid
-  organization_id         String?                   @db.Uuid
-  title                   String                    @db.VarChar(500)
-  body                    String
-  category                announcement_category
-  severity                announcement_severity     @default(INFORMATIONAL)
-  scope                   announcement_scope        @default(MUNICIPALITY_WIDE)
-  target_barangays        String[]
-  status                  announcement_status       @default(DRAFT)
-  publish_now             Boolean                   @default(true)
-  scheduled_at            DateTime?                 @db.Timestamptz(6)
-  published_at            DateTime?                 @db.Timestamptz(6)
-  archived_at             DateTime?                 @db.Timestamptz(6)
-  superseded_by_id        String?                   @db.Uuid
-  push_sent_count         Int?                      @default(0)
-  sms_sent_count          Int?                      @default(0)
-  image_url               String?                   @db.VarChar(1000)
-  image_storage_key       String?                   @db.VarChar(500)
-  image_alt_text          String?                   @db.VarChar(300)
-  /// Structured announcement format (docs/automation/bocaue_mayor_announcement_format.md)
-  template_key            String?                   @db.VarChar(50)
-  template_data           Json?
-  language                announcement_language     @default(FIL)
-  summary                 String?                   @db.VarChar(400)
-  action_required         String?
-  effective_start_at      DateTime?                 @db.Timestamptz(6)
-  effective_end_at        DateTime?                 @db.Timestamptz(6)
-  issuing_office          String?                   @db.VarChar(200)
-  source_reference        String?                   @db.VarChar(500)
-  contact_info            String?                   @db.VarChar(300)
-  approved_by_id          String?                   @db.Uuid
-  approved_at             DateTime?                 @db.Timestamptz(6)
-  cancelled_at            DateTime?                 @db.Timestamptz(6)
-  correction_note         String?
-  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
-  updated_at              DateTime                  @default(now()) @updatedAt @db.Timestamptz(6)
-  announcement_deliveries announcement_deliveries[]
-  organizations           Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
-  users                   User                      @relation("announcement_publisher", fields: [publisher_id], references: [id], onUpdate: NoAction)
-  approver                User?                     @relation("announcement_approver", fields: [approved_by_id], references: [id], onUpdate: NoAction)
-  announcements           Announcement?             @relation("announcementsToannouncements", fields: [superseded_by_id], references: [id], onUpdate: NoAction)
-  other_announcements     Announcement[]            @relation("announcementsToannouncements")
+  id                                        String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  publisher_id                              String                    @db.Uuid
+  organization_id                           String?                   @db.Uuid
+  title                                     String                    @db.VarChar(500)
+  body                                      String
+  category                                  announcement_category
+  severity                                  announcement_severity     @default(INFORMATIONAL)
+  scope                                     announcement_scope        @default(MUNICIPALITY_WIDE)
+  target_barangays                          String[]
+  status                                    announcement_status       @default(DRAFT)
+  publish_now                               Boolean                   @default(true)
+  scheduled_at                              DateTime?                 @db.Timestamptz(6)
+  published_at                              DateTime?                 @db.Timestamptz(6)
+  archived_at                               DateTime?                 @db.Timestamptz(6)
+  superseded_by_id                          String?                   @db.Uuid
+  push_sent_count                           Int?                      @default(0)
+  sms_sent_count                            Int?                      @default(0)
+  created_at                                DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                                DateTime                  @default(now()) @updatedAt @db.Timestamptz(6)
+  image_storage_key                         String?                   @db.VarChar(500)
+  image_url                                 String?                   @db.VarChar(1000)
+  action_required                           String?
+  approved_at                               DateTime?                 @db.Timestamptz(6)
+  approved_by_id                            String?                   @db.Uuid
+  cancelled_at                              DateTime?                 @db.Timestamptz(6)
+  contact_info                              String?                   @db.VarChar(300)
+  correction_note                           String?
+  effective_end_at                          DateTime?                 @db.Timestamptz(6)
+  effective_start_at                        DateTime?                 @db.Timestamptz(6)
+  image_alt_text                            String?                   @db.VarChar(300)
+  issuing_office                            String?                   @db.VarChar(200)
+  language                                  announcement_language     @default(FIL)
+  source_reference                          String?                   @db.VarChar(500)
+  summary                                   String?                   @db.VarChar(400)
+  template_data                             Json?
+  template_key                              String?                   @db.VarChar(50)
+  announcement_deliveries                   announcement_deliveries[]
+  users_announcements_approved_by_idTousers User?                     @relation("announcements_approved_by_idTousers", fields: [approved_by_id], references: [id], onUpdate: NoAction)
+  organizations                             Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  users                                     User                      @relation("announcement_publisher", fields: [publisher_id], references: [id], onUpdate: NoAction)
+  announcements                             Announcement?             @relation("announcementsToannouncements", fields: [superseded_by_id], references: [id], onUpdate: NoAction)
+  other_announcements                       Announcement[]            @relation("announcementsToannouncements")
 
   @@index([category], map: "idx_announcements_category")
   @@index([severity], map: "idx_announcements_severity")
@@ -783,6 +799,10 @@ model incident_details {
   road_blocked       Boolean?          @default(false)
   water_level_note   String?           @db.VarChar(255)
   additional_notes   String?
+  /// MOD-09 caller answers, keyed by @agap/shared intake question → option values. Validated against the catalog before storage.
+  caller_answers     Json?
+  /// MOD-24 caller answers that raised the recommended priority at intake.
+  priority_reasons   String[]          @default([])
   first_aid_guide_id String?           @db.Uuid
   submitted_at       DateTime          @default(now()) @db.Timestamptz(6)
   first_aid_guides   first_aid_guides? @relation(fields: [first_aid_guide_id], references: [id], onUpdate: NoAction, map: "fk_incident_details_first_aid")
@@ -815,6 +835,8 @@ model incident_locations {
   altitude_meters      Decimal?                  @db.Decimal(8, 2)
   point                Unsupported("geography")?
   formatted_address    String?
+  /// Caller-provided nearest landmark (e.g. "beside the barangay hall, Purok 3").
+  landmark             String?                   @db.VarChar(120)
   street               String?                   @db.VarChar(255)
   barangay             String?                   @db.VarChar(100)
   municipality         String?                   @db.VarChar(100)
@@ -1146,8 +1168,8 @@ model ResponderAvailability {
   source        String                      @default("SELF_SERVICE") @db.VarChar(40)
   created_at    DateTime                    @default(now()) @db.Timestamptz(6)
   updated_at    DateTime                    @updatedAt @db.Timestamptz(6)
-  user          User                        @relation("responderAvailabilityUser", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   changed_by    User                        @relation("responderAvailabilityChangedBy", fields: [changed_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user          User                        @relation("responderAvailabilityUser", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([status], map: "idx_responder_availability_status")
   @@map("responder_availability")
@@ -1302,6 +1324,73 @@ model user_sessions {
   @@index([user_id], map: "idx_user_sessions_user_id")
 }
 
+/// Authenticator-app (TOTP) enrollment. The secret is AES-256-GCM sealed (MFA_ENCRYPTION_KEY), never plaintext.
+model user_mfa_totp {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id          String    @unique @db.Uuid
+  secret_encrypted String
+  /// null = enrollment started but the first code was never confirmed.
+  confirmed_at     DateTime? @db.Timestamptz(6)
+  /// Last accepted 30 s time step; a code from the same or an earlier step is a replay.
+  last_used_step   BigInt?
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  users            User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// Single-use recovery codes (bcrypt-hashed). A set is replaced as a whole.
+model user_backup_codes {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id    String    @db.Uuid
+  code_hash  String    @db.VarChar(255)
+  used_at    DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  users      User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id])
+}
+
+/// "Trust this browser for this shift": skips the second step (never the password) until it expires.
+model trusted_devices {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id      String    @db.Uuid
+  /// SHA-256 of the 32-byte token held in the HttpOnly agap_trusted cookie.
+  token_hash   String    @unique @db.VarChar(255)
+  /// Parsed from the user-agent, e.g. "Chrome on Windows".
+  label        String?   @db.VarChar(150)
+  ip_address   String?   @db.Inet
+  expires_at   DateTime  @db.Timestamptz(6)
+  last_used_at DateTime? @db.Timestamptz(6)
+  revoked_at   DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  users        User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id])
+}
+
+/// MOD-05: latest readiness snapshot reported by each of a user's devices.
+model device_readiness_reports {
+  id                        String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id                   String                     @db.Uuid
+  device_id                 String                     @db.VarChar(64)
+  platform                  String                     @db.VarChar(16)
+  app_version               String?                    @db.VarChar(32)
+  location_permission       readiness_permission_state
+  location_services_enabled Boolean
+  notification_permission   readiness_permission_state
+  camera_permission         readiness_permission_state
+  motion_sensor_available   Boolean
+  connectivity              readiness_connectivity
+  connection_type           String?                    @db.VarChar(20)
+  overall_status            readiness_status
+  checked_at                DateTime                   @db.Timestamptz(6)
+  created_at                DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                   @default(now()) @db.Timestamptz(6)
+  users                     User                       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, device_id], map: "uq_device_readiness_user_device")
+  @@index([user_id, updated_at(sort: Desc)], map: "idx_device_readiness_user_updated")
+}
+
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model user_verifications {
   id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
@@ -1312,6 +1401,8 @@ model user_verifications {
   expires_at        DateTime            @db.Timestamptz(6)
   verified_at       DateTime?           @db.Timestamptz(6)
   created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  /// Failed guesses against this code; the code is expired once the limit is reached.
+  attempt_count     Int                 @default(0)
   users             User                @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([token], map: "idx_user_verifications_token")
@@ -1380,10 +1471,151 @@ model webauthn_credentials {
   @@index([user_id], map: "idx_webauthn_credentials_user")
 }
 
+/// Geographic regions. `municipality`: the Bocaue geo-fence. `barangay`: the 19 barangay
+/// boundaries (OpenStreetMap, ODbL) used to route an incident to its barangay.
+/// `boundary` is geometry(MultiPolygon, 4326) in the database.
+model geo_regions {
+  id                        String                      @id
+  name                      String
+  region_type               String
+  boundary                  Unsupported("geometry")
+  last_updated_at           DateTime
+  created_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  barangay_contacts         barangay_contacts[]
+  incident_barangay_notices incident_barangay_notices[]
+
+  @@index([boundary], map: "idx_geo_regions_boundary_gist", type: Gist)
+  @@index([name, region_type], map: "idx_geo_regions_name_type")
+}
+
+/// Barangay hotline directory (MOD-17 / MOD-34). Alert targets are the active PRIMARY and
+/// BACKUP contacts; both must be SMS-capable (enforced by a CHECK). Partial unique indexes
+/// (one active PRIMARY / BACKUP per barangay) live in the migration only: Prisma cannot model them.
+model barangay_contacts {
+  id          String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  barangay_id String
+  phone_e164  String                @db.VarChar(16)
+  phone_raw   String?               @db.VarChar(40)
+  kind        barangay_contact_kind
+  can_sms     Boolean               @default(false)
+  role        barangay_contact_role @default(OTHER)
+  label       String?               @db.VarChar(120)
+  is_active   Boolean               @default(true)
+  /// Temporary demo data. Production alerting must refuse to text these.
+  is_demo     Boolean               @default(false)
+  verified_at DateTime?             @db.Timestamptz(6)
+  source      String?               @db.VarChar(120)
+  created_at  DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
+  barangay    geo_regions           @relation(fields: [barangay_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([barangay_id, phone_e164], map: "uq_barangay_contacts_phone")
+  @@index([barangay_id, is_active], map: "idx_barangay_contacts_barangay_active")
+}
+
+/// One row per incident per barangay: who was told, by which SMS, and what came back.
+/// Never changes the incident lifecycle; the dispatcher confirms any closure.
+/// `short_code` is unique among OPEN notices only (partial index in the migration).
+model incident_barangay_notices {
+  id                     String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id            String                  @db.Uuid
+  barangay_id            String
+  match_method           barangay_match_method
+  is_approximate         Boolean                 @default(false)
+  short_code             String                  @db.VarChar(4)
+  sms_status             barangay_sms_status     @default(PENDING)
+  sms_sent_at            DateTime?               @db.Timestamptz(6)
+  last_report            barangay_report_type?
+  last_report_source     barangay_report_source?
+  last_report_at         DateTime?               @db.Timestamptz(6)
+  last_report_by_user_id String?                 @db.Uuid
+  followup_due_at        DateTime?               @db.Timestamptz(6)
+  followup_sent_at       DateTime?               @db.Timestamptz(6)
+  closed_at              DateTime?               @db.Timestamptz(6)
+  created_at             DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                @default(now()) @updatedAt @db.Timestamptz(6)
+  incidents              Incident                @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  barangay               geo_regions             @relation(fields: [barangay_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  last_report_by         User?                   @relation("BarangayNoticeReporter", fields: [last_report_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  inbound_messages       barangay_sms_inbound[]
+
+  @@unique([incident_id, barangay_id], map: "uq_incident_barangay_notices_incident_barangay")
+  @@index([incident_id], map: "idx_incident_barangay_notices_incident")
+  @@index([barangay_id, created_at(sort: Desc)], map: "idx_incident_barangay_notices_barangay")
+}
+
+/// Append-only log of every SMS received from a barangay, applied or not. Application code
+/// only INSERTs. `provider_message_id` makes webhook retries and re-polls idempotent.
+model barangay_sms_inbound {
+  id                  String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  provider_message_id String                   @unique(map: "uq_barangay_sms_inbound_provider_message") @db.VarChar(100)
+  from_phone          String                   @db.VarChar(32)
+  from_phone_e164     String?                  @db.VarChar(16)
+  body                String
+  received_at         DateTime                 @db.Timestamptz(6)
+  parsed_command      String?                  @db.VarChar(12)
+  parsed_code         String?                  @db.VarChar(4)
+  notice_id           String?                  @db.Uuid
+  outcome             barangay_inbound_outcome
+  created_at          DateTime                 @default(now()) @db.Timestamptz(6)
+  notice              incident_barangay_notices? @relation(fields: [notice_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([notice_id], map: "idx_barangay_sms_inbound_notice")
+  @@index([received_at(sort: Desc)], map: "idx_barangay_sms_inbound_received")
+}
+
+enum barangay_contact_kind {
+  MOBILE
+  LANDLINE
+}
+
+enum barangay_contact_role {
+  PRIMARY
+  BACKUP
+  OTHER
+}
+
+enum barangay_match_method {
+  POLYGON
+  NEAREST
+  MANUAL
+}
+
+enum barangay_sms_status {
+  PENDING
+  SENT
+  PARTIAL
+  FAILED
+  SKIPPED
+  DISABLED
+}
+
+enum barangay_report_type {
+  SEEN
+  ON_SCENE
+  ON_THE_WAY
+  HANDLED
+  NEEDS_BACKUP
+  NO_ANSWER
+}
+
+enum barangay_report_source {
+  LINK
+  SMS_REPLY
+  PHONE_CALL
+}
+
+enum barangay_inbound_outcome {
+  APPLIED
+  DUPLICATE
+  UNKNOWN_SENDER
+  UNKNOWN_CODE
+  NOT_NOTIFIED
+  UNPARSED
+  DISABLED
+}
+
 enum announcement_category {
-  WEATHER_ADVISORY
-  PUBLIC_ADVISORY
-  MUNICIPAL_SERVICE
   CLASS_SUSPENSION
   FLOOD_ALERT
   EVACUATION_ORDER
@@ -1393,12 +1625,9 @@ enum announcement_category {
   POST_DISASTER_UPDATE
   RESCUE_UPDATE
   GENERAL_INFORMATION
-}
-
-enum announcement_language {
-  FIL
-  EN
-  FIL_EN
+  WEATHER_ADVISORY
+  PUBLIC_ADVISORY
+  MUNICIPAL_SERVICE
 }
 
 enum announcement_scope {
@@ -1441,6 +1670,12 @@ enum audit_action {
   CONSENT_WITHDRAW
   DATA_EXPORT
   SYSTEM
+  LOGIN_FAILED
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  PASSWORD_CHANGE
+  MFA_CHANGE
+  SESSION_REVOKED
 }
 
 enum breathing_status {
@@ -1535,6 +1770,7 @@ enum incident_category {
   MEDICAL
   ROAD_ACCIDENT
   FLOOD
+  NATURAL_DISASTER
   RESCUE
   FIRE
   INDUSTRIAL
@@ -1683,6 +1919,12 @@ enum user_role {
   SYSTEM_ADMINISTRATOR
 }
 
+enum user_sex {
+  MALE
+  FEMALE
+  PREFER_NOT_TO_SAY
+}
+
 enum user_status {
   PENDING_VERIFICATION
   ACTIVE
@@ -1700,6 +1942,10 @@ enum verification_status {
 enum verification_type {
   EMAIL
   PHONE
+  /// Password-reset codes. Never interchangeable with PHONE/EMAIL codes; stored as SHA-256 hashes.
+  PASSWORD_RESET
+  /// Reserved for the SMS second-factor fallback (docs/plans/WEB_AUTH_SECURITY_PLAN.md Phase 3).
+  MFA_SMS
 }
 
 enum webauthn_ceremony_status {
@@ -1723,14 +1969,27 @@ enum webauthn_transport {
   SMART_CARD
 }
 
-model GeoRegion {
-  id              String   @id @default(cuid())
-  name            String
-  region_type     String
-  boundary        Unsupported("geometry(Polygon, 4326)")
-  last_updated_at DateTime @updatedAt
-  created_at      DateTime @default(now()) @db.Timestamptz(6)
+enum announcement_language {
+  FIL
+  EN
+  FIL_EN
+}
 
-  @@index([name, region_type], map: "idx_geo_regions_name_type")
-  @@map("geo_regions")
+enum readiness_permission_state {
+  GRANTED
+  DENIED
+  UNDETERMINED
+  UNAVAILABLE
+}
+
+enum readiness_connectivity {
+  ONLINE
+  LIMITED
+  OFFLINE
+}
+
+enum readiness_status {
+  READY
+  LIMITED
+  NOT_READY
 }

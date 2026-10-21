@@ -14,7 +14,10 @@ import {
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { IncidentsService } from './incidents.service';
@@ -23,7 +26,7 @@ import { IncidentHandoverService } from './incident-handover/incident-handover.s
 import { TransportService } from './transport/transport.service';
 import { StartTransportDto } from './transport/dto/start-transport.dto';
 import { RecordArrivalDto } from './transport/dto/record-arrival.dto';
-import { MediaService, MULTER_MEMORY_STORAGE } from '../media/media.service';
+import { MediaService, MULTER_MEMORY_STORAGE, MAX_VIDEO_UPLOAD_BYTES } from '../media/media.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { UpdateIncidentStatusDto } from './dto/update-incident-status.dto';
 import { SubmitAssessmentDto } from './assessment/dto/submit-assessment.dto';
@@ -32,6 +35,7 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole, IncidentStatus } from '@agap/shared';
+import { IncidentParticipantService } from '../realtime/incident-participant.service';
 
 @ApiTags('incidents')
 @Controller({ path: 'incidents', version: '1' })
@@ -42,6 +46,7 @@ export class IncidentsController {
     private readonly assessmentService: AssessmentService,
     private readonly handoverService: IncidentHandoverService,
     private readonly transportService: TransportService,
+    private readonly participants: IncidentParticipantService,
   ) {}
 
   @Post()
@@ -52,7 +57,7 @@ export class IncidentsController {
   @ApiResponse({ status: 409, description: 'Duplicate idempotency key (returns existing incident)' })
   async create(@Body() dto: CreateIncidentDto, @Request() req: any) {
     const actorId = req.user?.id ?? undefined;
-    return this.incidentsService.create(dto, actorId);
+    return this.incidentsService.create(dto, actorId, req.user?.role);
   }
 
   @Get()
@@ -64,11 +69,13 @@ export class IncidentsController {
     @Query('page') page?: number,
     @Query('perPage') perPage?: number,
     @Query('status') status?: IncidentStatus,
+    @Query('statuses') statuses?: string,
   ) {
     return this.incidentsService.findAll({
       ...(page !== undefined && { page: +page }),
       ...(perPage !== undefined && { perPage: +perPage }),
       ...(status !== undefined && { status }),
+      ...(statuses && { statuses: statuses.split(',') as IncidentStatus[] }),
     });
   }
 
@@ -84,8 +91,26 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get incident by ID' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.incidentsService.findById(id);
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    const { barangay_notices, ...incident } = (await this.incidentsService.findById(id)) as any;
+    // reporter_sex (reporter map icon) is for staff and assigned crew only —
+    // this route is also used by the citizen app, which must never receive it.
+    // The barangay notice (short code, report status) is ops-only for the same reason.
+    const participation = await this.participants.getParticipation(
+      { id: req.user.id, role: req.user.role },
+      id,
+    );
+    if (participation === 'staff') {
+      return {
+        ...incident,
+        barangay_notices,
+        reporter_sex: await this.incidentsService.getReporterSex(id),
+      };
+    }
+    if (participation === 'crew') {
+      return { ...incident, reporter_sex: await this.incidentsService.getReporterSex(id) };
+    }
+    return incident;
   }
 
   @Get(':id/detail')
@@ -118,7 +143,8 @@ export class IncidentsController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: MULTER_MEMORY_STORAGE,
-      limits: { fileSize: 10_485_760 },
+      // The video ceiling; MediaService enforces the smaller 10 MB photo limit.
+      limits: { fileSize: MAX_VIDEO_UPLOAD_BYTES },
     }),
   )
   @ApiOperation({ summary: 'Upload a photo or video attachment for an incident (MOD-10)' })
@@ -127,7 +153,7 @@ export class IncidentsController {
       type: 'object',
       required: ['file'],
       properties: {
-        file: { type: 'string', format: 'binary', description: 'JPEG/PNG/WebP image or MP4 video (max 10 MB)' },
+        file: { type: 'string', format: 'binary', description: 'JPEG/PNG/WebP image (max 10 MB) or MP4 video (max 25 MB)' },
         capturedAt: { type: 'string', description: 'Device clock (ms epoch) at capture — Tier 1 provenance' },
         captureLat: { type: 'string', description: 'GPS latitude at capture' },
         captureLng: { type: 'string', description: 'GPS longitude at capture' },
@@ -157,15 +183,38 @@ export class IncidentsController {
       accuracy: num(body?.captureAccuracy),
       source: body?.captureSource || undefined,
     };
-    return this.mediaService.uploadIncidentPhoto(file, id, req.user?.id, capture);
+    const attachment = await this.mediaService.uploadIncidentPhoto(file, id, req.user?.id, capture);
+    // Photos arrive after the incident is created, so tell the dashboard to refetch.
+    this.incidentsService.notifyAttachmentAdded(id, attachment.id);
+    return attachment;
   }
 
   @Get(':id/attachments')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List incident attachments' })
   async listAttachments(@Param('id', ParseUUIDPipe) id: string) {
     return this.incidentsService.listAttachments(id);
+  }
+
+  @Get(':id/attachments/:attachmentId/file')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Download an incident attachment (MOD-10), streamed through the API' })
+  async attachmentFile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const file = await this.mediaService.getIncidentAttachmentFile(id, attachmentId);
+    // Incident evidence is sensitive — never cache it in shared caches.
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    return new StreamableFile(file.stream, {
+      type: file.contentType,
+      ...(file.contentLength !== undefined && { length: file.contentLength }),
+    });
   }
 
   // ---- Events & timeline ----

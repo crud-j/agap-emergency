@@ -1,7 +1,7 @@
 import type { Config } from 'jest';
 
 const config: Config = {
-  moduleFileExtensions: ['js', 'json', 'ts'],
+  moduleFileExtensions: ['ts', 'js', 'json'],
   rootDir: '.',
   testMatch: ['**/*.spec.ts'],
   transform: {
@@ -17,6 +17,7 @@ const config: Config = {
   // when suites run in parallel on a loaded machine.
   testTimeout: 30_000,
   moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/../mobile/$1',
     '^@backend/(.*)$': '<rootDir>/../backend/src/$1',
     '^@agap/shared$': '<rootDir>/../shared/src/index.ts',
     '^@agap/shared/(.*)$': '<rootDir>/../shared/src/$1',

@@ -29,11 +29,19 @@ async function doRefresh(): Promise<boolean> {
  * failure and re-throws on refresh failure so callers get a proper error state.
  */
 export async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const buildHeaders = (token: string | null): Record<string, string> => ({
-    ...defaultHeaders(),
-    ...(init.headers as Record<string, string> | undefined),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  });
+  // A FormData body must not carry the JSON Content-Type: the runtime sets
+  // multipart/form-data with its boundary, and without it the server cannot
+  // find the uploaded file (every photo/video upload failed this way).
+  const isMultipart = typeof FormData !== 'undefined' && init.body instanceof FormData;
+  const buildHeaders = (token: string | null): Record<string, string> => {
+    const headers: Record<string, string> = {
+      ...defaultHeaders(),
+      ...(init.headers as Record<string, string> | undefined),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    if (isMultipart) delete headers['Content-Type'];
+    return headers;
+  };
 
   let res: Response;
   try {

@@ -112,8 +112,28 @@ function IncidentRow({
             <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${status.bg} ${status.text}`}>
               {titleCase(inc.status)}
             </span>
+            {inc.incident_reporters?.is_guest && (
+              <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">
+                Guest report
+              </span>
+            )}
             <span className="text-[11px] font-mono text-slate-600">{inc.public_reference}</span>
           </div>
+
+          {/* MOD-24: the caller answers that raised this incident's priority. */}
+          {inc.incident_details?.priority_reasons?.length ? (
+            <div className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-red-300">
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {inc.incident_details.priority_reasons[0]}
+                {inc.incident_details.priority_reasons.length > 1 &&
+                  ` +${inc.incident_details.priority_reasons.length - 1} more`}
+              </span>
+            </div>
+          ) : null}
+          {inc.incident_reporters?.reporter_status === 'NEEDS_HELP' && (
+            <div className="mt-1 text-[11px] font-semibold text-amber-300">Reporter also needs help</div>
+          )}
 
           {/* SLA countdown */}
           {!sla.met && <SlaChip label={sla.label} remaining={sla.remainingSecs} breached={sla.breached} warn={sla.warn} />}

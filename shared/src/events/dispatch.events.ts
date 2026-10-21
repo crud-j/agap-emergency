@@ -14,6 +14,15 @@ export interface DispatchCreatedPayload {
   createdAt: string;
 }
 
+/** `dispatch.updated` — crew accepted / declined (status is the new dispatch status). */
+export interface DispatchUpdatedPayload {
+  incidentId: string;
+  dispatchId: string;
+  resourceId: string;
+  status: string;
+  updatedAt: string;
+}
+
 export interface DispatchCancelledPayload {
   incidentId: string;
   dispatchId: string;

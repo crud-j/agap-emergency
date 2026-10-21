@@ -32,10 +32,30 @@ export class EtaRefreshProcessor extends WorkerHost {
     this.logger.log(`Processing ETA refresh for dispatch ${dispatchId}`);
 
     try {
-      const route = await this.maps.route(
-        { lat: responderLat, lng: responderLng },
-        { lat: incidentLat, lng: incidentLng },
-      );
+      // Jobs are throttled per dispatch, so the fix in job.data may be up to the
+      // throttle window old. Route from the freshest fix of this dispatch's crew,
+      // falling back to the enqueued point. Skip units that are no longer active.
+      const dispatch = await this.prisma.dispatches.findUnique({
+        where: { id: dispatchId },
+        select: { status: true },
+      });
+      if (!dispatch || !['PENDING', 'SENT', 'ACCEPTED'].includes(String(dispatch.status))) {
+        this.logger.log(`Skipping ETA refresh for inactive dispatch ${dispatchId}`);
+        return;
+      }
+      const freshest = await this.prisma.location_history.findFirst({
+        where: {
+          incident_id: incidentId,
+          users: { is: { dispatch_crew: { some: { dispatch_id: dispatchId } } } },
+        },
+        orderBy: { recorded_at: 'desc' },
+        select: { latitude: true, longitude: true },
+      });
+      const from = freshest
+        ? { lat: Number(freshest.latitude), lng: Number(freshest.longitude) }
+        : { lat: responderLat, lng: responderLng };
+
+      const route = await this.maps.route(from, { lat: incidentLat, lng: incidentLng });
 
       if (!route.durationSeconds) {
         this.logger.warn(`Routing returned no duration for dispatch ${dispatchId}`);

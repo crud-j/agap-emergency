@@ -13,7 +13,13 @@ import { AuditService } from '../audit/audit.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
-import { AuditAction, IncidentStatus, QUEUE_NAMES } from '@agap/shared';
+import {
+  AuditAction,
+  IncidentStatus,
+  QUEUE_NAMES,
+  recommendIntakePriority,
+  sanitizeIntakeAnswers,
+} from '@agap/shared';
 import { Prisma } from '@prisma/client';
 
 const DISPATCHABLE_STATUSES = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
@@ -35,9 +41,16 @@ export class DispatchService {
     const where: Prisma.dispatchesWhereInput = {};
     if (filters.incidentId) where.incident_id = filters.incidentId;
     if (filters.status) where.status = filters.status as any;
+    // Staff-only route (DISPATCHER/SUPERVISOR): crew names are shown on the
+    // dispatch dashboard's unit tracking card (MOD-31 / MOD-43). Never add names
+    // to findById — that route is not role-restricted.
     return this.prisma.dispatches.findMany({
       where,
-      include: { incidents: true, resources: true, dispatch_crew: true },
+      include: {
+        incidents: true,
+        resources: true,
+        dispatch_crew: { include: { users: { select: { id: true, full_name: true } } } },
+      },
       orderBy: { created_at: 'desc' },
     });
   }
@@ -307,12 +320,18 @@ export class DispatchService {
   async getPriorityRecommendation(incidentId: string) {
     const incident = await this.prisma.incident.findUnique({
       where: { id: incidentId },
+      include: { incident_details: { select: { caller_answers: true } } },
     });
     if (!incident) throw new NotFoundException('Incident not found');
+    // Recomputed from the stored caller answers so the rule set can evolve
+    // without rewriting old incidents.
+    const answers = sanitizeIntakeAnswers(incident.category, incident.incident_details?.caller_answers);
+    const { priority, reasons } = recommendIntakePriority(incident.category, answers);
     return {
       incidentId,
       currentPriority: incident.priority,
-      recommendedPriority: incident.priority,
+      recommendedPriority: priority,
+      reasons,
       note: 'Recommendation is assistive; dispatcher confirms the final priority',
     };
   }

@@ -14,7 +14,8 @@ import type {
  * authenticator response in the JSON shape the backend verifies.
  */
 
-export type PasskeyFailure = 'cancelled' | 'unsupported' | 'no-credentials' | 'already-exists' | 'failed';
+export type PasskeyFailure =
+  | 'cancelled' | 'unsupported' | 'no-credentials' | 'already-exists' | 'no-provider' | 'failed';
 
 export class PasskeyError extends Error {
   constructor(readonly reason: PasskeyFailure, message?: string) {
@@ -47,6 +48,11 @@ function toPasskeyError(e: unknown): PasskeyError {
       return new PasskeyError('no-credentials');
     case 'CredentialAlreadyExists':
       return new PasskeyError('already-exists');
+    // Android: no credential provider (Google Password Manager, Samsung Pass…)
+    // is signed in or enabled, so the OS has nowhere to store the passkey.
+    case 'NoCreateOption':
+    case 'NotConfigured':
+      return new PasskeyError('no-provider');
     default:
       return new PasskeyError('failed', (e as { message?: string })?.message);
   }

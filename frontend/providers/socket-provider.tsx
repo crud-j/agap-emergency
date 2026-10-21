@@ -1,22 +1,25 @@
 'use client';
 
-import { useEffect, useRef, startTransition, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useSyncExternalStore, startTransition, type JSX, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { PaginatedResult } from '@agap/shared';
-import { connectSocket, joinOps, onIncidentEvent } from '@/lib/websocket';
-import { getToken } from '@/lib/auth';
+import { connectSocket, disconnectSocket, joinOps, onIncidentEvent } from '@/lib/websocket';
+import { getToken, subscribeSession } from '@/lib/auth';
 import type {
   IncidentStatusChangedPayload,
   IncidentCreatedPayload,
   DispatchCreatedPayload,
   DispatchCancelledPayload,
+  DispatchUpdatedPayload,
   EscalationPayload,
   ResponderLocationUpdatedPayload,
+  ResponderEtaUpdatedPayload,
   ResponderStatusChangedPayload,
   AnnouncementPublishedPayload,
 } from '@agap/shared';
 import type { IncidentListItem } from '@/features/incidents/api';
-import type { LiveResponderPosition } from '@/features/map/api';
+import type { LatestUnitPosition, LiveResponderPosition } from '@/features/map/api';
+import { applyEtaUpdate, mergeResponderLocations } from '@/features/map/live-tracking';
 import type { Resource, FleetItem } from '@/features/resources/api';
 
 interface ResourceStatusChangedPayload {
@@ -43,13 +46,34 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
   // rapid GPS events don't cause a render per position fix.
   const locBufferRef = useRef<Map<string, ResponderLocationUpdatedPayload>>(new Map());
   const locFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Debounces the REST re-seed when the socket reports a unit not yet cached.
+  const seedRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The access token is in memory and only exists once the session is restored or
+  // signed in, so connect when a session appears and disconnect when it ends.
+  const signedIn = useSyncExternalStore(subscribeSession, () => !!getToken(), () => false);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
+    if (!signedIn) {
+      disconnectSocket();
+      return;
+    }
 
-    connectSocket(token);
-    joinOps();
+    const socket = connectSocket();
+    const leaveOps = joinOps();
+
+    // ─── reconnect: catch up ─────────────────────────────────────────────────
+    // Events sent while the socket was down are lost, so after a reconnect refetch
+    // whatever is on screen (active queries only) instead of showing stale state
+    // until the next manual reload.
+    let connects = socket.connected ? 1 : 0;
+    const onConnect = () => {
+      if (connects++ === 0) return;
+      startTransition(() => {
+        void qc.invalidateQueries();
+      });
+    };
+    socket.on('connect', onConnect);
 
     // ─── incident.status_changed ─────────────────────────────────────────────
     // Update status in-place on every cached incident list and detail so
@@ -77,6 +101,9 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
             old && typeof old === 'object' ? { ...(old as object), status: newStatus } : old;
           qc.setQueryData(['incident', incidentId], patchStatus);
           qc.setQueryData(['dispatch-incident', incidentId], patchStatus);
+          // The patch above flips the chip instantly; the refetch brings the new
+          // timeline event (and anything else the transition changed) into the drawer.
+          qc.invalidateQueries({ queryKey: ['incident', incidentId] });
 
           qc.setQueriesData<{ data: IncidentListItem[] }>(
             { queryKey: ['dispatch-incidents'], exact: false },
@@ -90,6 +117,18 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           );
 
           qc.invalidateQueries({ queryKey: ['incident-locations'] });
+        });
+      },
+    );
+
+    // ─── barangay.notice_updated (MOD-17 / MOD-34) ───────────────────────────
+    const offBarangay = onIncidentEvent<{ incidentId: string }>(
+      'barangay.notice_updated',
+      ({ incidentId }) => {
+        startTransition(() => {
+          qc.invalidateQueries({ queryKey: ['incident-barangay', incidentId] });
+          qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+          qc.invalidateQueries({ queryKey: ['incidents'] });
         });
       },
     );
@@ -170,11 +209,13 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
     // ─── responder.location_updated ──────────────────────────────────────────
     // GPS events can arrive multiple times per second per responder. Buffer the
     // payloads and flush at most every 200ms so the map re-renders at ~5fps
-    // instead of on every socket message.
+    // instead of on every socket message. Rows are one per unit (dispatchId) and
+    // keep incident_id / call sign (G2); a unit first seen over the socket
+    // triggers a debounced refetch of the REST seed for its name and unit.
     const offResponderLoc = onIncidentEvent<ResponderLocationUpdatedPayload>(
       'responder.location_updated',
       (payload) => {
-        locBufferRef.current.set(payload.responderId, payload);
+        locBufferRef.current.set(payload.dispatchId ?? payload.responderId, payload);
         if (!locFlushTimerRef.current) {
           locFlushTimerRef.current = setTimeout(() => {
             const buffer = locBufferRef.current;
@@ -182,26 +223,51 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
             locBufferRef.current = new Map();
 
             startTransition(() => {
+              let sawUnknown = false;
               qc.setQueryData<LiveResponderPosition[]>(['live-responders'], (old) => {
-                let next = old ? [...old] : [];
-                buffer.forEach((p) => {
-                  const patch: LiveResponderPosition = {
-                    responderId: p.responderId,
-                    lat: p.lat,
-                    lng: p.lng,
-                    heading: p.heading ?? null,
-                    speed: p.speed ?? null,
-                    updated_at: p.updatedAt,
-                  } as LiveResponderPosition;
-                  const idx = next.findIndex((r) => r.responderId === p.responderId);
-                  if (idx === -1) next = [...next, patch];
-                  else next = next.map((r, i) => (i === idx ? { ...r, ...patch } : r));
-                });
-                return next;
+                const merged = mergeResponderLocations(old, buffer.values());
+                sawUnknown = merged.sawUnknown;
+                return merged.next;
               });
+              if (sawUnknown && !seedRefetchTimerRef.current) {
+                seedRefetchTimerRef.current = setTimeout(() => {
+                  seedRefetchTimerRef.current = null;
+                  qc.invalidateQueries({ queryKey: ['live-responders'] });
+                }, 2_000);
+              }
             });
           }, 200);
         }
+      },
+    );
+
+    // ─── responder.eta_updated (MOD-43) ──────────────────────────────────────
+    // Routed ETA for one unit — always an estimate. Patched into the incident's
+    // unit cache that the dispatch tracking card and ETA pill read.
+    const offEta = onIncidentEvent<ResponderEtaUpdatedPayload>(
+      'responder.eta_updated',
+      (payload) => {
+        startTransition(() => {
+          qc.setQueryData<LatestUnitPosition[]>(['incident-units', payload.incidentId], (old) =>
+            applyEtaUpdate(old, payload),
+          );
+        });
+      },
+    );
+
+    // ─── dispatch.updated (crew accepted / declined) ─────────────────────────
+    const offDispatchUpdated = onIncidentEvent<DispatchUpdatedPayload>(
+      'dispatch.updated',
+      ({ incidentId }) => {
+        startTransition(() => {
+          qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+          qc.invalidateQueries({ queryKey: ['dispatch-incident', incidentId] });
+          qc.invalidateQueries({ queryKey: ['incident-dispatches', incidentId] });
+          qc.invalidateQueries({ queryKey: ['incident-units', incidentId] });
+          qc.invalidateQueries({ queryKey: ['live-responders'] });
+          qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
+          qc.invalidateQueries({ queryKey: ['available-units'] });
+        });
       },
     );
 
@@ -254,8 +320,11 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
     );
 
     return () => {
+      leaveOps();
+      socket.off('connect', onConnect);
       offStatus();
       offCreated();
+      offBarangay();
       offUpdated();
       offAssessment();
       offDispatchCreated();
@@ -263,6 +332,8 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       offEscCreated();
       offEscUpdated();
       offResponderLoc();
+      offEta();
+      offDispatchUpdated();
       offResponderStatus();
       offAnnouncement();
       offResourceStatus();
@@ -270,8 +341,12 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
         clearTimeout(locFlushTimerRef.current);
         locFlushTimerRef.current = null;
       }
+      if (seedRefetchTimerRef.current) {
+        clearTimeout(seedRefetchTimerRef.current);
+        seedRefetchTimerRef.current = null;
+      }
     };
-  }, [qc]);
+  }, [qc, signedIn]);
 
   return <>{children}</>;
 }

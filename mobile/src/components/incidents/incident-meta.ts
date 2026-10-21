@@ -22,6 +22,7 @@ export const TYPE_META: Record<string, TypeMeta> = {
   MEDICAL:       { label: 'Medical Emergency', icon: 'medkit',       color: colors.primary, soft: colors.primarySoft },
   ROAD_ACCIDENT: { label: 'Road Traffic Accident', icon: 'car-sport', color: colors.danger,  soft: colors.dangerSoft },
   FLOOD:         { label: 'Flood Emergency',   icon: 'water',        color: colors.info,    soft: colors.infoSoft },
+  NATURAL_DISASTER: { label: 'Natural Disaster', icon: 'thunderstorm', color: '#0E7490',      soft: '#E6F4F7' },
   RESCUE:        { label: 'Rescue',            icon: 'body',         color: '#7C3AED',      soft: '#F3EEFC' },
   FIRE:          { label: 'Fire Emergency',    icon: 'flame',        color: '#EA580C',      soft: '#FFF2EC' },
   INDUSTRIAL:    { label: 'Industrial Hazard', icon: 'warning',      color: colors.amber,   soft: colors.amberSoft },
@@ -76,7 +77,7 @@ export const TONE_COLORS: Record<StatusTone, { fg: string; bg: string }> = {
 
 // ─── Filter groups (history tabs) ───────────────────────────────────────────
 
-export type HistoryFilter = 'all' | 'ongoing' | 'resolved' | 'cancelled';
+export type HistoryFilter = 'all' | 'ongoing' | 'resolved' | 'cancelled' | 'archive';
 
 const ONGOING = new Set([
   'SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED', 'ASSESSED',
@@ -85,12 +86,17 @@ const ONGOING = new Set([
 ]);
 const RESOLVED = new Set(['RESOLVED', 'CLOSED']);
 const CANCELLED = new Set(['CANCELLED', 'FALSE_ALERT', 'DUPLICATE', 'UNABLE_TO_RESPOND', 'REFERRED']);
+const ARCHIVED = new Set([
+  ...RESOLVED,
+  ...CANCELLED,
+]);
 
 export function matchesFilter(status: string, filter: HistoryFilter): boolean {
   switch (filter) {
     case 'ongoing':   return ONGOING.has(status);
     case 'resolved':  return RESOLVED.has(status);
     case 'cancelled': return CANCELLED.has(status);
+    case 'archive':   return ARCHIVED.has(status);
     default:          return true;
   }
 }

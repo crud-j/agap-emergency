@@ -18,17 +18,46 @@ export interface RiskIntelligenceResponse {
   period_days: number;
 }
 
+/**
+ * One unit on an active mission (GET /locations/responders). The backend only
+ * returns ACCEPTED dispatches whose incident is still active, one row per
+ * dispatch (freshest crew fix). Fields after `responderId` may be missing on
+ * rows first seen through a socket patch until the REST seed refetches.
+ */
 export interface LiveResponderPosition {
   responderId: string;
   responder_name: string | null;
+  dispatchId?: string;
+  incident_id: string | null;
+  incident_status?: string;
   resource_name: string | null;
+  call_sign?: string | null;
+  resource_type?: string | null;
   lat: number;
   lng: number;
   heading: number | null;
   speed: number | null;
-  status: string;
-  incident_id: string | null;
   updated_at: string;
+}
+
+/**
+ * GET /locations/tracking/:incidentId/latest — one entry per accepted unit on
+ * the incident (WP3). Position is null until the crew's first GPS fix. ETA is
+ * always an estimate and null when routing is unavailable.
+ */
+export interface LatestUnitPosition {
+  dispatchId: string;
+  callSign: string | null;
+  unitName: string | null;
+  resourceType: string | null;
+  position: {
+    lat: number;
+    lng: number;
+    heading: number | null;
+    speedKmh: number | null;
+    updatedAt: string;
+  } | null;
+  eta: { seconds: number | null; isEstimate: true; calculatedAt: string | null };
 }
 
 export interface MapConfig {
@@ -56,6 +85,30 @@ export function fetchLiveResponderPositions(): Promise<LiveResponderPosition[]> 
   return api.get('/locations/responders', getToken());
 }
 
+export function fetchLatestUnitPositions(incidentId: string): Promise<LatestUnitPosition[]> {
+  return api.get(`/locations/tracking/${incidentId}/latest`, getToken());
+}
+
+export interface RouteLineResult {
+  distanceMeters: number | null;
+  durationSeconds: number | null;
+  isEstimate: true;
+  /** [lng, lat] pairs */
+  geometry?: Array<[number, number]>;
+}
+
+/** POST /locations/route — driving route + ETA (labelled estimate); nulls on routing failure. */
+export function fetchRoute(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+): Promise<RouteLineResult> {
+  return api.post(
+    '/locations/route',
+    { fromLat: from.lat, fromLng: from.lng, toLat: to.lat, toLng: to.lng },
+    getToken(),
+  );
+}
+
 export interface IncidentLocationItem {
   id: string;
   public_reference: string;
@@ -64,6 +117,9 @@ export interface IncidentLocationItem {
   status: string;
   lat: number | null;
   lng: number | null;
+  /** Reporter map icon (staff-only, WP3.6). null = neutral pin. */
+  reporter_sex: 'MALE' | 'FEMALE' | null;
+  reporter_is_guest: boolean | null;
 }
 
 export async function fetchIncidentLocations(params?: {
@@ -83,6 +139,8 @@ export async function fetchIncidentLocations(params?: {
     priority: string;
     status: string;
     incident_locations: { latitude: number | string | null; longitude: number | string | null } | null;
+    incident_reporters?: { is_guest: boolean } | null;
+    reporter_sex?: 'MALE' | 'FEMALE' | null;
   }> }>(`/incidents?${qs}`, getToken());
 
   return (res.data ?? []).map((inc) => ({
@@ -93,5 +151,7 @@ export async function fetchIncidentLocations(params?: {
     status: inc.status,
     lat: inc.incident_locations?.latitude != null ? Number(inc.incident_locations.latitude) : null,
     lng: inc.incident_locations?.longitude != null ? Number(inc.incident_locations.longitude) : null,
+    reporter_sex: inc.reporter_sex ?? null,
+    reporter_is_guest: inc.incident_reporters?.is_guest ?? null,
   }));
 }

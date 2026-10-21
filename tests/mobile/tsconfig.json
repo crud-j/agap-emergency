@@ -11,5 +11,6 @@
     "allowSyntheticDefaultImports": true,
     "types": ["jest", "node"]
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": ["**/*.ts", "**/*.tsx", "../../mobile/**/*.d.ts"],
+  "exclude": []
 }

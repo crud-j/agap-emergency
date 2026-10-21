@@ -26,6 +26,19 @@ export const TERMINAL_INCIDENT_STATUSES: ReadonlySet<IncidentStatus> = new Set([
   IncidentStatus.CANCELLED,
 ]);
 
+/**
+ * Incident statuses during which an accepted unit is actively responding, so its
+ * live position is shown on the ops map and to the reporter (MOD-13 / MOD-43).
+ * Tracking stops once the incident leaves this set (resolved, closed, etc.).
+ */
+export const ACTIVE_RESPONSE_INCIDENT_STATUSES: readonly IncidentStatus[] = [
+  IncidentStatus.DISPATCHED,
+  IncidentStatus.EN_ROUTE,
+  IncidentStatus.ON_SCENE,
+  IncidentStatus.TRANSPORTING,
+  IncidentStatus.ASSISTING,
+];
+
 export const INCIDENT_STATUS_TRANSITIONS: Readonly<
   Record<IncidentStatus, readonly IncidentStatus[]>
 > = {

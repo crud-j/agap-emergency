@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, StatusBar, Image,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,8 +11,7 @@ import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
 import { useNetworkStatus } from '@/src/hooks/useNetworkStatus';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { AvailabilityControl } from '@/src/components/responder/availability-control';
-
-const AGAP_ICON = require('../../assets/icons/agap-solo-icon.png') as number;
+import { AgapLogo } from '@/src/components/brand/AgapLogo';
 
 type GpsState = 'checking' | 'granted' | 'denied';
 
@@ -32,6 +31,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   MEDICAL:      'Medical emergency',
   ROAD_ACCIDENT:'Road accident',
   FLOOD:        'Flood rescue',
+  NATURAL_DISASTER: 'Natural disaster',
   RESCUE:       'Rescue operation',
   FIRE:         'Fire emergency',
   INDUSTRIAL:   'Industrial incident',
@@ -94,11 +94,7 @@ export default function HomeScreen() {
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <View style={[styles.logoWrap, { backgroundColor: '#DCE3E9' }]} />
-              <View style={{ gap: 4 }}>
-                <SkeletonLine height={13} width={50} />
-                <SkeletonLine height={10} width={88} />
-              </View>
+              <AgapLogo />
             </View>
             <View style={styles.headerRight}>
               <SkeletonLine height={28} width={90} />
@@ -144,7 +140,6 @@ export default function HomeScreen() {
   const status      = summary?.availability.status ?? 'OFF_DUTY';
   const statusLabel = AVAILABILITY_LABEL[status] ?? status;
   const statusDot   = AVAILABILITY_DOT[status] ?? '#8795A3';
-  const orgName     = summary?.user.organizations[0]?.name ?? 'MDRRMO Bocaue';
   const initials    = fullName.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
   const isActive          = activeAssignments.length > 0;
@@ -168,13 +163,7 @@ export default function HomeScreen() {
         {/* ── Header bar ────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <View style={styles.logoWrap}>
-              <Image source={AGAP_ICON} style={styles.logoIcon} resizeMode="contain" />
-            </View>
-            <View>
-              <Text style={styles.logoName}>AGAP</Text>
-              <Text style={styles.logoOrg}>{orgName}</Text>
-            </View>
+            <AgapLogo />
           </View>
           <View style={styles.headerRight}>
             <View style={[
@@ -560,7 +549,7 @@ const SHADOW = {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F7FA' },
+  container: { flex: 1, backgroundColor: '#F2F5F8' },
   scroll:    { padding: 16, paddingBottom: 32 },
   center:    { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
   iconWrap:  { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EDF1F4', alignItems: 'center', justifyContent: 'center', marginBottom: 8, borderWidth: 1, borderColor: BEVEL },
@@ -572,10 +561,6 @@ const styles = StyleSheet.create({
   header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   headerLeft:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logoWrap:    { width: 38, height: 38, borderRadius: 10, backgroundColor: '#0D6053', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  logoIcon:    { width: 38, height: 38 },
-  logoName:    { fontSize: 15, fontWeight: '800', color: '#1C2B3A', lineHeight: 18 },
-  logoOrg:     { fontSize: 11, color: '#8795A3', lineHeight: 15 },
   connPill:    { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
   connDot:     { width: 7, height: 7, borderRadius: 4 },
   connText:    { fontSize: 12, fontWeight: '600' },

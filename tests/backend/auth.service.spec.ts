@@ -5,6 +5,10 @@ import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
 import { AuthService } from '@backend/auth/auth.service';
 import { PrismaService } from '@backend/common/prisma/prisma.service';
+import { AuditService } from '@backend/audit/audit.service';
+import { LoginLockoutService } from '@backend/auth/lockout/login-lockout.service';
+import { TrustedDeviceService } from '@backend/auth/mfa/trusted-device.service';
+import { SessionRevocationService } from '@backend/auth/sessions/session-revocation.service';
 import { QUEUE_NAMES } from '@agap/shared';
 import { createMockPrisma } from './helpers/prisma.mock';
 import * as bcrypt from 'bcryptjs';
@@ -41,6 +45,16 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwtService },
         { provide: getQueueToken(QUEUE_NAMES.SMS), useValue: mockSmsQueue },
+        { provide: AuditService, useValue: { log: jest.fn().mockResolvedValue(undefined), logInTransaction: jest.fn() } },
+        {
+          provide: LoginLockoutService,
+          useValue: { appliesTo: () => false, remainingMinutes: () => 0, recordFailure: jest.fn() },
+        },
+        {
+          provide: TrustedDeviceService,
+          useValue: { isTrusted: jest.fn().mockResolvedValue(false), revokeAllForUser: jest.fn() },
+        },
+        { provide: SessionRevocationService, useValue: { markRevoked: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
@@ -135,6 +149,7 @@ describe('AuthService', () => {
   describe('login', () => {
     it('creates a session and returns access + refresh tokens', async () => {
       mockPrisma.user_sessions.create.mockResolvedValue({});
+      mockPrisma.user.update.mockResolvedValue({});
 
       const result = await service.login({ id: 'user-1', email: null, role: 'CITIZEN' });
 
@@ -190,13 +205,15 @@ describe('AuthService', () => {
         users: { ...baseUser },
       };
       mockPrisma.user_sessions.findUnique.mockResolvedValue(session);
-      mockPrisma.$transaction.mockImplementation(() => Promise.resolve([null, null]));
+      mockPrisma.user_sessions.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.refreshToken('valid-refresh-token');
 
       expect(result.accessToken).toBeDefined();
       expect(result.refreshToken).toBeDefined();
-      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(mockPrisma.user_sessions.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: session.id, is_revoked: false }) }),
+      );
     });
 
     it('throws UnauthorizedException for a revoked session', async () => {
@@ -231,13 +248,20 @@ describe('AuthService', () => {
 
   describe('logout', () => {
     it('revokes all sessions for the user when no token is provided', async () => {
+      mockPrisma.user_sessions.findMany.mockResolvedValue([
+        { id: 's-1', user_id: 'user-1' },
+        { id: 's-2', user_id: 'user-1' },
+      ]);
       mockPrisma.user_sessions.updateMany.mockResolvedValue({ count: 2 });
 
-      const result = await service.logout('user-1');
+      const result = await service.logout({ userId: 'user-1' });
 
+      expect(mockPrisma.user_sessions.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ user_id: 'user-1', is_revoked: false }) }),
+      );
       expect(mockPrisma.user_sessions.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ user_id: 'user-1' }),
+          where: { id: { in: ['s-1', 's-2'] } },
           data: { is_revoked: true },
         }),
       );
@@ -253,6 +277,7 @@ describe('AuthService', () => {
         id: 'v-1',
         expires_at: new Date(Date.now() + 60_000),
       });
+      mockPrisma.user.findUnique.mockResolvedValue({ status: 'ACTIVE' });
       mockPrisma.$transaction.mockResolvedValue([{}, {}]);
 
       const result = await service.verifyOtp({ userId: 'user-1', token: '123456', type: 'PHONE' });
@@ -329,6 +354,7 @@ describe('AuthService', () => {
       const resultNoAccount = await service.forgotPassword({ phoneNumber: '+63917' });
 
       mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user_verifications.count.mockResolvedValue(0);
       mockPrisma.user_verifications.create.mockResolvedValue({});
       const resultWithAccount = await service.forgotPassword({ phoneNumber: '+63917' });
 

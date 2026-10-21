@@ -14,18 +14,24 @@ import {
   CreateBucketCommand,
   HeadBucketCommand,
 } from '@aws-sdk/client-s3';
-import type { Readable } from 'stream';
+import { Readable } from 'stream';
 import { memoryStorage } from 'multer';
 import { randomUUID } from 'crypto';
-import { extname } from 'path';
+import { extname, join, resolve, sep } from 'path';
+import { mkdir, writeFile, readFile } from 'fs/promises';
 import { PrismaService } from '../common/prisma/prisma.service';
 
 export const MULTER_MEMORY_STORAGE = memoryStorage();
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4']);
 const ANNOUNCEMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const MAX_FILE_SIZE = 10_485_760;
+const MAX_FILE_SIZE = 10_485_760; // 10 MB — photos
+/** Videos: 60 s of 720p from the AGAP camera is ~19 MB. Also the multer limit. */
+export const MAX_VIDEO_UPLOAD_BYTES = 26_214_400; // 25 MB
 const MAX_ANNOUNCEMENT_IMAGE_SIZE = 5_242_880; // 5 MB
+
+/** Marker stored in incident_attachments.storage_bucket for files kept on local disk. */
+const LOCAL_BUCKET = 'local';
 
 // ─── Tier 1 photo validation (MOD-25) ───────────────────────────────────────
 // Trusted capture provenance stamped on-device at the shutter (not from mutable
@@ -119,6 +125,8 @@ export class MediaService {
   private readonly endpoint: string;
 
   private readonly publicUrl: string;
+  private readonly localDir: string;
+  private readonly localFallback: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -129,6 +137,15 @@ export class MediaService {
     // PUBLIC_STORAGE_URL is the browser-accessible base URL for stored files.
     // Separate from STORAGE_ENDPOINT so Docker internal URLs don't leak into the DB.
     this.publicUrl = this.config.get<string>('PUBLIC_STORAGE_URL', this.endpoint);
+    // When object storage is down, incident evidence is kept on local disk rather
+    // than lost — a dispatcher seeing the photo matters more than where it lives.
+    // On by default outside production; set STORAGE_LOCAL_FALLBACK=false to disable.
+    this.localDir = resolve(this.config.get<string>('LOCAL_UPLOAD_DIR', 'uploads'));
+    const fallbackFlag = this.config.get<string>('STORAGE_LOCAL_FALLBACK');
+    this.localFallback =
+      fallbackFlag != null
+        ? fallbackFlag === 'true'
+        : this.config.get<string>('NODE_ENV') !== 'production';
 
     this.s3 = new S3Client({
       endpoint: this.endpoint,
@@ -163,7 +180,7 @@ export class MediaService {
       // Any other error (ECONNREFUSED, bad credentials, …) means storage is down.
       this.logger.error(`Object storage unreachable at ${this.endpoint}: ${String(headErr)}`);
       throw new ServiceUnavailableException(
-        `Object storage is unavailable. Start the storage service (docker compose up minio) and try again.`,
+        'Object storage is unavailable. Check that the configured S3-compatible service is running and that STORAGE_ENDPOINT and credentials are correct.',
       );
     }
   }
@@ -182,9 +199,11 @@ export class MediaService {
       );
     }
 
-    if (file.size > MAX_FILE_SIZE) {
+    const isVideo = file.mimetype.startsWith('video/');
+    const maxSize = isVideo ? MAX_VIDEO_UPLOAD_BYTES : MAX_FILE_SIZE;
+    if (file.size > maxSize) {
       throw new BadRequestException(
-        `File too large (${file.size} bytes). Maximum is ${MAX_FILE_SIZE} bytes (10 MB).`,
+        `File too large (${file.size} bytes). Maximum is ${maxSize} bytes (${isVideo ? '25' : '10'} MB).`,
       );
     }
 
@@ -192,26 +211,36 @@ export class MediaService {
     const ext = rawExt || (file.mimetype.split('/')[1] ?? 'bin');
     const key = `incidents/${incidentId}/${randomUUID()}.${ext}`;
 
-    await this.ensureBucket();
-
+    let bucket = this.bucket;
+    let storageUrl: string | null;
     try {
-      await this.s3.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-          Body: file.buffer,
-          ContentType: file.mimetype,
-        }),
-      );
+      await this.ensureBucket();
+      try {
+        await this.s3.send(
+          new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: key,
+            Body: file.buffer,
+            ContentType: file.mimetype,
+          }),
+        );
+      } catch (err: unknown) {
+        this.logger.error(`S3 upload failed for incident ${incidentId}: ${String(err)}`);
+        throw new ServiceUnavailableException(
+          `File upload failed. Ensure the storage service is running on ${this.endpoint}.`,
+        );
+      }
+      // Use publicUrl (PUBLIC_STORAGE_URL) so browsers can load the image directly.
+      storageUrl = `${this.publicUrl}/${this.bucket}/${key}`;
     } catch (err: unknown) {
-      this.logger.error(`S3 upload failed for incident ${incidentId}: ${String(err)}`);
-      throw new ServiceUnavailableException(
-        `File upload failed. Ensure the storage service is running on ${this.endpoint}.`,
+      if (!(err instanceof ServiceUnavailableException) || !this.localFallback) throw err;
+      await this.writeLocal(key, file.buffer);
+      this.logger.warn(
+        `Object storage unavailable — stored incident ${incidentId} attachment on local disk (${key}).`,
       );
+      bucket = LOCAL_BUCKET;
+      storageUrl = null; // served only through GET /incidents/:id/attachments/:attachmentId/file
     }
-
-    // Use publicUrl (PUBLIC_STORAGE_URL) so browsers can load the image directly.
-    const storageUrl = `${this.publicUrl}/${this.bucket}/${key}`;
 
     // Advisory authenticity assessment (Tier 1). Best-effort — a failure here must
     // never prevent the attachment from being stored.
@@ -244,7 +273,7 @@ export class MediaService {
         file_name: file.originalname,
         file_type: file.mimetype,
         file_size_bytes: file.size,
-        storage_bucket: this.bucket,
+        storage_bucket: bucket,
         storage_key: key,
         storage_url: storageUrl,
         capture_timestamp: capture?.capturedAt != null ? new Date(capture.capturedAt) : null,
@@ -263,6 +292,65 @@ export class MediaService {
       `(authenticity ${score ?? 'n/a'}${flags.length ? `, flags: ${flags.join(',')}` : ''})`,
     );
     return attachment;
+  }
+
+  /**
+   * Streams an incident attachment back through the API (MOD-10). The dashboard
+   * loads evidence with the dispatcher's token instead of hitting the storage
+   * host directly, so buckets stay private and local-disk fallbacks still work.
+   */
+  async getIncidentAttachmentFile(
+    incidentId: string,
+    attachmentId: string,
+  ): Promise<{ stream: Readable; contentType: string; contentLength?: number }> {
+    const attachment = await this.prisma.incidentAttachment.findFirst({
+      where: { id: attachmentId, incident_id: incidentId },
+      select: { storage_bucket: true, storage_key: true, file_type: true },
+    });
+    if (!attachment) throw new NotFoundException('Attachment not found.');
+    const contentType = attachment.file_type;
+
+    if (attachment.storage_bucket === LOCAL_BUCKET) {
+      try {
+        const buf = await readFile(this.localPath(attachment.storage_key));
+        return { stream: Readable.from(buf), contentType, contentLength: buf.length };
+      } catch {
+        throw new NotFoundException('Attachment file not found.');
+      }
+    }
+
+    try {
+      const res = await this.s3.send(
+        new GetObjectCommand({ Bucket: attachment.storage_bucket, Key: attachment.storage_key }),
+      );
+      if (!res.Body) throw new NotFoundException('Attachment file not found.');
+      return {
+        stream: res.Body as Readable,
+        contentType: res.ContentType ?? contentType,
+        ...(res.ContentLength !== undefined && { contentLength: res.ContentLength }),
+      };
+    } catch (err: unknown) {
+      if (err instanceof NotFoundException) throw err;
+      const code = (err as { name?: string })?.name;
+      if (code === 'NoSuchKey' || code === 'NotFound') {
+        throw new NotFoundException('Attachment file not found.');
+      }
+      this.logger.error(`Attachment read failed for ${attachment.storage_key}: ${String(err)}`);
+      throw new ServiceUnavailableException('Object storage is unavailable.');
+    }
+  }
+
+  /** Resolves a storage key under the local upload dir, refusing path traversal. */
+  private localPath(key: string): string {
+    const full = resolve(join(this.localDir, key));
+    if (!full.startsWith(this.localDir + sep)) throw new NotFoundException('Attachment not found.');
+    return full;
+  }
+
+  private async writeLocal(key: string, body: Buffer): Promise<void> {
+    const full = this.localPath(key);
+    await mkdir(resolve(full, '..'), { recursive: true });
+    await writeFile(full, body);
   }
 
   async uploadAnnouncementImage(

@@ -194,6 +194,29 @@ pnpm --filter @agap/backend start:debug
 
 Backend runs at **http://localhost:3000**
 
+#### Windows: `EADDRINUSE` on port 3000
+
+Only run one backend process at a time. If `start:dev` is already running, do not also run `start` or another `start:dev` in a second terminal. Stop the existing process with **Ctrl+C** in its terminal before starting it again.
+
+To see which process owns port 3000:
+
+```powershell
+$listener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($listener) {
+  Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)" |
+    Select-Object ProcessId, CommandLine
+} else {
+  Write-Output "Nothing is listening on port 3000"
+}
+```
+
+If the owning process is a backend instance you started and its terminal is unavailable, stop only that verified PID, then run one backend command:
+
+```powershell
+Stop-Process -Id <PID>
+pnpm --filter @agap/backend start:dev
+```
+
 ### Frontend (Next.js Operations Center)
 
 ```bash
@@ -214,9 +237,20 @@ pnpm --filter @agap/mobile android
 # iOS simulator (macOS only)
 pnpm --filter @agap/mobile ios
 cloudflared tunnel --url http://127.0.0.1:3000
-npx expo start --dev-client
-ngrok http 3000 --domain=benevolent-semirhythmically-tova.ngrok-free.dev
+npx expo start --dev-client --tunnel --clear
+ngrok http 3000 --domain=unexecutorial-phantasmagorian-sena.ngrok-free.dev
+~/.config/agap-object-storage/start-garage
 curl -H "ngrok-skip-browser-warning: 1" https://benevolent-semirhythmically-tova.ngrok-free.dev/.well-known/assetlinks.json
+
+# All dispatchers: password back to AgapDev2026!, forced change at next login
+pnpm dev:reset-dispatcher
+
+# Same, and also wipe their passkeys, authenticator, backup codes and trusted browsers
+pnpm dev:reset-dispatcher --mfa
+
+# Just one dispatcher
+pnpm dev:reset-dispatcher dispatcher1@mdrrmo.bocaue.gov.ph --mfa
+
 
 $token = (curl.exe -s -X POST http://localhost:3000/v1/auth/login -H "Content-Type: application/json" -d '{\"identifier\":\"citizen@demo.agap\",\"password\":\"AgapDev2026!\"}' | ConvertFrom-Json).accessToken; curl.exe -X GET http://localhost:3000/v1/incidents/mine -H "Authorization: Bearer $token"
 ```

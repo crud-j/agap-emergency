@@ -57,3 +57,6 @@ mobile/android/app/build/
 # Agent / IDE skill dirs — contain symlinks that break EAS Build packaging on Windows
 .agents/
 .windsurf/
+
+# Local-disk fallback for incident media when object storage is down
+backend/uploads/

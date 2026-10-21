@@ -10,12 +10,13 @@ import {
 } from '@/components/ui';
 import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
 import { IncidentDetailDrawer } from '@/components/incidents/IncidentDetailDrawer';
+import { BarangayPanel } from '@/components/incidents/BarangayPanel';
 import { useWsState } from '@/lib/use-ws-state';
 import {
   useIncidents, useIncident, useUpdateIncidentStatus, useMarkFalseAlert, useMergeIncident,
 } from '@/features/incidents/hooks';
 import { usePriorityRecommendation } from '@/features/dispatch/hooks';
-import { categoryIcon, titleCase, timeAgo } from '@/lib/incident-format';
+import { categoryIcon, formatAffectedCount, titleCase, timeAgo } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
 
 const TRIAGE_STATUSES = ['SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED'];
@@ -111,6 +112,13 @@ export default function TriagePage(): JSX.Element {
                       <p className="truncate text-xs text-agap-textSub">
                         {inc.incident_locations?.barangay ?? titleCase(inc.category)} · {timeAgo(inc.submitted_at)}
                       </p>
+                      {inc.barangay_notices?.[0] && (
+                        <p className="truncate text-[11px] text-agap-textSub">
+                          Brgy {inc.barangay_notices[0].barangay.name}
+                          {inc.barangay_notices[0].is_approximate ? ' (approx.)' : ''}
+                          {inc.barangay_notices[0].last_report ? ` · ${titleCase(inc.barangay_notices[0].last_report)}` : ''}
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <PriorityBadge priority={inc.priority} showDot={false} />
@@ -199,10 +207,10 @@ function TriageDetail({
           <MapPin size={15} className="mt-0.5 shrink-0 text-agap-textSub" />
           <span>{address}</span>
         </div>
-        {incident.number_of_patients != null && (
+        {formatAffectedCount(incident.hazard_flags, incident.number_of_patients) && (
           <div className="mt-1 flex items-center gap-2 text-sm text-agap-textMid">
             <Users size={15} className="shrink-0 text-agap-textSub" />
-            <span>{incident.number_of_patients} patient(s)</span>
+            <span>People affected: {formatAffectedCount(incident.hazard_flags, incident.number_of_patients)}</span>
           </div>
         )}
         {incident.description && (
@@ -212,6 +220,7 @@ function TriageDetail({
 
       <div className="space-y-5 p-5">
         <PriorityRecChip incidentId={incident.id} currentPriority={incident.priority} />
+        <BarangayPanel incidentId={incident.id} incidentStatus={incident.status} />
         <TriageActions incidentId={incident.id} status={incident.status} onResolved={onResolved} />
         <DuplicateCandidates
           incident={incident}

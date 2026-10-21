@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { IncidentType } from '../enums/incident-type.enum';
 import { IncidentPriority } from '../enums/incident-priority.enum';
 import { ReporterType } from '../enums/reporter-type.enum';
+import { LANDMARK_MAX_LENGTH, ReporterStatus } from '../constants/incident-intake';
 
 export const GuestReporterSchema = z.object({
   name: z.string().max(100).optional(),
@@ -36,6 +37,14 @@ export const CreateIncidentSchema = z.object({
   affectedCount: z.string().max(20).optional(),
   hazards: z.array(z.string().max(200)).max(20).optional(),
   responseNeeds: z.array(z.string().max(100)).max(10).optional(),
+  /** Structured caller answers (MOD-09); the backend re-validates them against the intake catalog. */
+  intake: z
+    .object({
+      answers: z.record(z.array(z.string().max(40)).max(10)).optional(),
+      reporterStatus: z.nativeEnum(ReporterStatus).optional(),
+      landmark: z.string().max(LANDMARK_MAX_LENGTH).optional(),
+    })
+    .optional(),
 });
 
 export type CreateIncidentInput = z.infer<typeof CreateIncidentSchema>;

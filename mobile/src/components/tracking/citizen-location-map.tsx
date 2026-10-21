@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { View, Modal, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { Map, Camera, Marker, type CameraRef } from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -26,7 +26,7 @@ const TILE_LOAD_TIMEOUT_MS = 15_000;
  * Either event shows a retry overlay that remounts the GL surface (increment mapKey).
  * Callers wrap this component in a MapErrorBoundary + React.Suspense.
  */
-export default function CitizenLocationMap({
+function CitizenLocationMap({
   styleUrl,
   coords,
   onRetryLocation,
@@ -40,6 +40,7 @@ export default function CitizenLocationMap({
   const cameraRef = useRef<CameraRef>(null);
   const [mapKey, setMapKey] = useState(0);
   const [tileError, setTileError] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -73,7 +74,7 @@ export default function CitizenLocationMap({
     }
   }, [coords?.lat, coords?.lng]);
 
-  return (
+  const mapContent = (
     <View style={StyleSheet.absoluteFill}>
       <Map
         key={mapKey}
@@ -133,9 +134,34 @@ export default function CitizenLocationMap({
           </TouchableOpacity>
         </View>
       )}
+
+      <TouchableOpacity
+        style={styles.fullscreenBtn}
+        onPress={() => setFullscreen((value) => !value)}
+        accessibilityRole="button"
+        accessibilityLabel={fullscreen ? 'Exit fullscreen map' : 'View fullscreen map'}
+      >
+        <Ionicons name={fullscreen ? 'contract-outline' : 'expand-outline'} size={19} color="#0D6053" />
+      </TouchableOpacity>
     </View>
   );
+
+  return (
+    <>
+      <View style={StyleSheet.absoluteFill}>{!fullscreen && mapContent}</View>
+      <Modal
+        visible={fullscreen}
+        animationType="fade"
+        onRequestClose={() => setFullscreen(false)}
+        statusBarTranslucent
+      >
+        {fullscreen && <View style={styles.fullscreenRoot}>{mapContent}</View>}
+      </Modal>
+    </>
+  );
 }
+
+export default React.memo(CitizenLocationMap);
 
 const styles = StyleSheet.create({
   pin: {
@@ -161,6 +187,23 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  fullscreenRoot: { flex: 1, backgroundColor: '#F2F5F8' },
+  fullscreenBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',

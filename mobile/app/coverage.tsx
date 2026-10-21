@@ -11,7 +11,9 @@ import { isNativeMapAvailable } from '@/src/components/tracking/native-map-avail
 // Lazy so the MapLibre native module is imported only when it exists — a stale dev
 // client / Expo Go falls back to a placeholder instead of a hard native crash.
 const BocaueScopedMap = React.lazy(
-  () => import('@/src/components/tracking/bocaue-scoped-map'),
+  () => Promise.resolve({
+    default: require('../src/components/tracking/bocaue-scoped-map').default as typeof import('../src/components/tracking/bocaue-scoped-map').default,
+  }),
 );
 
 // ─── MapLibre render guard ──────────────────────────────────────────────────

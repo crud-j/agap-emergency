@@ -31,6 +31,12 @@ export class PrismaExceptionFilter implements ExceptionFilter {
           message: 'A record with this value already exists.',
         });
       }
+      if (exception.code === 'P2000') {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'A provided value is too long for its field.',
+        });
+      }
       if (exception.code === 'P2025') {
         return response.status(HttpStatus.NOT_FOUND).json({
           statusCode: HttpStatus.NOT_FOUND,

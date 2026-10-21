@@ -1,0 +1,1072 @@
+{
+  "_meta": {
+    "schema_version": 1,
+    "purpose": "Barangay hotline directory used to alert the BDRRMC/BPSO of the barangay an incident falls in (MOD-17 / MOD-34).",
+    "source": {
+      "type": "facebook-poster",
+      "title": "Designated Evacuation Areas with Hotline Numbers, Municipality of Bocaue",
+      "posted": "2026-08-29",
+      "verified_by_mdrrmo": false
+    },
+    "notes": [
+      "Numbers are transcribed from a public poster and are UNVERIFIED. Do not enable real barangay alerts until MDRRMO confirms them (see barangay-contact-confirmation.md).",
+      "evacuation_areas[].coordinates are display hints only and are mostly wrong (9 of 33 fall in the right barangay). Never use them for routing; the barangay of an incident comes from the OpenStreetMap boundaries.",
+      "kind=INVALID contacts are kept for the record and skipped by the seed. Do not guess a correction: ask the barangay.",
+      "Roles are provisional: the first two mobile numbers are PRIMARY and BACKUP until MDRRMO picks them.",
+      "A barangay with demo_override=true is TEMPORARY test data and must be restored from original_contacts before real use. The seed refuses to run in production while any demo contact is present."
+    ],
+    "barangay_id_spelling": "Names follow OpenStreetMap (Bundukan, Tambubong). poster_name keeps the poster spelling where it differs."
+  },
+  "barangays": [
+    {
+      "barangay_id": "ANTIPONA",
+      "name": "Antipona",
+      "contacts": [
+        {
+          "raw": "0961-150-1961",
+          "e164": "+639611501961",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0926-675-5230",
+          "e164": "+639266755230",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "San Roque Chapel",
+          "exact_location": "Labasan, Antipona, Bocaue, Bulacan",
+          "coordinates": {
+            "latitude": 14.8055,
+            "longitude": 120.9238
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Terminal New Public Market",
+          "exact_location": "New Public Market, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7963,
+            "longitude": 120.9272
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "BAGUMBAYAN",
+      "name": "Bagumbayan",
+      "contacts": [
+        {
+          "raw": "769-2412",
+          "e164": null,
+          "kind": "INVALID",
+          "can_sms": false,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29",
+          "issue": "MISSING_AREA_CODE"
+        },
+        {
+          "raw": "0915-880-6372",
+          "e164": "+639158806372",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0932-255-3031",
+          "e164": "+639322553031",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Barangay Hall / Barangay Health Center",
+          "exact_location": "Lopez Jaena St. Bagumbayan, Bocaue, Bul.",
+          "coordinates": {
+            "latitude": 14.7972,
+            "longitude": 120.9254
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "BAMBANG",
+      "name": "Bambang",
+      "contacts": [
+        {
+          "raw": "0926-546-9708",
+          "e164": "+639265469708",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0963-453-0379",
+          "e164": "+639634530379",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Nutrition Office, Brgy. Hall",
+          "exact_location": "Carmen Subd., Bambang, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7925,
+            "longitude": 120.9221
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Bambang Elementary School",
+          "exact_location": "Pitong Gatang St., Bambang, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7911,
+            "longitude": 120.9198
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "BATIA",
+      "name": "Batia",
+      "demo_override": true,
+      "demo_override_note": "TEMPORARY for instructor demo. Replace with the real BDRRMC numbers (see original_contact_numbers) and remove the demo_* keys before real use.",
+      "contacts": [
+        {
+          "raw": "0969-478-4013",
+          "e164": "+639694784013",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "DEMO NUMBER",
+          "is_demo": true,
+          "verified_at": null,
+          "source": "demo-override"
+        }
+      ],
+      "original_contacts": [
+        {
+          "raw": "0964-757-9780",
+          "e164": "+639647579780",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0922-626-6091",
+          "e164": "+639226266091",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0943-564-0931",
+          "e164": "+639435640931",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0992-248-9614",
+          "e164": "+639922489614",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "St. Martha Evacuation Center / New TESDA Bldg., SMEH",
+          "exact_location": "St. Martha, Batia, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8322,
+            "longitude": 120.9492
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "New BPSO Outpost, NV5",
+          "exact_location": "Northville 5 Batia, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8335,
+            "longitude": 120.9511
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "New BPSO Outpost, Bocaue Hills",
+          "exact_location": "AFP/PNP, Batia, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8285,
+            "longitude": 120.941
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Barangay Hall",
+          "exact_location": "Batia Proper, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8304,
+            "longitude": 120.9445
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "BINANG_1ST",
+      "name": "Biñang 1st",
+      "contacts": [
+        {
+          "raw": "(044) 07924300",
+          "e164": null,
+          "kind": "INVALID",
+          "can_sms": false,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29",
+          "issue": "MALFORMED"
+        },
+        {
+          "raw": "0966-194-4858",
+          "e164": "+639661944858",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0993-566-9591",
+          "e164": "+639935669591",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Barangay Health Center / Barangay Multi-Purpose Hall",
+          "exact_location": "Biñang 1st, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7938,
+            "longitude": 120.9329
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "BINANG_2ND",
+      "name": "Biñang 2nd",
+      "contacts": [
+        {
+          "raw": "0922-709-0700",
+          "e164": "+639227090700",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0938-416-6144",
+          "e164": "+639384166144",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Brgy. Hall and Senior Citizens Office",
+          "exact_location": "Mc Arthur Highway, Biñang 2nd, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7967,
+            "longitude": 120.9341
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "BOLACAN",
+      "name": "Bolacan",
+      "contacts": [
+        {
+          "raw": "0997-926-3410",
+          "e164": "+639979263410",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0927-966-9947",
+          "e164": "+639279669947",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Bolacan Chapel",
+          "exact_location": "Bernardo St., Bolacan, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7836,
+            "longitude": 120.9135
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Barangay Hall",
+          "exact_location": "Bernardo St., Bolacan, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7844,
+            "longitude": 120.9122
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "BUNDUKAN",
+      "name": "Bundukan",
+      "poster_name": "Bunducan",
+      "contacts": [
+        {
+          "raw": "0977-204-4957",
+          "e164": "+639772044957",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0915-905-8302",
+          "e164": "+639159058302",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0928-372-0840",
+          "e164": "+639283720840",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Bunducan Elementary School",
+          "exact_location": "L. Gonzales Rd., Bunducan, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7997,
+            "longitude": 120.9575
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Basketball Court and Multipurpose Hall",
+          "exact_location": "Nieves St., Bunducan, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8011,
+            "longitude": 120.9592
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "BUNLO",
+      "name": "Bunlo",
+      "contacts": [
+        {
+          "raw": "0966-420-0478",
+          "e164": "+639664200478",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0933-311-6578",
+          "e164": "+639333116578",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0994-512-1331",
+          "e164": "+639945121331",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Bunlo Elementary School",
+          "exact_location": "Luntian St., Bunlo, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7931,
+            "longitude": 120.9419
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "CAINGIN",
+      "name": "Caingin",
+      "contacts": [
+        {
+          "raw": "044-6401266",
+          "e164": "+63446401266",
+          "kind": "LANDLINE",
+          "can_sms": false,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0976-537-6739",
+          "e164": "+639765376739",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0962-368-3824",
+          "e164": "+639623683824",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Old Barangay Hall",
+          "exact_location": "Purok 4, Caingin, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8058,
+            "longitude": 120.9312
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "New Barangay Hall",
+          "exact_location": "Canuto Villanueva St., Caingin, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8071,
+            "longitude": 120.9328
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "DUHAT",
+      "name": "Duhat",
+      "contacts": [
+        {
+          "raw": "0967-073-0243",
+          "e164": "+639670730243",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0916-713-2423",
+          "e164": "+639167132423",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0951-150-9371",
+          "e164": "+639511509371",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "3rd Floor of Barangay Hall",
+          "exact_location": "Capiral St., Sulucan, Brgy. Duhat, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8062,
+            "longitude": 120.9405
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "IGULOT",
+      "name": "Igulot",
+      "contacts": [
+        {
+          "raw": "0977-844-0090",
+          "e164": "+639778440090",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0917-184-0090",
+          "e164": "+639171840090",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Old Barangay Hall (Main Evacuation Center area)",
+          "exact_location": "Igulot Rd., Bocaue, Bul.",
+          "coordinates": {
+            "latitude": 14.8105,
+            "longitude": 120.9523
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "LOLOMBOY",
+      "name": "Lolomboy",
+      "contacts": [
+        {
+          "raw": "0970-817-3959",
+          "e164": "+639708173959",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0912-485-6342",
+          "e164": "+639124856342",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0946-510-0999",
+          "e164": "+639465100999",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "New Barangay Hall & TESDA Bldg.",
+          "exact_location": "LTR Mendoza St., Lolomboy, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7802,
+            "longitude": 120.936
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Covered Court (Near New Brgy. Hall)",
+          "exact_location": "LTR Mendoza St., Lolomboy, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7805,
+            "longitude": 120.9358
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "POBLACION",
+      "name": "Poblacion",
+      "contacts": [
+        {
+          "raw": "044-309-2956",
+          "e164": "+63443092956",
+          "kind": "LANDLINE",
+          "can_sms": false,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0923-707-6439",
+          "e164": "+639237076439",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0921-929-8901",
+          "e164": "+639219298901",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Old Market (Fish Port)",
+          "exact_location": "Poblacion Old Market, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8008,
+            "longitude": 120.9281
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Barangay Hall",
+          "exact_location": "Poblacion, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8015,
+            "longitude": 120.9275
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "SULUCAN",
+      "name": "Sulucan",
+      "contacts": [
+        {
+          "raw": "(044) 913-6980",
+          "e164": "+63449136980",
+          "kind": "LANDLINE",
+          "can_sms": false,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0995-932-1367",
+          "e164": "+639959321367",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0906-590-2809",
+          "e164": "+639065902809",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Sulucan-Multipurpose Hall Center",
+          "exact_location": "Sulucan Extension, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8012,
+            "longitude": 120.9378
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Sulucan Chapel",
+          "exact_location": "Sulucan Extension, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8019,
+            "longitude": 120.9382
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "TAAL",
+      "name": "Taal",
+      "contacts": [
+        {
+          "raw": "0923-936-3599",
+          "e164": "+639239363599",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0929-322-1916",
+          "e164": "+639293221916",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Barangay Hall",
+          "exact_location": "Eusebio St., Taal, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8142,
+            "longitude": 120.9251
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "TAMBUBONG",
+      "name": "Tambubong",
+      "contacts": [
+        {
+          "raw": "0961-868-9336",
+          "e164": "+639618689336",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "044-792-4974",
+          "e164": "+63447924974",
+          "kind": "LANDLINE",
+          "can_sms": false,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0910-170-3620",
+          "e164": "+639101703620",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0922-691-4677",
+          "e164": "+639226914677",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "San Roque Chapel",
+          "exact_location": "Provincial Rd., Tambubong, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7951,
+            "longitude": 120.9542
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "AFP/PNP Grandville Homes Court",
+          "exact_location": "AFP/PNP Grandville Homes, Tambubong Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7935,
+            "longitude": 120.9585
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "TURO",
+      "name": "Turo",
+      "contacts": [
+        {
+          "raw": "0993-096-5617",
+          "e164": "+639930965617",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0915-804-2310",
+          "e164": "+639158042310",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0950-137-4166",
+          "e164": "+639501374166",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "Barangay Multipurpose Hall",
+          "exact_location": "P. Santiago St., Turo, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8112,
+            "longitude": 120.9348
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "Turo Elementary School",
+          "exact_location": "P. Santiago St., Turo, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.8125,
+            "longitude": 120.9352
+          },
+          "coordinates_verified": false
+        }
+      ]
+    },
+    {
+      "barangay_id": "WAKAS",
+      "name": "Wakas",
+      "contacts": [
+        {
+          "raw": "0965-723-9169",
+          "e164": "+639657239169",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "PRIMARY",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0947-352-3352",
+          "e164": "+639473523352",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "BACKUP",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        },
+        {
+          "raw": "0997-627-0271",
+          "e164": "+639976270271",
+          "kind": "MOBILE",
+          "can_sms": true,
+          "role": "OTHER",
+          "label": "Hotline (poster)",
+          "is_demo": false,
+          "verified_at": null,
+          "source": "facebook-poster-2026-08-29"
+        }
+      ],
+      "evacuation_areas": [
+        {
+          "name": "DYCI & German Espiritu Liner (Garahe)",
+          "exact_location": "Uressa St., Wakas, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7989,
+            "longitude": 120.9295
+          },
+          "coordinates_verified": false
+        },
+        {
+          "name": "DYCI School",
+          "exact_location": "Mc Arthur Highway Wakas, Boc., Bul.",
+          "coordinates": {
+            "latitude": 14.7978,
+            "longitude": 120.931
+          },
+          "coordinates_verified": false
+        }
+      ]
+    }
+  ]
+}

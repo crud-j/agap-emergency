@@ -26,6 +26,10 @@ export interface IncidentListItem {
   dispatched_at: string | null;
   on_scene_at: string | null;
   incident_locations: IncidentLocation | null;
+  incident_reporters?: { is_guest: boolean; reporter_status?: string | null } | null;
+  /** Caller answers that raised the priority at intake (MOD-24). */
+  incident_details?: { priority_reasons: string[] } | null;
+  hazard_flags?: string[];
 }
 
 export interface IncidentDetail extends IncidentListItem {
