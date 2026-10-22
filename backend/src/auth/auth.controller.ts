@@ -80,6 +80,7 @@ export class AuthController {
 
   @Post('register/guest')
   @Public()
+  @Throttle({ burst: { ttl: 1000, limit: 5 }, sustained: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'Create a short-lived guest reporter account' })
   async registerGuest(@Body() dto: RegisterGuestDto) {
     return this.authService.registerGuest(dto);
@@ -113,6 +114,7 @@ export class AuthController {
 
   @Post('refresh')
   @Public()
+  @Throttle({ burst: { ttl: 1000, limit: 5 }, sustained: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'Rotate access + refresh tokens' })
   async refresh(
     @Body() dto: RefreshTokenDto,
@@ -191,6 +193,7 @@ export class AuthController {
 
   @Post('verify/email')
   @Public()
+  @Throttle({ burst: { ttl: 1000, limit: 5 }, sustained: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'Verify email with OTP' })
   async verifyEmail(@Body() dto: VerifyOtpDto) {
     return this.authService.verifyOtp({ ...dto, type: 'EMAIL' });

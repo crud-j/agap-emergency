@@ -46,9 +46,14 @@ import { validateConfig } from './config/config.validation';
       validate: validateConfig,
       envFilePath: ['.env.local', '.env'],
     }),
+    // Default for authenticated console traffic. One Operations Center tab polls
+    // several endpoints, and staff on one office network share an IP, so the old
+    // 30/min default locked staff out of their own console (429 on Resolve etc.).
+    // Public endpoints carry their own stricter @Throttle (SOS/shake, barangay
+    // link, auth, MFA, announcement subscribe) and are unaffected by this.
     ThrottlerModule.forRoot([
-      { name: 'burst', ttl: 1000, limit: 5 },
-      { name: 'sustained', ttl: 60000, limit: 30 },
+      { name: 'burst', ttl: 1000, limit: 20 },
+      { name: 'sustained', ttl: 60000, limit: 600 },
     ]),
     BullModule.forRootAsync({
       useFactory: () => ({

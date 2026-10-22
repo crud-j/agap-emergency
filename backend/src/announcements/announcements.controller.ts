@@ -15,7 +15,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AnnouncementsService } from './announcements.service';
@@ -71,6 +71,7 @@ export class AnnouncementsController {
 
   @Post('subscribe')
   @Public()
+  @Throttle({ burst: { ttl: 1000, limit: 5 }, sustained: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'Subscribe to SMS announcements' })
   async subscribe(@Body() dto: SmsSubscribeDto) {
     return this.announcementsService.subscribe(dto);
@@ -78,6 +79,7 @@ export class AnnouncementsController {
 
   @Post('unsubscribe')
   @Public()
+  @Throttle({ burst: { ttl: 1000, limit: 5 }, sustained: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'Unsubscribe from SMS announcements' })
   async unsubscribe(@Body() body: { phoneNumber: string }) {
     return this.announcementsService.unsubscribe(body.phoneNumber);
