@@ -1,0 +1,179 @@
+# AGAP — Implemented Modules (100% Functional) and Additional Modules
+
+**Date:** 2026-10-22
+**Purpose:** a reference for the Individual Module Report check-up. It shows which modules each member can document and get signed now, which need a caveat written into the TO-BE, and which are not ready.
+**Module specs:** [docs/modules/](modules/). Owners come from each spec's "Prepared By" line.
+**Fix plan for the modules that are not ready:** [plans/MODULE_GAPS_COMPLETION_PLAN.md](plans/MODULE_GAPS_COMPLETION_PLAN.md).
+
+> **Rule for the reports.** The `docs/modules/MOD-XX_*.md` specs describe the full planned design. The **TO-BE** section of a report must describe only what the app does today. Do not copy features from a spec into the TO-BE unless this file lists them as working.
+
+---
+
+## How this list was made
+
+- The code was read module by module on 2026-10-22: backend controller and service, web page, and mobile screen. Each module also had to have a working path from a screen to the database.
+- Automated checks on the same day:
+  - **Typecheck:** passes in all four packages (shared, backend, frontend, mobile).
+  - **Frontend tests:** 59 of 59 pass.
+  - **Backend tests:** 632 of 643 pass in a full run. The 11 failures are bcrypt timeouts in the login security (MFA) suites on a busy machine. Run alone, all 132 auth tests pass, and the whole suite passes with `--testTimeout=30000` (see the [handoff](handoff/2026-10-22_incident-timeline-push-and-verified-reporter.md)).
+- **What "functional" means here:** the code does it, end to end. Before the leader signs, each member must still run their module by hand with test data (Section III of the instructions). Rows marked **Walkthrough pending** are built but have never been tried by hand.
+
+**Legend**
+
+| Mark | Meaning |
+|---|---|
+| ✅ | Works end to end. Can be documented as is. |
+| 🟡 | Works, with a limit that the TO-BE must state. |
+| ❌ | Not ready. Do not get it signed yet. The fix plan covers it. |
+| ⛔ | Eliminated from the system by decision. |
+| 📄 | Report written: the module's report content is in [module-reports/](module-reports/). |
+
+---
+
+## Summary
+
+| Status | Count | Modules |
+|---|---|---|
+| ✅ Works end to end | 44 | 01–06, 08–18, 20–31, 33–37, 39, 41–49, 53 |
+| 🟡 Works, with a stated limit | 3 | 32, 52 (also SMS-dependent: 16, 17) |
+| ❌ Not ready | 5 | 07, 38, 40, 50, 51 |
+| ⛔ Eliminated | 1 | 19 |
+| 📄 Report written | 5 | 01, 02, 03, 05, 53 |
+
+---
+
+## Module status by member
+
+**Reports written (📄):** MOD-01, MOD-02, MOD-03, MOD-05 and MOD-53. The content is in [module-reports/](module-reports/), ready to copy into the [report template](AGAP_Individual_Module_Report_Template.pdf). These five rows were corrected on 2026-10-22 after a closer code reading.
+
+### Justine R. Soliman — MOD-01 to 08, MOD-53
+
+| MOD | Module | Status | Report | What works (basis for the TO-BE) | Main code |
+|---|---|---|---|---|---|
+| 01 | User Registration and Profile | ✅ | 📄 [Report](module-reports/MOD-01_User_Registration_and_Profile_Management.md) | Citizen registration with OTP verification, guest registration, phone or email login, refresh-token rotation, forgot and reset password, profile view and preference settings (name and address can't be edited in the app). Registration is limited to Bocaue by a GPS check (see Additional Module A6). | `backend/src/auth`, `backend/src/users`, `mobile/app/auth`, `mobile/app/profile` |
+| 02 | Emergency Contact Management | ✅ | 📄 [Report](module-reports/MOD-02_Emergency_Contact_Management.md) | Add, edit and remove contacts, with a per-contact alert setting. Visible only to the owner. No phone-format check and no reordering in the app yet. | `backend/src/emergency-contacts`, `mobile/app/contacts` |
+| 03 | Medical Profile | ✅ | 📄 [Report](module-reports/MOD-03_Medical_Profile.md) | Blood type, allergies, conditions and medications, saved only after a separate medical consent. Missing medical data never blocks dispatch. Not encrypted, and no screen shows it to responders yet. | `backend/src/medical-profiles`, `backend/src/consent`, `mobile/app/medical` |
+| 04 | Accessibility and Multi-Language | ✅ | — | English and Filipino, text size, high contrast, reduced motion. The preferred language is saved to the profile. | `mobile/src/i18n/translations.ts`, `mobile/src/stores/accessibility.store.ts`, `mobile/app/profile/accessibility.tsx` |
+| 05 | Emergency Readiness and Permissions | ✅ | 📄 [Report](module-reports/MOD-05_Emergency_Readiness_and_Permission_Status.md) | Checklist of location, notification and camera permissions, profile completeness, contacts and medical profile. Each row links to the screen that fixes it. | `mobile/app/settings/permissions.tsx`, `mobile/src/services/readiness`, `GET /v1/users/me/readiness` |
+| 06 | Immediate SOS Trigger | ✅ | — | Hold-to-SOS button → confirm location → incident type → reporter or patient → details → photo → submit. Each report carries a unique key, so a resend never creates a duplicate. | `mobile/src/components/emergency/HoldToSOS.tsx`, `mobile/app/emergency/*`, `backend/src/incidents` |
+| 07 | Shake-to-Alert | ❌ | — | **Not wired.** The accelerometer service exists, but nothing starts it. The "Shake on" chip on the home screen is only a label tied to reduced motion. The backend `POST /v1/alerts/shake` exists. | `mobile/src/services/shake-detector/shake-detector.service.ts` |
+| 08 | Cancellation and False Alerts | ✅ | — | The citizen cancels with a reason (911 and MDRRMO numbers are shown). The dispatcher marks a false alert from triage. Both are audited and push a notice to the reporter. | `mobile/app/emergency/cancel.tsx`, `backend/src/false-alerts` |
+| 53 | Municipal Announcements | ✅ | 📄 [Report](module-reports/MOD-53_Municipal_Announcements_and_Public_Broadcast.md) | Compose, schedule, publish and archive in the structured Mayor's Office format. Publishing pushes to subscribed phones. Citizens read and subscribe in the app (no unsubscribe yet; STOP replies aren't processed). One-way broadcast only. Note: the publisher also approves their own notice (there is no separate approver role). | `backend/src/announcements`, `frontend/app/(ops)/announcements`, `mobile/app/announcements` |
+
+### Vanessa Danielle T. Jose — MOD-09 to 16
+
+| MOD | Module | Status | What works | Main code |
+|---|---|---|---|---|
+| 09 | Rapid Incident Detail Capture | ✅ | Guided questions per incident type, landmark, free-text description. Every field is optional. | `mobile/app/emergency/incident-details.tsx`, `incident-type.tsx` |
+| 10 | Photo and Evidence Capture | ✅ | Camera capture with retake, uploaded to object storage and linked to the incident. A failed photo never blocks the report. | `mobile/app/emergency/capture.tsx`, `backend/src/media` |
+| 11 | Precision GPS Capture | ✅ | High-accuracy fix with an accuracy reading. The reporter confirms the pin and can continue without GPS. | `mobile/src/services/gps`, `mobile/app/emergency/location.tsx`, `backend/src/locations` |
+| 12 | Reverse Geocoding | ✅ | Coordinates → address and barangay, using the Nominatim provider. | `backend/src/locations/maps/providers/nominatim-geocoding.provider.ts` |
+| 13 | Live Incident Location Tracking | ✅ | Location updates are stored in history and pushed live to the operations map and the tracking screen. | `backend/src/locations`, `mobile/app/tracking/[id].tsx` |
+| 14 | Incident Record and Ticketing | ✅ | Each incident is saved to PostgreSQL first and gets a public reference (`INC-2026-NNNNNN`). The reporter and the patient are separate records, and an unknown patient is allowed. | `backend/src/incidents`, `backend/src/emergency-alerts` |
+| 15 | Incident Lifecycle State Management | ✅ | Allowed status transitions are enforced by a shared transition table. Every change is timestamped, audited and broadcast live. | `backend/src/incidents/incident-status`, `shared/src/enums/incident-status.ts` |
+| 16 | Emergency Contact Notification | ✅ (SMS needs load) | When a signed-in citizen submits a report, their emergency contacts with alerts on get an SMS through Textbee, plus app notices for each timeline step (see A8). **The live SMS demo needs credit on the Textbee phone.** | `backend/src/emergency-contacts/emergency-contact-notification.service.ts`, `backend/src/notifications` |
+
+### Jhobert S. Dionisio — MOD-17 to 24, MOD-51
+
+| MOD | Module | Status | What works | Main code |
+|---|---|---|---|---|
+| 17 | Multi-Channel Transmission Gateway | ✅ (SMS needs load) | The data path (HTTPS) and a backend SMS to MDRRMO operations, under 160 characters in the `AGAP\|INC-…\|lat,lng\|time\|TYPE\|C:Y` format. The SMS is sent only after the incident is saved, and a failed SMS never cancels the incident. | `backend/src/jobs/processors/sms.processor.ts`, `backend/src/emergency-alerts` |
+| 18 | Responder Assignment and Dispatch Messaging | ✅ | A dispatch creates an assignment that appears in the responder app (refreshed every 15 seconds and after each action) and notifies the reporter. | `backend/src/dispatch`, `backend/src/notifications`, `mobile/app/responder/assignments.tsx` |
+| 19 | Offline Queue and Retry | ⛔ | **Eliminated.** See the section below. | — |
+| 20 | Real-Time Event / WebSocket Engine | ✅ | Socket.io with a sign-in check at connection, rooms per user, per incident and for operations staff, and the standard events. A failed broadcast never blocks a request. | `backend/src/realtime` |
+| 21 | Operations and Dispatch Dashboard | ✅ | A dashboard per role (dispatcher, supervisor, LGU) with live KPI tiles, recent incidents, a connection indicator and a surge banner. | `frontend/app/(ops)/dashboard`, `frontend/components/dashboard` |
+| 22 | Real-Time Incident Map | ✅ | MapLibre map of Bocaue with incident markers colored by priority, live responder markers and flood-prone overlays. Clicking a marker opens the incident. | `frontend/app/(ops)/operations/map` |
+| 23 | Incident Command Queue | ✅ | Sortable, filterable incident list with live updates and a detail drawer (Overview, Barangay, Timeline, Chat). | `frontend/app/(ops)/operations/incidents`, `IncidentDetailDrawer.tsx` |
+| 24 | Severity and Priority Recommendation | ✅ | A recommended priority with its reasons. The dispatcher confirms or overrides it. | `backend/src/dispatch/priority` |
+| 51 | Risk Intelligence and Visualization | ❌ | The heatmap, flood and industrial overlays and the risk-area list all work. **Missing:** the web page cannot add, edit or delete risk areas, even though the backend can. | `backend/src/risk-intelligence`, `frontend/app/(ops)/operations/risk` |
+
+### Christian Joaquin — MOD-25 to 32, MOD-52
+
+| MOD | Module | Status | What works | Main code |
+|---|---|---|---|---|
+| 25 | Triage and Validation | ✅ | Triage queue (Submitted, Received, Acknowledged) with actions to mark received, acknowledged and assessed, plus false alert. Audited. | `frontend/app/(ops)/operations/triage`, `backend/src/dispatch` |
+| 26 | Duplicate Detection and Merging | ✅ | Candidate duplicates by distance (PostGIS) and time window. The dispatcher confirms any merge; nothing merges automatically. | `backend/src/incidents/duplicate-detection.service.ts` |
+| 27 | Organization and Resource Registry | ✅ | Create, edit and filter organizations and resources. Known gap: the Organization column in the registry shows "—". | `frontend/app/(ops)/organizations`, `resources`, `backend/src/organizations`, `backend/src/resources` |
+| 28 | Unit Availability and Readiness | ✅ | Fleet board with a status summary and a live status dropdown. The responder app sets its own availability. | `frontend/app/(ops)/operations/fleet`, `backend/src/fleet` |
+| 29 | Capability Matrix | ✅ | A required-capability table for all 8 categories, used to score units. | `backend/src/dispatch/resource-matching` |
+| 30 | Unit Recommendation | ✅ | A ranked list scored on capability, distance (PostGIS) and unit type, with the reasons shown. | `backend/src/dispatch/resource-matching` |
+| 31 | Dispatch Authorization | ✅ | The dispatcher must click to confirm an assignment. Add or remove crew, cancel a dispatch. All audited. | `frontend/app/(ops)/operations/dispatch`, `backend/src/dispatch` |
+| 32 | Responder Mobile Interface | 🟡 | Assignment list, accept, en route → on scene → transporting or treating on scene → resolved, navigation, map, availability. **Limit to state in the TO-BE:** responders get no phone push; new assignments appear through a 15-second refresh. | `mobile/app/responder`, `backend/src/responders` |
+| 52 | Disaster Surge and Mass-Casualty Mode | 🟡 | Turn surge mode on and off, triage tags, a resources summary, broadcast. **Limit to state in the TO-BE:** the triage-tag list refreshes every 30–60 seconds; it does not update instantly. | `backend/src/disaster-mode`, `frontend/app/(ops)/operations/surge` |
+
+### Aldrin Dela Cruz — MOD-33 to 40, MOD-49
+
+| MOD | Module | Status | What works | Main code |
+|---|---|---|---|---|
+| 33 | Secure Incident Communication | ✅ | Chat limited to one incident's participants, delivered live to that incident's room only. Staff appear by role label. | `backend/src/communications`, `mobile/app/incident/chat/[id].tsx`, drawer Chat tab |
+| 34 | Multi-Agency Coordination | ✅ | Add or remove participating agencies (for example BFP) on an incident. Barangay coordination extends it (A1). | `frontend/app/(ops)/operations/multi-agency`, `backend/src/organizations` |
+| 35 | Resource Request and Mutual Aid | ✅ | Raise a request to another organization. The receiving org approves or declines. | `operations/multi-agency` (Mutual Aid tab), `backend/src/resources` |
+| 36 | Incident Command / ICS Support | ✅ | Activate ICS, assign and remove positions, deactivate. Supervisor only. | `frontend/app/(ops)/operations/command`, `backend/src/incidents` |
+| 37 | On-Scene Patient Assessment | ✅ | Optional vitals and assessment form in the responder app, saved, audited and broadcast. | `mobile/app/responder/assessment/[id].tsx`, `backend/src/incidents/assessment` |
+| 38 | Hospital Receiving Coordination | ❌ | Hospital users can see referrals, acknowledge them and mark them arrived. **Missing:** no screen creates a referral, so a referral appears only if someone inserts it by hand. | `frontend/app/(ops)/hospitals`, `backend/src/hospitals` |
+| 39 | Hospital and Facility Registry | ✅ | Hospital list with search, create and edit. | `frontend/app/(ops)/hospitals`, `backend/src/hospitals`, `backend/src/facilities` |
+| 40 | Transport and Destination Tracking | ❌ | The responder can set "Transporting", but **no screen picks a destination or records arrival**. The backend `/incidents/:id/transport` endpoints exist but nothing calls them. | `backend/src/incidents/transport` |
+| 49 | System Administration | ✅ | Users (create, change role, activate, deactivate), configuration, health, barangay directory, permissions reference. | `frontend/app/(ops)/administration`, `backend/src/administration` |
+
+### Arjar Mauricio — MOD-41 to 48, MOD-50
+
+| MOD | Module | Status | What works | Main code |
+|---|---|---|---|---|
+| 41 | SLA and Escalation Engine | ✅ (walkthrough pending) | A background job watches SLA policies and raises escalations. The escalations board lets staff acknowledge and resolve them, with live updates. | `backend/src/jobs/processors/sla-monitor.processor.ts`, `backend/src/escalations`, `frontend/app/(ops)/operations/escalations` |
+| 42 | User-Facing Emergency Status | ✅ (walkthrough pending) | The citizen's incident screen shows the live status timeline, plus a push and an app notice for each step (see A8). | `mobile/app/incidents/[id].tsx`, `backend/src/notifications/incident-status-notifier.ts` |
+| 43 | Live ETA and Responder Tracking | ✅ | A route-based ETA is refreshed by a background job and always labeled "est.". The responder's position is shown live. | `backend/src/jobs/processors/eta-refresh.processor.ts`, `mobile/app/tracking/[id].tsx` |
+| 44 | Incident Handover | ✅ | Create a handover; the receiver acknowledges it. Live broadcast. | `backend/src/incidents/incident-handover`, multi-agency Handover tab |
+| 45 | Resolution and Closure | ✅ (walkthrough pending) | The responder resolves; the dispatcher records the outcome and closes in the **Resolve & Close** dialog. The reporter is notified. The dialog was fixed on 2026-10-22 and has not been checked by hand. | `backend/src/incidents`, `IncidentDetailDrawer.tsx` (`ResolutionDialog`) |
+| 46 | Immutable Audit Trail | ✅ | Every consequential action writes an audit row; there is no update or delete. A filterable read-only viewer for supervisors and administrators. | `backend/src/audit`, `frontend/app/(ops)/audit` |
+| 47 | Role-Based Access Control | ✅ | Every endpoint checks the sign-in and role. Web navigation and pages are limited by role. Note: the Roles & Permissions tab is reference only; no guard reads it. | `backend/src/common/guards`, `frontend/middleware.ts`, `frontend/components/layout/Sidebar.tsx` |
+| 48 | Privacy, Consent and Medical Data | ✅ | Medical consent is granted and withdrawn separately; access log and data export. | `backend/src/consent`, `backend/src/privacy`, `mobile/app/profile/privacy.tsx` |
+| 50 | Emergency Response Analytics | ❌ | Volume and false-alert charts work. **Broken:** the response-time and SLA-compliance charts read the `incident_metrics` table, which nothing ever fills, so they show zeros or nothing. The date filters are ignored. | `backend/src/analytics`, `frontend/app/(ops)/analytics` |
+
+---
+
+## Eliminated module — MOD-19 Offline Emergency Queue and Retry ⛔
+
+**Decision:** removed from the system on purpose.
+
+**Why:** a report saved on the phone while offline would be sent only when the phone reconnects, possibly hours later. By then the emergency may already be over, or the reporter may have died. A late, stale alert could send responders to a scene that no longer needs them while live emergencies wait. The team judged that risk to outweigh guaranteed delivery.
+
+**What was removed:** the backend `offline-sync` module and its job, the phone's offline queue and assessment queue, the network-sync hook, and their tests (details in [SESSION_HANDOFF.md](SESSION_HANDOFF.md)).
+
+**What the system does instead (already in place):**
+1. The report is sent right away over the data path, and the MDRRMO SMS is sent by the backend once the incident is saved (MOD-17).
+2. If sending fails, the app says so clearly and shows the **911 and MDRRMO hotlines** so the reporter can call (Rule 9).
+3. Each report carries a unique key. If the reporter taps submit again, the backend returns the same incident instead of creating a duplicate.
+
+**Leftovers, harmless:** the `offline_event_queue` table remains in the schema, and nothing reads it. `CLAUDE.md`, `README.md` and `tests/http/sos-flow.http` still mention MOD-19.
+
+**For the report owner (Jhobert):** confirm with the instructor how an eliminated module is reported. One option is to keep MOD-19 in the report as a documented design decision, describing the AS-IS process and the decision above, with no TO-BE automation.
+
+---
+
+## Additional modules (built beyond the 53)
+
+These features exist in the code but are not among the 53 module specs. They work unless marked otherwise. Each one extends listed modules, so a member can mention it in the TO-BE of the module it extends.
+
+| # | Feature | What it does | Extends | Status | Main code |
+|---|---|---|---|---|---|
+| A1 | **Barangay Alert and Callback Automation** | Works out the incident's barangay and texts its BDRRMC/BPSO hotline with a secure link. Barangay staff open a public web page (`/b/[token]`) to report back, or reply by SMS (codes such as `OTW 4416`, read by a poller). The dispatcher logs call attempts and outcomes in the drawer's Barangay tab. Includes an admin directory of barangay contacts. | MOD-17, 34, 41, 46 | Built. Phases 0–4 are live-verified; the SMS-reply check is pending because the demo SIM has no load. | `backend/src/barangay-coordination`, `frontend/app/b`, `frontend/app/(ops)/administration/barangays` |
+| A2 | **Supervisor Oversight Dashboard** | Supervisor-only, read-only: operations summary, dispatcher workload, exceptions (overdue items), pending handovers, recent activity, major incidents. | MOD-21, 36, 41 | Built. Signed-in walkthrough pending. | `backend/src/oversight`, `frontend/components/dashboard/SupervisorDashboard.tsx` |
+| A3 | **Role-Based Navigation and Dashboards** | One `/dashboard` page with different content per role, a sidebar per role, and a **Municipal Overview** for the LGU account (counts only, no personal data). | MOD-21, 47, 50 | Phases 1–4 built; 5–7 not started. | `frontend/components/layout/Sidebar.tsx`, `frontend/components/dashboard/*`, `GET /v1/analytics/municipal-overview` |
+| A4 | **Operations Center Login Security** | Second sign-in step by authenticator app (TOTP), SMS code or passkey; backup codes; account lockout; password policy with a forced change on first sign-in; session list and sign-out of sessions; re-confirming identity before sensitive actions. | MOD-01, 46, 47, 49 | Built. The MFA database migration is applied only to local development. | `backend/src/auth`, `backend/src/auth/mfa`, `frontend/app/login/*`, `frontend/app/(ops)/account/security` |
+| A5 | **Mobile Passkey Sign-In** | Sign in on the phone with a passkey (fingerprint or face) instead of a password. | MOD-01 | Built. | `mobile/app/profile/passkeys.tsx`, `mobile/src/services/passkey`, `backend/src/auth/well-known.controller.ts` |
+| A6 | **Bocaue Geo-Fence and Coverage** | Registration checks that the GPS position is inside Bocaue and fills in the barangay. A coverage map screen shows the service area. | MOD-01, 11, 12 | Built. | `POST /v1/auth/geo-check`, `mobile/app/coverage.tsx` |
+| A7 | **First-Aid Guides** | Step-by-step first-aid guides built into the app, readable without internet. | MOD-04, 06 | Built. | `mobile/app/first-aid`, `mobile/src/data/first-aid` |
+| A8 | **Incident Timeline Push and Verified Reporter Badge** | A push and an app notice to the reporter at every status step. App notices and a toast for the dispatcher who assigned the unit (en route, on scene, awaiting closure). Phone screens refresh by themselves. After a CLOSED incident, a signed-in reporter gets a **Verified Reporter** badge and a thank-you card, and dispatchers see the reporter's record in the drawer. | MOD-16, 42, 45, 21/23 | Built and unit-tested. **Not committed, and not tried by hand.** | `backend/src/notifications/incident-status-notifier.ts`, `mobile/src/components/reporter/verified-reporter.tsx`, `mobile/src/hooks/useLiveIncidentRefresh.ts` |
+| A9 | **MapLibre Bocaue Map** | Replaced the Leaflet map with MapLibre (web and phone), using a Bocaue barangay boundary layer. | MOD-13, 22, 43 | Built. Missing sprite icons are logged (cosmetic only). | `frontend/app/(ops)/operations/map`, `mobile/src/components/tracking/live-tracking-map.tsx` |
+
+**Planned but not built. Do not document as working:** AI Assist for the incident drawer ([plans/AI_ASSIST_PLAN.md](plans/AI_ASSIST_PLAN.md), not started) and Role Dashboards Phases 5–7.
+
+---
+
+## Before the leader signs: checklist per member
+
+1. Commit the working tree. About 97 files are uncommitted, including A8 and Role Dashboards Phases 3–4. Everyone should demo the same version.
+2. Run your modules by hand with test data and save screenshots of each output listed in your report.
+3. Modules marked **walkthrough pending** (41, 42, 45, A2, A8) must be walked through first. The steps are in the [A8 handoff, "What's left"](handoff/2026-10-22_incident-timeline-push-and-verified-reporter.md#whats-left).
+4. SMS demos (MOD-16, 17, A1) need credit on the Textbee phone.
+5. ❌ modules wait for the [fix plan](plans/MODULE_GAPS_COMPLETION_PLAN.md). Update the report after each fix.
