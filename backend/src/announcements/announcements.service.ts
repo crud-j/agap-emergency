@@ -9,10 +9,23 @@ import { AuditService } from '../audit/audit.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 import { SmsSubscribeDto } from './dto/sms-subscribe.dto';
-import { Announcement, Prisma, announcement_category, announcement_status } from '@prisma/client';
+import {
+  Announcement,
+  Prisma,
+  announcement_category,
+  announcement_severity,
+  announcement_status,
+} from '@prisma/client';
 
 /** Statuses a resident may open by direct link (feed shows PUBLISHED only). */
 const PUBLIC_STATUSES: announcement_status[] = ['PUBLISHED', 'CANCELLED', 'ARCHIVED', 'SUPERSEDED'];
+
+/** Parse "A,B" into the values that belong to `values`, dropping unknown ones. */
+function enumList<T extends string>(raw: string | undefined, values: Record<string, T>): T[] {
+  if (!raw) return [];
+  const allowed = new Set<string>(Object.values(values));
+  return raw.split(',').map((v) => v.trim()).filter((v): v is T => allowed.has(v));
+}
 
 /**
  * Factual advisories need a verified source before they go out
@@ -77,9 +90,15 @@ export class AnnouncementsService {
 
   // ─── Reads ──────────────────────────────────────────────────────────────────
 
+  /**
+   * `status` and `severity` accept one value or a comma-separated list
+   * (Publication History asks for PUBLISHED,ARCHIVED,SUPERSEDED; the Advisories
+   * filter for WARNING,CRITICAL). Unknown values are ignored.
+   */
   async findAllForPublisher(filters: {
     status?: string;
     category?: string;
+    severity?: string;
     page?: number;
     perPage?: number;
   }) {
@@ -88,17 +107,34 @@ export class AnnouncementsService {
     const skip = (page - 1) * perPage;
 
     const where: Prisma.AnnouncementWhereInput = {};
-    if (filters.status && Object.values(announcement_status).includes(filters.status as announcement_status)) {
-      where.status = filters.status as announcement_status;
-    }
+    const statuses = enumList(filters.status, announcement_status);
+    if (statuses.length) where.status = { in: statuses };
+    const severities = enumList(filters.severity, announcement_severity);
+    if (severities.length) where.severity = { in: severities };
     if (filters.category && Object.values(announcement_category).includes(filters.category as announcement_category)) {
       where.category = filters.category as announcement_category;
     }
 
-    const [data, total] = await Promise.all([
-      this.prisma.announcement.findMany({ where, orderBy: { created_at: 'desc' }, skip, take: perPage }),
+    const [rows, total] = await Promise.all([
+      this.prisma.announcement.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: perPage,
+        include: {
+          users: { select: { full_name: true } },
+          users_announcements_approved_by_idTousers: { select: { full_name: true } },
+        },
+      }),
       this.prisma.announcement.count({ where }),
     ]);
+
+    // Flatten the relations to two display names; the row's own fields are unchanged.
+    const data = rows.map(({ users, users_announcements_approved_by_idTousers: approver, ...a }) => ({
+      ...a,
+      publisherName: users.full_name,
+      approverName: approver?.full_name ?? null,
+    }));
 
     return {
       data,

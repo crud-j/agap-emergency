@@ -152,7 +152,9 @@ async function main() {
     where: { email: 'announcements@lgu.bocaue.gov.ph' },
     update: {},
     create: {
-      full_name: 'LGU Information Officer',
+      // Decision D7 (ROLE_DASHBOARDS_PLAN). `update: {}` leaves existing databases
+      // on the old name; rename those once in Administration → Users.
+      full_name: 'LGU Information Officer — Office of the Mayor',
       email: 'announcements@lgu.bocaue.gov.ph',
       phone_number: '+639171234008',
       password_hash: devHash,

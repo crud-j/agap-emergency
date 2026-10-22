@@ -61,6 +61,8 @@ describe('role-access', () => {
     expect(canOpen(ROLE.DISPATCHER, '/announcements')).toBe(true);
     expect(canOpen(ROLE.DISPATCHER, '/announcements/compose')).toBe(false);
     expect(canOpen(ROLE.PUBLISHER, '/announcements/compose')).toBe(true);
+    expect(canOpen(ROLE.PUBLISHER, '/announcements/history')).toBe(true);
+    expect(canOpen(ROLE.DISPATCHER, '/announcements/history')).toBe(false);
     expect(canOpen(ROLE.SUPERVISOR, '/analyticsX')).toBe(false);
     expect(canOpen(ROLE.SYS_ADMIN, '/administration/users')).toBe(true);
     expect(canOpen(undefined, '/dashboard')).toBe(false);
@@ -74,12 +76,16 @@ describe('role-access', () => {
     expect(landingForRole(ROLE.HOSPITAL_USER)).toBe('/hospitals');
   });
 
+  it('lands the LGU account on its Municipal Overview', () => {
+    expect(landingForRole(ROLE.PUBLISHER)).toBe('/dashboard');
+  });
+
   it('sidebars match the agreed spec', () => {
     expect(labels(ROLE.DISPATCHER)).toEqual([
       'Dashboard', 'Incident Queue', 'Live Map', 'Triage', 'Dispatch',
       'Multi-Agency', 'Fleet & Units', 'Hospitals & Facilities',
     ]);
-    expect(labels(ROLE.PUBLISHER)).toEqual(['Dashboard', 'Announcements']);
+    expect(labels(ROLE.PUBLISHER)).toEqual(['Dashboard', 'Announcements', 'Publication History']);
     expect(labels(ROLE.ORG_ADMIN)).toEqual(['Dashboard']);
     expect(labels(ROLE.HOSPITAL_USER)).toEqual(['Hospitals & Facilities']);
     expect(showsSidebar(ROLE.HOSPITAL_USER)).toBe(false);

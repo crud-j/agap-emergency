@@ -27,6 +27,24 @@ export const TERMINAL_INCIDENT_STATUSES: ReadonlySet<IncidentStatus> = new Set([
 ]);
 
 /**
+ * Incident statuses that still need operations attention: submitted and not yet
+ * resolved or ended. The ops consoles' "active" lists and the municipal overview
+ * counts (MOD-21, MOD-50) both use this, so the two always agree.
+ */
+export const ACTIVE_INCIDENT_STATUSES: readonly IncidentStatus[] = [
+  IncidentStatus.SUBMITTED,
+  IncidentStatus.RECEIVED,
+  IncidentStatus.ACKNOWLEDGED,
+  IncidentStatus.ASSESSED,
+  IncidentStatus.DISPATCH_PENDING,
+  IncidentStatus.DISPATCHED,
+  IncidentStatus.EN_ROUTE,
+  IncidentStatus.ON_SCENE,
+  IncidentStatus.TRANSPORTING,
+  IncidentStatus.ASSISTING,
+];
+
+/**
  * Incident statuses during which an accepted unit is actively responding, so its
  * live position is shown on the ops map and to the reporter (MOD-13 / MOD-43).
  * Tracking stops once the incident leaves this set (resolved, closed, etc.).

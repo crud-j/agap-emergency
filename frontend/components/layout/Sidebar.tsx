@@ -14,7 +14,7 @@ import {
   Truck, Building2, HeartPulse, AlarmClock,
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
-  Users, KeyRound, Landmark, Circle,
+  Users, KeyRound, Landmark, Circle, History,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -38,6 +38,7 @@ const ICONS: Record<string, LucideIcon> = {
   '/analytics': BarChart2,
   '/operations/risk': Layers,
   '/announcements': Megaphone,
+  '/announcements/history': History,
   '/administration/users': Users,
   '/administration/permissions': KeyRound,
   '/administration/barangays': Landmark,
@@ -168,14 +169,25 @@ function SidebarNav(): JSX.Element {
   const pendingSnapshot = useRef<Snapshot | null>(null);
   const [activePosition, setActivePosition] = useState<{ top: number; height: number } | null>(null);
 
-  function isActive(item: NavItem) {
-    return item.exact ? pathname === item.href : pathname.startsWith(item.href);
-  }
-
   const groups = navForRole(user?.role).map((g) => ({
     label: g.label,
     items: g.items.map((item): NavItem => ({ ...item, icon: ICONS[item.href] ?? Circle })),
   }));
+
+  function matchesPath(item: NavLink) {
+    return item.exact
+      ? pathname === item.href
+      : pathname === item.href || pathname.startsWith(`${item.href}/`);
+  }
+
+  // The most specific matching link wins, so Publication History
+  // (/announcements/history) doesn't also light up Announcements.
+  function isActive(item: NavItem) {
+    if (!matchesPath(item)) return false;
+    return !groups.some((g) =>
+      g.items.some((other) => other.href.length > item.href.length && matchesPath(other)),
+    );
+  }
 
   const docked = mode === 'dock';
   const overlay = !isDesktop && !docked;

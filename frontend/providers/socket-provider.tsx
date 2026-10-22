@@ -117,6 +117,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           );
 
           qc.invalidateQueries({ queryKey: ['incident-locations'] });
+          qc.invalidateQueries({ queryKey: ['municipal-overview'] });
         });
       },
     );
@@ -141,6 +142,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['incidents'] });
           qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
           qc.invalidateQueries({ queryKey: ['incident-locations'] });
+          qc.invalidateQueries({ queryKey: ['municipal-overview'] });
         });
       },
     );

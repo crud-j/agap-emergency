@@ -95,10 +95,12 @@ export class AnnouncementsController {
     @Query('category') category?: string,
     @Query('page') page?: string,
     @Query('perPage') perPage?: string,
+    @Query('severity') severity?: string,
   ) {
     return this.announcementsService.findAllForPublisher({
       ...(status && { status }),
       ...(category && { category }),
+      ...(severity && { severity }),
       ...(page !== undefined && { page: +page }),
       ...(perPage !== undefined && { perPage: +perPage }),
     });

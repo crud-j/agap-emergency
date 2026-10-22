@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { ACTIVE_INCIDENT_STATUSES } from '@agap/shared';
 import {
   Activity,
   Car,
@@ -11,19 +12,11 @@ import {
   CircleAlert,
 } from 'lucide-react';
 
-/** Incident lifecycle statuses that still need operations attention. */
-export const ACTIVE_STATUSES = [
-  'SUBMITTED',
-  'RECEIVED',
-  'ACKNOWLEDGED',
-  'ASSESSED',
-  'DISPATCH_PENDING',
-  'DISPATCHED',
-  'EN_ROUTE',
-  'ON_SCENE',
-  'TRANSPORTING',
-  'ASSISTING',
-];
+/**
+ * Incident lifecycle statuses that still need operations attention. Shared with the
+ * backend's municipal overview counts, so the dashboard and the queue agree.
+ */
+export const ACTIVE_STATUSES: string[] = [...ACTIVE_INCIDENT_STATUSES];
 
 /** Statuses from which a dispatch can be authorized (mirrors backend). */
 export const DISPATCHABLE_STATUSES = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];

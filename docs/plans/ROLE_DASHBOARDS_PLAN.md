@@ -1,6 +1,6 @@
 # Plan: Role Dashboards and Separation of Duties
 
-> **Status (2026-10-22):** Phase 1 built (signed-in walkthrough pending); Phases 2–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
+> **Status (2026-10-22):** Phases 1 and 2 built (signed-in walkthroughs pending); Phases 3–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
 > **How to use:** build one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts. Phase 0 is decisions only.
 > **Modules:** MOD-21 (ops dashboard), MOD-41 (escalation), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration), MOD-50 (analytics), MOD-52 (surge), MOD-53 (announcements).
 
@@ -232,7 +232,7 @@ In `backend/src/analytics/analytics.controller.ts` and `analytics.service.ts`:
   activeByCategory: { category: string; count: number }[];
   activeByPriority: { priority: 'CRITICAL'|'HIGH'|'MEDIUM'|'LOW'; count: number }[];
   activeByBarangay: { barangay: string; count: number }[]; // null barangay → 'Unassigned'
-  today: { total: number; resolved: number };            // submitted_at / resolved_at since local midnight
+  today: { total: number; critical: number; resolved: number }; // submitted_at / resolved_at since local midnight
   yesterday: { total: number; critical: number };        // for the "vs. yesterday" deltas on the cards
   units: { available: number; deployed: number; unavailable: number };
   trend7d: { date: string; total: number; critical: number }[]; // 7 local days, oldest first, zero-filled
@@ -293,6 +293,34 @@ In `backend/src/analytics/analytics.controller.ts` and `analytics.service.ts`:
 - [ ] The LGU account sees live counts that match the Dispatcher's queue for the same moment.
 - [ ] The network tab for the LGU account shows no incident list, reporter or location payloads.
 - [ ] Creating a test SOS updates the overview within 60 s.
+
+### Phase 2 status: BUILT, signed-in walkthrough pending (2026-10-22)
+
+**Built**
+- **Shared:** `ACTIVE_INCIDENT_STATUSES` in `shared/src/enums/incident-status.enum.ts`, next to `ACTIVE_RESPONSE_INCIDENT_STATUSES`. The frontend's `ACTIVE_STATUSES` (`lib/incident-format.ts`) now spreads it. The private copies in `operations/command/page.tsx` and `operations/multi-agency/page.tsx` were left alone (same values).
+- **Backend `GET /v1/analytics/municipal-overview`** (`analytics.controller.ts`, `analytics.service.ts`): roles exactly `ANNOUNCEMENTS_PUBLISHER`, `DISPATCHER`, `SUPERVISOR`. Uses `groupBy`/`count` plus two aggregate-only raw queries (trend, performance); no row is ever selected. `getPerformanceFromIncidents(since)` is public for Phase 3. `manilaMidnight()`/`manilaDateKey()` use a fixed UTC+8 offset (Manila has no DST), independent of the server zone.
+- **Backend `GET /announcements/publisher/all`:** each row gains `publisherName` and `approverName`. `status` and the new `severity` query parameter accept a comma-separated list (single values work as before).
+- **Frontend:** `components/dashboard/MunicipalOverview.tsx` replaces the LGU placeholder. `useMunicipalOverview()` polls every 60 s; `SocketProvider` also invalidates it on `incident.created` and `incident.status_changed`. New `/announcements/history` (Publication History). Announcements page has an **Advisories** tab (`severity=WARNING,CRITICAL`).
+- **Navigation:** LGU sidebar is Dashboard · Announcements · Publication History; LGU lands on `/dashboard`; `/announcements/history` opens for the LGU account and the System Administrator (the endpoint's roles). The sidebar now highlights the most specific matching link, so History doesn't also light up Announcements.
+- **Seed (D7):** the publisher's `full_name` is "LGU Information Officer — Office of the Mayor" for new databases.
+
+**Deviations from the text above**
+- **`today.critical`** was added to the response, for the critical card's "vs. yesterday".
+- **Stat cards follow the spec (§2), not the plan's list:** active, critical (active), incidents today, units deployed of in-service. "Announcements published today" was dropped in favour of the spec's "incidents today"; latest announcements are a panel instead.
+- **"vs. yesterday" is shown only where it's honest:** incidents today and critical reported today. Active and unit counts are live snapshots; there's no stored history to compare against, so those cards show "resolved today" and the available/out-of-service split instead.
+- **Totals exclude `DRAFT` and `DUPLICATE`** (trend, today/yesterday, performance): a draft was never sent and a duplicate is merged into another incident.
+- **Publication History also lists `CANCELLED`:** a cancelled announcement was public and carries the correction note, which the spec lists ("corrections").
+- **LGU live updates come from polling only.** The LGU account is not staff, so it never joins `ops:all` and receives no incident events (correct: those payloads carry details). The 60 s poll meets "within 60 s".
+
+**Verified**
+- Backend type check clean; full suite **37 suites, 576 tests** (12 new in `test/analytics/municipal-overview.spec.ts`).
+- Frontend type check clean; **59 tests** (role-access spec updated). Mobile type check clean (shared changed).
+- Both raw SQL queries and the full `getMunicipalOverview()` ran against the dev database: counts are consistent (barangay rows + Unassigned = active) and the trend has 7 Manila days.
+
+**Pending**
+- The signed-in **Done when** checks below (LGU counts vs. Dispatcher queue, LGU network tab, test SOS within 60 s).
+- Existing databases: rename the LGU account once in Administration → Users (the seed doesn't update existing rows).
+- **Found, not fixed (from Phase 1):** `/announcements` is open to every console role so the critical-advisory banner can link there, but the page loads `GET /announcements/publisher/all`, which allows only the publisher roles. A Dispatcher or Supervisor following the banner gets a 403 table. Fix with a read-only published view for non-publishers, or point the banner elsewhere.
 
 ---
 

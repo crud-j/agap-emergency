@@ -50,6 +50,8 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   // critical-advisory banner links here); composing needs a publishing role.
   { prefix: '/announcements', roles: CONSOLE },
   { prefix: '/announcements/compose', roles: [PUBLISHER, SYS_ADMIN] },
+  // Reads GET /announcements/publisher/all (publisher roles only).
+  { prefix: '/announcements/history', roles: [PUBLISHER, SYS_ADMIN] },
 
   { prefix: '/audit', roles: [SUPERVISOR, SYS_ADMIN] },
   { prefix: '/organizations', roles: [SYS_ADMIN] },
@@ -60,7 +62,7 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
 const LANDING: Record<string, string> = {
   [DISPATCHER]: '/operations/dispatch',
   [SUPERVISOR]: '/operations/dispatch',
-  [PUBLISHER]: '/announcements',
+  [PUBLISHER]: '/dashboard',
   [SYS_ADMIN]: '/dashboard',
   [ORG_ADMIN]: '/dashboard',
   [HOSPITAL_USER]: '/hospitals',
@@ -145,6 +147,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Broadcast',
     items: [
       { href: '/announcements', label: 'Announcements', roles: [PUBLISHER] },
+      { href: '/announcements/history', label: 'Publication History', roles: [PUBLISHER] },
     ],
   },
   {

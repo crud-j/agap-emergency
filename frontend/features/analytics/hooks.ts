@@ -7,6 +7,7 @@ import {
   fetchSlaCompliance,
   fetchFalseAlertRate,
   fetchDailySummary,
+  fetchMunicipalOverview,
 } from './api';
 
 export function useResponseTimes() {
@@ -46,5 +47,19 @@ export function useDailySummary(date?: string) {
     queryKey: ['analytics-daily', date],
     queryFn: () => fetchDailySummary(date),
     staleTime: 60_000,
+  });
+}
+
+/**
+ * Municipal overview counts. Polls every 60 s: the LGU account is not in the ops
+ * socket room, so it gets no incident events. For Dispatcher and Supervisor the
+ * SocketProvider also invalidates this on incident.created / status_changed.
+ */
+export function useMunicipalOverview() {
+  return useQuery({
+    queryKey: ['municipal-overview'],
+    queryFn: fetchMunicipalOverview,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }

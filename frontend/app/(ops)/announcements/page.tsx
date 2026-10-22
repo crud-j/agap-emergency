@@ -34,7 +34,9 @@ import { getTemplate, manilaInputToIso, isoToManilaInput, SOURCE_REQUIRED_CATEGO
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_TABS = ['ALL', 'DRAFT', 'SCHEDULED', 'PUBLISHED', 'CANCELLED', 'ARCHIVED', 'SUPERSEDED'] as const;
+// ADVISORIES filters by severity (hazard notices), not status: spec §2, a filter, not a page.
+const STATUS_TABS = ['ALL', 'ADVISORIES', 'DRAFT', 'SCHEDULED', 'PUBLISHED', 'CANCELLED', 'ARCHIVED', 'SUPERSEDED'] as const;
+const ADVISORY_SEVERITIES = 'WARNING,CRITICAL';
 type StatusTab = (typeof STATUS_TABS)[number];
 
 const inputCls =
@@ -383,7 +385,9 @@ function AnnouncementsList(): JSX.Element {
   const { data, isLoading } = useAnnouncements({
     page,
     perPage: 20,
-    ...(activeTab !== 'ALL' && { status: activeTab }),
+    ...(activeTab === 'ADVISORIES'
+      ? { severity: ADVISORY_SEVERITIES }
+      : activeTab !== 'ALL' && { status: activeTab }),
   });
   const rows: Announcement[] = data?.data ?? [];
   // Keep the drawer in sync with refetched rows after an action.
@@ -505,7 +509,7 @@ function AnnouncementsList(): JSX.Element {
               activeTab === tab ? 'bg-white text-agap-textMain shadow-tile' : 'text-agap-textSub hover:text-agap-textMain',
             )}
           >
-            {tab === 'ALL' ? 'All' : tab === 'ARCHIVED' ? 'Archive' : statusMeta(tab).label}
+            {tab === 'ALL' ? 'All' : tab === 'ADVISORIES' ? 'Advisories' : tab === 'ARCHIVED' ? 'Archive' : statusMeta(tab).label}
           </button>
         ))}
       </div>
@@ -522,7 +526,9 @@ function AnnouncementsList(): JSX.Element {
           emptyDescription={
             activeTab === 'ALL' || activeTab === 'DRAFT'
               ? 'Click “New announcement” to compose one from a template.'
-              : `No ${statusMeta(activeTab).label.toLowerCase()} announcements.`
+              : activeTab === 'ADVISORIES'
+                ? 'No Warning or Critical advisories.'
+                : `No ${statusMeta(activeTab).label.toLowerCase()} announcements.`
           }
         />
       )}

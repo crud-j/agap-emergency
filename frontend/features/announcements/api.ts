@@ -29,6 +29,7 @@ export interface Announcement {
   publish_now: boolean;
   target_barangays: string[];
   sms_sent_count: number | null;
+  push_sent_count: number | null;
   image_url: string | null;
   image_storage_key: string | null;
   image_alt_text: string | null;
@@ -49,11 +50,17 @@ export interface Announcement {
   organization_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Publisher list only (GET /announcements/publisher/all). */
+  publisherName?: string | null;
+  approverName?: string | null;
 }
 
 export interface AnnouncementListParams {
+  /** One status or a comma-separated list. */
   status?: string;
   category?: string;
+  /** One severity or a comma-separated list. */
+  severity?: string;
   page?: number;
   perPage?: number;
 }
@@ -87,6 +94,7 @@ export function fetchAnnouncementsForPublisher(
   const qs = new URLSearchParams();
   if (params?.status)   qs.set('status', params.status);
   if (params?.category) qs.set('category', params.category);
+  if (params?.severity) qs.set('severity', params.severity);
   if (params?.page)     qs.set('page', String(params.page));
   if (params?.perPage)  qs.set('perPage', String(params.perPage));
   return api.get(`/announcements/publisher/all?${qs}`, getToken());

@@ -20,6 +20,13 @@ import { UserRole } from '@agap/shared';
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
+  @Get('municipal-overview')
+  @Roles(UserRole.ANNOUNCEMENTS_PUBLISHER, UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Municipal overview for the Office of the Mayor (counts only)' })
+  async municipalOverview() {
+    return this.analyticsService.getMunicipalOverview();
+  }
+
   @Get('response-times')
   @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Average response times by category' })
