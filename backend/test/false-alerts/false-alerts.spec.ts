@@ -181,6 +181,16 @@ describe('FalseAlertsService.markFalseAlert()', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it.each([UserRole.SYSTEM_ADMINISTRATOR, UserRole.ORG_ADMINISTRATOR])(
+    'throws ForbiddenException for %s (separation of duties, Phase 5b)',
+    async (role) => {
+      const { service } = makeMocks({ status: IncidentStatus.ACKNOWLEDGED });
+      await expect(
+        service.markFalseAlert('incident-uuid-1', 'admin-1', role),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    },
+  );
+
   it('throws BadRequestException when transition is invalid (e.g. SUBMITTED → FALSE_ALERT)', async () => {
     const { service } = makeMocks({ status: IncidentStatus.SUBMITTED });
     await expect(

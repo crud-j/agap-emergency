@@ -187,7 +187,7 @@ function AgenciesTab(): JSX.Element {
   const [incidentId, setIncidentId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const canEdit = useAuthUser();
-  const isSuper = hasRole(canEdit, 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
+  const isSuper = hasRole(canEdit, 'SUPERVISOR');
 
   const { data: agencies, isLoading } = useIncidentAgencies(incidentId);
 
@@ -402,7 +402,7 @@ function MutualAidTab(): JSX.Element {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [createOpen, setCreateOpen] = useState(false);
   const user = useAuthUser();
-  const canRequest = hasRole(user, 'DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
+  const canRequest = hasRole(user, 'DISPATCHER', 'SUPERVISOR');
   const canRespond = hasRole(user, 'ORG_ADMINISTRATOR', 'SYSTEM_ADMINISTRATOR');
 
   const params = statusFilter !== 'ALL' ? { status: statusFilter } : {};
@@ -635,7 +635,7 @@ function HandoverTab(): JSX.Element {
   const [incidentId, setIncidentId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const user = useAuthUser();
-  const canCreate = hasRole(user, 'DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
+  const canCreate = hasRole(user, 'DISPATCHER', 'SUPERVISOR');
 
   const { data: handovers, isLoading } = useHandovers(incidentId);
   const acknowledge = useAcknowledgeHandover();

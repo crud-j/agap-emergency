@@ -45,8 +45,6 @@ export class FalseAlertsController {
     UserRole.BYSTANDER,
     UserRole.DISPATCHER,
     UserRole.SUPERVISOR,
-    UserRole.ORG_ADMINISTRATOR,
-    UserRole.SYSTEM_ADMINISTRATOR,
   )
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
@@ -71,16 +69,11 @@ export class FalseAlertsController {
 
   /**
    * Mark an incident as a false alert.
-   * Dispatcher/Supervisor/Admin only. Valid from ACKNOWLEDGED or ASSESSED.
+   * Dispatcher/Supervisor only. Valid from ACKNOWLEDGED or ASSESSED.
    */
   @Patch(':incidentId/false-alert')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(
-    UserRole.DISPATCHER,
-    UserRole.SUPERVISOR,
-    UserRole.ORG_ADMINISTRATOR,
-    UserRole.SYSTEM_ADMINISTRATOR,
-  )
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark incident as false alert (MOD-08)' })

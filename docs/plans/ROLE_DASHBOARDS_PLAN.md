@@ -1,6 +1,6 @@
 # Plan: Role Dashboards and Separation of Duties
 
-> **Status (2026-10-22):** Phases 1–4 and 5a built (signed-in walkthroughs pending); Phases 5b–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
+> **Status (2026-10-22):** Phases 1–5b built (signed-in walkthroughs pending); Phases 6–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
 > **How to use:** build one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts. Phase 0 is decisions only.
 > **Modules:** MOD-21 (ops dashboard), MOD-41 (escalation), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration), MOD-50 (analytics), MOD-52 (surge), MOD-53 (announcements).
 
@@ -593,6 +593,39 @@ The Phase 1 sidebar already hides these pages; this covers someone opening them 
 - [ ] As the System Administrator: `PATCH /v1/incidents/:id/status`, `POST /v1/escalations/:id/resolve` and `POST /v1/disaster-mode/activate` each return 403.
 - [ ] As the Supervisor: all three still work. As a Dispatcher: status change and false alert still work.
 - [ ] Full emergency flow re-run: citizen SOS → acknowledge → dispatch → responder accept (mobile) → on scene → resolve → close, with no errors.
+
+### Phase 5b status: BUILT, signed-in walkthrough pending (2026-10-22)
+
+**Data review first.**
+
+| Area | Finding | Result |
+|---|---|---|
+| `escalation.processor.ts` | **Nothing enqueues `QUEUE_NAMES.ESCALATION`**: the processor is never run. The live SLA path is `sla-monitor.processor.ts`, which already notified Supervisors only | Changed as planned anyway; D5 applied to **both** through one helper |
+| Recipient filter `status = 'ACTIVE'` | Seeded and admin-created staff are `PENDING_VERIFICATION` by design (`auth/account-status.ts`: they can sign in). On the dev database **every** staff account is `PENDING_VERIFICATION`, so SLA breach pushes reached **0** supervisors | ⚠️ fixed: recipients are staff who can sign in (not `SUSPENDED`/`DEACTIVATED`) |
+| Prerequisite "an `ACTIVE` Supervisor exists" | Fails literally (dev has none), but the Supervisor can sign in and act, which is what surge activation needs | ✅ met in substance |
+| Multi-agency `canRespond` (`ORG_ADMINISTRATOR`, `SYSTEM_ADMINISTRATOR`) | Mutual-aid approve/deny; not in this phase's list; backend still allows both | Left unchanged (below) |
+
+**Built**
+- **Backend role removals**, exactly as the table above: `PATCH /incidents/:id/status` → Dispatcher, Supervisor; `PATCH /false-alerts/:id/cancel` drops both admin roles (citizen and bystander kept); `PATCH /false-alerts/:id/false-alert` → Dispatcher, Supervisor; `false-alerts.service` `DISPATCHER_ROLES` → Dispatcher, Supervisor; all four `/escalations` endpoints → Supervisor; `disaster-mode` `activate`, `deactivate`, `broadcast` → Supervisor (`GET status` keeps the System Administrator).
+- **Incident chat** (`communications.service.ts`): `CHAT_POST_ROLES` (Dispatcher, Supervisor) and `CHAT_READ_ROLES` (+ System Administrator). `assertParticipant(…, 'post')` on send; a System Administrator who tries to post gets "Your role can read this incident chat but not post in it". The Org Administrator has neither, unless it's the reporter or crew. The web chat panel shows a read-only note instead of the composer for the System Administrator.
+- **Escalation recipients** (`jobs/escalation-recipients.ts`, new): `findEscalationRecipients(prisma, roles)` returns staff with those roles who can sign in; if none, Dispatchers (D5). Used by `sla-monitor.processor.ts` (Supervisors) and `escalation.processor.ts` (`RESPONSE` is now `['SUPERVISOR']`).
+- **Frontend flags:** `SYSTEM_ADMINISTRATOR` removed from fleet `canChangeStatus`, surge `canManage`, escalations `canManageEscalations`, command `canCommand`, and multi-agency `isSuper`, `canRequest`, `canCreate`.
+
+**Deviations from the text above**
+- **SLA monitor changed too.** The plan only named `escalation.processor.ts`, which never runs; without this, D5 would have had no effect. The change only widens who is notified (more Supervisors, or Dispatchers as fallback); the SLA timing, escalation records and WebSocket event are untouched.
+- **Recipients are "can sign in", not `ACTIVE`.** See the data review.
+
+**Verified**
+- Backend type check clean; full suite **44 suites, 676 tests**: new `test/rbac/separation-of-duties.spec.ts` (role metadata for all ten endpoints, D1 reads kept), `test/jobs/escalation-recipients.spec.ts` (status rule, Dispatcher fallback, never the System Administrator), 4 chat cases in `communications.spec.ts`, 2 in `false-alerts.spec.ts` (System and Org Administrator refused).
+- `grep SYSTEM_ADMINISTRATOR backend/test`: `incident-creation.spec.ts` (Sys Admin reporting) and `incident-participant.spec.ts` (D1) still pass unchanged.
+- Frontend type check clean; 59 tests.
+- Dev database: the old Supervisor query found **0** recipients, `findEscalationRecipients` finds **1**.
+
+**Pending**
+- Signed-in **Done when** checks above, including the full emergency flow re-run.
+- **Found, not changed:** `PATCH /resources/requests/:id/approve|deny` and the multi-agency `canRespond` flag still allow the System Administrator. Approving mutual aid is the lending organization's call, so it belongs to the Org Administrator (Phase 6); removing the System Administrator there is a one-line follow-up if MDRRMO agrees.
+- **Found, not changed:** `disaster-mode.service.ts:118` loads responders with `status: 'ACTIVE'`, the same filter problem as above. Seeded responders are `PENDING_VERIFICATION`, so it likely finds none. Not part of this phase; check before relying on surge mode.
+- A System Administrator who reports an emergency themselves can no longer cancel it through `/false-alerts/:id/cancel` (the endpoint no longer admits the role). A dispatcher can still cancel it. Staff should report through the citizen app anyway.
 
 ---
 

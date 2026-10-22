@@ -300,7 +300,7 @@ function ResponderCard({ responder }: { responder: Responder }): JSX.Element {
 function FleetUnitsView(): JSX.Element {
   const wsState = useWsState();
   const user = useAuthUser();
-  const canChangeStatus = hasRole(user, 'DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
+  const canChangeStatus = hasRole(user, 'DISPATCHER', 'SUPERVISOR');
 
   const { data: orgsData } = useOrganizations({ perPage: 200 });
   const orgs = orgsData?.data ?? [];

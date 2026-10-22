@@ -131,7 +131,7 @@ export class IncidentsController {
 
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update incident status (MOD-15)' })
   async updateStatus(

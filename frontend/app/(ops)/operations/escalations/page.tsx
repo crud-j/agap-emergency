@@ -57,7 +57,7 @@ function breachLabel(iso: string): { text: string; overdue: boolean } {
 export default function EscalationsPage(): JSX.Element {
   const [statusFilter, setStatusFilter] = useState<string>('ACTIVE');
   const user = useAuthUser();
-  const canManageEscalations = hasRole(user, 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
+  const canManageEscalations = hasRole(user, 'SUPERVISOR');
 
   const { data, isLoading, isError, refetch } = useEscalations(
     statusFilter === ALL ? undefined : { status: statusFilter },

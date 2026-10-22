@@ -357,7 +357,7 @@ export default function SurgePage(): JSX.Element {
   const triageQ = useTriageTags({ enabled: isActive });
   const resourcesQ = useSurgeResources();
 
-  const canManage = hasRole(user, 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
+  const canManage = hasRole(user, 'SUPERVISOR');
 
   const [showActivate, setShowActivate] = useState(false);
   const [showDeactivate, setShowDeactivate] = useState(false);

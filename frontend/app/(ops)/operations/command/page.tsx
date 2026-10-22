@@ -621,7 +621,7 @@ function HandoverPanel({ incidentId }: { incidentId: string }): JSX.Element {
 
 export default function CommandPage(): JSX.Element {
   const user = useAuthUser();
-  const canCommand = hasRole(user, 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
+  const canCommand = hasRole(user, 'SUPERVISOR');
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 

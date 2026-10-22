@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { findEscalationRecipients } from '../escalation-recipients';
 
 export interface EscalationJobData {
   incidentId: string;
@@ -13,7 +14,9 @@ export interface EscalationJobData {
 const ESCALATION_ROLES: Record<EscalationJobData['escalationType'], string[]> = {
   ACKNOWLEDGEMENT: ['DISPATCHER', 'SUPERVISOR'],
   DISPATCH: ['SUPERVISOR'],
-  RESPONSE: ['SUPERVISOR', 'SYSTEM_ADMINISTRATOR'],
+  // The System Administrator can't act on escalations (Phase 5b); Dispatchers are
+  // the fallback when no Supervisor can be reached (D5, in findEscalationRecipients).
+  RESPONSE: ['SUPERVISOR'],
 };
 
 @Processor(QUEUE_NAMES.ESCALATION)
@@ -35,10 +38,7 @@ export class EscalationProcessor extends WorkerHost {
       const targetRoles = ESCALATION_ROLES[escalationType] ?? ['SUPERVISOR'];
 
       const [supervisors, escalation] = await Promise.all([
-        this.prisma.user.findMany({
-          where: { role: { in: targetRoles as any[] }, status: 'ACTIVE' },
-          select: { id: true, full_name: true },
-        }),
+        findEscalationRecipients(this.prisma, targetRoles),
         this.prisma.escalation.findFirst({
           where: { incident_id: incidentId, status: 'ACTIVE' },
           orderBy: { created_at: 'desc' },
@@ -46,7 +46,7 @@ export class EscalationProcessor extends WorkerHost {
       ]);
 
       if (supervisors.length === 0) {
-        this.logger.warn(`No active supervisors found for escalation ${escalationType} on incident ${incidentId}`);
+        this.logger.warn(`No staff to notify for escalation ${escalationType} on incident ${incidentId}`);
         return;
       }
 
@@ -74,7 +74,7 @@ export class EscalationProcessor extends WorkerHost {
         });
       }
 
-      this.logger.log(`Escalation notifications enqueued for ${supervisors.length} supervisor(s) — incident ${incidentId}`);
+      this.logger.log(`Escalation notifications enqueued for ${supervisors.length} staff — incident ${incidentId}`);
     } catch (err) {
       this.logger.error(`Escalation processor failed for incident ${incidentId}: ${String(err)}`);
     }

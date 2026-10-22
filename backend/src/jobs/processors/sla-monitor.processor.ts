@@ -4,6 +4,7 @@ import { Job, Queue } from 'bullmq';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
+import { findEscalationRecipients } from '../escalation-recipients';
 import type { NotificationJobData } from './notification.processor';
 
 type EscalationType = 'ACKNOWLEDGEMENT' | 'DISPATCH' | 'RESPONSE';
@@ -88,11 +89,8 @@ export class SlaMonitorProcessor extends WorkerHost {
 
       this.logger.log(`SLA breach: ${escalationType} for incident ${incident.public_reference} (escalation ${escalation.id})`);
 
-      // Notify all active SUPERVISOR users
-      const supervisors = await this.prisma.user.findMany({
-        where: { role: 'SUPERVISOR', status: 'ACTIVE' },
-        select: { id: true },
-      });
+      // Notify Supervisors who can sign in; Dispatchers if there are none (D5)
+      const supervisors = await findEscalationRecipients(this.prisma, ['SUPERVISOR']);
 
       await Promise.allSettled(
         supervisors.map((s) =>

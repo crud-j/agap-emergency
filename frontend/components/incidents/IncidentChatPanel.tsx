@@ -7,7 +7,7 @@ import { Button } from '@/components/ui';
 import { useIncidentMessages, useSendMessage } from '@/features/communications/hooks';
 import type { IncidentMessage } from '@/features/communications/api';
 import { useIncidentEvent, useJoinIncidentRoom } from '@/hooks/useIncidentEvents';
-import { useAuthUser } from '@/lib/use-auth';
+import { hasRole, useAuthUser } from '@/lib/use-auth';
 import { timeAgo } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +22,8 @@ export function IncidentChatPanel({ incidentId }: { incidentId: string }): JSX.E
   const me = useAuthUser();
   const { data: messages = [], isLoading } = useIncidentMessages(incidentId);
   const send = useSendMessage(incidentId);
+  // The System Administrator may read incident chat but not post (role dashboards plan, D1).
+  const readOnly = hasRole(me, 'SYSTEM_ADMINISTRATOR');
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -74,23 +76,29 @@ export function IncidentChatPanel({ incidentId }: { incidentId: string }): JSX.E
         )}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-[rgba(168,181,193,0.20)] p-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder="Message incident participants…"
-          className="flex-1 rounded-lg border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green"
-        />
-        <Button variant="primary" size="sm" onClick={submit} loading={send.isPending} disabled={!draft.trim()}>
-          <Send size={14} />
-        </Button>
-      </div>
+      {readOnly ? (
+        <p className="border-t border-[rgba(168,181,193,0.20)] px-3 py-2 text-xs text-agap-textSub">
+          Read only: posting is limited to dispatchers, supervisors, the reporter and assigned crew.
+        </p>
+      ) : (
+        <div className="flex items-center gap-2 border-t border-[rgba(168,181,193,0.20)] p-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="Message incident participants…"
+            className="flex-1 rounded-lg border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green"
+          />
+          <Button variant="primary" size="sm" onClick={submit} loading={send.isPending} disabled={!draft.trim()}>
+            <Send size={14} />
+          </Button>
+        </div>
+      )}
       {send.isError && (
         <p className="px-3 pb-2 text-xs text-agap-danger">
           {(send.error as Error)?.message ?? 'Message failed to send.'}

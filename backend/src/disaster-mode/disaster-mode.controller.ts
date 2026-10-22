@@ -33,7 +33,7 @@ export class DisasterModeController {
   }
 
   @Post('activate')
-  @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Activate disaster surge mode' })
   async activate(@Body() dto: ActivateSurgeDto, @Request() req: any) {
     const orgId = await this.disasterModeService.resolveOrgForUser(req.user.id);
@@ -41,7 +41,7 @@ export class DisasterModeController {
   }
 
   @Post('deactivate')
-  @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Deactivate disaster surge mode' })
   async deactivate(@Body() body: { surgeId: string }, @Request() req: any) {
     return this.disasterModeService.deactivate(body.surgeId, req.user.id);
@@ -88,7 +88,7 @@ export class DisasterModeController {
   }
 
   @Post('broadcast')
-  @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Send surge broadcast to all responders (MOD-52)' })
   async broadcast(
     @Body() body: { surgeId: string; message: string },

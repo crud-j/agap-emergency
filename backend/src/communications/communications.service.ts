@@ -2,8 +2,13 @@ import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nest
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 
-// Operational staff can always participate in an incident's chat.
-const DISPATCHER_ROLES = new Set(['DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR', 'ORG_ADMINISTRATOR']);
+// Operational staff can always post in an incident's chat.
+const CHAT_POST_ROLES = new Set(['DISPATCHER', 'SUPERVISOR']);
+// Staff who may read any incident's chat. The System Administrator keeps read-only
+// visibility (role dashboards plan, decision D1); the Org Administrator has none.
+const CHAT_READ_ROLES = new Set([...CHAT_POST_ROLES, 'SYSTEM_ADMINISTRATOR']);
+
+export type ChatAccess = 'read' | 'post';
 
 interface IncidentMessageRow {
   id: string;
@@ -18,7 +23,8 @@ interface IncidentMessageRow {
  * Incident-scoped secure communications (MOD-33).
  *
  * Participants only: the reporter, assigned responders (dispatch crew), and
- * operational staff (dispatchers/supervisors/admins). Everyone else is blocked.
+ * operational staff (dispatchers and supervisors post; the System Administrator
+ * may only read). Everyone else is blocked.
  *
  * Identity protection (CLAUDE.md rule 15): messages are returned/emitted with a
  * role-based sender label only — never the reporter's/bystander's personal name
@@ -57,7 +63,7 @@ export class CommunicationsService {
     dto: { messageText: string; attachmentId?: string },
     userId: string,
   ) {
-    const { role } = await this.assertParticipant(incidentId, userId);
+    const { role } = await this.assertParticipant(incidentId, userId, 'post');
     const reporterUserId = await this.reporterUserId(incidentId);
 
     const created = (await this.prisma.incident_messages.create({
@@ -109,9 +115,14 @@ export class CommunicationsService {
   /**
    * Throws ForbiddenException unless the user is a participant of the incident:
    * operational staff, the reporter, or an assigned responder (dispatch crew).
-   * Returns the requester's role for downstream labelling.
+   * `post` narrows staff to Dispatcher and Supervisor; the System Administrator
+   * may only read. Returns the requester's role for downstream labelling.
    */
-  async assertParticipant(incidentId: string, userId: string): Promise<{ role: string | null }> {
+  async assertParticipant(
+    incidentId: string,
+    userId: string,
+    access: ChatAccess = 'read',
+  ): Promise<{ role: string | null }> {
     // Fetch reporter + user role in parallel first.
     const [reporter, user] = await Promise.all([
       this.prisma.incidentReporter.findUnique({
@@ -122,7 +133,7 @@ export class CommunicationsService {
     ]);
 
     const role = (user?.role as string) ?? null;
-    const isStaff = role != null && DISPATCHER_ROLES.has(role);
+    const isStaff = role != null && (access === 'post' ? CHAT_POST_ROLES : CHAT_READ_ROLES).has(role);
     const isReporter = reporter?.user_id != null && reporter.user_id === userId;
 
     // Staff can always participate — skip the crew lookup entirely.
@@ -143,6 +154,9 @@ export class CommunicationsService {
       })) != null;
 
     if (!isCrew) {
+      if (role != null && CHAT_READ_ROLES.has(role)) {
+        throw new ForbiddenException('Your role can read this incident chat but not post in it');
+      }
       throw new ForbiddenException('You are not a participant of this incident');
     }
     return { role };

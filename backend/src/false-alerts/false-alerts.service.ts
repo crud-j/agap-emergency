@@ -15,12 +15,9 @@ import { IncidentStatus, AuditAction, UserRole } from '@agap/shared';
 import { type Incident } from '@prisma/client';
 import { CancellationReason } from './dto/cancel-incident.dto';
 
-const DISPATCHER_ROLES = new Set<string>([
-  UserRole.DISPATCHER,
-  UserRole.SUPERVISOR,
-  UserRole.ORG_ADMINISTRATOR,
-  UserRole.SYSTEM_ADMINISTRATOR,
-]);
+// Operational authority only. Administrators manage the platform, not incidents
+// (role dashboards plan, Phase 5b).
+const DISPATCHER_ROLES = new Set<string>([UserRole.DISPATCHER, UserRole.SUPERVISOR]);
 
 // Statuses from which a citizen reporter can initiate cancellation (pre-dispatch)
 const CITIZEN_CANCELLABLE: ReadonlySet<IncidentStatus> = new Set([
@@ -158,7 +155,7 @@ export class FalseAlertsService {
 
   /**
    * Mark an incident as a false alert.
-   * Dispatcher/Supervisor/Admin only. Valid from ACKNOWLEDGED or ASSESSED.
+   * Dispatcher/Supervisor only. Valid from ACKNOWLEDGED or ASSESSED.
    */
   async markFalseAlert(
     incidentId: string,

@@ -5,6 +5,8 @@ const REPORTER = 'user-reporter';
 const CREW = 'user-crew';
 const DISPATCHER = 'user-dispatcher';
 const STRANGER = 'user-stranger';
+const SYS_ADMIN = 'user-sysadmin';
+const ORG_ADMIN = 'user-orgadmin';
 const INCIDENT = 'inc-1';
 
 function buildPrisma() {
@@ -30,6 +32,8 @@ function buildPrisma() {
           [CREW]: 'RESPONDER',
           [DISPATCHER]: 'DISPATCHER',
           [STRANGER]: 'CITIZEN',
+          [SYS_ADMIN]: 'SYSTEM_ADMINISTRATOR',
+          [ORG_ADMIN]: 'ORG_ADMINISTRATOR',
         };
         return Promise.resolve(roles[where.id] ? { role: roles[where.id] } : null);
       }),
@@ -75,6 +79,30 @@ describe('CommunicationsService — participants-only (MOD-33)', () => {
 
     it('blocks a non-participant stranger', async () => {
       await expect(service().assertParticipant(INCIDENT, STRANGER)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('System and Org Administrator (Phase 5b, decision D1)', () => {
+    it('lets the System Administrator read', async () => {
+      await expect(service().getMessages(INCIDENT, SYS_ADMIN)).resolves.toEqual([]);
+    });
+
+    it('refuses the System Administrator a post, with a clear reason', async () => {
+      await expect(service().sendMessage(INCIDENT, { messageText: 'hi' }, SYS_ADMIN)).rejects.toThrow(
+        'Your role can read this incident chat but not post in it',
+      );
+      expect(prisma.incident_messages.create).not.toHaveBeenCalled();
+    });
+
+    it('gives the Org Administrator neither read nor post', async () => {
+      await expect(service().getMessages(INCIDENT, ORG_ADMIN)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service().sendMessage(INCIDENT, { messageText: 'hi' }, ORG_ADMIN)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('still lets a dispatcher post', async () => {
+      await expect(service().assertParticipant(INCIDENT, DISPATCHER, 'post')).resolves.toEqual({ role: 'DISPATCHER' });
     });
   });
 
