@@ -41,10 +41,12 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/operations/risk', roles: [SUPERVISOR] },
   { prefix: '/analytics', roles: [SUPERVISOR] },
 
-  // Fleet & Units. The System Administrator sees only its Registry tab.
-  { prefix: '/operations/fleet', roles: [DISPATCHER, SUPERVISOR, SYS_ADMIN] },
+  // Fleet & Units. The System and Org Administrators see only its Registry tab.
+  { prefix: '/operations/fleet', roles: [DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
   // Old Registry route; redirects to the Fleet & Units Registry tab.
-  { prefix: '/resources', roles: [DISPATCHER, SUPERVISOR, SYS_ADMIN] },
+  { prefix: '/resources', roles: [DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
+  // Mutual-aid requests to answer for the Org Administrator's organization.
+  { prefix: '/resources/requests', roles: [ORG_ADMIN] },
   { prefix: '/hospitals', roles: [HOSPITAL_USER, DISPATCHER, SUPERVISOR, SYS_ADMIN] },
 
   // Public announcements are readable by every console role (the dashboard's
@@ -55,8 +57,10 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/announcements/history', roles: [PUBLISHER, SYS_ADMIN] },
 
   { prefix: '/audit', roles: [SUPERVISOR, SYS_ADMIN] },
-  { prefix: '/organizations', roles: [SYS_ADMIN] },
+  { prefix: '/organizations', roles: [ORG_ADMIN, SYS_ADMIN] },
   { prefix: '/administration', roles: [SYS_ADMIN] },
+  // The only administration page the Org Administrator opens (Phase 6).
+  { prefix: '/administration/barangays', roles: [ORG_ADMIN, SYS_ADMIN] },
   { prefix: '/ops/kitchen-sink', roles: [SYS_ADMIN] },
 ];
 
@@ -132,8 +136,9 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Resources',
     items: [
-      { href: '/organizations', label: 'Organizations', roles: [SYS_ADMIN] },
-      { href: '/operations/fleet', label: 'Fleet & Units', roles: [DISPATCHER, SUPERVISOR, SYS_ADMIN] },
+      { href: '/organizations', label: 'Organizations', roles: [ORG_ADMIN, SYS_ADMIN] },
+      { href: '/operations/fleet', label: 'Fleet & Units', roles: [DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
+      { href: '/resources/requests', label: 'Requests', roles: [ORG_ADMIN] },
       { href: '/hospitals', label: 'Hospitals & Facilities', roles: [HOSPITAL_USER, DISPATCHER, SUPERVISOR, SYS_ADMIN] },
     ],
   },
@@ -162,7 +167,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/administration/users', label: 'Users & Accounts', roles: [SYS_ADMIN] },
       { href: '/administration/permissions', label: 'Roles & Permissions', roles: [SYS_ADMIN] },
-      { href: '/administration/barangays', label: 'Barangay Directory', roles: [SYS_ADMIN] },
+      { href: '/administration/barangays', label: 'Barangay Directory', roles: [ORG_ADMIN, SYS_ADMIN] },
       { href: '/audit', label: 'Audit Log', roles: [SYS_ADMIN] },
       { href: '/administration/security', label: 'Security Events', roles: [SYS_ADMIN] },
       { href: '/administration/integrations', label: 'Integrations', roles: [SYS_ADMIN] },

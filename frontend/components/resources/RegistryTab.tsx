@@ -91,8 +91,12 @@ function ResourceFormDialog({ open, onOpenChange, editing, defaultOrgId }: Resou
   const [form, setForm] = useState<ResourceFormState>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
 
+  const user = useAuthUser();
   const { data: orgsData } = useOrganizations({ perPage: 200 });
-  const orgs = orgsData?.data ?? [];
+  // The server only accepts the Org Administrator's own organization (org-scope.ts).
+  const orgs = (orgsData?.data ?? []).filter(
+    (o) => !hasRole(user, 'ORG_ADMINISTRATOR') || o.id === user?.orgId,
+  );
 
   const create = useCreateResource();
   const update = useUpdateResource();
@@ -163,7 +167,8 @@ function ResourceFormDialog({ open, onOpenChange, editing, defaultOrgId }: Resou
             <label className="text-sm font-medium text-agap-textMain">
               Organization <span className="text-agap-danger">*</span>
             </label>
-            <Select value={form.organizationId} onValueChange={(v) => set('organizationId', v)}>
+            {/* A unit's organization can't be changed after creation (the API ignores it). */}
+            <Select value={form.organizationId} onValueChange={(v) => set('organizationId', v)} disabled={!!editing}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select organization" />
               </SelectTrigger>
@@ -262,22 +267,18 @@ export function RegistryTab(): JSX.Element {
   const user = useAuthUser();
   const canEdit = hasRole(user, 'ORG_ADMINISTRATOR', 'SYSTEM_ADMINISTRATOR');
 
-  // ORG_ADMIN sees only their own org's resources
-  const orgFilter = hasRole(user, 'ORG_ADMINISTRATOR') && !hasRole(user, 'SYSTEM_ADMINISTRATOR')
-    ? user?.orgId
-    : undefined;
+  // Org Administrator: reads every organization's units, edits its own (decision D6).
+  // The list opens on its own organization; the server enforces the edit rule.
+  const ownOrgDefault = hasRole(user, 'ORG_ADMINISTRATOR') ? user?.orgId : undefined;
 
   const { data: orgsData } = useOrganizations({ perPage: 200 });
   const orgs = orgsData?.data ?? [];
 
-  const { data, isLoading, isError, refetch } = useResources({
-    ...(orgFilter && { organization_id: orgFilter }),
-    perPage: 200,
-  });
+  const { data, isLoading, isError, refetch } = useResources({ perPage: 200 });
   const resources = useMemo<Resource[]>(() => data?.data ?? [], [data]);
 
   const [search, setSearch] = useState('');
-  const [orgId, setOrgId] = useState(ALL);
+  const [orgId, setOrgId] = useState(ownOrgDefault ?? ALL);
   const [typeFilter, setTypeFilter] = useState(ALL);
   const [statusFilter, setStatusFilter] = useState(ALL);
 
@@ -437,7 +438,7 @@ export function RegistryTab(): JSX.Element {
         </div>
 
         {/* Org filter — only for roles that can see multiple orgs */}
-        {!orgFilter && orgs.length > 0 && (
+        {orgs.length > 0 && (
           <Select value={orgId} onValueChange={setOrgId}>
             <SelectTrigger className="w-48"><SelectValue placeholder="All organizations" /></SelectTrigger>
             <SelectContent>

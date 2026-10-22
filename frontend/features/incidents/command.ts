@@ -186,7 +186,7 @@ export function acknowledgeHandover(incidentId: string): Promise<HandoverRecord>
 
 // ─── Mutual aid fetchers ──────────────────────────────────────────────────────
 
-export function fetchMutualAidRequests(
+export async function fetchMutualAidRequests(
   params?: MutualAidListParams,
 ): Promise<{ data: MutualAidRequest[]; meta: { total: number } }> {
   const qs = new URLSearchParams();
@@ -195,7 +195,31 @@ export function fetchMutualAidRequests(
   if (params?.status)     qs.set('status', params.status);
   if (params?.page)       qs.set('page', String(params.page));
   if (params?.perPage)    qs.set('perPage', String(params.perPage));
-  return api.get(`/resources/requests?${qs}`, getToken());
+  const rows = await api.get<RawMutualAidRequest[]>(`/resources/requests?${qs}`, getToken());
+  // GET /resources/requests returns a plain array with Prisma's relation names.
+  const data = (Array.isArray(rows) ? rows : []).map(toMutualAidRequest);
+  return { data, meta: { total: data.length } };
+}
+
+type OrgRef = { id: string; name: string; short_name: string | null };
+
+/** One row as the backend sends it (resources.service.ts listRequests). */
+type RawMutualAidRequest = Omit<MutualAidRequest, 'requesting_org' | 'providing_org'> & {
+  organizations_resource_requests_requesting_org_idToorganizations?: OrgRef;
+  organizations_resource_requests_providing_org_idToorganizations?: OrgRef | null;
+};
+
+function toMutualAidRequest(raw: RawMutualAidRequest): MutualAidRequest {
+  const {
+    organizations_resource_requests_requesting_org_idToorganizations: requesting,
+    organizations_resource_requests_providing_org_idToorganizations: providing,
+    ...rest
+  } = raw;
+  return {
+    ...rest,
+    ...(requesting && { requesting_org: requesting }),
+    providing_org: providing ?? null,
+  };
 }
 
 export function createMutualAidRequest(body: CreateMutualAidBody): Promise<MutualAidRequest> {

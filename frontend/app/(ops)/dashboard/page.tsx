@@ -7,7 +7,7 @@ import { OpsDashboard } from '@/components/dashboard/OpsDashboard';
 import { AdminDashboard } from '@/components/dashboard/AdminDashboard';
 import { MunicipalOverview } from '@/components/dashboard/MunicipalOverview';
 import { SupervisorDashboard } from '@/components/dashboard/SupervisorDashboard';
-import { RolePlaceholderDashboard } from '@/components/dashboard/RolePlaceholderDashboard';
+import { OrgDashboard } from '@/components/dashboard/OrgDashboard';
 
 /**
  * One home route for every console role; each role gets its own content
@@ -31,18 +31,7 @@ export default function DashboardPage(): JSX.Element | null {
       return <MunicipalOverview />;
 
     case ROLE.ORG_ADMIN:
-      return (
-        <RolePlaceholderDashboard
-          title="Organization Administration"
-          subtitle={user.orgName ?? 'Your organization'}
-        >
-          <p className="text-sm text-agap-textMid">
-            Organization tools (your units, members, resource requests and the barangay
-            directory) are being set up for this role. For account changes in the meantime,
-            contact the System Administrator.
-          </p>
-        </RolePlaceholderDashboard>
-      );
+      return <OrgDashboard />;
 
     default:
       // Hospital users are sent to their portal by AuthGate; nothing renders before sign-in.

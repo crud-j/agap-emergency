@@ -8,6 +8,7 @@ import {
   Body,
   UseGuards,
   ParseUUIDPipe,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { OrganizationsService } from './organizations.service';
@@ -26,14 +27,14 @@ export class OrganizationsController {
   constructor(private readonly organizationsService: OrganizationsService) {}
 
   @Get()
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'List organizations' })
   async findAll() {
     return this.organizationsService.findAll();
   }
 
   @Get(':id')
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Get organization by ID' })
   async findById(@Param('id', ParseUUIDPipe) id: string) {
     return this.organizationsService.findById(id);
@@ -52,22 +53,23 @@ export class OrganizationsController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: Partial<CreateOrganizationDto>,
+    @Request() req: any,
   ) {
-    return this.organizationsService.update(id, dto);
+    return this.organizationsService.update(id, dto, req.user);
   }
 
   @Get(':id/members')
   @Roles(UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'List organization members' })
-  async findMembers(@Param('id', ParseUUIDPipe) id: string) {
-    return this.organizationsService.findMembers(id);
+  async findMembers(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.organizationsService.findMembers(id, req.user);
   }
 
   @Post(':id/members')
   @Roles(UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Add a member to an organization' })
-  async addMember(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AddMemberDto) {
-    return this.organizationsService.addMember(id, dto);
+  async addMember(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AddMemberDto, @Request() req: any) {
+    return this.organizationsService.addMember(id, dto, req.user);
   }
 
   @Delete(':id/members/:userId')
@@ -76,8 +78,9 @@ export class OrganizationsController {
   async removeMember(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('userId', ParseUUIDPipe) userId: string,
+    @Request() req: any,
   ) {
-    await this.organizationsService.removeMember(id, userId);
+    await this.organizationsService.removeMember(id, userId, req.user);
     return { message: 'Member removed' };
   }
 }

@@ -14,7 +14,7 @@ import {
   Truck, Building2, HeartPulse, AlarmClock,
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
-  Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug,
+  Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug, Inbox,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -34,6 +34,7 @@ const ICONS: Record<string, LucideIcon> = {
   '/operations/surge': Zap,
   '/organizations': Building2,
   '/operations/fleet': Truck,
+  '/resources/requests': Inbox,
   '/hospitals': HeartPulse,
   '/analytics': BarChart2,
   '/operations/risk': Layers,

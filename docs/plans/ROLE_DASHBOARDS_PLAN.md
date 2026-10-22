@@ -1,6 +1,6 @@
 # Plan: Role Dashboards and Separation of Duties
 
-> **Status (2026-10-22):** Phases 1–5b built (signed-in walkthroughs pending); Phases 6–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
+> **Status (2026-10-22):** Phases 1–6 built (signed-in walkthroughs pending); Phase 7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
 > **How to use:** build one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts. Phase 0 is decisions only.
 > **Modules:** MOD-21 (ops dashboard), MOD-41 (escalation), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration), MOD-50 (analytics), MOD-52 (surge), MOD-53 (announcements).
 
@@ -656,6 +656,51 @@ Writes are unchanged. They already allow `ORG_ADMINISTRATOR` and are own-org in 
 - [ ] As `orgadmin@mdrrmo.bocaue.gov.ph`: every sidebar link loads with no 403.
 - [ ] The Barangay Directory edit works and is audited.
 - [ ] Editing another organization's unit is refused by the server.
+
+### Phase 6 status: BUILT, signed-in walkthrough pending (2026-10-22)
+
+**Own-org check: what was found.** The server had **no** own-organization check anywhere. The Org Administrator's "own org only" rule existed in the web UI alone, and several write endpoints didn't even receive the caller. An Org Administrator could:
+- edit any organization (`PATCH /organizations/:id`);
+- list, add or remove members of any organization, **including adding itself to another one** (`/organizations/:id/members`);
+- register a unit under any organization, and edit any unit or its capabilities (`POST /resources`, `PATCH /resources/:id`, `/resources/:id/capabilities`);
+- answer a mutual-aid request that was already answered, accept its own organization's request, or (legacy `PATCH /resources/request/:id/respond`) accept without becoming the provider.
+
+**Data review.**
+
+| Source | Finding | Result |
+|---|---|---|
+| `organization_memberships` | `orgadmin@mdrrmo.bocaue.gov.ph` → MDRRMO Bocaue (active). The System Administrator has no membership | ✅ own-org = active membership; System Administrator bypasses |
+| `user.orgId` (login) | First membership's organization (`auth.service.ts`); the UI already used it | ✅ unchanged |
+| `resource_requests` | Broadcast: no target organization; "accept" sets `providing_org_id`. Dev database has **0** requests | Requests page built on this model |
+| `GET /resources/requests` | Returns a **plain array** with Prisma relation names; the frontend read `{ data, meta }` and `requesting_org`/`providing_org` | ⚠️ the Multi-Agency **Mutual Aid tab was always empty**; fixed in the frontend fetcher |
+| Barangay Directory | `barangay-contacts.controller.ts` already allows `ORG_ADMINISTRATOR`; every change is audited | ✅ route opened only |
+
+**Built**
+- **Backend reads (additive):** `ORG_ADMINISTRATOR` added to `GET /resources`, `GET /resources/:id` (which also gained `SYSTEM_ADMINISTRATOR`, matching `GET /resources`), `GET /organizations` and `GET /organizations/:id`.
+- **Server own-org check** `organizations/org-scope.ts` `assertCanManageOrg(prisma, actor, orgId)`: the System Administrator passes; anyone else needs an active membership in that organization, or gets 403 "You can only manage your own organization". Applied to organization update, members list/add/remove, unit create (by `organizationId`), unit update and capability add/remove (by the unit's organization).
+- **Mutual-aid responses** (`resources.service.ts respondToRequest`): a guarded `updateMany … where status = PENDING` (409 if already answered; two organizations can't both become the provider); accepting your own organization's request is refused (400); the legacy respond route now sets the provider on accept like `/approve`; the audit entry records the provider.
+- **Frontend:**
+  - Sidebar for the Org Administrator: Dashboard · Organizations · Fleet & Units · Requests · Barangay Directory. Routes opened: `/organizations`, `/operations/fleet` (Registry tab only, as before), `/resources`, `/resources/requests` (Org Administrator only), `/administration/barangays` (no other administration route).
+  - **`OrgDashboard`** replaces the placeholder (and `RolePlaceholderDashboard.tsx` is deleted): own units, available, out of service, open requests from other organizations; units by status; open-request preview. A notice when the account has no organization.
+  - **Requests page** (`components/resources/RequestsInbox.tsx`): Open / Our organization / All; Provide and Deny (with optional notes) only on pending requests from other organizations; server errors shown in the dialog.
+  - **Registry tab (D6):** reads every organization's units, opens filtered to its own; the add-unit form offers only its own organization; a unit's organization is locked when editing (the API never changed it).
+  - `fetchMutualAidRequests` maps the backend array to `{ data, meta }` with `requesting_org`/`providing_org`, which also fixes the Multi-Agency Mutual Aid tab.
+
+**Deviations from the text above**
+- The own-org check covers **all** Org Administrator writes in both controllers, not only the two `PATCH` endpoints: the members endpoints were the more serious gap.
+- `respondToRequest` gained the PENDING guard and the own-request refusal (found while building the Requests page).
+- `GET /resources/:id` also admits the System Administrator.
+
+**Verified**
+- Backend type check clean; full suite **45 suites, 696 tests** (20 in the new `test/organizations/org-scope.spec.ts`: role metadata for the four reads, the scope helper, every organization and unit write refused across organizations, the System Administrator bypass, and the three request guards).
+- Frontend type check clean; 59 tests (role-access spec: the Org Administrator's sidebar and routes, and `/administration/*` other than Barangay Directory still closed).
+- Against the dev database, `assertCanManageOrg` for `orgadmin@`: MDRRMO Bocaue allowed; BFP Bocaue and BGH refused (403).
+
+**Pending**
+- Signed-in **Done when** checks above.
+- **Semantics to confirm with MDRRMO:** requests go to every organization, so **Deny** by one organization closes the request for all. A per-organization "decline" would need a table of responses (schema change), out of scope here.
+- The System Administrator has no organization membership, so it can't accept a request (`resolveOrgForUser` refuses). That fits Phase 5b; it can still deny.
+- Organization and unit edits are still **not audited** (only requests are). Add `AuditService` calls if MDRRMO wants registry changes in the Audit Log.
 
 ---
 

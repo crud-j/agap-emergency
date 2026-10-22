@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { AddMemberDto } from './dto/add-member.dto';
+import { assertCanManageOrg, type OrgActor } from './org-scope';
 
 @Injectable()
 export class OrganizationsService {
@@ -37,8 +38,9 @@ export class OrganizationsService {
     });
   }
 
-  async update(id: string, dto: Partial<CreateOrganizationDto>) {
+  async update(id: string, dto: Partial<CreateOrganizationDto>, actor: OrgActor) {
     await this.findById(id);
+    await assertCanManageOrg(this.prisma, actor, id);
     return this.prisma.organization.update({
       where: { id },
       data: {
@@ -55,16 +57,18 @@ export class OrganizationsService {
     });
   }
 
-  async findMembers(orgId: string) {
+  async findMembers(orgId: string, actor: OrgActor) {
     await this.findById(orgId);
+    await assertCanManageOrg(this.prisma, actor, orgId);
     return this.prisma.organization_memberships.findMany({
       where: { organization_id: orgId, is_active: true },
       include: { users: { select: { id: true, full_name: true, role: true } } },
     });
   }
 
-  async addMember(orgId: string, dto: AddMemberDto) {
+  async addMember(orgId: string, dto: AddMemberDto, actor: OrgActor) {
     await this.findById(orgId);
+    await assertCanManageOrg(this.prisma, actor, orgId);
     const existing = await this.prisma.organization_memberships.findFirst({
       where: { organization_id: orgId, user_id: dto.userId },
     });
@@ -78,7 +82,8 @@ export class OrganizationsService {
     });
   }
 
-  async removeMember(orgId: string, userId: string) {
+  async removeMember(orgId: string, userId: string, actor: OrgActor) {
+    await assertCanManageOrg(this.prisma, actor, orgId);
     await this.prisma.organization_memberships.deleteMany({
       where: { organization_id: orgId, user_id: userId },
     });

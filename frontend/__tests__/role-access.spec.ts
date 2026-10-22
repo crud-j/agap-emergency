@@ -72,6 +72,14 @@ describe('role-access', () => {
     expect(canOpen(ROLE.SYS_ADMIN, '/administration/integrations')).toBe(true);
     expect(canOpen(ROLE.SUPERVISOR, '/administration/security')).toBe(false);
     expect(canOpen(ROLE.ORG_ADMIN, '/administration/integrations')).toBe(false);
+    // Phase 6: the Org Administrator's only administration page is the Barangay Directory.
+    expect(canOpen(ROLE.ORG_ADMIN, '/administration/barangays')).toBe(true);
+    expect(canOpen(ROLE.ORG_ADMIN, '/administration/users')).toBe(false);
+    expect(canOpen(ROLE.ORG_ADMIN, '/administration')).toBe(false);
+    expect(canOpen(ROLE.ORG_ADMIN, '/resources/requests')).toBe(true);
+    expect(canOpen(ROLE.DISPATCHER, '/resources/requests')).toBe(false);
+    expect(canOpen(ROLE.ORG_ADMIN, '/organizations')).toBe(true);
+    expect(canOpen(ROLE.ORG_ADMIN, '/operations/fleet')).toBe(true);
     expect(canOpen(undefined, '/dashboard')).toBe(false);
     expect(canOpen(ROLE.SYS_ADMIN, '/no-such-page')).toBe(false);
   });
@@ -95,7 +103,9 @@ describe('role-access', () => {
       'Multi-Agency', 'Fleet & Units', 'Hospitals & Facilities', 'Incident History',
     ]);
     expect(labels(ROLE.PUBLISHER)).toEqual(['Dashboard', 'Announcements', 'Publication History']);
-    expect(labels(ROLE.ORG_ADMIN)).toEqual(['Dashboard']);
+    expect(labels(ROLE.ORG_ADMIN)).toEqual([
+      'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Barangay Directory',
+    ]);
     expect(labels(ROLE.HOSPITAL_USER)).toEqual(['Hospitals & Facilities']);
     expect(showsSidebar(ROLE.HOSPITAL_USER)).toBe(false);
     expect(showsSidebar(ROLE.DISPATCHER)).toBe(true);

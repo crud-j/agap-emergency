@@ -30,7 +30,7 @@ export class ResourcesController {
   constructor(private readonly resourcesService: ResourcesService) {}
 
   @Get()
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'List resources' })
   async findAll(
     @Query('status') status?: string,
@@ -121,11 +121,13 @@ export class ResourcesController {
     @Body() body: { accept: boolean; notes?: string },
     @Request() req: any,
   ) {
-    return this.resourcesService.respondToRequest(id, body.accept, body.notes, req.user.id);
+    // Accepting makes the actor's organization the provider, as on /requests/:id/approve.
+    const providingOrgId = body.accept ? await this.resourcesService.resolveOrgForUser(req.user.id) : undefined;
+    return this.resourcesService.respondToRequest(id, body.accept, body.notes, req.user.id, providingOrgId);
   }
 
   @Get(':id')
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Get resource by ID' })
   async findById(@Param('id', ParseUUIDPipe) id: string) {
     return this.resourcesService.findById(id);
@@ -134,8 +136,8 @@ export class ResourcesController {
   @Post()
   @Roles(UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Create a resource' })
-  async create(@Body() dto: CreateResourceDto) {
-    return this.resourcesService.create(dto);
+  async create(@Body() dto: CreateResourceDto, @Request() req: any) {
+    return this.resourcesService.create(dto, req.user);
   }
 
   @Patch(':id')
@@ -144,8 +146,9 @@ export class ResourcesController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: Partial<CreateResourceDto>,
+    @Request() req: any,
   ) {
-    return this.resourcesService.update(id, dto);
+    return this.resourcesService.update(id, dto, req.user);
   }
 
   @Patch(':id/status')
@@ -165,8 +168,9 @@ export class ResourcesController {
   async addCapability(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddCapabilityDto,
+    @Request() req: any,
   ) {
-    return this.resourcesService.addCapability(id, dto.capabilityId);
+    return this.resourcesService.addCapability(id, dto.capabilityId, req.user);
   }
 
   @Delete(':id/capabilities/:capId')
@@ -175,8 +179,9 @@ export class ResourcesController {
   async removeCapability(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('capId', ParseUUIDPipe) capId: string,
+    @Request() req: any,
   ) {
-    await this.resourcesService.removeCapability(id, capId);
+    await this.resourcesService.removeCapability(id, capId, req.user);
     return { message: 'Capability removed' };
   }
 }

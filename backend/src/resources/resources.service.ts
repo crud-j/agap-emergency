@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateResourceDto } from './dto/create-resource.dto';
@@ -6,6 +6,7 @@ import { UpdateResourceStatusDto } from './dto/update-resource-status.dto';
 import { ResourceRequestDto } from './dto/resource-request.dto';
 import { AuditAction } from '@agap/shared';
 import { Prisma } from '@prisma/client';
+import { assertCanManageOrg, type OrgActor } from '../organizations/org-scope';
 
 @Injectable()
 export class ResourcesService {
@@ -43,7 +44,8 @@ export class ResourcesService {
     return resource;
   }
 
-  async create(dto: CreateResourceDto) {
+  async create(dto: CreateResourceDto, actor: OrgActor) {
+    await assertCanManageOrg(this.prisma, actor, dto.organizationId);
     return this.prisma.resources.create({
       data: {
         organization_id: dto.organizationId,
@@ -55,8 +57,10 @@ export class ResourcesService {
     });
   }
 
-  async update(id: string, dto: Partial<CreateResourceDto>) {
-    await this.findById(id);
+  async update(id: string, dto: Partial<CreateResourceDto>, actor: OrgActor) {
+    const resource = await this.findById(id);
+    await assertCanManageOrg(this.prisma, actor, resource.organization_id);
+    // organizationId is not editable here: moving a unit is not an own-org edit.
     return this.prisma.resources.update({
       where: { id },
       data: {
@@ -87,8 +91,9 @@ export class ResourcesService {
     return updated;
   }
 
-  async addCapability(resourceId: string, capabilityId: string) {
-    await this.findById(resourceId);
+  async addCapability(resourceId: string, capabilityId: string, actor: OrgActor) {
+    const resource = await this.findById(resourceId);
+    await assertCanManageOrg(this.prisma, actor, resource.organization_id);
     const existing = await this.prisma.resource_capability_assignments.findFirst({
       where: { resource_id: resourceId, capability_id: capabilityId },
     });
@@ -98,7 +103,9 @@ export class ResourcesService {
     });
   }
 
-  async removeCapability(resourceId: string, capabilityId: string) {
+  async removeCapability(resourceId: string, capabilityId: string, actor: OrgActor) {
+    const resource = await this.findById(resourceId);
+    await assertCanManageOrg(this.prisma, actor, resource.organization_id);
     await this.prisma.resource_capability_assignments.deleteMany({
       where: { resource_id: resourceId, capability_id: capabilityId },
     });
@@ -183,10 +190,15 @@ export class ResourcesService {
       where: { id: requestId },
     });
     if (!request) throw new NotFoundException('Resource request not found');
+    if (accept && providingOrgId && providingOrgId === request.requesting_org_id) {
+      throw new BadRequestException('An organization cannot fulfil its own request');
+    }
 
     const newStatus = accept ? 'ACCEPTED' : 'REJECTED';
-    const updated = await this.prisma.resourceRequest.update({
-      where: { id: requestId },
+    // Guarded on PENDING: a request is answered once, and two organizations
+    // accepting at the same moment can't both become the provider.
+    const { count } = await this.prisma.resourceRequest.updateMany({
+      where: { id: requestId, status: 'PENDING' },
       data: {
         status: newStatus as any,
         response_notes: notes ?? null,
@@ -194,6 +206,9 @@ export class ResourcesService {
         ...(accept && { fulfilled_at: new Date() }),
       },
     });
+    if (count === 0) {
+      throw new ConflictException(`This request was already answered (${String(request.status)})`);
+    }
 
     void this.audit.log({
       action: AuditAction.UPDATE,
@@ -203,10 +218,14 @@ export class ResourcesService {
       moduleId: 'MOD-35',
       incidentId: request.incident_id,
       oldValues: { status: String(request.status) },
-      newValues: { status: newStatus, response_notes: notes ?? null },
+      newValues: {
+        status: newStatus,
+        response_notes: notes ?? null,
+        ...(providingOrgId && { providing_org_id: providingOrgId }),
+      },
     });
 
-    return updated;
+    return this.prisma.resourceRequest.findUnique({ where: { id: requestId } });
   }
 
   /** Resolve the actor's primary organization for outbound resource requests. */
