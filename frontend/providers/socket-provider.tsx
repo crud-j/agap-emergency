@@ -118,6 +118,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
 
           qc.invalidateQueries({ queryKey: ['incident-locations'] });
           qc.invalidateQueries({ queryKey: ['municipal-overview'] });
+          qc.invalidateQueries({ queryKey: ['oversight'] });
         });
       },
     );
@@ -143,6 +144,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
           qc.invalidateQueries({ queryKey: ['incident-locations'] });
           qc.invalidateQueries({ queryKey: ['municipal-overview'] });
+          qc.invalidateQueries({ queryKey: ['oversight'] });
         });
       },
     );
@@ -181,6 +183,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['dispatch-incident', payload.incidentId] });
           qc.invalidateQueries({ queryKey: ['incidents'] });
           qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
+          qc.invalidateQueries({ queryKey: ['oversight'] });
         });
       },
     );
@@ -194,18 +197,29 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['available-units'] });
           qc.invalidateQueries({ queryKey: ['incident', payload.incidentId] });
           qc.invalidateQueries({ queryKey: ['dispatch-incident', payload.incidentId] });
+          qc.invalidateQueries({ queryKey: ['oversight'] });
         });
       },
     );
 
     // ─── escalation.created / updated ────────────────────────────────────────
-    const offEscCreated = onIncidentEvent<EscalationPayload>(
-      'escalation.created',
-      () => startTransition(() => qc.invalidateQueries({ queryKey: ['escalations'] })),
-    );
-    const offEscUpdated = onIncidentEvent<EscalationPayload>(
-      'escalation.updated',
-      () => startTransition(() => qc.invalidateQueries({ queryKey: ['escalations'] })),
+    const refreshEscalations = () =>
+      startTransition(() => {
+        qc.invalidateQueries({ queryKey: ['escalations'] });
+        qc.invalidateQueries({ queryKey: ['oversight', 'summary'] });
+      });
+    const offEscCreated = onIncidentEvent<EscalationPayload>('escalation.created', refreshEscalations);
+    const offEscUpdated = onIncidentEvent<EscalationPayload>('escalation.updated', refreshEscalations);
+
+    // ─── incident.handover (MOD-44: created or acknowledged) ─────────────────
+    const offHandover = onIncidentEvent<{ incidentId: string }>(
+      'incident.handover',
+      ({ incidentId }) => {
+        startTransition(() => {
+          qc.invalidateQueries({ queryKey: ['handovers', incidentId] });
+          qc.invalidateQueries({ queryKey: ['oversight', 'handovers'] });
+        });
+      },
     );
 
     // ─── responder.location_updated ──────────────────────────────────────────
@@ -269,6 +283,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['live-responders'] });
           qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
           qc.invalidateQueries({ queryKey: ['available-units'] });
+          qc.invalidateQueries({ queryKey: ['oversight'] });
         });
       },
     );
@@ -333,6 +348,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       offDispatchCancelled();
       offEscCreated();
       offEscUpdated();
+      offHandover();
       offResponderLoc();
       offEta();
       offDispatchUpdated();

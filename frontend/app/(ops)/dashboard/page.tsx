@@ -6,6 +6,7 @@ import { ROLE } from '@/lib/role-access';
 import { OpsDashboard } from '@/components/dashboard/OpsDashboard';
 import { AdminDashboard } from '@/components/dashboard/AdminDashboard';
 import { MunicipalOverview } from '@/components/dashboard/MunicipalOverview';
+import { SupervisorDashboard } from '@/components/dashboard/SupervisorDashboard';
 import { RolePlaceholderDashboard } from '@/components/dashboard/RolePlaceholderDashboard';
 
 /**
@@ -18,8 +19,10 @@ export default function DashboardPage(): JSX.Element | null {
 
   switch (user?.role) {
     case ROLE.DISPATCHER:
-    case ROLE.SUPERVISOR:
       return <OpsDashboard />;
+
+    case ROLE.SUPERVISOR:
+      return <SupervisorDashboard />;
 
     case ROLE.SYS_ADMIN:
       return <AdminDashboard />;

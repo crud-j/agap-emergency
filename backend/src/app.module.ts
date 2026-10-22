@@ -20,6 +20,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { AuditModule } from './audit/audit.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { OversightModule } from './oversight/oversight.module';
 import { RiskIntelligenceModule } from './risk-intelligence/risk-intelligence.module';
 import { DisasterModeModule } from './disaster-mode/disaster-mode.module';
 import { AdministrationModule } from './administration/administration.module';
@@ -91,6 +92,7 @@ import { validateConfig } from './config/config.validation';
     AnnouncementsModule,
     AuditModule,
     AnalyticsModule,
+    OversightModule,
     RiskIntelligenceModule,
     DisasterModeModule,
     AdministrationModule,

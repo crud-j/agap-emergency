@@ -37,7 +37,8 @@ const PRIORITY_DOT: Record<string, string> = {
 };
 
 /**
- * MOD-21 — Emergency Operations and Dispatch Dashboard (Dispatcher and Supervisor).
+ * MOD-21 — Emergency Operations and Dispatch Dashboard (Dispatcher). The Supervisor
+ * has its own oversight dashboard (SupervisorDashboard).
  * Other roles get their own dashboard from app/(ops)/dashboard/page.tsx.
  */
 export function OpsDashboard(): JSX.Element {

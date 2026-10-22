@@ -21,6 +21,15 @@ export const ACTIVE_STATUSES: string[] = [...ACTIVE_INCIDENT_STATUSES];
 /** Statuses from which a dispatch can be authorized (mirrors backend). */
 export const DISPATCHABLE_STATUSES = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
 
+/** Seconds → "45s", "12 min", "2 h 5 min"; null → "—" (no data, never a fake 0). */
+export function formatDurationSec(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined) return '—';
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
 export function titleCase(value?: string | null): string {
   return (value ?? '')
     .replace(/_/g, ' ')

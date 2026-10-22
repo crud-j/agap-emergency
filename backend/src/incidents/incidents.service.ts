@@ -30,6 +30,9 @@ import { Prisma, type Incident } from '@prisma/client';
 import { EmergencyContactNotificationService } from '../emergency-contacts/emergency-contact-notification.service';
 import { REPORTER_SEX_INCLUDE, reporterSexFrom, type ReporterSex } from '../common/utils/reporter-sex';
 
+/** ICS situation report (incident_command_structures.situation_notes, MOD-36). */
+const ICS_SITUATION_NOTES_MAX = 4000;
+
 @Injectable()
 export class IncidentsService {
   private readonly logger = new Logger(IncidentsService.name);
@@ -1030,14 +1033,32 @@ export class IncidentsService {
 
   // ---- ICS extended (MOD-36) ----
 
-  async updateIcs(incidentId: string, dto: { objectives?: string[] }, userId: string) {
+  async updateIcs(
+    incidentId: string,
+    dto: { objectives?: string[]; situationNotes?: string | null },
+    userId: string,
+  ) {
     const ics = await this.prisma.incident_command_structures.findUnique({
       where: { incident_id: incidentId },
     });
     if (!ics) throw new NotFoundException('No ICS activated for incident');
+    if (dto.objectives !== undefined && !(Array.isArray(dto.objectives) && dto.objectives.every((o) => typeof o === 'string'))) {
+      throw new BadRequestException('objectives must be a list of strings');
+    }
+    if (dto.situationNotes !== undefined && dto.situationNotes !== null) {
+      if (typeof dto.situationNotes !== 'string') throw new BadRequestException('situationNotes must be text');
+      if (dto.situationNotes.length > ICS_SITUATION_NOTES_MAX) {
+        throw new BadRequestException(`situationNotes is limited to ${ICS_SITUATION_NOTES_MAX} characters`);
+      }
+    }
+    const notes = dto.situationNotes === undefined ? undefined : dto.situationNotes?.trim() || null;
     const updated = await this.prisma.incident_command_structures.update({
       where: { incident_id: incidentId },
-      data: { ...(dto.objectives !== undefined && { objectives: dto.objectives }) },
+      data: {
+        ...(dto.objectives !== undefined && { objectives: dto.objectives }),
+        ...(notes !== undefined && { situation_notes: notes }),
+        updated_at: new Date(),
+      },
     });
     void this.audit.log({
       action: 'UPDATE',

@@ -17,6 +17,9 @@ export interface AuditLogEntry {
   userAgent?: string | undefined;
 }
 
+/** Read endpoints show who acted; only the display name, never contact details. */
+const ACTOR_NAME = { users: { select: { full_name: true } } } satisfies Prisma.AuditLogInclude;
+
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
@@ -106,14 +109,25 @@ export class AuditService {
       orderBy: { occurred_at: 'desc' },
       skip,
       take: perPage,
+      include: ACTOR_NAME,
     });
     const total = await this.prisma.auditLog.count({ where });
 
-    return { data, meta: { total, page, perPage } };
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        perPage,
+        totalPages: Math.ceil(total / perPage),
+        hasNext: page * perPage < total,
+        hasPrev: page > 1,
+      },
+    };
   }
 
   async findById(id: string) {
-    const log = await this.prisma.auditLog.findUnique({ where: { id } });
+    const log = await this.prisma.auditLog.findUnique({ where: { id }, include: ACTOR_NAME });
     if (!log) throw new NotFoundException('Audit log not found');
     return log;
   }
@@ -122,6 +136,7 @@ export class AuditService {
     return this.prisma.auditLog.findMany({
       where: { incident_id: incidentId },
       orderBy: { occurred_at: 'desc' },
+      include: ACTOR_NAME,
     });
   }
 }

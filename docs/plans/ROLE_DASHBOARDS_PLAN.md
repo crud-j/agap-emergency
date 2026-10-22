@@ -1,6 +1,6 @@
 # Plan: Role Dashboards and Separation of Duties
 
-> **Status (2026-10-22):** Phases 1 and 2 built (signed-in walkthroughs pending); Phases 3–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
+> **Status (2026-10-22):** Phases 1–3 built (signed-in walkthroughs pending); Phases 4–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
 > **How to use:** build one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts. Phase 0 is decisions only.
 > **Modules:** MOD-21 (ops dashboard), MOD-41 (escalation), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration), MOD-50 (analytics), MOD-52 (surge), MOD-53 (announcements).
 
@@ -378,6 +378,51 @@ In `backend/src/analytics/analytics.controller.ts` and `analytics.service.ts`:
 - [ ] As the Supervisor: an unacknowledged test SOS older than 5 min appears under **waiting**.
 - [ ] A handover created and not acknowledged appears under handovers, and disappears once acknowledged.
 - [ ] A Dispatcher calling `/v1/oversight/*` gets 403.
+
+### Phase 3 status: BUILT, signed-in walkthrough pending (2026-10-22)
+
+**Data review first.** Before building, every source table was checked for a writer, so no panel reads a column nothing fills (the `incident_metrics` lesson):
+
+| Source | Written by | Result |
+|---|---|---|
+| `incidents` statuses and timestamps | `incidents.service` `updateStatus`, responders, dispatch | ✅ used as planned |
+| `dispatches.dispatcher_id`, `status`, `rejected_at` | `dispatch.service`, `responders.service` (`SENT` is never written) | ✅ used as planned |
+| `incident_events.triggered_by_id` | every staff transition (`triggered_by_role` is often null) | ✅ role taken from `users.role` |
+| `location_history.resource_id` | **never written**: both tracking endpoints store `incident_id` + `user_id` only | ⚠️ stale-location query changed (below) |
+| `incident_handovers` create / `acknowledged_at` | `IncidentHandoverService`, audited | ✅ used as planned |
+| `incident_command_structures.situation_notes` | **never written**: `PATCH /incidents/:id/ics` accepted objectives only | ⚠️ now written (below) |
+| `audit_logs` → frontend | stored as `occurred_at`/`new_values`; the page read `created_at`/`metadata`/`actor` | ⚠️ fixed (below) |
+| Incident status changes in `audit_logs` | **not written there**; they live in `incident_events` | ⚠️ activity feed reads `incident_events` |
+
+**Built**
+- **Backend `backend/src/oversight/`** (module, controller, service), class-level `@Roles(UserRole.SUPERVISOR)`, reads only:
+  - `GET /v1/oversight/summary`: active, critical, en route, on scene, resolved today (Manila day), open escalations, not acknowledged, `units` (shared `AnalyticsService.getUnitCounts()`, extracted from Phase 2), `performance7d` (`getPerformanceFromIncidents`).
+  - `GET /v1/oversight/workload`: per Dispatcher/Supervisor, open dispatches, distinct open incidents, incident actions in the last hour. Active staff with nothing open are listed.
+  - `GET /v1/oversight/exceptions`: waiting, rejected (with `reassigned` when the incident already has another open dispatch; uncovered first), stale location. Thresholds from `system_configurations` `oversight.waiting_minutes` / `oversight.stale_location_minutes` (number or numeric string, 1–240, default 5).
+  - `GET /v1/oversight/handovers`: unacknowledged, on incidents that haven't ended, from → to with names and roles.
+  - `GET /v1/oversight/activity` (**added**): latest `incident_events` with transition, actor and time. Notes are not selected (responder free text can carry patient details).
+  - `GET /v1/oversight/major-incidents` (**added**): active incidents with ICS active or in an active surge, with positions filled and agency count. The Command page had no list source.
+- **ICS situation notes:** `PATCH /incidents/:id/ics` accepts `situationNotes` (≤ 4000 characters, trimmed, empty clears) and validates `objectives`. Supervisor-only as before, audited as before.
+- **Audit read fixes:** `GET /audit`, `/audit/:id` and `/audit/incidents/:id` include the actor's `full_name`; `GET /audit` meta adds `totalPages`, `hasNext`, `hasPrev`. The frontend `AuditLogEntry` type now matches the table, and the Activity/Audit Log page shows the time, actor and recorded values (all three were blank before) and pages past page 1.
+- **Frontend:** `SupervisorDashboard.tsx` (summary cards, exceptions opening the incident drawer, escalation queue preview, workload, handovers, performance against `SLA_ACKNOWLEDGEMENT_MINUTES`/`SLA_DISPATCH_MINUTES`, resource coverage, compact live map, activity feed, last-updated and 3-minute stale warning). Supervisor lands on `/dashboard`; Dispatcher keeps `OpsDashboard`.
+- **Command / ICS page** (`components/command/CommandSections.tsx`): Major incidents, Objectives and situation report (editable while ICS is active), Agency coordination, Hospitals and evacuation centers (`GET /facilities`), Command log (`GET /audit/incidents/:id`). Existing ICS and handover panels unchanged.
+- **Realtime:** `SocketProvider` refreshes `['oversight']` on incident, dispatch and escalation events and now listens for `incident.handover` (it didn't before).
+- `DashboardPanel` and `formatDurationSec` are shared by the LGU and Supervisor dashboards.
+
+**Deviations from the text above**
+- **Stale location** matches the dispatch's crew (`dispatch_crew.user_id`) on the same incident, plus `resource_id` if a row ever sets it, using one `LEFT JOIN LATERAL … MAX(recorded_at)`, not `DISTINCT ON (resource_id)`. Only `ACCEPTED` dispatches on incidents in `ACTIVE_RESPONSE_INCIDENT_STATUSES` are checked; a crew that never shared a location counts from `accepted_at`.
+- **Activity feed** uses `incident_events`, not `GET /audit?perPage=20`.
+- **Two extra endpoints** (`activity`, `major-incidents`), both Supervisor-only reads.
+
+**Verified**
+- Backend type check clean; full suite **38 suites, 589 tests** (13 new in `test/oversight/oversight.spec.ts`).
+- Frontend type check clean; 59 tests.
+- All six service methods ran against the dev database and matched independent SQL counts (waiting 10 = 10; ICS active 1 = 1; stale units found with real last-seen times while 0 of 3 `location_history` rows had `resource_id`). A `situation_notes` write round-tripped and was restored.
+
+**Pending**
+- The signed-in **Done when** checks below.
+- **Follow-up (not changed: emergency path):** set `location_history.resource_id` in the two tracking writers (`locations.service.ts`, `responders.service.ts`); both already know the dispatch. The oversight query already uses it when present.
+- **Found, not fixed:** `incidents.service.ts` still has unused `createHandover`/`listHandovers`/`acknowledgeHandover` copies (the controller uses `IncidentHandoverService`). Delete in a cleanup.
 
 ---
 

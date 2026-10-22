@@ -26,6 +26,12 @@ export function manilaDateKey(at: Date): string {
   return new Date(at.getTime() + MANILA_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+export interface UnitCounts {
+  available: number;
+  deployed: number;
+  unavailable: number;
+}
+
 export interface IncidentPerformance {
   acknowledgeSec: number | null;
   dispatchSec: number | null;
@@ -45,7 +51,7 @@ export interface MunicipalOverview {
   activeByBarangay: { barangay: string; count: number }[];
   today: { total: number; critical: number; resolved: number };
   yesterday: { total: number; critical: number };
-  units: { available: number; deployed: number; unavailable: number };
+  units: UnitCounts;
   trend7d: { date: string; total: number; critical: number }[];
   performance7d: IncidentPerformance;
 }
@@ -79,12 +85,7 @@ export class AnalyticsService {
         _count: { _all: true },
       }),
       this.prisma.incident.count({ where: { resolved_at: { gte: todayStart } } }),
-      this.prisma.resources.groupBy({
-        by: ['status'],
-        where: { is_active: true },
-        orderBy: { status: 'asc' },
-        _count: { _all: true },
-      }),
+      this.getUnitCounts(),
       this.prisma.$queryRaw<{ day: string; total: number; critical: number }[]>`
         SELECT to_char((submitted_at AT TIME ZONE 'Asia/Manila')::date, 'YYYY-MM-DD') AS day,
                COUNT(*)::int AS total,
@@ -104,9 +105,6 @@ export class AnalyticsService {
       .sort((a, b) => b.count - a.count || a.barangay.localeCompare(b.barangay));
     const unassigned = active - activeByBarangay.reduce((sum, row) => sum + row.count, 0);
     if (unassigned > 0) activeByBarangay.push({ barangay: 'Unassigned', count: unassigned });
-
-    const unitCount = (statuses: resource_status[]) =>
-      units.filter((row) => statuses.includes(row.status)).reduce((sum, row) => sum + row._count._all, 0);
 
     const byDay = new Map(trendRows.map((row) => [row.day, row]));
     const trend7d = Array.from({ length: TREND_DAYS }, (_, i) => {
@@ -130,13 +128,26 @@ export class AnalyticsService {
       activeByBarangay,
       today: { total: todayRow.total, critical: todayRow.critical, resolved: resolvedToday },
       yesterday: { total: yesterdayRow.total, critical: yesterdayRow.critical },
-      units: {
-        available: unitCount(['AVAILABLE']),
-        deployed: unitCount(DEPLOYED_UNITS),
-        unavailable: unitCount(UNAVAILABLE_UNITS),
-      },
+      units,
       trend7d,
       performance7d,
+    };
+  }
+
+  /** Active units by readiness (shared with the Supervisor oversight summary). */
+  async getUnitCounts(): Promise<UnitCounts> {
+    const rows = await this.prisma.resources.groupBy({
+      by: ['status'],
+      where: { is_active: true },
+      orderBy: { status: 'asc' },
+      _count: { _all: true },
+    });
+    const count = (statuses: resource_status[]) =>
+      rows.filter((row) => statuses.includes(row.status)).reduce((sum, row) => sum + row._count._all, 0);
+    return {
+      available: count(['AVAILABLE']),
+      deployed: count(DEPLOYED_UNITS),
+      unavailable: count(UNAVAILABLE_UNITS),
     };
   }
 

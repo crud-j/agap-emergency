@@ -76,8 +76,10 @@ describe('role-access', () => {
     expect(landingForRole(ROLE.HOSPITAL_USER)).toBe('/hospitals');
   });
 
-  it('lands the LGU account on its Municipal Overview', () => {
+  it('lands the LGU account and the Supervisor on their own dashboards', () => {
     expect(landingForRole(ROLE.PUBLISHER)).toBe('/dashboard');
+    expect(landingForRole(ROLE.SUPERVISOR)).toBe('/dashboard');
+    expect(landingForRole(ROLE.DISPATCHER)).toBe('/operations/dispatch');
   });
 
   it('sidebars match the agreed spec', () => {

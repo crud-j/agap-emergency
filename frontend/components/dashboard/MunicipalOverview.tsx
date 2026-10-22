@@ -7,11 +7,12 @@ import {
 } from 'lucide-react';
 import { Badge, Skeleton, StatCard } from '@/components/ui';
 import { DashboardBanners } from '@/components/dashboard/DashboardBanners';
+import { DashboardPanel } from '@/components/dashboard/DashboardPanel';
 import { useMunicipalOverview } from '@/features/analytics/hooks';
 import type { MunicipalOverview as Overview } from '@/features/analytics/api';
 import { useAnnouncements } from '@/features/announcements/hooks';
 import { categoryLabel as announcementCategory, fmtManila, severityMeta } from '@/features/announcements/labels';
-import { categoryIcon, titleCase } from '@/lib/incident-format';
+import { categoryIcon, formatDurationSec as fmtDuration, titleCase } from '@/lib/incident-format';
 import { useNow } from '@/lib/use-now';
 import { cn } from '@/lib/utils';
 
@@ -26,15 +27,6 @@ function vsYesterday(today: number, yesterday: number): string {
   return `${diff > 0 ? '+' : '−'}${Math.abs(diff)} vs yesterday`;
 }
 
-function fmtDuration(sec: number | null): string {
-  if (sec === null) return '—';
-  if (sec < 60) return `${sec}s`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  return `${h} h ${min % 60} min`;
-}
-
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
 }
@@ -44,23 +36,6 @@ function fmtDay(date: string): string {
   return new Date(`${date}T12:00:00+08:00`).toLocaleDateString('en-PH', {
     timeZone: 'Asia/Manila', weekday: 'short', day: 'numeric',
   });
-}
-
-function Panel({ title, action, children, className }: {
-  title: string;
-  action?: JSX.Element;
-  children: JSX.Element | JSX.Element[];
-  className?: string;
-}): JSX.Element {
-  return (
-    <section className={cn('rounded-xl border border-agap-track/40 bg-white shadow-card', className)}>
-      <div className="flex items-center justify-between border-b border-agap-track/30 px-5 py-3.5">
-        <h2 className="text-[13px] font-bold text-agap-textMain">{title}</h2>
-        {action}
-      </div>
-      <div className="px-5 py-4">{children}</div>
-    </section>
-  );
 }
 
 /** Ranked magnitude list: one hue, bar length = share of the largest row. */
@@ -240,7 +215,7 @@ export function MunicipalOverview(): JSX.Element {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Panel title="Active incidents by barangay">
+        <DashboardPanel title="Active incidents by barangay">
           {loading || !data ? (
             <Skeleton className="h-32 w-full" />
           ) : (
@@ -249,8 +224,8 @@ export function MunicipalOverview(): JSX.Element {
               empty="No active incidents in any barangay."
             />
           )}
-        </Panel>
-        <Panel title="Active incidents by category">
+        </DashboardPanel>
+        <DashboardPanel title="Active incidents by category">
           {loading || !data ? (
             <Skeleton className="h-32 w-full" />
           ) : (
@@ -263,14 +238,14 @@ export function MunicipalOverview(): JSX.Element {
               }}
             />
           )}
-        </Panel>
+        </DashboardPanel>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
-        <Panel title="Incidents, last 7 days">
+        <DashboardPanel title="Incidents, last 7 days">
           {loading || !data ? <Skeleton className="h-44 w-full" /> : <TrendChart trend={data.trend7d} />}
-        </Panel>
-        <Panel title="Response performance, last 7 days">
+        </DashboardPanel>
+        <DashboardPanel title="Response performance, last 7 days">
           {loading || !perf ? (
             <Skeleton className="h-44 w-full" />
           ) : (
@@ -293,10 +268,10 @@ export function MunicipalOverview(): JSX.Element {
               </p>
             </dl>
           )}
-        </Panel>
+        </DashboardPanel>
       </div>
 
-      <Panel
+      <DashboardPanel
         title="Latest announcements"
         action={(
           <Link href="/announcements" className="flex items-center gap-1 text-[12px] font-semibold text-agap-green hover:text-agap-green/80">
@@ -329,7 +304,7 @@ export function MunicipalOverview(): JSX.Element {
             })}
           </ul>
         )}
-      </Panel>
+      </DashboardPanel>
     </div>
   );
 }

@@ -584,10 +584,10 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update ICS objectives/structure (MOD-36)' })
+  @ApiOperation({ summary: 'Update ICS objectives and situation notes (MOD-36)' })
   async updateIcs(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { objectives?: string[] },
+    @Body() body: { objectives?: string[]; situationNotes?: string | null },
     @Request() req: any,
   ) {
     return this.incidentsService.updateIcs(id, body, req.user.id);

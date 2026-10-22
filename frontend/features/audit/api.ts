@@ -4,18 +4,21 @@ import type { PaginatedResult } from '@agap/shared';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** One `audit_logs` row as GET /audit returns it (Prisma AuditLog + actor name). */
 export interface AuditLogEntry {
   id: string;
   action: string;
-  entity_type: string;
-  entity_id: string;
+  entity_type: string | null;
+  entity_id: string | null;
   actor_id: string | null;
   actor_role: string | null;
-  organization_id: string | null;
+  module_id: string | null;
+  incident_id: string | null;
   ip_address: string | null;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-  actor?: { full_name: string | null; email: string | null };
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+  occurred_at: string;
+  users?: { full_name: string } | null;
 }
 
 export interface AuditLogParams {
@@ -42,6 +45,11 @@ export function fetchAuditLog(params?: AuditLogParams): Promise<PaginatedResult<
   if (params?.page)       qs.set('page', String(params.page));
   if (params?.perPage)    qs.set('perPage', String(params.perPage));
   return api.get(`/audit?${qs}`, getToken());
+}
+
+/** Command log: every audit entry for one incident, newest first. */
+export function fetchIncidentAudit(incidentId: string): Promise<AuditLogEntry[]> {
+  return api.get(`/audit/incidents/${incidentId}`, getToken());
 }
 
 export function fetchAuditEntry(id: string): Promise<AuditLogEntry> {

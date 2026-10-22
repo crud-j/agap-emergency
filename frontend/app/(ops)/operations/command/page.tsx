@@ -2,7 +2,7 @@
 
 import { useState, type JSX } from 'react';
 import {
-  Siren, Target, Plus, Trash2, CheckCircle2,
+  Siren, Plus, Trash2, CheckCircle2,
   XCircle, Users, ChevronDown, AlertTriangle, Shield,
   ClipboardList, ArrowRightLeft, Check,
 } from 'lucide-react';
@@ -19,7 +19,6 @@ import { useIncidents } from '@/features/incidents/hooks';
 import {
   useIncidentIcs,
   useActivateIcs,
-  useUpdateIcs,
   useDeactivateIcs,
   useAddIcsPosition,
   useRemoveIcsPosition,
@@ -29,6 +28,13 @@ import {
 } from '@/features/incidents/command-hooks';
 import type { IcsAssignment, HandoverRecord } from '@/features/incidents/command';
 import { cn } from '@/lib/utils';
+import {
+  AgencyCoordinationPanel,
+  CommandBriefPanel,
+  CommandLogPanel,
+  HospitalEvacuationPanel,
+  MajorIncidentsPanel,
+} from '@/components/command/CommandSections';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -373,22 +379,9 @@ function IcsPanel({ incidentId }: { incidentId: string }): JSX.Element {
           )}
         </div>
 
-        {ics.objectives.length > 0 && (
-          <div className="mt-4">
-            <p className="text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-2 flex items-center gap-1">
-              <Target size={12} /> Objectives
-            </p>
-            <ul className="space-y-1">
-              {ics.objectives.map((obj, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-agap-textMain">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-agap-green shrink-0" />
-                  {obj}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
+
+      <CommandBriefPanel incidentId={incidentId} ics={ics} editable={isActive} />
 
       {/* Position assignments */}
       <div>
@@ -656,7 +649,7 @@ export default function CommandPage(): JSX.Element {
             Incident Command
           </h1>
           <p className="text-sm text-agap-textSub mt-0.5">
-            MOD-36 · ICS structure, command positions, objectives
+            MOD-36 · major incidents, command structure, objectives, agencies, facilities and command log
           </p>
         </div>
         <Badge variant="amber" className="mt-1">
@@ -672,6 +665,8 @@ export default function CommandPage(): JSX.Element {
           </p>
         </div>
       )}
+
+      <MajorIncidentsPanel selectedId={selectedId} onSelect={setSelectedId} />
 
       {/* Incident picker */}
       <div className="rounded-2xl bg-white border border-[rgba(168,181,193,0.20)] shadow-card p-4">
@@ -718,7 +713,9 @@ export default function CommandPage(): JSX.Element {
       {selectedId ? (
         <>
           <IcsPanel incidentId={selectedId} />
+          <AgencyCoordinationPanel incidentId={selectedId} />
           <HandoverPanel incidentId={selectedId} />
+          <CommandLogPanel incidentId={selectedId} />
         </>
       ) : (
         <div className="rounded-2xl bg-white border border-[rgba(168,181,193,0.20)] shadow-card">
@@ -729,6 +726,8 @@ export default function CommandPage(): JSX.Element {
           />
         </div>
       )}
+
+      <HospitalEvacuationPanel />
     </div>
   );
 }

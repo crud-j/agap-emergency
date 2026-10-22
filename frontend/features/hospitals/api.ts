@@ -104,3 +104,11 @@ export function acknowledgeReferral(refId: string): Promise<HospitalReferral> {
 export function markReferralArrived(refId: string): Promise<HospitalReferral> {
   return api.patch(`/hospitals/referrals/${refId}/arrived`, {}, getToken());
 }
+
+/**
+ * GET /facilities: every active facility (hospitals, evacuation centers, health
+ * centers…). Dispatcher and Supervisor only. Same `facilities` row as Hospital.
+ */
+export function fetchFacilities(): Promise<Hospital[]> {
+  return api.get('/facilities', getToken());
+}

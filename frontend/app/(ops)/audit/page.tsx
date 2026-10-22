@@ -106,7 +106,7 @@ function DetailDialog({ entry, onClose }: DetailDialogProps): JSX.Element {
         </DialogHeader>
 
         <div className="space-y-3 text-sm">
-          <Row label="Occurred At" value={fmtTs(entry.created_at)} />
+          <Row label="Occurred At" value={fmtTs(entry.occurred_at)} />
           <Row label="Action">
             <Badge variant={actionStyle(entry.action).variant}>{entry.action}</Badge>
           </Row>
@@ -117,8 +117,8 @@ function DetailDialog({ entry, onClose }: DetailDialogProps): JSX.Element {
             </code>
           </Row>
           <Row label="Actor">
-            {entry.actor?.full_name
-              ? <span className="font-medium text-agap-textMain">{entry.actor.full_name}</span>
+            {entry.users?.full_name
+              ? <span className="font-medium text-agap-textMain">{entry.users.full_name}</span>
               : <span className="text-agap-textSub">{entry.actor_id ? truncateId(entry.actor_id) : 'System'}</span>}
           </Row>
           <Row label="Actor Role">
@@ -126,13 +126,13 @@ function DetailDialog({ entry, onClose }: DetailDialogProps): JSX.Element {
               ? <Badge variant="muted">{entry.actor_role}</Badge>
               : <span className="text-agap-textSub">—</span>}
           </Row>
-          <Row label="Org ID" value={entry.organization_id ? truncateId(entry.organization_id) : '—'} />
+          <Row label="Module" value={entry.module_id ?? '—'} />
           <Row label="IP Address" value={entry.ip_address ?? '—'} />
-          {entry.metadata && Object.keys(entry.metadata).length > 0 && (
+          {entry.new_values && Object.keys(entry.new_values).length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1">Metadata</p>
+              <p className="text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1">Recorded values</p>
               <pre className="rounded-xl bg-agap-surface p-3 text-xs text-agap-textMid overflow-x-auto">
-                {JSON.stringify(entry.metadata, null, 2)}
+                {JSON.stringify(entry.new_values, null, 2)}
               </pre>
             </div>
           )}
@@ -202,7 +202,7 @@ export default function AuditPage(): JSX.Element {
       sortable: true,
       accessor: (row) => (
         <span className="text-xs text-agap-textMid whitespace-nowrap font-mono">
-          {fmtTs(row.created_at)}
+          {fmtTs(row.occurred_at)}
         </span>
       ),
     },
@@ -235,7 +235,7 @@ export default function AuditPage(): JSX.Element {
       header: 'Actor',
       accessor: (row) => (
         <span className="text-sm text-agap-textMain">
-          {row.actor?.full_name ?? (row.actor_id ? truncateId(row.actor_id) : 'System')}
+          {row.users?.full_name ?? (row.actor_id ? truncateId(row.actor_id) : 'System')}
         </span>
       ),
     },

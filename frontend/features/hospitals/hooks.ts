@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchHospitals,
   fetchHospital,
+  fetchFacilities,
   fetchNearbyHospitals,
   fetchReferralsForHospital,
   createHospital,
@@ -18,6 +19,15 @@ export function useHospitals() {
     queryKey: ['hospitals'],
     queryFn: fetchHospitals,
     staleTime: 30_000,
+  });
+}
+
+export function useFacilities(opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['facilities'],
+    queryFn: fetchFacilities,
+    staleTime: 60_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 

@@ -61,7 +61,7 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
 
 const LANDING: Record<string, string> = {
   [DISPATCHER]: '/operations/dispatch',
-  [SUPERVISOR]: '/operations/dispatch',
+  [SUPERVISOR]: '/dashboard',
   [PUBLISHER]: '/dashboard',
   [SYS_ADMIN]: '/dashboard',
   [ORG_ADMIN]: '/dashboard',
