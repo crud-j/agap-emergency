@@ -5,13 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { getToken } from '@/lib/auth';
 import { redirectToLogin, refreshSession } from '@/lib/session';
 import { useAuthUser } from '@/lib/use-auth';
+import { canOpen } from '@/lib/role-access';
 import { IdleLockOverlay } from '@/components/auth/IdleLockOverlay';
-
-/**
- * Routes a HOSPITAL_USER may open; everything else redirects to the portal. /account is
- * their own sign-in security (hospital users are an MFA role, so they must be able to enroll).
- */
-const HOSPITAL_ALLOWED = ['/hospitals', '/account'];
 
 type GateState = 'checking' | 'ready' | 'unavailable';
 
@@ -50,8 +45,11 @@ export function AuthGate({ children }: { children: ReactNode }): JSX.Element {
     if (state === 'ready' && !user && !getToken()) redirectToLogin();
   }, [state, user]);
 
+  // Hospital users have no other console pages, so anything outside their portal
+  // (and /account, their own sign-in security) goes straight back to it. Other roles
+  // get RouteGuard's "Not available for your role" panel instead.
   useEffect(() => {
-    if (user?.role === 'HOSPITAL_USER' && !HOSPITAL_ALLOWED.some((p) => pathname.startsWith(p))) {
+    if (user?.role === 'HOSPITAL_USER' && !canOpen(user.role, pathname)) {
       router.replace('/hospitals');
     }
   }, [user, pathname, router]);

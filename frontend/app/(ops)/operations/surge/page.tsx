@@ -351,11 +351,11 @@ const RESOURCE_COLS: Column<SurgeResource>[] = [
 export default function SurgePage(): JSX.Element {
   const user = useAuthUser();
   const surgeQ = useSurgeState();
-  const triageQ = useTriageTags();
-  const resourcesQ = useSurgeResources();
-
   const surge = surgeQ.data;
   const isActive = surge?.is_active ?? false;
+
+  const triageQ = useTriageTags({ enabled: isActive });
+  const resourcesQ = useSurgeResources();
 
   const canManage = hasRole(user, 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
 

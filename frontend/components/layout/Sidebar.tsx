@@ -7,105 +7,45 @@ import { usePathname } from 'next/navigation';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuthUser } from '@/lib/use-auth';
+import { navForRole, showsSidebar, type NavLink } from '@/lib/role-access';
 import styles from './Sidebar.module.css';
 import {
   LayoutDashboard, List, Map as MapIcon, Filter, Radio,
-  Truck, Package, Building2, HeartPulse, AlarmClock,
+  Truck, Building2, HeartPulse, AlarmClock,
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
+  Users, KeyRound, Landmark, Circle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
-// ─── Roles ─────────────────────────────────────────────────────────────────────
+// ─── Icons ──────────────────────────────────────────────────────────────────────
+//
+// Which links each role sees lives in lib/role-access.ts; this only picks icons.
 
-const R = {
-  DISPATCHER:             'DISPATCHER',
-  SUPERVISOR:             'SUPERVISOR',
-  HOSPITAL_USER:          'HOSPITAL_USER',
-  ORG_ADMIN:              'ORG_ADMINISTRATOR',
-  ANNOUNCEMENTS_PUB:      'ANNOUNCEMENTS_PUBLISHER',
-  SYS_ADMIN:              'SYSTEM_ADMINISTRATOR',
-} as const;
+const ICONS: Record<string, LucideIcon> = {
+  '/dashboard': LayoutDashboard,
+  '/operations/incidents': List,
+  '/operations/map': MapIcon,
+  '/operations/triage': Filter,
+  '/operations/dispatch': Radio,
+  '/operations/escalations': AlarmClock,
+  '/operations/command': Shield,
+  '/operations/multi-agency': Network,
+  '/operations/surge': Zap,
+  '/organizations': Building2,
+  '/operations/fleet': Truck,
+  '/hospitals': HeartPulse,
+  '/analytics': BarChart2,
+  '/operations/risk': Layers,
+  '/announcements': Megaphone,
+  '/administration/users': Users,
+  '/administration/permissions': KeyRound,
+  '/administration/barangays': Landmark,
+  '/administration/config': Settings,
+  '/audit': FileSearch,
+};
 
-const ALL_OPS = [R.DISPATCHER, R.SUPERVISOR, R.ORG_ADMIN, R.SYS_ADMIN, R.ANNOUNCEMENTS_PUB];
-
-// ─── Nav definition ─────────────────────────────────────────────────────────────
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-  roles: string[];
-  exact?: boolean;
-}
-
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-const NAV: NavGroup[] = [
-  {
-    label: 'Overview',
-    items: [
-      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ALL_OPS, exact: true },
-    ],
-  },
-  {
-    label: 'Incidents',
-    items: [
-      { href: '/operations/incidents', label: 'Queue',    icon: List,   roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
-      { href: '/operations/map',       label: 'Map',      icon: MapIcon,    roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
-      { href: '/operations/triage',    label: 'Triage',   icon: Filter, roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
-      { href: '/operations/dispatch',  label: 'Dispatch', icon: Radio,  roles: [R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
-    ],
-  },
-  {
-    label: 'Resources',
-    items: [
-      { href: '/operations/fleet',  label: 'Fleet',         icon: Truck,     roles: [R.DISPATCHER, R.SUPERVISOR, R.ORG_ADMIN, R.SYS_ADMIN] },
-      { href: '/resources',         label: 'Registry',      icon: Package,   roles: [R.DISPATCHER, R.SUPERVISOR, R.ORG_ADMIN, R.SYS_ADMIN] },
-      { href: '/organizations',     label: 'Organizations', icon: Building2, roles: [R.ORG_ADMIN, R.SYS_ADMIN] },
-    ],
-  },
-  {
-    label: 'Hospitals',
-    items: [
-      { href: '/hospitals', label: 'Hospitals', icon: HeartPulse,
-        roles: [R.HOSPITAL_USER, R.DISPATCHER, R.SUPERVISOR, R.SYS_ADMIN] },
-    ],
-  },
-  {
-    label: 'Operations',
-    items: [
-      { href: '/operations/escalations',  label: 'Escalations',   icon: AlarmClock, roles: [R.SUPERVISOR, R.SYS_ADMIN] },
-      { href: '/operations/command',      label: 'Command / ICS', icon: Shield,     roles: [R.SUPERVISOR, R.SYS_ADMIN] },
-      { href: '/operations/multi-agency', label: 'Multi-Agency',  icon: Network,    roles: [R.SUPERVISOR, R.DISPATCHER, R.SYS_ADMIN] },
-      { href: '/operations/surge',        label: 'Surge Mode',    icon: Zap,        roles: [R.SUPERVISOR, R.SYS_ADMIN] },
-    ],
-  },
-  {
-    label: 'Intelligence',
-    items: [
-      { href: '/analytics',       label: 'Analytics', icon: BarChart2, roles: [R.SUPERVISOR, R.ORG_ADMIN, R.SYS_ADMIN] },
-      { href: '/operations/risk', label: 'Risk Map',  icon: Layers,    roles: [R.SUPERVISOR, R.SYS_ADMIN] },
-    ],
-  },
-  {
-    label: 'Broadcast',
-    items: [
-      { href: '/announcements', label: 'Announcements', icon: Megaphone,
-        roles: [R.ANNOUNCEMENTS_PUB, R.SUPERVISOR, R.SYS_ADMIN] },
-    ],
-  },
-  {
-    label: 'Administration',
-    items: [
-      { href: '/administration', label: 'Admin',     icon: Settings,   roles: [R.ORG_ADMIN, R.SYS_ADMIN] },
-      { href: '/audit',          label: 'Audit Log', icon: FileSearch, roles: [R.SUPERVISOR, R.ORG_ADMIN, R.SYS_ADMIN] },
-    ],
-  },
-];
+type NavItem = NavLink & { icon: LucideIcon };
 
 // ─── Motion ─────────────────────────────────────────────────────────────────────
 //
@@ -211,7 +151,7 @@ function flipIcons(root: HTMLElement, snap: Snapshot) {
 
 // ─── Component ──────────────────────────────────────────────────────────────────
 
-export function Sidebar(): JSX.Element {
+function SidebarNav(): JSX.Element {
   const pathname = usePathname();
   const user = useAuthUser();
 
@@ -232,14 +172,10 @@ export function Sidebar(): JSX.Element {
     return item.exact ? pathname === item.href : pathname.startsWith(item.href);
   }
 
-  function canSee(item: NavItem) {
-    if (!user) return false;
-    return item.roles.includes(user.role);
-  }
-
-  const groups = NAV.map((g) => ({ ...g, items: g.items.filter(canSee) })).filter(
-    (g) => g.items.length > 0,
-  );
+  const groups = navForRole(user?.role).map((g) => ({
+    label: g.label,
+    items: g.items.map((item): NavItem => ({ ...item, icon: ICONS[item.href] ?? Circle })),
+  }));
 
   const docked = mode === 'dock';
   const overlay = !isDesktop && !docked;
@@ -571,3 +507,13 @@ export function Sidebar(): JSX.Element {
   );
 }
 
+
+/**
+ * Roles with a single page (the Hospital Portal) get no sidebar at all; the
+ * nav never mounts, so it also never sets the dock spacing on <html>.
+ */
+export function Sidebar(): JSX.Element | null {
+  const user = useAuthUser();
+  if (!showsSidebar(user?.role)) return null;
+  return <SidebarNav />;
+}

@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState, type JSX } from 'react';
+import { Suspense, useMemo, useState, type JSX } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Truck, Flame, Waves, Users, Package,
   Search, CheckCircle2, Radio, MapPin, AlertCircle, Wrench,
@@ -21,6 +22,7 @@ import { useOrganizations } from '@/features/organizations/hooks';
 import type { Resource } from '@/features/resources/api';
 import type { Responder } from '@/features/responders/api';
 import { cn } from '@/lib/utils';
+import { RegistryTab } from '@/components/resources/RegistryTab';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -295,7 +297,7 @@ function ResponderCard({ responder }: { responder: Responder }): JSX.Element {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function FleetPage(): JSX.Element {
+function FleetUnitsView(): JSX.Element {
   const wsState = useWsState();
   const user = useAuthUser();
   const canChangeStatus = hasRole(user, 'DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
@@ -357,7 +359,7 @@ export default function FleetPage(): JSX.Element {
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-agap-textMain">Fleet — Unit Availability</h1>
+          <h2 className="text-lg font-extrabold text-agap-textMain">Unit Availability</h2>
           <p className="mt-1 text-sm text-agap-textSub">
             {isLoading ? 'Loading…' : `${filtered.length} of ${total} unit${total === 1 ? '' : 's'} shown`}
           </p>
@@ -578,5 +580,65 @@ export default function FleetPage(): JSX.Element {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Page: Fleet & Units ──────────────────────────────────────────────────────
+
+type FleetTab = 'units' | 'registry';
+
+const FLEET_TABS: { key: FleetTab; label: string; icon: LucideIcon }[] = [
+  { key: 'units', label: 'Units & Personnel', icon: Truck },
+  { key: 'registry', label: 'Registry', icon: Package },
+];
+
+/**
+ * Operational unit status and the resource registry on one page. The System
+ * Administrator maintains the registry only; unit status is an operational action
+ * (PATCH /resources/:id/status allows Dispatcher, Supervisor and Responder).
+ */
+function FleetAndUnits(): JSX.Element {
+  const user = useAuthUser();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const registryOnly = !hasRole(user, 'DISPATCHER', 'SUPERVISOR');
+  const tab: FleetTab = registryOnly || searchParams.get('tab') === 'registry' ? 'registry' : 'units';
+
+  return (
+    <div className="space-y-5">
+      <h1 className="text-2xl font-extrabold text-agap-textMain">Fleet &amp; Units</h1>
+
+      {!registryOnly && (
+        <div role="tablist" className="flex w-fit items-center gap-1 rounded-xl bg-agap-surface p-1">
+          {FLEET_TABS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => router.replace(key === 'units' ? '/operations/fleet' : '/operations/fleet?tab=registry')}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-all',
+                tab === key ? 'bg-white text-agap-green shadow-tile' : 'text-agap-textSub hover:text-agap-textMain',
+              )}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === 'units' ? <FleetUnitsView /> : <RegistryTab />}
+    </div>
+  );
+}
+
+export default function FleetPage(): JSX.Element {
+  // useSearchParams needs a Suspense boundary in the App Router.
+  return (
+    <Suspense fallback={null}>
+      <FleetAndUnits />
+    </Suspense>
   );
 }

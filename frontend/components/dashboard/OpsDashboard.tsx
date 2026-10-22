@@ -3,20 +3,18 @@
 import { useMemo, type JSX } from 'react';
 import Link from 'next/link';
 import {
-  AlertCircle, Activity, Truck, Clock, Megaphone, Siren, RefreshCw,
-  ArrowRight, MapPin, Zap,
+  AlertCircle, Activity, Truck, Clock, RefreshCw,
+  ArrowRight, MapPin,
 } from 'lucide-react';
 import {
   StatCard, PriorityBadge, StatusChip, EmptyState, Button,
 } from '@/components/ui';
 import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
+import { DashboardBanners } from '@/components/dashboard/DashboardBanners';
 import { useWsState } from '@/lib/use-ws-state';
-import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { useIncidents } from '@/features/incidents/hooks';
 import { useAvailableResources } from '@/features/resources/hooks';
 import { useResponders } from '@/features/responders/hooks';
-import { useSurgeState } from '@/features/surge/hooks';
-import { usePublishedAnnouncements } from '@/features/announcements/hooks';
 import {
   ACTIVE_STATUSES, DISPATCHABLE_STATUSES, categoryIcon, timeAgo, titleCase,
 } from '@/lib/incident-format';
@@ -39,18 +37,15 @@ const PRIORITY_DOT: Record<string, string> = {
 };
 
 /**
- * MOD-21 — Emergency Operations and Dispatch Dashboard.
+ * MOD-21 — Emergency Operations and Dispatch Dashboard (Dispatcher and Supervisor).
+ * Other roles get their own dashboard from app/(ops)/dashboard/page.tsx.
  */
-export default function DashboardPage(): JSX.Element {
+export function OpsDashboard(): JSX.Element {
   const wsState = useWsState();
-  const user = useAuthUser();
-  const canViewOps = hasRole(user, 'DISPATCHER', 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
 
-  const incidentsQuery     = useIncidents({ perPage: 100 }, { enabled: canViewOps });
-  const availableQuery     = useAvailableResources({ enabled: canViewOps });
-  const respondersQuery    = useResponders({ perPage: 100 }, { enabled: canViewOps });
-  const surgeQuery         = useSurgeState({ enabled: canViewOps });
-  const announcementsQuery = usePublishedAnnouncements();
+  const incidentsQuery     = useIncidents({ perPage: 100 });
+  const availableQuery     = useAvailableResources();
+  const respondersQuery    = useResponders({ perPage: 100 });
 
   const incidents: IncidentListItem[] = incidentsQuery.data?.data ?? [];
   const responders = respondersQuery.data ?? [];
@@ -78,20 +73,10 @@ export default function DashboardPage(): JSX.Element {
     [incidents],
   );
 
-  const surge = surgeQuery.data;
-  const criticalAnnouncement = useMemo(
-    () =>
-      (announcementsQuery.data ?? []).find(
-        (a) => a.severity === 'CRITICAL' && a.status === 'PUBLISHED',
-      ) ?? null,
-    [announcementsQuery.data],
-  );
-
   const failures = [
     { label: 'incidents',       q: incidentsQuery },
     { label: 'available units', q: availableQuery },
     { label: 'responders',      q: respondersQuery },
-    { label: 'announcements',   q: announcementsQuery },
   ].filter((f) => f.q.isError);
 
   function retryAll() {
@@ -117,20 +102,7 @@ export default function DashboardPage(): JSX.Element {
       </div>
 
       {/* ── Surge / critical announcement banners ────────────────────────── */}
-      {surge?.is_active && (
-        <SurgeBanner
-          massCasualty={surge.mass_casualty}
-          reason={surge.activation_reason}
-          barangays={surge.affected_barangays}
-          incidentCount={surge.active_incident_count}
-        />
-      )}
-      {criticalAnnouncement && (
-        <AnnouncementBanner
-          title={criticalAnnouncement.title}
-          body={criticalAnnouncement.body}
-        />
-      )}
+      <DashboardBanners showSurge />
 
       {/* ── Retry strip ──────────────────────────────────────────────────── */}
       {failures.length > 0 && (
@@ -306,66 +278,3 @@ function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element 
   );
 }
 
-// ─── Surge banner ────────────────────────────────────────────────────────────
-
-function SurgeBanner({
-  massCasualty, reason, barangays, incidentCount,
-}: {
-  massCasualty: boolean;
-  reason?: string | null;
-  barangays: string[];
-  incidentCount: number;
-}): JSX.Element {
-  const detail = [
-    reason,
-    barangays.length ? `Affected: ${barangays.join(', ')}` : null,
-    `${incidentCount} active incident${incidentCount === 1 ? '' : 's'}`,
-  ].filter(Boolean).join(' · ');
-
-  return (
-    <div className="flex items-start gap-3 rounded-xl bg-agap-sidebar border border-white/10 px-4 py-3.5">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/20">
-        <Siren size={18} className="text-red-400" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-bold text-white">
-          {massCasualty ? 'Mass-Casualty Surge Mode Active' : 'Disaster Surge Mode Active'}
-        </p>
-        {detail && <p className="mt-0.5 text-[12px] text-white/60 line-clamp-1">{detail}</p>}
-      </div>
-      <Link
-        href="/operations/surge"
-        className="flex items-center gap-1 shrink-0 self-center rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-white/15 transition-colors"
-      >
-        <Zap size={12} /> Open surge console
-      </Link>
-    </div>
-  );
-}
-
-// ─── Announcement banner ─────────────────────────────────────────────────────
-
-function AnnouncementBanner({
-  title, body,
-}: {
-  title: string;
-  body?: string | null;
-}): JSX.Element {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-agap-danger/25 bg-agap-dangerSoft px-4 py-3.5">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-agap-danger/10">
-        <Megaphone size={18} className="text-agap-danger" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-bold text-agap-danger">Critical Advisory — {title}</p>
-        {body && <p className="mt-0.5 text-[12px] text-agap-textMid line-clamp-2">{body}</p>}
-      </div>
-      <Link
-        href="/announcements"
-        className="flex items-center gap-1 shrink-0 self-center rounded-lg border border-agap-danger/20 px-3 py-1.5 text-[12px] font-semibold text-agap-danger hover:bg-agap-danger/5 transition-colors"
-      >
-        View <ArrowRight size={12} />
-      </Link>
-    </div>
-  );
-}

@@ -1,4 +1,5 @@
 import type { SessionUser } from './auth';
+import { landingForRole } from './role-access';
 
 /** `?next=` from the session gate — same-site paths only (no open redirect). */
 export function safeNextPath(): string | null {
@@ -21,21 +22,7 @@ export function safeNextPath(): string | null {
   }
 }
 
-export function landingForRole(role?: string): string {
-  switch (role) {
-    case 'DISPATCHER':
-    case 'SUPERVISOR':
-      return '/operations/dispatch';
-    case 'SYSTEM_ADMINISTRATOR':
-      return '/administration';
-    case 'HOSPITAL_USER':
-      return '/hospitals';
-    case 'ANNOUNCEMENTS_PUBLISHER':
-      return '/announcements';
-    default:
-      return '/dashboard';
-  }
-}
+export { landingForRole };
 
 /** Where a freshly signed-in user goes: the forced password change first, otherwise on to the console. */
 export function destinationAfterSignIn(user: Pick<SessionUser, 'role' | 'mustChangePassword'>, next: string | null): string {

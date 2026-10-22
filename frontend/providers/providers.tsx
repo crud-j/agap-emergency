@@ -21,9 +21,11 @@ export function Providers({ children }: { children: ReactNode }): ReactElement {
             // 'offlineFirst' stops TanStack from pausing queries when it thinks the
             // network is unavailable (can misfire with a running backend on localhost).
             networkMode: 'offlineFirst',
+            // Retry network failures and 5xx only. A 4xx answer will not change on
+            // retry, and retrying a 429 (rate limited) only deepens the limit.
             retry: (failureCount, error: unknown) => {
-              const e = error as { status?: number } | null;
-              if (e?.status === 401 || e?.status === 403) return false;
+              const status = (error as { status?: number } | null)?.status;
+              if (status !== undefined && status >= 400 && status < 500) return false;
               return failureCount < 3;
             },
           },

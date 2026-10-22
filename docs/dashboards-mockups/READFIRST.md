@@ -1,0 +1,1 @@
+## the dashboard mock-ups are layout and style only, and the spec decides the content.

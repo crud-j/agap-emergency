@@ -39,14 +39,15 @@ Citizen/guest reporter accounts are intentionally excluded.
 | Role | Name | Email (login) | Phone | Password | Org | Logs in to |
 |---|---|---|---|---|---|---|
 | System Administrator | System Administrator | `admin@agap.local` *(= `INITIAL_ADMIN_EMAIL`)* | — | `INITIAL_ADMIN_PASSWORD` | Platform | Web (Admin) |
-| Dgaispatcher | Juan dela Cruz | `dispatcher1@mdrrmo.bocaue.gov.ph` | +639171234001 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
+| Dispatcher | Juan dela Cruz | `dispatcher1@mdrrmo.bocaue.gov.ph` | +639171234001 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
 | Dispatcher | Maria Santos | `dispatcher2@mdrrmo.bocaue.gov.ph` | +639171234002 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
 | Supervisor | Roberto Reyes | `supervisor@mdrrmo.bocaue.gov.ph` | +639171234003 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
 | Responder | Jose Mendoza | `responder1@mdrrmo.bocaue.gov.ph` | +639171234004 | `AgapDev2026!` | MDRRMO Bocaue | Mobile (Responder) |
 | Responder | Ana Garcia | `responder2@mdrrmo.bocaue.gov.ph` | +639171234005 | `AgapDev2026!` | MDRRMO Bocaue | Mobile (Responder) |
 | Responder | Carlos Bautista | `responder3@bfp.bocaue.gov.ph` | +639171234006 | `AgapDev2026!` | BFP Bocaue | Mobile (Responder) |
 | Hospital User | Dr. Luz Aquino | `receiving@bocauehospital.gov.ph` | +639171234007 | `AgapDev2026!` | Bocaue General Hospital | Web (Hospital Portal) |
-| Announcements Publisher | LGU Information Officer | `announcements@lgu.bocaue.gov.ph` | +639171234008 | `AgapDev2026!` | LGU | Web (Announcements Console) |
+| Announcements Publisher | LGU Information Officer (Office of the Mayor) | `announcements@lgu.bocaue.gov.ph` | +639171234008 | `AgapDev2026!` | LGU | Web (Municipal Overview + Announcements) |
+| Org Administrator | Elena Villanueva | `orgadmin@mdrrmo.bocaue.gov.ph` | +639171234009 | `AgapDev2026!` | MDRRMO Bocaue | Web (Organization Administration) |
 
 ---
 
@@ -55,12 +56,12 @@ Citizen/guest reporter accounts are intentionally excluded.
 ### 🛡️ System Administrator
 - **Account:** `admin@agap.local` (overridable via `INITIAL_ADMIN_EMAIL`).
 - **Password:** `INITIAL_ADMIN_PASSWORD` (env).
-- **Authority (MOD-47/49):** platform-wide — manage accounts, roles, system config, health; global oversight.
-- **Surface:** Operations Center → Administration.
+- **Authority (MOD-47/49):** platform-wide — manage accounts, roles, system config, health. **No operational authority** (no dispatch, triage, escalation or surge); see the [role spec](AGAP_Role_Rules_and_Dashboard_Content.md) §5.
+- **Surface:** Operations Center → Dashboard (system health) and the Administration pages (`/administration/users`, `/permissions`, `/barangays`, `/config`).
 
 ### 🧭 Dispatcher (Operations Center staff)
 - **Accounts:** `dispatcher1@mdrrmo.bocaue.gov.ph` (Juan dela Cruz), `dispatcher2@mdrrmo.bocaue.gov.ph` (Maria Santos).
-- **Authority:** receive, acknowledge, triage/assess, validate, **authorize dispatch**, escalate, monitor — within assigned authority. Cannot close? (closure is dispatcher/supervisor per lifecycle). Cannot perform responder/field-only actions.
+- **Authority:** receive, acknowledge, triage/assess, validate, **authorize dispatch**, escalate, monitor — within assigned authority. Can close an incident once its resolution is recorded. Cannot perform responder/field-only actions.
 - **Surface:** Operations Center → Dispatch, Command Queue, Map.
 
 ### 👮 Supervisor / Incident Commander
@@ -79,10 +80,15 @@ Citizen/guest reporter accounts are intentionally excluded.
 - **Authority (MOD-38):** view inbound referrals, acknowledge/coordinate receiving, update receiving status — facility-scoped.
 - **Surface:** Web (Hospital Portal).
 
-### 📢 Announcements Publisher
-- **Account:** `announcements@lgu.bocaue.gov.ph` (LGU Information Officer).
-- **Authority (MOD-53):** compose, schedule, publish, archive public announcements. **One-way broadcast only — not an emergency dispatch channel** (Rule 16).
-- **Surface:** Web (Announcements Console).
+### 📢 Announcements Publisher — LGU Information Officer (Office of the Mayor)
+- **Account:** `announcements@lgu.bocaue.gov.ph` (LGU Information Officer). Posts on the Mayor's behalf; the Mayor has no account (role spec §1).
+- **Authority (MOD-53):** compose, schedule, publish, archive public announcements. **One-way broadcast only — not an emergency dispatch channel** (Rule 16). Sees aggregated counts only, never incident details.
+- **Surface:** Web (Municipal Overview + Announcements).
+
+### 🏢 Org Administrator
+- **Account:** `orgadmin@mdrrmo.bocaue.gov.ph` (Elena Villanueva, MDRRMO Bocaue).
+- **Authority:** manage its own organization's members, units and resource requests. No dispatch, triage or incident authority.
+- **Surface:** Web (Organization Administration). Its organization pages are being added (role dashboards plan, Phase 6); until then it sees its Dashboard only.
 
 ---
 
@@ -90,7 +96,6 @@ Citizen/guest reporter accounts are intentionally excluded.
 
 | Role | Why no seed account | How to create |
 |---|---|---|
-| **Organization Administrator** (`ORG_ADMINISTRATOR`) | Org-scoped admin of users/resources/config; create per partner org as needed | Admin → Administration (users) or org members endpoint |
 | **Bystander** (`BYSTANDER`) | Guest reporter — submits an emergency with **no account** (Rule 14) | n/a (guest path) |
 | **Citizen** (`CITIZEN`) | Excluded here by request | Self-registration in the mobile app |
 
@@ -100,7 +105,7 @@ Citizen/guest reporter accounts are intentionally excluded.
 
 | Organization | Short name | Type | Members |
 |---|---|---|---|
-| Bocaue Municipal DRRM Office | MDRRMO Bocaue | MDRRMO | dispatcher1, dispatcher2, supervisor, responder1, responder2 |
+| Bocaue Municipal DRRM Office | MDRRMO Bocaue | MDRRMO | dispatcher1, dispatcher2, supervisor, orgadmin, responder1, responder2 |
 | Bureau of Fire Protection — Bocaue | BFP Bocaue | BFP | responder3 |
 | Bocaue General Hospital | BGH | HOSPITAL | hospital user |
 

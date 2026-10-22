@@ -37,12 +37,14 @@ export function useDeactivateSurge() {
   });
 }
 
-export function useTriageTags() {
+/** Only meaningful during an active surge: the backend answers 400 "No active surge incident" otherwise. */
+export function useTriageTags(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['surge-triage'],
     queryFn: fetchTriageTags,
     staleTime: 30_000,
     refetchInterval: 60_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 

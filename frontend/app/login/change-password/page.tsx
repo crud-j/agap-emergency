@@ -6,44 +6,10 @@ import { api } from '@/lib/api';
 import { getSessionUser, getToken } from '@/lib/auth';
 import { mfaRequest, type MfaStatus } from '@/lib/mfa';
 import { logout, redirectToLogin, refreshSession } from '@/lib/session';
+import { landingForRole, safeNextPath } from '@/lib/post-login';
 import { useAuthUser } from '@/lib/use-auth';
 
 type PageState = 'checking' | 'ready' | 'unavailable';
-
-function safeNextPath(): string | null {
-  const next = new URLSearchParams(window.location.search).get('next');
-  if (!next) return null;
-
-  try {
-    const target = new URL(next, window.location.origin);
-    if (
-      target.origin !== window.location.origin ||
-      target.pathname === '/login' ||
-      target.pathname.startsWith('/login/')
-    ) {
-      return null;
-    }
-    return `${target.pathname}${target.search}${target.hash}`;
-  } catch {
-    return null;
-  }
-}
-
-function landingForRole(role: string | undefined): string {
-  switch (role) {
-    case 'DISPATCHER':
-    case 'SUPERVISOR':
-      return '/operations/dispatch';
-    case 'SYSTEM_ADMINISTRATOR':
-      return '/administration';
-    case 'HOSPITAL_USER':
-      return '/hospitals';
-    case 'ANNOUNCEMENTS_PUBLISHER':
-      return '/announcements';
-    default:
-      return '/dashboard';
-  }
-}
 
 export default function ChangePasswordPage(): JSX.Element {
   const router = useRouter();

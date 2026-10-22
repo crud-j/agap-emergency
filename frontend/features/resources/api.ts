@@ -45,14 +45,22 @@ export interface CreateResourceBody {
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
-export function fetchResources(params?: ResourceListParams): Promise<PaginatedResult<Resource>> {
+/**
+ * GET /resources returns a plain array (no paging: resources.service.ts findAll).
+ * Wrap it so callers keep the PaginatedResult shape; accept a paginated body too
+ * in case the endpoint gains paging later.
+ */
+export async function fetchResources(params?: ResourceListParams): Promise<PaginatedResult<Resource>> {
   const qs = new URLSearchParams();
   if (params?.status)          qs.set('status', params.status);
   if (params?.resource_type)   qs.set('type', params.resource_type);
   if (params?.organization_id) qs.set('orgId', params.organization_id);
-  if (params?.page)            qs.set('page', String(params.page));
-  if (params?.perPage)         qs.set('perPage', String(params.perPage));
-  return api.get(`/resources?${qs}`, getToken());
+  const body = await api.get<Resource[] | PaginatedResult<Resource>>(`/resources?${qs}`, getToken());
+  if (!Array.isArray(body)) return body;
+  return {
+    data: body,
+    meta: { total: body.length, page: 1, perPage: body.length, totalPages: 1, hasNext: false, hasPrev: false },
+  };
 }
 
 export function fetchResource(id: string): Promise<Resource> {

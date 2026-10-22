@@ -1,0 +1,611 @@
+# Plan: Role Dashboards and Separation of Duties
+
+> **Status (2026-10-22):** Phase 1 built (signed-in walkthrough pending); Phases 2–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
+> **How to use:** build one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts. Phase 0 is decisions only.
+> **Modules:** MOD-21 (ops dashboard), MOD-41 (escalation), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration), MOD-50 (analytics), MOD-52 (surge), MOD-53 (announcements).
+
+## Context
+
+Every web-console role shares one sidebar ([Sidebar.tsx:47-108](../../frontend/components/layout/Sidebar.tsx#L47-L108)) with links shown or hidden by role. A review on 2026-10-22 found:
+
+1. **Links that 403.** Some sidebar links open pages whose data endpoints refuse that role:
+   - **System Administrator:** Dispatch (`GET /dispatch`), Command / ICS (`GET /incidents/:id/ics`), Multi-Agency (`GET /incidents/:id/agencies`) and Risk Map (`GET /risk-intelligence/*`) are all Dispatcher/Supervisor only.
+   - **Org Administrator:** Registry and Fleet (`GET /resources`), Organizations (`GET /organizations`) and Analytics (`/analytics/*`) all refuse it, and the Admin and Audit pages block it outright.
+2. **A misleading "All clear".** [dashboard/page.tsx:47-53](../../frontend/app/(ops)/dashboard/page.tsx#L47-L53) disables its incident queries for roles outside Dispatcher, Supervisor and System Administrator. With TanStack Query v5 a disabled query is not "loading", so the LGU and Org Admin accounts see **0 active incidents** and **"All clear — no emergency incidents have been reported in Bocaue."**
+3. **No separation of duties.** The System Administrator can:
+   - change incident status (`PATCH /incidents/:id/status`, [incidents.controller.ts:126](../../backend/src/incidents/incidents.controller.ts#L126));
+   - cancel incidents and mark false alerts ([false-alerts.controller.ts:43-50, 78-84](../../backend/src/false-alerts/false-alerts.controller.ts));
+   - acknowledge and resolve escalations ([escalations.controller.ts:25-53](../../backend/src/escalations/escalations.controller.ts));
+   - activate and deactivate surge mode, and send the disaster broadcast ([disaster-mode.controller.ts:35-91](../../backend/src/disaster-mode/disaster-mode.controller.ts)).
+4. **Role mismatch.** The earlier proposal named roles that don't exist (Mayor, Incident Commander). This is now resolved in the spec:
+   - the LGU Information Officer (`ANNOUNCEMENTS_PUBLISHER`) posts on the Mayor's behalf;
+   - Incident Commander is an ICS position held by a Supervisor, not a separate role.
+
+**Intended outcome:** each role opens on a dashboard made for its job, sees no page it can't use, and has only the authority the spec gives it. Emergency flows (SOS, dispatch, responder, citizen status) behave exactly as today.
+
+### What the review confirmed about the current system
+
+| Area | Finding | Consequence for this plan |
+|---|---|---|
+| `RolesGuard` | No role bypass. Allowed = role listed in `@Roles(...)` ([roles.guard.ts](../../backend/src/common/guards/roles.guard.ts)) | Removing a role from `@Roles` is a complete, local change |
+| `role_permissions` table | Edited by the Roles & Permissions tab, but **no guard reads it** (only `permissions.service.ts` touches it) | Don't build on it. Note it in the UI as "reference only" (Phase 5) |
+| `Announcement` model | Already has `approved_by_id`, `approved_at`. Today `publish()`/`schedule()` set them to the publisher ([announcements.service.ts:274-399](../../backend/src/announcements/announcements.service.ts#L274-L399)) | Approval reuses these columns; Phase 7 adds only one enum value and three columns |
+| `announcements.update()` | Only allowed in `DRAFT` (service line 226) | A pending announcement is automatically locked against edits |
+| Public announcement endpoints | `findPublished` filters `status: PUBLISHED`; archive lists only `ARCHIVED/CANCELLED/SUPERSEDED` | A new `PENDING_APPROVAL` status never reaches the mobile app or the public |
+| `audit_action` enum | Already has `LOGIN_FAILED`, `ACCOUNT_LOCKED`, `ACCOUNT_UNLOCKED`, `PASSWORD_CHANGE`, `MFA_CHANGE`, `SESSION_REVOKED`, `PERMISSION_DENIED` | Security events need no schema change |
+| `GET /audit` | Filters by **one** `action` ([audit.controller.ts:23-44](../../backend/src/audit/audit.controller.ts#L23-L44)) | Phase 5 accepts a comma-separated list (additive) |
+| `GET /administration/health` | Returns `database` and a hard-coded `redis: 'unknown'` ([administration.service.ts:285-293](../../backend/src/administration/administration.service.ts#L285-L293)) | Phase 5 makes Redis real and adds queues and integrations |
+| `GET /analytics/volume` | All-time counts; no priority or barangay | Phase 2 adds a purpose-built, count-only endpoint instead |
+| `dispatches.dispatcher_id`, `incident_events.triggered_by_id`, `incident_handovers.acknowledged_at`, `location_history.recorded_at`, `escalations.status` | All exist | Supervisor oversight (Phase 3) needs no schema change |
+| `incident-participant.service.ts` `INCIDENT_STAFF_ROLES` | Includes `SYSTEM_ADMINISTRATOR`, `ORG_ADMINISTRATOR`; used by WebSocket room joins and tracking; covered by `test/realtime/incident-participant.spec.ts` | Read visibility. Left alone unless decision D1 says otherwise |
+| `communications.service.ts` `DISPATCHER_ROLES` | Sys Admin and Org Admin may read **and post** in incident chat | Phase 5 removes them from posting |
+| `escalation.processor.ts` | `RESPONSE` escalations notify `SUPERVISOR` and `SYSTEM_ADMINISTRATOR` | Phase 5 changes the recipients (decision D5) |
+| Seed | Seeds **one account per web role**, including `orgadmin@mdrrmo.bocaue.gov.ph` (Elena Villanueva) | `USER_ACCOUNTS.md` wrongly says no Org Admin is seeded (Phase 1 fixes the doc) |
+| `shared/src/enums/announcement-status.enum.ts` | Stale (`REVIEW`, `APPROVED`, `EXPIRED`), imported nowhere; the frontend has its own type in `features/announcements/api.ts` | Phase 7 aligns it with the database |
+| `landingForRole` | Defined twice: [post-login.ts:24](../../frontend/lib/post-login.ts#L24) and a private copy in [change-password/page.tsx:32](../../frontend/app/login/change-password/page.tsx#L32) | Phase 1 removes the copy |
+| Mobile app | Calls none of the endpoints this plan changes. Uses responder, incident (citizen), alert and public announcement endpoints only. Its announcement type is `'PUBLISHED' \| 'CANCELLED' \| 'ARCHIVED' \| 'SUPERSEDED'` | **No mobile change in any phase** |
+
+### Design guardrails (apply to every phase)
+
+- **Never weaken an emergency path.** No change to SOS, alert intake, dispatch, responder or citizen endpoints, except removing the System Administrator and Org Administrator from operational ones (Phase 5).
+- **Barangay alert automation is out of bounds.** No phase changes `backend/src/barangay-coordination/`, the automatic alert SMS with its code, the SMS-reply poller, or the public `/b` page (`frontend/app/b/`, outside the `(ops)` layout). The Phase 1 route guard applies to the `(ops)` console only, so it must never wrap `/b`. The only barangay change is the Directory moving from a tab to `/administration/barangays`, plus Org Administrator access in Phase 6. The mockup's "Send SMS" and "Broadcast" buttons were dropped because they would be free-form texting from the Dispatcher dashboard, which has no backend; they have nothing to do with the barangay alert.
+- **Dispatcher and Supervisor permissions never shrink.** Every Dispatcher and Supervisor `@Roles` entry stays as it is.
+- **Additive first.** Phases 1–4 and 6 only add endpoints, add roles to read endpoints, or change the frontend. The only removals are in Phase 5b, and the only migration is in Phase 7.
+- **Count-only for the LGU.** No endpoint used by `ANNOUNCEMENTS_PUBLISHER` returns names, phone numbers, addresses, coordinates or medical data.
+- **Migrations:** write the SQL by hand under `backend/prisma/migrations/`, then `pnpm prisma migrate deploy` and `pnpm prisma generate`. Do **not** use `migrate dev` (the dev database has drift it would try to reset).
+- **Tests:** backend Jest runs with `--config ./test/jest.config.ts`. The baseline is 36 suites, 564 tests, all passing.
+- **No real phone numbers** in code, tests or docs. Use `+63917000000x` placeholders.
+
+### Phase overview
+
+| Phase | What | Backend | Schema | Frontend | Mobile |
+|---|---|---|---|---|---|
+| 0 | Decisions | — | — | — | — |
+| 1 | Role navigation, landing pages, dashboard fix, docs | none | none | yes | none |
+| 2 | Municipal overview for the LGU account | 1 new read endpoint | none | yes | none |
+| 3 | Supervisor oversight | 1 new read-only module | none | yes | none |
+| 4 | Dispatcher additions | none | none | yes | none |
+| 5a | System Admin: health, integrations, security events | additive | none | yes | none |
+| 5b | System Admin: remove operational powers | role removals | none | yes | none |
+| 6 | Org Administrator access | roles added to 4 read endpoints | none | yes | none |
+| 7 | Approval for CRITICAL advisories (behind a flag) | new endpoints | 1 enum value, 3 columns | yes | none |
+
+---
+
+## Phase 0: Decisions (no code)
+
+Each decision has a default; build with the default unless MDRRMO says otherwise.
+
+| # | Decision | Default |
+|---|---|---|
+| D1 | Does the System Administrator keep **read-only** incident visibility (`GET /incidents`, WebSocket ops room, incident chat reading)? | **Yes, read-only, but no sidebar links to operational pages.** Keeps `INCIDENT_STAFF_ROLES` and its test unchanged |
+| D2 | Who approves CRITICAL advisories? | **MDRRMO Supervisor** (`SUPERVISOR`) |
+| D3 | Which announcements need approval? | **Severity `CRITICAL`**, any category |
+| D4 | May the System Administrator still publish announcements? | **Yes** (platform support), but CRITICAL ones go through approval like everyone else |
+| D5 | `RESPONSE` escalation recipients once the Sys Admin can't act on escalations | **Supervisors; if no `ACTIVE` supervisor exists, Dispatchers** |
+| D6 | May the Org Administrator read **all** organizations' units, or only its own? | **Read all, edit own.** Unit and fleet data is not personal; editing is already own-org only ([resources/page.tsx:392](../../frontend/app/(ops)/resources/page.tsx#L392)) |
+| D7 | Display name of the LGU account | **"LGU Information Officer — Office of the Mayor"** |
+
+**Done when**
+- [ ] D1–D7 are recorded in this section, with the date and who decided.
+
+---
+
+## Phase 1: Role navigation, landing pages, dashboard fix (frontend only)
+
+**Goal:** every role sees only links it can use, opens on the right page, and never sees fake zeros.
+
+### 1.1 One role-access map
+Create `frontend/lib/role-access.ts` as the single source for navigation per role:
+
+```ts
+export interface RoleAccess {
+  landing: string;            // first page after sign-in
+  allowedPrefixes: string[];  // routes this role may open ('/account' always included)
+}
+export const ROLE_ACCESS: Record<string, RoleAccess>;
+export function landingForRole(role?: string): string;
+export function canOpen(role: string | undefined, pathname: string): boolean;
+```
+
+- Each `NavItem.roles` in `Sidebar.tsx` must agree with `allowedPrefixes`. Add a unit check that every nav item's `href` passes `canOpen` for each role listed on it.
+- `lib/post-login.ts` re-exports `landingForRole` from `role-access.ts`.
+- Delete the private copy in `app/login/change-password/page.tsx:32-46` and import the shared one.
+
+### 1.2 Sidebar per role
+Labels and routes follow the spec's §0 page-name table. Group headings follow the spec. Links to pages built in later phases are added in those phases (column 3).
+
+| Role | Links in Phase 1 | Added later | Landing |
+|---|---|---|---|
+| Dispatcher | Dashboard · Incident Queue · Live Map · Triage · Dispatch · Fleet & Units · Hospitals & Facilities · Multi-Agency | Incident History (P4) | `/operations/dispatch` (unchanged) |
+| Supervisor | Dashboard · Incident Queue · Live Map · Triage · Dispatch · Escalations · Activity Log · Command / ICS · Multi-Agency · Surge Mode · Fleet & Units · Hospitals & Facilities · Analytics · Risk Map | Incident History (P4), Approvals (P7) | `/operations/dispatch`; `/dashboard` from P3 |
+| LGU Info Officer | Dashboard · Announcements | Publication History (P2) | `/announcements`; `/dashboard` from P2 |
+| System Administrator | Dashboard · Users & Accounts · Roles & Permissions · Organizations · Fleet & Units · Hospitals & Facilities · Barangay Directory · Configuration · Audit Log | Integrations, Security Events (P5a) | `/dashboard` |
+| Org Administrator | Dashboard | Organizations · Fleet & Units · Requests · Barangay Directory (P6) | `/dashboard` |
+| Hospital User | Hospitals & Facilities | — | `/hospitals` (unchanged) |
+
+- **No Profile link** for any role. It's in the user menu, and Account security is already in the top bar (`/account/security`).
+- **System Administrator:**
+  - **Loses** Incident Queue, Live Map, Triage, Dispatch, Escalations, Command / ICS, Multi-Agency, Surge Mode, Risk Map, Analytics and Announcements. Its backend powers stay until Phase 5b; this phase only stops it from landing on pages that 403 or that it shouldn't use.
+  - **Fleet & Units** for this role is the registry tab only. The status buttons need `DISPATCHER`/`SUPERVISOR` on the backend anyway.
+- **Hospital User:** unchanged. `AuthGate`'s `HOSPITAL_ALLOWED` becomes `ROLE_ACCESS.HOSPITAL_USER.allowedPrefixes`.
+
+### 1.2a Merge Registry into Fleet & Units
+`/resources` (the registry) becomes a **Registry** tab on `/operations/fleet`. Its content moves unchanged into `components/resources/RegistryTab.tsx`, and `/resources` redirects to `/operations/fleet?tab=registry`. No backend change: both use `GET /resources`.
+
+### 1.2b Administration tabs become routes
+The tabs in [administration/page.tsx:711-717](../../frontend/app/(ops)/administration/page.tsx#L711-L717) become routes, so the sidebar is the only navigation:
+- `/administration/users`, `/administration/permissions`, `/administration/barangays`, `/administration/config`;
+- later `/administration/integrations` and `/administration/security` (Phase 5a).
+
+Each route renders the existing tab component (`UsersTab`, `PermissionsTab`, `BarangayDirectoryTab`, `ConfigTab`). Move them out of `page.tsx` into `components/admin/`. `/administration` redirects to `/dashboard`. The System Health tab content moves to the System Administrator's Dashboard (1.4).
+
+### 1.3 Route guard for every role
+Generalise the Hospital redirect in [AuthGate.tsx:53-57](../../frontend/components/layout/AuthGate.tsx#L53-L57): if `!canOpen(user.role, pathname)`, show a **"Not available for your role"** panel with a link to `landingForRole(role)`. Show the panel rather than redirecting silently, so a bookmarked link explains itself. Keep the existing Hospital behaviour (redirect to `/hospitals`).
+
+### 1.4 Dashboard: never show fake data
+In [dashboard/page.tsx](../../frontend/app/(ops)/dashboard/page.tsx):
+- `/dashboard` becomes a switch on role. Each role's content is its own component in `components/dashboard/`:
+
+  | Role | Component | Filled in |
+  |---|---|---|
+  | Dispatcher | `DispatcherDashboard` (today's content, moved) | P1; P4 adds counts |
+  | Supervisor | `SupervisorDashboard` (today's content for now) | P3 |
+  | LGU Info Officer | `MunicipalOverview` (placeholder: "Municipal overview arrives in Phase 2" + link to Announcements) | P2 |
+  | System Administrator | `AdminDashboard`: the existing health panel, user/unit/facility counts, recent users | P1; P5a adds queues |
+  | Org Administrator | `OrgDashboard` (placeholder) | P6 |
+
+- **No fake data.** A role whose queries are disabled never renders the KPI grid or Recent Incidents, so "0" and "All clear" can't appear.
+- The surge banner and the critical-announcement banner stay for every role; `GET /announcements` is public.
+
+### 1.5 Documentation fixes
+In [USER_ACCOUNTS.md](../USER_ACCOUNTS.md):
+- Line 42: "Dgaispatcher" → "Dispatcher".
+- Line 63: replace "Cannot close? (…)" with "Can close once the resolution is recorded."
+- Org Administrator: move it from "Roles with no seeded account" to the account table (`orgadmin@mdrrmo.bocaue.gov.ph`, Elena Villanueva, MDRRMO Bocaue, Web). Check its phone number against the seed.
+- Announcements Publisher: name it "LGU Information Officer — Office of the Mayor"; one-way broadcast; links to the spec.
+
+**Files:**
+- **New:** `frontend/lib/role-access.ts`, `frontend/components/dashboard/*`, `frontend/components/resources/RegistryTab.tsx`, `frontend/components/admin/*Tab.tsx` (moved), `frontend/app/(ops)/administration/<section>/page.tsx`.
+- **Changed:** `frontend/lib/post-login.ts`, `frontend/app/login/change-password/page.tsx`, `frontend/components/layout/Sidebar.tsx`, `frontend/components/layout/AuthGate.tsx`, `frontend/app/(ops)/dashboard/page.tsx`, `frontend/app/(ops)/operations/fleet/page.tsx`, `frontend/app/(ops)/resources/page.tsx` (redirect), `frontend/app/(ops)/administration/page.tsx` (redirect), `docs/USER_ACCOUNTS.md`.
+
+**Done when**
+- [x] `pnpm --filter @agap/frontend typecheck` is clean.
+- [ ] Signed in as each of the six web accounts, every sidebar link loads with no 403 in the browser network tab.
+- [ ] The LGU and Org Admin dashboards show no "0" counts and no "All clear".
+- [ ] Opening `/operations/dispatch` as the System Administrator shows "Not available for your role".
+- [x] Old links still work: `/resources` and `/administration` redirect.
+- [x] Every sidebar label matches the spec's §0 table, and no role has a Profile link.
+- [x] The backend test suite is untouched (no backend files changed).
+
+### Phase 1 status: BUILT, signed-in walkthrough pending (2026-10-22)
+
+**Built**
+- `frontend/lib/role-access.ts` holds the route rules (`canOpen`, longest-prefix match, closed by default), the landing pages and the sidebar groups (`NAV_GROUPS`, `navForRole`). `Sidebar.tsx` only maps routes to icons.
+- `landingForRole` exists once; `post-login.ts` re-exports it. `change-password/page.tsx` now imports both `landingForRole` and `safeNextPath` (it had private copies of each).
+- `components/layout/RouteGuard.tsx` (inside the `(ops)` layout, so the sidebar stays) shows "Not available for your role". `AuthGate` keeps redirecting Hospital users to `/hospitals`, now via `canOpen`. `/b` is outside `(ops)` and untouched.
+- `/dashboard` switches on role:
+  - Dispatcher and Supervisor: `OpsDashboard` (the previous page, moved);
+  - System Administrator: `AdminDashboard` (health, staff/unit/facility counts, newest accounts);
+  - LGU and Org Admin: `RolePlaceholderDashboard`, with no counts.
+
+  The surge and critical-advisory banners are in `DashboardBanners`. Surge is shown to Dispatcher and Supervisor only, since its link opens the Surge page.
+- **Fleet & Units:** tabs `Units & Personnel` / `Registry` (`?tab=registry`). The System Administrator sees Registry only. The old `/resources` page moved to `components/resources/RegistryTab.tsx` and now redirects.
+- **Administration routes:** `/administration/users`, `/permissions`, `/barangays`, `/config`. `/administration` redirects to `/dashboard`.
+- **USER_ACCOUNTS.md:** typo fixed, closure wording fixed, the seeded Org Administrator added, the LGU account named as the Office of the Mayor's officer.
+
+**Deviations from the text above**
+- **Tab components:** they live in one file, `components/admin/AdminSections.tsx` (`UsersTab`, `PermissionsTab`, `HealthTab`, `ConfigTab`, plus the `AdminPage` frame), not one file each. They share helpers and dialogs, so splitting them would only add imports.
+- **Sidebar grouping:** links are grouped (Operations, Oversight, Command, Resources, Intelligence, Broadcast, Administration), so a Dispatcher sees Multi-Agency before Fleet & Units. The spec lists the same links in a slightly different order.
+- **Sys Admin's banners:** the System Administrator's dashboard shows the critical-advisory banner but not the surge banner.
+
+**Verified**
+- **Frontend type check** is clean.
+- **Frontend tests:** `pnpm test` passes 4 suites, 58 tests, including the new `__tests__/role-access.spec.ts`. That spec checks that every sidebar link opens for its roles, every landing page opens, there's no Profile link, the Sys Admin has no operational page, path segments match whole, and each role's sidebar equals the spec.
+- **Dev server:** compiled and served every changed route with HTTP 200, and `/resources` and `/administration` carry their redirects.
+- **No backend files changed.**
+
+**Fixed during the walkthrough**
+- **Admin dashboard crash** ("Cannot read properties of undefined (reading 'total')"): `GET /resources` returns a plain array, but `fetchResources` was typed as `{ data, meta }`.
+  - `features/resources/api.ts` now wraps the array in that shape.
+  - **This also fixes Fleet & Units and the Registry,** which read `data.data` and so had been listing no units since before Phase 1.
+
+**Pending**
+- **Signed-in walkthrough** with each of the six web accounts. Not done here: it needs passwords, and possibly MFA.
+- **Lint:** `pnpm lint` fails before linting anything (`next lint` passes options the installed ESLint no longer accepts). This existed before Phase 1 and needs its own fix.
+
+---
+
+## Phase 2: Municipal overview for the LGU account
+
+**Goal:** the Office of the Mayor sees counts, never details.
+
+### 2.1 Backend: `GET /v1/analytics/municipal-overview`
+In `backend/src/analytics/analytics.controller.ts` and `analytics.service.ts`:
+- `@Roles(UserRole.ANNOUNCEMENTS_PUBLISHER, UserRole.DISPATCHER, UserRole.SUPERVISOR)`.
+- Response, counts only:
+
+```ts
+{
+  generatedAt: string;                                   // ISO
+  active: number;                                        // incidents in an active status
+  activeByCategory: { category: string; count: number }[];
+  activeByPriority: { priority: 'CRITICAL'|'HIGH'|'MEDIUM'|'LOW'; count: number }[];
+  activeByBarangay: { barangay: string; count: number }[]; // null barangay → 'Unassigned'
+  today: { total: number; resolved: number };            // submitted_at / resolved_at since local midnight
+  yesterday: { total: number; critical: number };        // for the "vs. yesterday" deltas on the cards
+  units: { available: number; deployed: number; unavailable: number };
+  trend7d: { date: string; total: number; critical: number }[]; // 7 local days, oldest first, zero-filled
+  performance7d: {                                       // averages in seconds over incidents submitted in the last 7 days
+    acknowledgeSec: number | null;                       // acknowledged_at − submitted_at
+    dispatchSec: number | null;                          // dispatched_at − submitted_at
+    arrivalSec: number | null;                           // on_scene_at − dispatched_at
+    resolvedShare: number | null;                        // resolved or closed ÷ total, 0–1
+  };
+}
+```
+
+- **Performance** uses the timestamp columns on `incidents` (`submitted_at`, `acknowledged_at`, `dispatched_at`, `on_scene_at`, `resolved_at`, `closed_at`). It's computed in SQL (`AVG(EXTRACT(EPOCH FROM …))`) and ignores rows where either timestamp is null. Return `null` when there are no rows, never `0`.
+  - **Do not use `incident_metrics`.** Nothing writes to that table (no service, seed or database trigger), so `getResponseTimes()` and `getSlaCompliance()` always return empty results today. See [Known gap: `incident_metrics` is never filled](#known-gap-incident_metrics-is-never-filled).
+  - Put the performance query in `analytics.service.ts` as `getPerformanceFromIncidents(since)`, so Phase 3 can reuse it for the Supervisor dashboard.
+- **Trend** uses one `GROUP BY` on the local date of `submitted_at` (Asia/Manila), zero-filled in code.
+
+- **Active statuses:** the same list as the frontend `ACTIVE_STATUSES` ([incident-format.ts:15-26](../../frontend/lib/incident-format.ts#L15-L26)). Move the list into `shared/src/constants/` and import it on both sides, so the two can't drift.
+- **Units** come from `resources` with `is_active = true`:
+  - `available` = `AVAILABLE`;
+  - `deployed` = `DISPATCHED`, `EN_ROUTE`, `ON_SCENE`, `TRANSPORTING`, `RETURNING`, `RESERVED`;
+  - `unavailable` = `OUT_OF_SERVICE`, `OFFLINE`.
+- **Barangay** comes from `incident_locations.barangay`, already filled by barangay tagging.
+- Use `groupBy` only. Never `select` a row.
+- **"Local midnight"** means Asia/Manila. Compute it explicitly; don't rely on the server's time zone. The existing `getDailySummary` uses `setHours(0)`, which depends on the server — don't copy that.
+
+### 2.2 Backend: publication history with names
+`GET /announcements/publisher/all` returns `publisher_id` and `approved_by_id` only. Add `publisherName` and `approverName` (`full_name` through the existing relations) to its response. This is an additive field.
+
+### 2.3 Frontend
+- **`features/analytics/`:** add a `useMunicipalOverview()` hook that refetches every 60 s and on the `incident.created` and `incident.status_changed` WebSocket events.
+- **`components/dashboard/MunicipalOverview.tsx`** replaces the Phase 1 placeholder. It follows the spec's §2 content:
+  - header "Office of the Mayor — Municipal Overview";
+  - stat cards (active, critical, units deployed of available, announcements published today) with "vs. yesterday";
+  - active incidents by barangay as a ranked list. A shaded barangay map can come later; the frontend has only the municipal outline (`/assets/geojson/bocaue.geojson`), and the barangay polygons used for barangay tagging live in the backend, so that would need a small endpoint to serve them;
+  - a category breakdown;
+  - the 7-day trend;
+  - response performance;
+  - latest announcements;
+  - a "Last updated" time and a stale warning after 3 minutes without a successful fetch (shared rule 5).
+- **Mockup elements that are dropped:** the incident map with individual markers and unit positions, the Recent Incidents table (addresses), and weather (no source). Quick actions are limited to Create Announcement and View Publication History.
+- **`app/(ops)/announcements/history/page.tsx`:** published, archived and superseded announcements, with author, approver, publication time, correction note and SMS/push counts.
+- **Announcements page:** add the **Advisories** filter (severity `WARNING` or `CRITICAL`). Advisories are not a separate page.
+- **Sidebar for the LGU account:** Dashboard · Announcements · Publication History.
+- **Landing for `ANNOUNCEMENTS_PUBLISHER`:** `/dashboard`.
+- **Display name (D7):** update the seed's `full_name` for the publisher. Because the seed uses `upsert … update: {}`, existing databases keep the old name; change it once through Administration → Users.
+
+### 2.4 Tests
+`backend/test/analytics/municipal-overview.spec.ts`:
+- The role metadata is exactly the three roles above. Read it with `Reflect.getMetadata(ROLES_KEY, AnalyticsController.prototype.municipalOverview)`.
+- With a mocked Prisma, the response contains no key other than the documented ones. This is a regression guard against someone adding a `select` later.
+- A null barangay counts as `Unassigned`.
+- The trend has exactly 7 entries, with days that had no incidents zero-filled; a day boundary is Manila midnight, not UTC.
+- Performance values are `null` with no data.
+
+**Done when**
+- [ ] Backend: typecheck clean, full suite green (564 + new).
+- [ ] The LGU account sees live counts that match the Dispatcher's queue for the same moment.
+- [ ] The network tab for the LGU account shows no incident list, reporter or location payloads.
+- [ ] Creating a test SOS updates the overview within 60 s.
+
+---
+
+## Phase 3: Supervisor oversight
+
+**Goal:** the Supervisor opens on its own Dashboard (`/dashboard`, `SupervisorDashboard`) instead of the Dispatch screen. The mockup's "Dispatch Oversight", "Resource Coverage" and "Performance Reports" are panels on this dashboard, not sidebar links.
+
+### 3.1 Backend: new read-only module `backend/src/oversight/`
+`oversight.module.ts`, `oversight.controller.ts`, `oversight.service.ts`, registered in `app.module.ts`. The class-level decorator is `@Roles(UserRole.SUPERVISOR)`. The module only reads; there are no writes.
+
+| Endpoint | Returns | Built from |
+|---|---|---|
+| `GET /v1/oversight/summary` | `active`, `critical` (active and `priority = CRITICAL`), `enRoute`, `onScene`, `resolvedToday`, `openEscalations` (status `ACTIVE` or `ACKNOWLEDGED`), `unacknowledged` (status `SUBMITTED`/`RECEIVED`), `units` (same shape as Phase 2), `performance7d` (from `getPerformanceFromIncidents`, Phase 2) | `incidents`, `escalations`, `resources` |
+| `GET /v1/oversight/workload` | Per dispatcher or supervisor: `openDispatches` (`dispatches.status` in `PENDING`, `SENT`, `ACCEPTED` on an active incident), `actionsLastHour` (`incident_events` by `triggered_by_id`) | `dispatches.dispatcher_id`, `incident_events` |
+| `GET /v1/oversight/exceptions` | Three lists: **waiting** (`SUBMITTED`/`RECEIVED` for more than 5 min); **rejected** (dispatches with `rejected_at` on an incident still active); **stale location** (active dispatch whose newest `location_history.recorded_at` for that resource is more than 5 min old) | `incidents`, `dispatches`, `location_history` |
+| `GET /v1/oversight/handovers` | Handovers with `acknowledged_at IS NULL`: incident reference, from, to, `handed_over_at` | `incident_handovers` |
+
+- **Thresholds:** read the 5-minute values from `system_configurations` keys `oversight.waiting_minutes` and `oversight.stale_location_minutes`, defaulting to 5 if a key is missing. No migration is needed; a key is just a row.
+- **Response fields:** every list returns `public_reference`, never a raw incident UUID as the display value (CLAUDE.md). It may also return the `id` for linking to the drawer, as other ops endpoints already do.
+- **Stale location query:** use a single `DISTINCT ON (resource_id) … ORDER BY recorded_at DESC` raw query, filtered to the resources of active dispatches, so it doesn't load the whole history.
+
+### 3.2 Frontend
+- **`components/dashboard/SupervisorDashboard.tsx`** replaces the Phase 1 stand-in. Its panels:
+  - summary cards;
+  - performance;
+  - an escalations preview (existing `GET /escalations`);
+  - resource coverage (`units`, plus the existing fleet list);
+  - dispatcher workload;
+  - exceptions (three lists, each row opening the incident drawer);
+  - handovers awaiting acknowledgement, shown person to person;
+  - an activity feed (existing `GET /audit?perPage=20`);
+  - a compact live map, reusing the existing map component.
+- **Supervisor landing:** `/dashboard`.
+- **Command / ICS page** ([command/page.tsx](../../frontend/app/(ops)/operations/command/page.tsx)) takes the Incident Commander mockup's content as sections, all from existing endpoints. Only add sections missing from the page today:
+
+  | Section | Source |
+  |---|---|
+  | Major incidents | Incidents with ICS activated, plus surge incidents |
+  | Command structure | `GET /incidents/:id/ics` |
+  | Objectives and situation notes | `incident_command_structures.objectives`, `situation_notes` (in the ICS response) |
+  | Agency coordination | `GET /incidents/:id/agencies` |
+  | Hospital and evacuation | `GET /hospitals`, facilities including `EVACUATION_CENTER` |
+  | Command log | `GET /audit/incidents/:incidentId` |
+
+  **Check while building:** whether `PATCH`-ing objectives and situation notes already has an endpoint. If not, editing them is a small follow-up; showing them needs nothing new. Incident Groups are not built (out of scope).
+
+### 3.3 Tests
+`backend/test/oversight/oversight.spec.ts`:
+- role metadata is `SUPERVISOR` only;
+- the exceptions logic (waiting, rejected, stale) with fixed timestamps;
+- handovers are filtered by `acknowledged_at`.
+
+**Done when**
+- [ ] The full suite is green.
+- [ ] As the Supervisor: an unacknowledged test SOS older than 5 min appears under **waiting**.
+- [ ] A handover created and not acknowledged appears under handovers, and disappears once acknowledged.
+- [ ] A Dispatcher calling `/v1/oversight/*` gets 403.
+
+---
+
+## Phase 4: Dispatcher additions (frontend only)
+
+- **Dashboard counts** ([dashboard/page.tsx](../../frontend/app/(ops)/dashboard/page.tsx)): add **Unreviewed** (`SUBMITTED`, `RECEIVED`) and **Critical** (active and `priority === 'CRITICAL'`), computed from the incidents already loaded.
+- **Incident History:** `app/(ops)/operations/history/page.tsx`.
+  - Uses the existing `GET /incidents?statuses=RESOLVED,CLOSED,CANCELLED,FALSE_ALERT,DUPLICATE,UNABLE_TO_RESPOND,REFERRED&page=…` (`statuses` is already supported, [incidents.controller.ts:63-80](../../backend/src/incidents/incidents.controller.ts#L63-L80)).
+  - Each row opens the existing incident drawer, read-only for closed incidents.
+- **Sidebar:** add Incident History for Dispatcher (last link) and Supervisor (Records group).
+- **Dispatcher dashboard cards** follow the mockup: Active, Unreviewed, Critical, En Route, On Scene, Resolved Today, with "vs. last 24 h". Quick actions are limited to existing actions: Assign Unit (opens Dispatch), View All Incidents, Open Map. **Not included:**
+- **New Incident:** the web console has no form for logging a phone-call incident. "Caller intake" is the citizen app's intake questions. A dispatcher-entered incident would be a separate feature.
+- **Broadcast and Send SMS:** see the spec, §3.
+
+**Done when**
+- [ ] Frontend typecheck is clean.
+- [ ] The counts match the queue's filters.
+- [ ] A closed demo incident appears in History.
+
+---
+
+## Phase 5a: System Administrator — health, integrations, security events (additive)
+
+### Backend
+- **Health:** extend `getHealth()` in [administration.service.ts:285](../../backend/src/administration/administration.service.ts#L285). The response becomes:
+
+```ts
+{
+  database: 'ok'|'error';
+  redis: 'ok'|'error';                       // real PING through the existing BullMQ connection
+  queues: { name: string; waiting: number; active: number; failed: number; delayed: number }[];
+                                             // getJobCounts() for every QUEUE_NAMES entry (shared/src/constants/queue.constants.ts)
+  integrations: {
+    sms:  { configured: boolean; lastFailure?: { at: string; reason: string } };   // TEXTBEE_API_KEY && TEXTBEE_DEVICE_ID set; newest failed job on the SMS queue
+    push: { configured: boolean };                                                 // FCM credentials set
+    maps: { configured: boolean };
+  };
+  timestamp: string;
+}
+```
+
+  - Never return a key, token, device ID or phone number: booleans and counts only.
+  - Each check gets a 2-second timeout. One slow dependency must not hang the endpoint.
+- **Audit filter:** `GET /audit` accepts `action=LOGIN_FAILED,ACCOUNT_LOCKED,…`. In `audit.service.ts:92`, split on commas and use `{ in: [...] }`. A single value behaves exactly as today.
+
+### Frontend
+- **System Administrator Dashboard** (`AdminDashboard`, Phase 1): add the queue table and a red state when Redis or a queue has failures. No uptime percentage, API-usage or storage widgets until a backend source exists.
+- **New `/administration/integrations` page:** one row per integration (SMS gateway, push, maps) with configured / last failure.
+- **New `/administration/security` page (Security Events):**
+  - shows `LOGIN_FAILED`, `ACCOUNT_LOCKED`, `ACCOUNT_UNLOCKED`, `PASSWORD_CHANGE`, `MFA_CHANGE`, `SESSION_REVOKED` and `PERMISSION_DENIED`;
+  - filters by date range and actor;
+  - each row links to the user in the Users tab.
+- **Roles & Permissions page:** add a notice: "Reference list. Access is enforced by each endpoint's role rules, not by this table." This is true today (see Context).
+- **Sidebar:** add Integrations and Security Events for the System Administrator.
+
+### Tests
+- `test/administration/health.spec.ts`: with a mocked queue and Redis, the response has no secret-looking values, and a timeout yields `error` instead of hanging.
+- `test/audit/audit-filter.spec.ts`: a single action and a list both work.
+
+**Done when**
+- [ ] The suite is green.
+- [ ] Stopping Redis turns Health red within one refresh.
+- [ ] Five wrong passwords on a test account show `LOGIN_FAILED` ×5 and `ACCOUNT_LOCKED` in Security Events.
+
+---
+
+## Phase 5b: System Administrator — remove operational powers
+
+**Prerequisite:** D1 and D5 decided. At least one `ACTIVE` Supervisor account exists in every environment, since surge activation becomes Supervisor-only.
+
+### Backend: remove `SYSTEM_ADMINISTRATOR` (and `ORG_ADMINISTRATOR` where listed)
+
+| File | Location | Change |
+|---|---|---|
+| `src/incidents/incidents.controller.ts` | `PATCH :id/status` (line 126) | `@Roles(DISPATCHER, SUPERVISOR)` |
+| `src/false-alerts/false-alerts.controller.ts` | `PATCH :incidentId/cancel` (lines 43-50) | Remove `ORG_ADMINISTRATOR`, `SYSTEM_ADMINISTRATOR`. Keep `CITIZEN`, `BYSTANDER`, `DISPATCHER`, `SUPERVISOR` |
+| `src/false-alerts/false-alerts.controller.ts` | `PATCH :incidentId/false-alert` (lines 78-84) | `@Roles(DISPATCHER, SUPERVISOR)` |
+| `src/false-alerts/false-alerts.service.ts` | `DISPATCHER_ROLES` (lines 18-23) | Remove `ORG_ADMINISTRATOR`, `SYSTEM_ADMINISTRATOR` |
+| `src/escalations/escalations.controller.ts` | all four endpoints (lines 25-53) | `@Roles(SUPERVISOR)` |
+| `src/disaster-mode/disaster-mode.controller.ts` | `activate`, `deactivate`, `broadcast` (lines 36, 44, 91) | `@Roles(SUPERVISOR)`. `GET status` keeps `SYSTEM_ADMINISTRATOR` (read-only banner) |
+| `src/communications/communications.service.ts` | `DISPATCHER_ROLES` (line 6) | Split into `CHAT_POST_ROLES` (`DISPATCHER`, `SUPERVISOR`) and read access. Under D1 the System Administrator may read but not post; the Org Administrator neither |
+| `src/jobs/processors/escalation.processor.ts` | `ESCALATION_ROLES.RESPONSE` (line 16) | `['SUPERVISOR']`, with the D5 fallback to `DISPATCHER` when the supervisor query returns no one |
+
+**Deliberately unchanged:**
+- `realtime/incident-participant.service.ts` `INCIDENT_STAFF_ROLES`: read visibility under D1. If D1 is "no", remove both admin roles and update `test/realtime/incident-participant.spec.ts:13`.
+- `GET /incidents`, `GET /incidents/:id/attachments`, `GET /audit/incidents/:id`, `GET /disaster-mode/status`: all read-only.
+- Every `DISPATCHER` and `SUPERVISOR` entry.
+- The `CITIZEN`/`BYSTANDER` cancel path.
+
+### Frontend: match the backend
+Remove `SYSTEM_ADMINISTRATOR` from:
+- `operations/fleet/page.tsx:301` `canChangeStatus`;
+- `operations/surge/page.tsx:360` `canManage`;
+- `operations/escalations/page.tsx:60`;
+- `operations/command/page.tsx:635`;
+- `operations/multi-agency/page.tsx:194, 409, 642`.
+
+The Phase 1 sidebar already hides these pages; this covers someone opening them by URL with D1 read access.
+
+### Tests
+- **New `test/rbac/separation-of-duties.spec.ts`:** for each endpoint above, read `ROLES_KEY` metadata and assert that `SYSTEM_ADMINISTRATOR` is absent and `DISPATCHER`/`SUPERVISOR` are present as listed.
+- **`false-alerts` service spec:** a System Administrator calling `markFalseAlert` gets `ForbiddenException`.
+- **Escalation processor spec:** `RESPONSE` notifies supervisors; with no active supervisor it notifies dispatchers.
+- **Check for breakage:** run `grep -rn "SYSTEM_ADMINISTRATOR" backend/test`. Today only `incident-creation.spec.ts:282` (Sys Admin *reporting* an incident, unaffected) and `incident-participant.spec.ts:13` (unchanged under D1) mention it.
+
+**Done when**
+- [ ] The suite is green.
+- [ ] As the System Administrator: `PATCH /v1/incidents/:id/status`, `POST /v1/escalations/:id/resolve` and `POST /v1/disaster-mode/activate` each return 403.
+- [ ] As the Supervisor: all three still work. As a Dispatcher: status change and false alert still work.
+- [ ] Full emergency flow re-run: citizen SOS → acknowledge → dispatch → responder accept (mobile) → on scene → resolve → close, with no errors.
+
+---
+
+## Phase 6: Org Administrator access
+
+### Backend: add `ORG_ADMINISTRATOR` to read endpoints (additive)
+
+| File | Endpoint |
+|---|---|
+| `src/resources/resources.controller.ts` | `GET /resources` (line 33), `GET /resources/:id` (line 128) |
+| `src/organizations/organizations.controller.ts` | `GET /organizations` (line 29), `GET /organizations/:id` (line 36) |
+
+Writes are unchanged. They already allow `ORG_ADMINISTRATOR` and are own-org in the UI. **Check while here:** `PATCH /resources/:id` and `PATCH /organizations/:id` must check own-org on the **server**. If they only check in the UI, add a service check that `actor.organization_id` matches (via `organization_memberships`) unless the actor is a System Administrator. Record what you find in this section.
+
+### Frontend
+- **Sidebar:** Dashboard · Organizations · Fleet & Units · Requests · Barangay Directory.
+- **Barangay Directory:** allow `ORG_ADMINISTRATOR` on `/administration/barangays` (the route from Phase 1.2b) in `role-access.ts`. The backend already allows it (`barangay-contacts.controller.ts:30`). No other administration route opens for this role.
+- **Requests page** (`/resources/requests`): uses the existing `GET /resources/requests` and `PATCH /resources/requests/:id/approve|deny`, both of which allow `ORG_ADMINISTRATOR`. It's a route rather than a tab because the Org Administrator has no other use for the Fleet page's operational tabs.
+- **Fleet & Units** for this role shows the Registry tab only (no status buttons).
+- **Dashboard panel** (from Phase 1): the organization's units by status, from `GET /resources`.
+- **Landing:** `/dashboard`.
+
+### Tests
+- Role-metadata assertions for the four read endpoints.
+- If the own-org server check is added, a spec for it.
+
+**Done when**
+- [ ] As `orgadmin@mdrrmo.bocaue.gov.ph`: every sidebar link loads with no 403.
+- [ ] The Barangay Directory edit works and is audited.
+- [ ] Editing another organization's unit is refused by the server.
+
+---
+
+## Phase 7: Approval for CRITICAL advisories (behind a flag)
+
+**Goal:** a CRITICAL advisory drafted by the LGU Information Officer is released only after an MDRRMO Supervisor approves it. With the flag off, behaviour is exactly as today.
+
+### 7.1 Schema
+Two migrations, because PostgreSQL cannot use a new enum value in the same transaction that adds it:
+
+`backend/prisma/migrations/20261023000000_announcement_pending_approval/migration.sql`
+```sql
+ALTER TYPE "announcement_status" ADD VALUE IF NOT EXISTS 'PENDING_APPROVAL' AFTER 'DRAFT';
+```
+
+`backend/prisma/migrations/20261023000100_announcement_approval_fields/migration.sql`
+```sql
+ALTER TABLE "announcements"
+  ADD COLUMN "approval_requested_at"    TIMESTAMPTZ(6),
+  ADD COLUMN "approval_requested_by_id" UUID,
+  ADD COLUMN "review_note"              TEXT;
+
+ALTER TABLE "announcements"
+  ADD CONSTRAINT "announcements_approval_requested_by_id_fkey"
+  FOREIGN KEY ("approval_requested_by_id") REFERENCES "users"("id")
+  ON DELETE NO ACTION ON UPDATE NO ACTION;
+```
+
+`schema.prisma`:
+- add `PENDING_APPROVAL` to `enum announcement_status`, after `DRAFT`;
+- add the three fields to `model Announcement`, plus the relation `users_announcements_approval_requested_by_idTousers User? @relation("announcements_approval_requested_by_idTousers", fields: [approval_requested_by_id], references: [id], onUpdate: NoAction)`;
+- add the back-relation field on `model User`, alongside the existing `announcements_approved_by_idTousers` back-relation.
+
+Then run `pnpm prisma migrate deploy && pnpm prisma generate`. The changes are all nullable or additive, so existing rows are untouched.
+
+### 7.2 Configuration
+- `ANNOUNCEMENT_APPROVAL_REQUIRED` (boolean, default `false`) in `backend/src/config/config.validation.ts` and `.env.example`.
+- `needsApproval(a) = flag && a.severity === 'CRITICAL'` (D3).
+
+### 7.3 Backend: announcement service and controller
+
+| Endpoint | Roles | Transition | Notes |
+|---|---|---|---|
+| `POST /announcements/:id/submit` | `ANNOUNCEMENTS_PUBLISHER`, `SYSTEM_ADMINISTRATOR` | `DRAFT → PENDING_APPROVAL` | Runs `assertPublishable` first. Sets `approval_requested_at/by`, clears `review_note`. An optional `scheduledAt` is stored in `scheduled_at`. Audit `STATUS_CHANGE`. Notifies active Supervisors (best-effort, through the existing notifications queue) |
+| `POST /announcements/:id/withdraw` | same | `PENDING_APPROVAL → DRAFT` | So the officer can edit. Audit `STATUS_CHANGE` |
+| `POST /announcements/:id/approve` | `SUPERVISOR` | `PENDING_APPROVAL → PUBLISHED`, or `→ SCHEDULED` if `scheduled_at` is in the future | Guarded `updateMany where status = PENDING_APPROVAL`, the same pattern as `publish()`. Sets `approved_by_id` to the supervisor. Refuses if the approver is `approval_requested_by_id`. Publishing reuses `afterPublish()` unchanged |
+| `POST /announcements/:id/return` | `SUPERVISOR` | `PENDING_APPROVAL → DRAFT` | Requires a `note` of at least 10 characters, stored in `review_note`. Audit `STATUS_CHANGE` |
+| `GET /announcements/approvals` | `SUPERVISOR` | — | Lists `PENDING_APPROVAL`, oldest first. **Declare it before `@Get(':id')`** ([announcements.controller.ts:128](../../backend/src/announcements/announcements.controller.ts#L128)), or `ParseUUIDPipe` on `:id` will reject "approvals" with a 400 |
+
+**Changes to existing methods:**
+- `publish()` and `schedule()`: if `needsApproval(existing)`, throw `BadRequestException('CRITICAL advisories need MDRRMO approval. Submit for approval instead.')`.
+- Publisher responses gain a computed `requiresApproval: boolean`, so the frontend never reads the env flag.
+- **Unchanged:** `update()` (already `DRAFT`-only, so a pending item is locked), `releaseDueScheduled()`, `afterPublish()`, and every public endpoint.
+
+**Interaction with D4:** a System Administrator creating a CRITICAL advisory goes through approval like everyone else.
+
+### 7.4 Frontend
+- **`features/announcements/api.ts`:** add `'PENDING_APPROVAL'` to `AnnouncementStatus`. Add `submit`, `withdraw`, `approve`, `return` and `approvals` calls and hooks.
+- **Compose page:** when `requiresApproval`, the primary button reads **"Submit for MDRRMO approval"** instead of Publish/Schedule.
+- **Announcements page:** a **Pending approval** filter; a returned draft shows the `review_note` prominently.
+- **New `app/(ops)/operations/approvals/page.tsx` (Supervisor):**
+  - shows the pending list, with a preview using the existing `AnnouncementPreview` component;
+  - Approve and Return actions, where Return asks for a note.
+- **Sidebar:** "Approvals" under Broadcast for the Supervisor. The LGU account gets **no new link**: "Pending approval" is a filter on its Announcements page, and its Dashboard shows a count of pending and returned items.
+- **`shared/src/enums/announcement-status.enum.ts`:** replace the stale values with the database's (`DRAFT`, `PENDING_APPROVAL`, `SCHEDULED`, `PUBLISHED`, `ARCHIVED`, `SUPERSEDED`, `CANCELLED`). It's imported nowhere today, so this is safe. Rebuild `shared` (`pnpm --filter @agap/shared build`) so its `.js`/`.d.ts` match.
+
+### 7.5 Mobile
+No change. Public endpoints filter by released statuses, `announcement.published` is emitted only from `afterPublish()`, and the mobile type union doesn't include `PENDING_APPROVAL`.
+
+### 7.6 Tests
+`backend/test/announcements/approval.spec.ts`:
+- **Flag off:** CRITICAL publishes directly, exactly as today (regression).
+- **Flag on:** `publish()` on CRITICAL throws; non-CRITICAL publishes directly.
+- **Submit → approve:** publishes once; `afterPublish` runs once; `approved_by_id` is the supervisor.
+- **Submit with a future time → approve:** becomes `SCHEDULED`; `releaseDueScheduled` later publishes it.
+- **Return:** needs a note, goes back to `DRAFT`, and `update()` works again.
+- **Approver is the requester:** refused.
+- **Concurrent approves:** only one succeeds (guarded `updateMany`).
+- **Public:** `findPublished` and `findPublicById` never return `PENDING_APPROVAL`.
+
+**Done when**
+- [ ] The migration applies cleanly on a copy of the dev database; `prisma generate` is clean; backend, frontend and mobile typechecks are clean.
+- [ ] Suite green.
+- [ ] With the flag on, end-to-end:
+  1. The LGU account drafts a CRITICAL flood advisory and submits it.
+  2. The Supervisor sees it in Approvals and returns it with a note.
+  3. The LGU account edits and resubmits.
+  4. The Supervisor approves.
+  5. The citizen app shows it, and SMS subscribers receive it once.
+- [ ] With the flag off, the same CRITICAL advisory publishes directly.
+
+---
+
+## Known gap: `incident_metrics` is never filled
+
+Found while checking the mockups' "Response Performance" panels (2026-10-22).
+
+- **What's missing:** `incident_metrics` exists (init migration) and is read by `analytics.service.ts` (`getResponseTimes`, `getSlaCompliance`). But no code, seed or database trigger ever inserts into it.
+- **Consequence:** the Analytics page's response-time and SLA figures are empty today, for both the Supervisor and the System Administrator.
+- **In this plan:** Phases 2 and 3 compute performance directly from `incidents` timestamps (`getPerformanceFromIncidents`), so they don't depend on the table.
+- **Follow-up (separate task):** either fill `incident_metrics` when an incident is resolved or closed (with a backfill for existing incidents), or switch `getResponseTimes`/`getSlaCompliance` to the incidents-based query and retire the table. Decide before relying on the Analytics page in a demo.
+
+## Out of scope (follow-ups)
+
+- A separate `INCIDENT_COMMANDER` role or a Mayor login (rejected in the spec).
+- Limiting the Supervisor's dispatch authority (rejected: night-shift risk).
+- Incident groups and staging areas (no backend model yet).
+- Enforcing the `role_permissions` table in a guard (a larger RBAC redesign).
+- Mockup widgets with no data source: weather, uptime percentage, API request volume, storage usage, a dispatcher "New Incident" form, a shaded barangay map for the LGU dashboard.
+- Per-organization scoping of Supervisor and Dispatcher incident lists.
+
+## Verification (every phase)
+
+1. `cd backend && pnpm typecheck && pnpm jest --config ./test/jest.config.ts` — all suites pass (baseline 36 / 564, plus new).
+2. `pnpm --filter @agap/frontend typecheck`.
+3. `pnpm --filter @agap/mobile typecheck` whenever `shared/` changes (Phases 2 and 7).
+4. **Manual role walkthrough.** Sign in as each web account (System Admin, dispatcher1, supervisor, announcements, orgadmin, receiving) and open every sidebar link: no 403, no fake zeros, the right landing page.
+5. **Emergency flow smoke test** after Phases 5b and 7: citizen SOS on mobile → dispatcher acknowledge and dispatch → responder accept on mobile → resolve → close. Barangay alert SMS still sent.
+6. Update the **Status** line at the top of this plan, and add a "Phase N status" section with what was verified and what's still pending.

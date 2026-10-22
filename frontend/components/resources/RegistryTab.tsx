@@ -258,7 +258,7 @@ interface ResourceRow {
   capabilities: string[];
 }
 
-export default function ResourceRegistryPage(): JSX.Element {
+export function RegistryTab(): JSX.Element {
   const user = useAuthUser();
   const canEdit = hasRole(user, 'ORG_ADMINISTRATOR', 'SYSTEM_ADMINISTRATOR');
 
@@ -410,7 +410,7 @@ export default function ResourceRegistryPage(): JSX.Element {
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-agap-textMain">Resource Registry</h1>
+          <h2 className="text-lg font-extrabold text-agap-textMain">Resource Registry</h2>
           <p className="mt-1 text-sm text-agap-textSub">
             {isLoading
               ? 'Loading…'
