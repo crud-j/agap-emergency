@@ -17,7 +17,7 @@ import {
   PriorityBadge, StatusChip, Button, Skeleton, EmptyState, EtaLabel,
 } from '@/components/ui';
 import {
-  useIncident, useUpdateIncidentStatus, useCreateResolution, useCloseIncident,
+  useIncident, useUpdateIncidentStatus, useCreateResolution, useCloseIncident, useReporterStanding,
 } from '@/features/incidents/hooks';
 import { usePriorityRecommendation } from '@/features/dispatch/hooks';
 import { useIncidentBarangay } from '@/hooks/useBarangay';
@@ -433,6 +433,7 @@ function People({ incident }: { incident: IncidentDetail }): JSX.Element {
             {REPORTER_STATUS_LABELS[reporterStatus]}
           </p>
         )}
+        {!reporter?.is_guest && <ReporterStandingLine incidentId={incident.id} />}
       </Section>
 
       <Section icon={Users} title={patients.length > 1 ? `Patients (${patients.length})` : 'Patient'}>
@@ -454,6 +455,29 @@ function People({ incident }: { incident: IncidentDetail }): JSX.Element {
         )}
       </Section>
     </div>
+  );
+}
+
+/** Trust signal for triage: the reporter's verified (closed) reports and false alerts. */
+function ReporterStandingLine({ incidentId }: { incidentId: string }): JSX.Element | null {
+  const { data } = useReporterStanding(incidentId);
+  const standing = data?.standing;
+  if (!standing) return null;
+  const falseAlerts = standing.falseAlerts > 0 && (
+    <span className="text-agap-danger">
+      {' '}· {standing.falseAlerts} false alert{standing.falseAlerts === 1 ? '' : 's'}
+    </span>
+  );
+  return standing.isVerifiedReporter ? (
+    <p className="mt-1 flex flex-wrap items-center gap-1 text-xs font-semibold text-agap-green">
+      <ShieldCheck size={12} />
+      Verified reporter · {standing.verifiedReports} closed report{standing.verifiedReports === 1 ? '' : 's'}
+      {falseAlerts}
+    </p>
+  ) : (
+    <p className="mt-1 text-xs text-agap-textSub">
+      First report{falseAlerts}
+    </p>
   );
 }
 
@@ -680,7 +704,7 @@ function StatusActionFooter({ incident }: { incident: IncidentDetail }): JSX.Ele
       )}
 
       {incident.status === 'RESOLVED' && (
-        <ResolutionDialog incidentId={incident.id} open={resolveOpen} onOpenChange={setResolveOpen} />
+        <ResolutionDialog incident={incident} open={resolveOpen} onOpenChange={setResolveOpen} />
       )}
     </DrawerFooter>
   );
@@ -719,9 +743,9 @@ const NO_DISPOSITION = '__none__';
  * the subsequent close fails, so the outcome is never lost.
  */
 function ResolutionDialog({
-  incidentId, open, onOpenChange,
+  incident, open, onOpenChange,
 }: {
-  incidentId: string;
+  incident: IncidentDetail;
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }): JSX.Element {
@@ -734,51 +758,67 @@ function ResolutionDialog({
   const close = useCloseIncident();
   const pending = createResolution.isPending || close.isPending;
 
-  function handleOpen(next: boolean) {
-    if (next) {
-      setOutcome(''); setDisposition(NO_DISPOSITION); setNotes(''); setError(null);
-    }
-    onOpenChange(next);
-  }
+  // Radix doesn't call onOpenChange when the parent opens a controlled dialog,
+  // so reset the form here.
+  useEffect(() => {
+    if (!open) return;
+    setOutcome(''); setDisposition(NO_DISPOSITION); setNotes(''); setError(null);
+  }, [open]);
 
   async function handleSubmit() {
     if (!outcome) { setError('Select an outcome.'); return; }
     setError(null);
     try {
       await createResolution.mutateAsync({
-        id: incidentId,
+        id: incident.id,
         body: {
           outcome,
           ...(disposition !== NO_DISPOSITION && { patientDisposition: disposition }),
           ...(notes.trim() && { resolutionNotes: notes.trim() }),
         },
       });
-      await close.mutateAsync({ id: incidentId });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not record the outcome.');
+      return;
+    }
+    try {
+      await close.mutateAsync({ id: incident.id });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not record resolution.');
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      setError(`Outcome saved, but closing failed: ${reason}. Try again.`);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+    <Dialog open={open} onOpenChange={(next) => { if (!pending) onOpenChange(next); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader className="mb-4">
           <DialogTitle className="flex items-center gap-2">
-            <CheckCircle2 size={16} className="text-agap-green" /> Resolve &amp; Close Incident
+            <CheckCircle2 size={18} className="shrink-0 text-agap-green" />
+            Resolve &amp; close incident
           </DialogTitle>
           <DialogDescription>
-            Record the outcome and patient disposition before closing. This is kept for analytics and audit.
+            Record the outcome before closing. It is kept for analytics and audit, and the reporter is told the incident is closed.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-1">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-xl bg-agap-surface px-3 py-2.5">
+          <span className="text-sm font-semibold text-agap-textMain">{incident.public_reference}</span>
+          <span className="text-xs text-agap-textSub">
+            {incident.resolved_at ? `Marked resolved ${timeAgo(incident.resolved_at)}` : 'Marked resolved'}
+          </span>
+        </div>
+
+        <div className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-agap-textMain">
+            <label htmlFor="resolution-outcome" className="block text-sm font-medium text-agap-textMain">
               Outcome <span className="text-agap-danger">*</span>
             </label>
-            <Select value={outcome} onValueChange={setOutcome}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select outcome" /></SelectTrigger>
+            <Select value={outcome} onValueChange={(v) => { setOutcome(v); setError(null); }}>
+              <SelectTrigger id="resolution-outcome" className="w-full">
+                <SelectValue placeholder="Select outcome" />
+              </SelectTrigger>
               <SelectContent>
                 {RESOLUTION_OUTCOMES.map((o) => (
                   <SelectItem key={o} value={o}>{titleCase(o)}</SelectItem>
@@ -788,9 +828,13 @@ function ResolutionDialog({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-agap-textMain">Patient disposition</label>
+            <label htmlFor="resolution-disposition" className="block text-sm font-medium text-agap-textMain">
+              Patient disposition
+            </label>
             <Select value={disposition} onValueChange={setDisposition}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Not applicable" /></SelectTrigger>
+              <SelectTrigger id="resolution-disposition" className="w-full">
+                <SelectValue placeholder="Not applicable" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NO_DISPOSITION}>Not applicable</SelectItem>
                 {PATIENT_DISPOSITIONS.map((d) => (
@@ -801,25 +845,30 @@ function ResolutionDialog({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-agap-textMain">Resolution notes</label>
+            <label htmlFor="resolution-notes" className="block text-sm font-medium text-agap-textMain">
+              Resolution notes <span className="font-normal text-agap-textSub">(optional)</span>
+            </label>
             <textarea
+              id="resolution-notes"
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Summary, follow-up needs, handover details…"
-              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green resize-none"
+              className="block w-full resize-none rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green"
             />
           </div>
 
           {error && (
-            <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger">{error}</p>
+            <p role="alert" className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger">{error}</p>
           )}
         </div>
 
         <DialogFooter>
-          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
+          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)} disabled={pending}>
+            Cancel
+          </Button>
           <Button variant="primary" size="sm" loading={pending} onClick={() => void handleSubmit()}>
-            Resolve &amp; Close
+            <CheckCircle2 size={14} /> Resolve &amp; close
           </Button>
         </DialogFooter>
       </DialogContent>

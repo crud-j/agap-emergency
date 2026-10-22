@@ -5,12 +5,14 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
 import {
@@ -35,6 +37,7 @@ export class DispatchService {
     private readonly audit: AuditService,
     private readonly realtime: RealtimeService,
     @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue: Queue,
+    @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
   ) {}
 
   async findAll(filters: { incidentId?: string; status?: string }) {
@@ -194,16 +197,12 @@ export class DispatchService {
       this.logger.warn(`Realtime emit failed for dispatch create: ${String(err)}`);
     }
 
+    // "Help is on the way" to the reporter: feed row + push, deduplicated per status.
+    void this.statusNotifier?.notifyReporter(incident.id, IncidentStatus.DISPATCHED);
+
     const reporterUserId = incident.incident_reporters?.user_id;
     try {
       if (reporterUserId) {
-        await this.notificationQueue.add('dispatch-created-push', {
-          userId: reporterUserId,
-          channel: 'PUSH',
-          title: 'Help is on the way',
-          body: `Responders have been dispatched. Ref: ${incident.public_reference}`,
-          data: { incidentId: incident.id, type: 'DISPATCH_CREATED' },
-        });
         await this.notificationQueue.add('dispatch-contact-notify', {
           userId: reporterUserId,
           channel: 'EMERGENCY_CONTACTS',

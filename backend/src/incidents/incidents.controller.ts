@@ -87,6 +87,14 @@ export class IncidentsController {
     return this.incidentsService.listMine(req.user.id);
   }
 
+  @Get('mine/standing')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "The citizen's Verified Reporter standing (counts only)" })
+  async myStanding(@Request() req: any) {
+    return this.incidentsService.getReporterStanding(req.user.id);
+  }
+
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -316,6 +324,15 @@ export class IncidentsController {
     @Request() req: any,
   ) {
     return this.incidentsService.createResolution(id, body, req.user.id);
+  }
+
+  @Get(':id/reporter-standing')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "The reporter's Verified Reporter standing, for dispatchers (counts only)" })
+  async reporterStanding(@Param('id', ParseUUIDPipe) id: string) {
+    return this.incidentsService.getReporterStandingForIncident(id);
   }
 
   @Get(':id/resolution')

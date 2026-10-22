@@ -179,7 +179,7 @@ The following are optional for local dev (features will be degraded without them
 
 | Variable | Feature |
 |---|---|
-| `FCM_PROJECT_ID` / `FCM_CLIENT_EMAIL` / `FCM_PRIVATE_KEY` | Push notifications |
+| `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` | Push notifications |
 | `TEXTBEE_API_KEY` / `TEXTBEE_DEVICE_ID` / `MDRRMO_OPS_PHONE` | SMS alerts |
 | `MAP_API_KEY` | Mapbox tiles / routing |
 | `STORAGE_*` | Incident photo upload |

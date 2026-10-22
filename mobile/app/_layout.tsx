@@ -1,6 +1,7 @@
 import '../global.css';
-import { useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { AppState, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -9,7 +10,8 @@ import { useAuthStore } from '../src/stores/auth.store';
 import { useAccessibilityStore } from '../src/stores/accessibility.store';
 import { homeRouteForRole } from '../src/lib/role-routing';
 import { OfflineBanner } from '../src/components/ui/OfflineBanner';
-import { registerPushToken } from '../src/services/push/push-registration';
+import { incidentIdFromNotification, registerPushToken } from '../src/services/push/push-registration';
+import { useLiveIncidentRefresh } from '../src/hooks/useLiveIncidentRefresh';
 import { AgapSplash } from '../src/components/splash/AgapSplash';
 
 // Wire React Native's AppState into TanStack Query's focus manager so
@@ -20,6 +22,18 @@ focusManager.setEventListener((handleFocus) => {
   });
   return () => sub.remove();
 });
+
+// Show pushes while the app is open too; iOS shows nothing otherwise.
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,6 +63,9 @@ function AuthGuard() {
     if (!isAuthenticated || !accessToken) return;
     void registerPushToken(accessToken);
   }, [accessToken, isAuthenticated]);
+
+  // Home, history, SOS and responder tabs refetch when an incident changes.
+  useLiveIncidentRefresh();
 
   useEffect(() => {
     loadFromStorage();
@@ -81,6 +98,31 @@ function AuthGuard() {
       }
     }
   }, [isAuthenticated, isLoading, accessibilityLoaded, segments, user?.role]);
+
+  // A tapped push opens its incident. Held until the session is loaded, and
+  // declared after the redirect above so a cold start lands home → incident.
+  const [tappedIncidentId, setTappedIncidentId] = useState<string | null>(null);
+  const handledResponses = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const take = (response: Notifications.NotificationResponse | null) => {
+      const id = incidentIdFromNotification(response);
+      const key = response?.notification.request.identifier;
+      if (!id || !key || handledResponses.current.has(key)) return;
+      handledResponses.current.add(key);
+      setTappedIncidentId(id);
+    };
+    take(Notifications.getLastNotificationResponse());
+    const sub = Notifications.addNotificationResponseReceivedListener(take);
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!tappedIncidentId || isLoading || !accessibilityLoaded || !isAuthenticated) return;
+    router.push({ pathname: '/incidents/[id]', params: { id: tappedIncidentId } } as never);
+    setTappedIncidentId(null);
+  }, [tappedIncidentId, isAuthenticated, isLoading, accessibilityLoaded]);
 
   return null;
 }

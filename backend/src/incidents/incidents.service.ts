@@ -5,6 +5,7 @@ import {
   Optional,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -14,6 +15,7 @@ import { IncidentStatusService } from './incident-status/incident-status.service
 import { DuplicateDetectionService } from './duplicate-detection/duplicate-detection.service';
 import { PriorityService } from './priority/priority.service';
 import { BarangayNotifyService } from '../barangay-coordination/barangay-notify.service';
+import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
 import {
   IncidentStatus,
   IncidentType,
@@ -33,6 +35,12 @@ import { REPORTER_SEX_INCLUDE, reporterSexFrom, type ReporterSex } from '../comm
 /** ICS situation report (incident_command_structures.situation_notes, MOD-36). */
 const ICS_SITUATION_NOTES_MAX = 4000;
 
+export interface ReporterStanding {
+  verifiedReports: number;
+  falseAlerts: number;
+  isVerifiedReporter: boolean;
+}
+
 @Injectable()
 export class IncidentsService {
   private readonly logger = new Logger(IncidentsService.name);
@@ -46,6 +54,7 @@ export class IncidentsService {
     private readonly audit: AuditService,
     private readonly contactNotification: EmergencyContactNotificationService,
     @Optional() private readonly barangayNotify?: BarangayNotifyService,
+    @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
   ) {}
 
   async create(dto: CreateIncidentDto, actorId?: string, actorRole?: UserRole): Promise<Incident> {
@@ -500,7 +509,21 @@ export class IncidentsService {
       void this.barangayNotify?.closeNoticesForIncident(id);
     }
 
+    this.notifyReporterOfStatus(id, newStatus);
+
     return updated;
+  }
+
+  /**
+   * Tells the reporter about a committed status change (MOD-42). Not awaited so a
+   * slow queue can't hold the request; statuses with no reporter message are skipped.
+   */
+  notifyReporterOfStatus(id: string, status: IncidentStatus): void {
+    try {
+      void this.statusNotifier?.notifyReporter(id, status);
+    } catch (err) {
+      this.logger.warn(`Reporter notification failed for ${id}: ${String(err)}`);
+    }
   }
 
   private async generateReference(): Promise<string> {
@@ -667,6 +690,7 @@ export class IncidentsService {
     }
 
     void this.barangayNotify?.closeNoticesForIncident(id);
+    this.notifyReporterOfStatus(id, IncidentStatus.FALSE_ALERT);
 
     return updated;
   }
@@ -706,6 +730,7 @@ export class IncidentsService {
     }
 
     void this.barangayNotify?.closeNoticesForIncident(id);
+    this.notifyReporterOfStatus(id, IncidentStatus.DUPLICATE);
 
     return updated;
   }
@@ -780,6 +805,7 @@ export class IncidentsService {
     }
 
     void this.barangayNotify?.closeNoticesForIncident(id);
+    this.notifyReporterOfStatus(id, IncidentStatus.DUPLICATE);
 
     return updated;
   }
@@ -789,16 +815,47 @@ export class IncidentsService {
     dto: { outcome: string; patientDisposition?: string; resolutionNotes?: string },
     actorId: string,
   ) {
-    await this.findById(id);
-    return this.prisma.incident_resolutions.create({
-      data: {
-        incident_id: id,
-        closed_by_id: actorId,
-        outcome: dto.outcome,
-        patient_disposition: (dto.patientDisposition ?? null) as any,
-        resolution_notes: dto.resolutionNotes ?? null,
-      },
+    const incident = await this.findById(id);
+    if ((incident.status as unknown as IncidentStatus) === IncidentStatus.CLOSED) {
+      throw new ConflictException('This incident is already closed; its resolution can no longer change.');
+    }
+    const data = {
+      closed_by_id: actorId,
+      outcome: dto.outcome,
+      patient_disposition: (dto.patientDisposition ?? null) as any,
+      resolution_notes: dto.resolutionNotes ?? null,
+    };
+    // Upsert: if the close step failed after the resolution saved, the dispatcher's
+    // retry updates it instead of failing on the unique incident_id forever.
+    return this.prisma.incident_resolutions.upsert({
+      where: { incident_id: id },
+      create: { incident_id: id, ...data },
+      update: data,
     });
+  }
+
+  /**
+   * Verified Reporter standing, the citizen's thank-you badge. Counts only: a report
+   * is verified once its incident is CLOSED (false alerts, duplicates and
+   * cancellations never reach CLOSED); false alerts are counted for dispatchers.
+   */
+  async getReporterStanding(userId: string): Promise<ReporterStanding> {
+    const mine = { incident_reporters: { is: { user_id: userId } } };
+    const [verifiedReports, falseAlerts] = await Promise.all([
+      this.prisma.incident.count({ where: { ...mine, status: IncidentStatus.CLOSED as any } }),
+      this.prisma.incident.count({ where: { ...mine, status: IncidentStatus.FALSE_ALERT as any } }),
+    ]);
+    return { verifiedReports, falseAlerts, isVerifiedReporter: verifiedReports > 0 };
+  }
+
+  /** The standing of an incident's reporter, for the dispatcher drawer. Guests have none. */
+  async getReporterStandingForIncident(id: string): Promise<{ guest: boolean; standing: ReporterStanding | null }> {
+    const reporter = await this.prisma.incidentReporter.findUnique({
+      where: { incident_id: id },
+      select: { user_id: true, is_guest: true },
+    });
+    if (!reporter?.user_id || reporter.is_guest) return { guest: true, standing: null };
+    return { guest: false, standing: await this.getReporterStanding(reporter.user_id) };
   }
 
   async getResolution(id: string) {

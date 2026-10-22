@@ -232,6 +232,8 @@ export class FalseAlertsService {
       this.logger.warn(`Realtime emit failed for false-alert status change: ${String(err)}`);
     }
 
+    this.incidents.notifyReporterOfStatus(incidentId, IncidentStatus.FALSE_ALERT);
+
     return updated;
   }
 }

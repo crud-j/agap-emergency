@@ -6,10 +6,12 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
+import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
 import { UpdateAssignmentStatusDto } from './dto/update-assignment-status.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { TrackLocationDto } from '../locations/dto/track-location.dto';
@@ -71,6 +73,7 @@ export class RespondersService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
+    @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
   ) {}
 
   async findAll(_filters: Record<string, unknown>) {
@@ -447,6 +450,15 @@ export class RespondersService {
       });
     } catch (err) {
       this.logger.warn(`Realtime emit failed for status change: ${String(err)}`);
+    }
+
+    // Tell the reporter and the assigning dispatcher after commit; not awaited,
+    // and the notifier never throws.
+    try {
+      void this.statusNotifier?.notifyReporter(dispatch.incident_id, incidentStatus);
+      void this.statusNotifier?.notifyDispatcher(dispatch.incident_id, incidentStatus, dispatchId);
+    } catch (err) {
+      this.logger.warn(`Status notification failed for ${dispatch.incident_id}: ${String(err)}`);
     }
 
     for (const d of finishedDispatches) {

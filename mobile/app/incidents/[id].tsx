@@ -31,6 +31,7 @@ import { getMapConfig } from '../../src/services/api/locations.api';
 import { useIncidentTracking } from '../../src/hooks/useIncidentTracking';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { isNativeMapAvailable } from '../../src/components/tracking/native-map-available';
+import { ReporterThanksCard } from '../../src/components/reporter/verified-reporter';
 
 const CitizenLocationMap = React.lazy(
   () => Promise.resolve({
@@ -254,6 +255,9 @@ function OverviewTab({
 
   return (
     <View style={styles.tabContent}>
+
+      {/* Thank-you + Verified Reporter badge once the incident is closed */}
+      {raw.status === 'CLOSED' && <ReporterThanksCard />}
 
       {/* Live tracking banner — active incidents only */}
       {isActive && (
@@ -731,10 +735,13 @@ export default function IncidentDetailScreen() {
     raw?.status ?? null,
   );
 
-  // Keep store in sync when viewing an active incident
+  // Keep store in sync: set while active, and release it once this incident ends
+  // so home and the SOS button stop showing it as active.
   React.useEffect(() => {
-    if (isActive && id) setActiveIncidentId(id);
-  }, [isActive, id, setActiveIncidentId]);
+    if (!raw || !id) return;
+    if (isActive) setActiveIncidentId(id);
+    else if (useIncidentStore.getState().activeIncidentId === id) setActiveIncidentId(null);
+  }, [raw, isActive, id, setActiveIncidentId]);
 
   const onRefresh = useCallback(() => { refetch(); }, [refetch]);
 

@@ -27,6 +27,8 @@ export interface IncidentListItem {
   acknowledged_at: string | null;
   dispatched_at: string | null;
   on_scene_at: string | null;
+  resolved_at?: string | null;
+  closed_at?: string | null;
   incident_locations: IncidentLocation | null;
   incident_reporters?: { is_guest: boolean; reporter_status?: string | null } | null;
   /** Structured caller intake (MOD-09 / MOD-24). The list endpoint loads only priority_reasons. */
@@ -193,8 +195,19 @@ export interface CreateResolutionBody {
   resolutionNotes?: string;
 }
 
+/** The reporter's Verified Reporter standing: counts only. Guests have none. */
+export interface ReporterStandingResponse {
+  guest: boolean;
+  standing: { verifiedReports: number; falseAlerts: number; isVerifiedReporter: boolean } | null;
+}
+
+export function fetchReporterStanding(id: string): Promise<ReporterStandingResponse> {
+  return api.get(`/incidents/${id}/reporter-standing`, getToken());
+}
+
 /** Record the incident outcome + patient disposition (MOD-45). One row per
- *  incident (incident_id is unique); call before closing. */
+ *  incident (incident_id is unique); call before closing. Re-sending before the
+ *  close updates the row, so a retry after a failed close works. */
 export function createResolution(id: string, body: CreateResolutionBody): Promise<IncidentResolution> {
   return api.post(`/incidents/${id}/resolution`, body, getToken());
 }

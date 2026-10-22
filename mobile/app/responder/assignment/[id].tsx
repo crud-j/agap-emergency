@@ -139,6 +139,8 @@ export default function AssignmentDetailScreen() {
         refetch(),
         // Keep Home / Missions / Map tabs in step without waiting for their poll.
         qc.invalidateQueries({ queryKey: ['responder-assignments'] }),
+        // Resolving frees the crew; Home's duty card shows it right away.
+        qc.invalidateQueries({ queryKey: ['responder-me'] }),
       ]);
     } catch (err) {
       Alert.alert(

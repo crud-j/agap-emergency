@@ -13,6 +13,7 @@ import { logout as logoutApi } from '../../src/services/api/auth.api';
 import { updateUserPreferences } from '../../src/services/api/users.api';
 import { BottomNav } from '../../src/components/ui/bottom-nav';
 import { MapIconCard } from '../../src/components/profile/map-icon-card';
+import { VerifiedReporterBadge } from '../../src/components/reporter/verified-reporter';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -118,6 +119,8 @@ export default function ProfileScreen() {
               )}
             </View>
           </View>
+
+          {!user?.is_guest && user?.role === 'CITIZEN' && <VerifiedReporterBadge />}
 
           {/* ── Profile completeness ──────────────────────────────────── */}
           {completeness < 100 ? (

@@ -86,6 +86,19 @@ export async function getIncidentStatus(id: string, token?: string) {
  * Incidents reported by the authenticated citizen (MOD-42). Hits the
  * ownership-scoped /mine endpoint — the generic list route is ops-only.
  */
+/** Verified Reporter standing: a report counts once its incident is CLOSED. */
+export interface ReporterStanding {
+  verifiedReports: number;
+  falseAlerts: number;
+  isVerifiedReporter: boolean;
+}
+
+export async function getMyStanding(): Promise<ReporterStanding> {
+  const res = await authedFetch(`${API_BASE}/v1/incidents/mine/standing`);
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
+  return res.json();
+}
+
 export async function listMyIncidents(): Promise<IncidentSummary[]> {
   const res = await authedFetch(`${API_BASE}/v1/incidents/mine`);
   if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);

@@ -68,7 +68,9 @@ export const SelectContent = forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-xl border border-[rgba(168,181,193,0.20)] bg-white shadow-[0_8px_32px_rgba(135,149,163,0.14)]',
+        // z-[1320]: above the dialog (z-[1310]) and drawer (z-[1210]); at z-50 the
+        // options opened behind the Resolve & Close dialog and could not be picked.
+        'relative z-[1320] max-h-96 min-w-[8rem] overflow-hidden rounded-xl border border-[rgba(168,181,193,0.20)] bg-white shadow-[0_8px_32px_rgba(135,149,163,0.14)]',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
         'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
         'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',

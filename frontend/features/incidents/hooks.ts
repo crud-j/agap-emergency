@@ -14,6 +14,7 @@ import {
   updateIncidentStatus,
   createResolution,
   fetchResolution,
+  fetchReporterStanding,
   type IncidentListParams,
   type SubmitAssessmentBody,
   type CreateResolutionBody,
@@ -25,6 +26,16 @@ export function useIncidents(params?: IncidentListParams, opts?: { enabled?: boo
     queryFn: () => fetchIncidents(params),
     staleTime: 30_000,
     enabled: opts?.enabled ?? true,
+  });
+}
+
+/** Verified Reporter standing of the incident's reporter (dispatcher drawer). */
+export function useReporterStanding(id: string | null) {
+  return useQuery({
+    queryKey: ['reporter-standing', id],
+    queryFn: () => fetchReporterStanding(id!),
+    enabled: !!id,
+    staleTime: 60_000,
   });
 }
 

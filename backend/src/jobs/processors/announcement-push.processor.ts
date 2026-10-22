@@ -7,6 +7,7 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
+import { tokenFromConfig } from '../../notifications/push-token';
 
 export interface AnnouncementPushJobData {
   announcementId: string;
@@ -123,18 +124,10 @@ export class AnnouncementPushProcessor extends WorkerHost {
       );
 
       // 3. Fan-out FCM sends — per-token try/catch, never abort batch.
-      // Tokens are stored as JSON objects by NotificationsService, but accept
-      // the legacy raw-string shape as well.
       let sent = 0;
       for (const record of filteredRecords) {
-        const value = record.config_value;
-        const token =
-          typeof value === 'string'
-            ? value
-            : value && typeof value === 'object' && !Array.isArray(value) && 'fcmToken' in value
-              ? value.fcmToken
-              : null;
-        if (!token || typeof token !== 'string') continue;
+        const token = tokenFromConfig(record.config_value);
+        if (!token) continue;
         try {
           await getMessaging().send({
             token,

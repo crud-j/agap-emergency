@@ -1,20 +1,30 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Bell, AlertCircle, Megaphone, Info, CheckCheck } from 'lucide-react';
+import { Bell, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useUnreadCount, useNotifications, useMarkRead, useMarkAllRead } from '@/features/notifications/hooks';
 import type { AppNotification } from '@/features/notifications/api';
+import { Toast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/use-toast';
+import { onIncidentEvent } from '@/lib/websocket';
+import type { NotificationCreatedPayload } from '@agap/shared';
 
 // ─── Event-type display config ─────────────────────────────────────────────────
 
 const EVENT_META: Record<string, { icon: typeof AlertCircle; color: string; bg: string }> = {
-  DISPATCH_CREATED:   { icon: AlertCircle, color: '#D97706', bg: '#FFF7ED' },
-  INCIDENT_ESCALATED: { icon: AlertCircle, color: '#DC2626', bg: '#FEF2F2' },
-  INCIDENT_UPDATED:   { icon: Info,        color: '#3B82F6', bg: '#EFF6FF' },
-  ANNOUNCEMENT:       { icon: Megaphone,   color: '#0D6053', bg: '#EEF7F4' },
+  DISPATCH_CREATED:          { icon: AlertCircle,  color: '#D97706', bg: '#FFF7ED' },
+  INCIDENT_ESCALATED:        { icon: AlertCircle,  color: '#DC2626', bg: '#FEF2F2' },
+  INCIDENT_AWAITING_CLOSURE: { icon: CheckCircle2, color: '#0D6053', bg: '#EEF7F4' },
+  RESPONDER_:                { icon: Truck,        color: '#7C3AED', bg: '#F5F3FF' },
+  INCIDENT_UPDATED:          { icon: Info,         color: '#3B82F6', bg: '#EFF6FF' },
+  ANNOUNCEMENT:              { icon: Megaphone,    color: '#0D6053', bg: '#EEF7F4' },
 };
+
+function incidentLink(incidentId: string): string {
+  return `/operations/incidents?id=${incidentId}`;
+}
 
 function getEventMeta(eventType: string) {
   return (
@@ -52,7 +62,7 @@ function NotifRow({
   function handleClick() {
     if (unread) onRead(notif.id);
     if (notif.incident_id) {
-      router.push(`/operations/incidents?id=${notif.incident_id}`);
+      router.push(incidentLink(notif.incident_id));
     } else if (notif.event_type === 'ANNOUNCEMENT' && typeof notif.data_payload?.announcementId === 'string') {
       router.push(`/announcements/${notif.data_payload.announcementId}`);
     }
@@ -105,6 +115,23 @@ export function NotificationBell() {
 
   const unread = countData?.unread ?? 0;
   const notifications = listData?.data ?? [];
+  const router = useRouter();
+  const { toasts, toast, dismiss } = useToast();
+  const toastLinks = useRef(new Map<string, string>());
+
+  // A live toast for each new notification (e.g. a unit resolved an incident and
+  // it awaits closure). Clicking it opens the incident.
+  useEffect(() => {
+    return onIncidentEvent<NotificationCreatedPayload>('notification.created', (n) => {
+      const id = toast({
+        title: n.title,
+        ...(n.body && { description: n.body }),
+        variant: n.type === 'INCIDENT_AWAITING_CLOSURE' ? 'success' : 'default',
+        duration: 8000,
+      });
+      if (n.incidentId) toastLinks.current.set(id, incidentLink(n.incidentId));
+    });
+  }, [toast]);
 
   // Close on outside click
   useEffect(() => {
@@ -117,6 +144,26 @@ export function NotificationBell() {
 
   return (
     <div ref={ref} className="relative">
+      {toasts.map((t) => {
+        const link = toastLinks.current.get(t.id);
+        return (
+          <Toast
+            key={t.id}
+            title={t.title}
+            {...(t.description && { description: t.description })}
+            {...(t.variant && { variant: t.variant })}
+            {...(t.duration !== undefined && { duration: t.duration })}
+            {...(link && { className: 'cursor-pointer', onClick: () => router.push(link) })}
+            onOpenChange={(isOpen) => {
+              if (!isOpen) {
+                dismiss(t.id);
+                toastLinks.current.delete(t.id);
+              }
+            }}
+          />
+        );
+      })}
+
       {/* Bell button */}
       <button
         onClick={() => setOpen((v) => !v)}

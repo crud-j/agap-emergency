@@ -24,6 +24,19 @@ const EVENT_CONFIG: Record<string, { icon: IconName; color: string; bg: string; 
   INCIDENT_STATUS_CHANGED: { icon: 'sync-outline',        color: '#3B82F6', bg: '#EFF6FF', label: 'Status change' },
   ANNOUNCEMENT:            { icon: 'megaphone-outline',   color: '#0D6053', bg: '#EEF7F4', label: 'Announcement' },
   RESPONDER_ASSIGNED:      { icon: 'person-add-outline',  color: '#7C3AED', bg: '#F5F3FF', label: 'Assignment' },
+  // The reporter's incident timeline (one per status step).
+  INCIDENT_ACKNOWLEDGED:      { icon: 'checkmark-circle-outline', color: '#3B82F6', bg: '#EFF6FF', label: 'Report received' },
+  INCIDENT_DISPATCHED:        { icon: 'car-outline',              color: '#D97706', bg: '#FFF7ED', label: 'Dispatched' },
+  INCIDENT_EN_ROUTE:          { icon: 'navigate-outline',         color: '#D97706', bg: '#FFF7ED', label: 'On the way' },
+  INCIDENT_ON_SCENE:          { icon: 'location-outline',         color: '#7C3AED', bg: '#F5F3FF', label: 'Arrived' },
+  INCIDENT_TRANSPORTING:      { icon: 'medkit-outline',           color: '#7C3AED', bg: '#F5F3FF', label: 'Transporting' },
+  INCIDENT_ASSISTING:         { icon: 'hand-left-outline',        color: '#7C3AED', bg: '#F5F3FF', label: 'Assisting' },
+  INCIDENT_RESOLVED:          { icon: 'checkmark-done-outline',   color: '#0D6053', bg: '#EEF7F4', label: 'Resolved' },
+  INCIDENT_CLOSED:            { icon: 'shield-checkmark-outline', color: '#0D6053', bg: '#EEF7F4', label: 'Closed' },
+  INCIDENT_REFERRED:          { icon: 'arrow-redo-outline',       color: '#3B82F6', bg: '#EFF6FF', label: 'Referred' },
+  INCIDENT_UNABLE_TO_RESPOND: { icon: 'alert-circle-outline',     color: '#DC2626', bg: '#FEF2F2', label: 'Unable to respond' },
+  INCIDENT_FALSE_ALERT:       { icon: 'close-circle-outline',     color: '#8795A3', bg: '#F5F7FA', label: 'False alert' },
+  INCIDENT_DUPLICATE:         { icon: 'git-merge-outline',        color: '#8795A3', bg: '#F5F7FA', label: 'Merged' },
 };
 
 function getConfig(eventType: string) {

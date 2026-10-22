@@ -5,12 +5,14 @@ import { DispatchService } from './dispatch.service';
 import { ResourceMatchingService } from './resource-matching/resource-matching.service';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AuditModule } from '../audit/audit.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
   imports: [
     RealtimeModule,
     AuditModule,
+    NotificationsModule,
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
   ],
   controllers: [DispatchController],

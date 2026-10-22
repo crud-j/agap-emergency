@@ -257,6 +257,14 @@ export const en = {
     mapIconSaveError: 'Could not save your choice. Check your connection and try again.',
     mapIconNotMedical: 'Not part of your medical info and not shared with other citizens. Only dispatchers and your assigned responders see it.',
   },
+  reporter: {
+    verifiedTitle: 'Verified Reporter',
+    verifiedOne: '1 verified report',
+    verifiedMany: '{n} verified reports',
+    notYet: 'When an emergency you report is resolved and closed, you earn the Verified Reporter badge.',
+    thanksTitle: 'Thank you for reporting',
+    thanksBody: 'Your report helped responders reach someone in need. It now counts toward your Verified Reporter badge.',
+  },
   passkeys: {
     title: 'Passkeys',
     intro: 'A passkey lets you sign in to AGAP with your phone screen lock (fingerprint, PIN, pattern or password) instead of a password. It never leaves this device.',
@@ -661,6 +669,14 @@ export const fil: typeof en = {
     mapIconDismiss: 'Hindi muna',
     mapIconSaveError: 'Hindi na-save ang iyong pinili. Suriin ang koneksyon at subukan muli.',
     mapIconNotMedical: 'Hindi ito bahagi ng iyong medical info at hindi ibinabahagi sa ibang mamamayan. Ang dispatcher at ang nakatalagang responder lamang ang makakakita nito.',
+  },
+  reporter: {
+    verifiedTitle: 'Beripikadong Tagapag-ulat',
+    verifiedOne: '1 beripikadong ulat',
+    verifiedMany: '{n} beripikadong ulat',
+    notYet: 'Kapag naresolba at naisara ang emergency na iniulat mo, makukuha mo ang badge na Beripikadong Tagapag-ulat.',
+    thanksTitle: 'Salamat sa pag-uulat',
+    thanksBody: 'Nakatulong ang iyong ulat para maabot ng mga responder ang nangangailangan. Bilang na ito sa iyong badge na Beripikadong Tagapag-ulat.',
   },
   passkeys: {
     title: 'Mga Passkey',

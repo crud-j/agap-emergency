@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState, type JSX } from 'react';
+import { Suspense, useEffect, useMemo, useState, type JSX } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Archive, Search } from 'lucide-react';
 import {
   DataTable, PriorityBadge, StatusChip, Button,
@@ -49,9 +50,20 @@ interface QueueRow {
  * MOD-23/24 — Incident Command Queue. Filterable/sortable DataTable of incidents
  * with live insert/update (SocketProvider keeps the ['incidents'] cache fresh).
  * Row click opens the shared IncidentDetailDrawer (also used by the map).
+ * `?id=<incidentId>` (the notification bell's links) opens that incident directly.
  */
 export default function IncidentQueuePage(): JSX.Element {
+  // useSearchParams needs a Suspense boundary in the app router.
+  return (
+    <Suspense>
+      <IncidentQueue />
+    </Suspense>
+  );
+}
+
+function IncidentQueue(): JSX.Element {
   const wsState = useWsState();
+  const linkedId = useSearchParams().get('id');
   const [view, setView] = useState<QueueView>('ACTIVE');
   const [page, setPage] = useState(1);
   const queryStatuses = view === 'ACTIVE'
@@ -75,6 +87,12 @@ export default function IncidentQueuePage(): JSX.Element {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!linkedId) return;
+    setSelectedId(linkedId);
+    setDrawerOpen(true);
+  }, [linkedId]);
 
   const barangayOptions = useMemo(() => {
     const set = new Set<string>();

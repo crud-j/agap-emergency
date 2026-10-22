@@ -23,6 +23,11 @@ export async function registerPushToken(
         name: 'AGAP announcements',
         importance: Notifications.AndroidImportance.DEFAULT,
       });
+      // Must match INCIDENT_UPDATES_CHANNEL in backend incident-status-notifier.ts.
+      await Notifications.setNotificationChannelAsync('incident-updates', {
+        name: 'Incident updates',
+        importance: Notifications.AndroidImportance.HIGH,
+      });
     }
 
     const deviceToken = await Notifications.getDevicePushTokenAsync();
@@ -33,4 +38,12 @@ export async function registerPushToken(
     console.warn('Unable to register push notification token', error);
     return false;
   }
+}
+
+/** Incident a tapped notification points at, if any (data.incidentId from the backend). */
+export function incidentIdFromNotification(
+  response: Notifications.NotificationResponse | null | undefined,
+): string | null {
+  const id = response?.notification.request.content.data?.incidentId;
+  return typeof id === 'string' && id ? id : null;
 }

@@ -39,7 +39,10 @@ export const DialogContent = forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-1/2 top-1/2 z-[1310] w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
+        // Inset from the screen edges and scrollable, so a tall form never runs off
+        // a short or narrow window.
+        'fixed left-1/2 top-1/2 z-[1310] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2',
+        'max-h-[calc(100dvh-2rem)] overflow-y-auto',
         'bg-white rounded-2xl shadow-[0_20px_60px_rgba(135,149,163,0.20)] border border-[rgba(168,181,193,0.20)]',
         'p-6 focus:outline-none',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
@@ -62,11 +65,12 @@ export const DialogContent = forwardRef<
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 export function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={cn('flex flex-col gap-1.5 mb-5', className)} {...props} />;
+  // pr-8 keeps the title clear of the close button.
+  return <div className={cn('flex flex-col gap-1.5 mb-5 pr-8', className)} {...props} />;
 }
 
 export function DialogFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={cn('flex justify-end gap-3 mt-6', className)} {...props} />;
+  return <div className={cn('flex flex-col-reverse gap-2 mt-6 sm:flex-row sm:justify-end sm:gap-3', className)} {...props} />;
 }
 
 export const DialogTitle = forwardRef<

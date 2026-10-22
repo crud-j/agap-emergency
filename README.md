@@ -95,9 +95,9 @@ Open `.env` and fill in the required values:
 | `TEXTBEE_API_KEY` | For SMS | Textbee API key (https://textbee.dev) |
 | `TEXTBEE_DEVICE_ID` | For SMS | Android gateway device ID from Textbee dashboard |
 | `MDRRMO_OPS_PHONE` | For SMS | Operations center phone number that receives alerts |
-| `FCM_PROJECT_ID` | For push | Firebase project credentials |
-| `FCM_CLIENT_EMAIL` | For push | Firebase project credentials |
-| `FCM_PRIVATE_KEY` | For push | Firebase project credentials |
+| `FIREBASE_PROJECT_ID` | For push | Firebase project credentials |
+| `FIREBASE_CLIENT_EMAIL` | For push | Firebase project credentials |
+| `FIREBASE_PRIVATE_KEY` | For push | Firebase project credentials |
 | `MAP_API_KEY` | For maps | Mapbox public token |
 | `INITIAL_ADMIN_PASSWORD` | Yes | First login password for admin account |
 

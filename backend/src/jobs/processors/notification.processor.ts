@@ -6,6 +6,7 @@ import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { tokenFromConfig } from '../../notifications/push-token';
 
 export interface NotificationJobData {
   userId?: string;
@@ -14,6 +15,8 @@ export interface NotificationJobData {
   title?: string;
   body: string;
   data?: Record<string, unknown>;
+  /** Android notification channel; omitted → the app's `default` channel. */
+  androidChannelId?: string;
 }
 
 @Processor(QUEUE_NAMES.NOTIFICATIONS)
@@ -74,7 +77,7 @@ export class NotificationProcessor extends WorkerHost {
         where: { config_key: `fcm_token:${data.userId}` },
       });
 
-      const token = tokenRecord?.config_value as string | undefined;
+      const token = tokenFromConfig(tokenRecord?.config_value);
       if (!token) {
         this.logger.warn(`No FCM token for userId=${data.userId}`);
         return;
@@ -94,6 +97,9 @@ export class NotificationProcessor extends WorkerHost {
         data: data.data
           ? Object.fromEntries(Object.entries(data.data).map(([k, v]) => [k, String(v)]))
           : {},
+        ...(data.androidChannelId && {
+          android: { priority: 'high', notification: { channelId: data.androidChannelId } },
+        }),
       });
 
       this.logger.log(`Push sent to userId=${data.userId}`);

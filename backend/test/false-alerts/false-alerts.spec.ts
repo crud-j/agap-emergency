@@ -34,6 +34,7 @@ function makeMocks(incidentOverrides: Parameters<typeof makeIncident>[0] = {}) {
 
   const incidents = {
     findById: jest.fn().mockResolvedValue(incident),
+    notifyReporterOfStatus: jest.fn(),
   };
 
   const statusService = new IncidentStatusService();
