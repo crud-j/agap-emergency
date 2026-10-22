@@ -19,6 +19,8 @@ export interface AuditLogEntry {
   new_values: Record<string, unknown> | null;
   occurred_at: string;
   users?: { full_name: string } | null;
+  /** The account the row is about, when `entity_type` is `user` (GET /audit list only). */
+  entity_user?: { id: string; full_name: string | null; role: string } | null;
 }
 
 export interface AuditLogParams {

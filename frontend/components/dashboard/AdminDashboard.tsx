@@ -4,7 +4,7 @@ import type { JSX } from 'react';
 import Link from 'next/link';
 import { ArrowRight, HeartPulse, Truck, Users } from 'lucide-react';
 import { Badge, StatCard } from '@/components/ui';
-import { HealthTab } from '@/components/admin/AdminSections';
+import { HealthTab } from '@/components/admin/HealthSections';
 import { DashboardBanners } from '@/components/dashboard/DashboardBanners';
 import { useAdminUsers } from '@/features/admin/hooks';
 import { useResources } from '@/features/resources/hooks';
@@ -14,8 +14,8 @@ import { titleCase } from '@/lib/incident-format';
 const NEWEST_USERS = 5;
 
 /**
- * System Administrator dashboard (MOD-49): platform health, registry counts and the
- * newest staff accounts. No operational incident data (separation of duties).
+ * System Administrator dashboard (MOD-49): platform health with background queues,
+ * registry counts and the newest staff accounts. No operational incident data (separation of duties).
  */
 export function AdminDashboard(): JSX.Element {
   // The user list is newest first (administration.service.ts orders by created_at desc).
@@ -62,7 +62,15 @@ export function AdminDashboard(): JSX.Element {
       </div>
 
       <section className="space-y-3">
-        <h2 className="text-[13px] font-bold text-agap-textMain">System health</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-[13px] font-bold text-agap-textMain">System health</h2>
+          <Link
+            href="/administration/integrations"
+            className="flex items-center gap-1 text-[12px] font-semibold text-agap-green hover:text-agap-green/80"
+          >
+            Integrations <ArrowRight size={13} />
+          </Link>
+        </div>
         <HealthTab />
       </section>
 

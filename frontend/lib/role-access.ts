@@ -34,6 +34,7 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/operations/triage', roles: OPS },
   { prefix: '/operations/dispatch', roles: OPS },
   { prefix: '/operations/multi-agency', roles: OPS },
+  { prefix: '/operations/history', roles: OPS },
   { prefix: '/operations/escalations', roles: [SUPERVISOR] },
   { prefix: '/operations/command', roles: [SUPERVISOR] },
   { prefix: '/operations/surge', roles: [SUPERVISOR] },
@@ -151,12 +152,20 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Records',
+    items: [
+      { href: '/operations/history', label: 'Incident History', roles: OPS },
+    ],
+  },
+  {
     label: 'Administration',
     items: [
       { href: '/administration/users', label: 'Users & Accounts', roles: [SYS_ADMIN] },
       { href: '/administration/permissions', label: 'Roles & Permissions', roles: [SYS_ADMIN] },
       { href: '/administration/barangays', label: 'Barangay Directory', roles: [SYS_ADMIN] },
       { href: '/audit', label: 'Audit Log', roles: [SYS_ADMIN] },
+      { href: '/administration/security', label: 'Security Events', roles: [SYS_ADMIN] },
+      { href: '/administration/integrations', label: 'Integrations', roles: [SYS_ADMIN] },
       { href: '/administration/config', label: 'Configuration', roles: [SYS_ADMIN] },
     ],
   },

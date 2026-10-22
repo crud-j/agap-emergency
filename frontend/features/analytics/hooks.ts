@@ -8,6 +8,7 @@ import {
   fetchFalseAlertRate,
   fetchDailySummary,
   fetchMunicipalOverview,
+  fetchDispatchSummary,
 } from './api';
 
 export function useResponseTimes() {
@@ -60,6 +61,16 @@ export function useMunicipalOverview() {
     queryKey: ['municipal-overview'],
     queryFn: fetchMunicipalOverview,
     staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+}
+
+/** Dispatcher dashboard counts; SocketProvider invalidates on incident and dispatch events. */
+export function useDispatchSummary() {
+  return useQuery({
+    queryKey: ['dispatch-summary'],
+    queryFn: fetchDispatchSummary,
+    staleTime: 15_000,
     refetchInterval: 60_000,
   });
 }

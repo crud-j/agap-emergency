@@ -15,7 +15,7 @@ import {
   type Column,
 } from '@/components/ui';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
-import { titleCase } from '@/lib/incident-format';
+import { ACTIVE_STATUSES, titleCase } from '@/lib/incident-format';
 import { useIncidents } from '@/features/incidents/hooks';
 import {
   useIncidentAgencies,
@@ -46,10 +46,6 @@ const RESOURCE_TYPES = [
 
 const REQUEST_STATUSES = ['ALL', 'PENDING', 'OFFERED', 'ACCEPTED', 'REJECTED', 'CANCELLED', 'FULFILLED'] as const;
 
-const ACTIVE_STATUSES = [
-  'SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED', 'ASSESSED',
-  'DISPATCH_PENDING', 'DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING',
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -81,7 +77,7 @@ function IncidentPicker({
   value: string | null;
   onChange: (id: string | null) => void;
 }): JSX.Element {
-  const { data, isLoading } = useIncidents({ perPage: 50 });
+  const { data, isLoading } = useIncidents({ statuses: ACTIVE_STATUSES, perPage: 100 });
   const active = (data?.data ?? []).filter((i) => ACTIVE_STATUSES.includes(i.status));
 
   if (isLoading) return <Skeleton className="h-10 rounded-xl" />;

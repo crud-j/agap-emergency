@@ -27,6 +27,13 @@ export class AnalyticsController {
     return this.analyticsService.getMunicipalOverview();
   }
 
+  @Get('dispatch-summary')
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Dispatcher dashboard counts (counts only)' })
+  async dispatchSummary() {
+    return this.analyticsService.getDispatchSummary();
+  }
+
   @Get('response-times')
   @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Average response times by category' })

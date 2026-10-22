@@ -22,13 +22,14 @@ export class AuditController {
 
   @Get()
   @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
-  @ApiOperation({ summary: 'List audit log entries' })
+  @ApiOperation({ summary: 'List audit log entries (action: one value or a comma-separated list)' })
   async findAll(
     @Query('page') page?: number,
     @Query('perPage') perPage?: number,
     @Query('action') action?: string,
     @Query('actorId') actorId?: string,
     @Query('entityType') entityType?: string,
+    @Query('entityId', new ParseUUIDPipe({ optional: true })) entityId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
@@ -38,6 +39,7 @@ export class AuditController {
       ...(action && { action }),
       ...(actorId && { actorId }),
       ...(entityType && { entityType }),
+      ...(entityId && { entityId }),
       ...(from && { from }),
       ...(to && { to }),
     });

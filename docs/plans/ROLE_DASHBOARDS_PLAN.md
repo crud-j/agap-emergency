@@ -1,6 +1,6 @@
 # Plan: Role Dashboards and Separation of Duties
 
-> **Status (2026-10-22):** Phases 1–3 built (signed-in walkthroughs pending); Phases 4–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
+> **Status (2026-10-22):** Phases 1–4 and 5a built (signed-in walkthroughs pending); Phases 5b–7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
 > **How to use:** build one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts. Phase 0 is decisions only.
 > **Modules:** MOD-21 (ops dashboard), MOD-41 (escalation), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration), MOD-50 (analytics), MOD-52 (surge), MOD-53 (announcements).
 
@@ -442,6 +442,31 @@ In `backend/src/analytics/analytics.controller.ts` and `analytics.service.ts`:
 - [ ] The counts match the queue's filters.
 - [ ] A closed demo incident appears in History.
 
+### Phase 4 status: BUILT, signed-in walkthrough pending (2026-10-22)
+
+**Data review first.** The Dispatcher dashboard counted from `GET /incidents?perPage=100`, which is the newest 100 incidents of **any** status (`orderBy submitted_at desc`, no status filter). Once more than 100 incidents exist, older active ones fall out and every card undercounts. "Responders on scene" counted the first 100 responders the same way. There was no source at all for "vs. last 24 h".
+
+**Built**
+- **Backend `GET /v1/analytics/dispatch-summary`** (**added**: the phase was planned as frontend only, but no Dispatcher-readable endpoint returned these counts; `/oversight/*` is Supervisor-only by design). `DISPATCHER`, `SUPERVISOR`; counts only: `active`, `unreviewed` (`SUBMITTED`/`RECEIVED`), `awaitingDispatch` (`ACKNOWLEDGED`/`ASSESSED`/`DISPATCH_PENDING`), `critical`, `enRoute`, `onScene`, `last24h` and `previous24h` (`reported` by `submitted_at`, excluding `DRAFT`/`DUPLICATE`; `critical`; `resolved` by `resolved_at`), `units`. Uses the shared `ACTIVE_INCIDENT_STATUSES`, the same list as the Incident Queue.
+- **Dispatcher dashboard** (`OpsDashboard`): six cards (Active, Unreviewed with awaiting-dispatch, Critical, En route · on scene, Resolved in 24 h, Units available) with "± vs previous 24 h" where a stored comparison exists; quick actions Assign unit, View all incidents, Open map. The recent list now loads only the 8 rows it shows.
+- **Incident History** `app/(ops)/operations/history/page.tsx`: `GET /incidents?statuses=…` with filters (All, Resolved & closed, Referred, Cancelled & false alerts, Duplicates, Unable to respond), server paging and total, rows open the incident drawer (no actions on ended incidents; Resolved and Referred keep their close action).
+- **Sidebar:** new Records group with Incident History for Dispatcher and Supervisor (last link for both); route `/operations/history` is OPS only.
+- **Same newest-N bug fixed on three pages** (frontend only): Triage, Multi-Agency and the Command / ICS picker now ask the server for the statuses they show (`statuses=…`) instead of filtering the newest 50–100 incidents. Their private `ACTIVE_STATUSES` copies now import the shared list.
+- **Realtime:** `SocketProvider` refreshes `['dispatch-summary']` on incident, dispatch and resource status events.
+
+**Deviations from the text above**
+- One backend endpoint added (above). Without it the counts could not match the queue.
+- Cards follow the mockup's six, with the spec's "awaiting dispatch" and "units available" folded in. "vs. last 24 h" is shown only for reported, critical and resolved counts: Active, Unreviewed, En route and On scene are live snapshots with no stored history to compare.
+
+**Verified**
+- Backend type check clean; full suite **39 suites, 593 tests** (4 new in `test/analytics/dispatch-summary.spec.ts`).
+- Frontend type check clean; 59 tests (role-access spec updated for the new link and route).
+- `getDispatchSummary()` ran against the dev database: active 21 and unreviewed 10, matching direct SQL.
+
+**Pending**
+- Signed-in **Done when** checks below. The dev database has no `CLOSED` incident yet (History shows 2 false alerts and 1 resolved, `INC-2026-DEMO07`); close one from its drawer to check History.
+- **Found, not fixed:** `fetchIncidents` sends `category`, `priority`, `barangay` and `search`, but `GET /incidents` reads only `page`, `perPage`, `status`, `statuses`. No screen passes them today; wire them up or remove them when filters are added.
+
 ---
 
 ## Phase 5a: System Administrator — health, integrations, security events (additive)
@@ -486,6 +511,41 @@ In `backend/src/analytics/analytics.controller.ts` and `analytics.service.ts`:
 - [ ] The suite is green.
 - [ ] Stopping Redis turns Health red within one refresh.
 - [ ] Five wrong passwords on a test account show `LOGIN_FAILED` ×5 and `ACCOUNT_LOCKED` in Security Events.
+
+### Phase 5a status: BUILT, signed-in walkthrough pending (2026-10-22)
+
+**Data review first.**
+
+| Source | Finding | Result |
+|---|---|---|
+| BullMQ queues | Every `QUEUE_NAMES` entry is registered in `jobs.module.ts`; all share the one connection from `app.module.ts` | ✅ one PING covers Redis; `getJobCounts()` per queue |
+| Failed SMS jobs | Only **critical** jobs (barangay alerts) throw and land in BullMQ's failed set. OTP, contact and other SMS swallow their errors in `SmsProcessor` | ⚠️ "last failure" covers barangay alert SMS only; the page says so |
+| Push credentials | Processors read `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (the `FCM_*` names were removed) | ✅ `push.configured` checks the `FIREBASE_*` names |
+| Maps | Geocoding (Nominatim) and OSRM routing need no key; Mapbox tiles do; Mapbox routing falls back to OSRM without a key (`maps.module.ts`) | ✅ `maps.configured` = OSM tiles, or Mapbox with `MAP_API_KEY` |
+| `LOGIN_FAILED` / `ACCOUNT_LOCKED` audit rows | Written with **no actor**; the account is `entity_type = 'user'`, `entity_id`. Unknown-email failures have no entity at all | ⚠️ Security Events filters by **account** (`entityId`), not actor (below) |
+| `PERMISSION_DENIED` | In the enum, **written by nothing** today | Listed in the filter; no rows until a writer exists |
+| `GET /audit?entityId=` | The frontend already sent it; the backend ignored it | ✅ now honoured |
+
+**Built**
+- **Backend `administration/system-health.service.ts`** (new): `GET /v1/administration/health` returns `database`, `redis` (real PING), `queues[]` (`name`, `status`, `waiting`, `active`, `failed`, `delayed`), `integrations` (`sms.configured` + `lastFailure {at, reason}`, `push.configured`, `maps {configured, tiles, routing}`) and `timestamp`. Each check has its own 2-second timeout and becomes `error`. The failure reason is scrubbed (digit runs → `[number]`, long token-like strings → `[redacted]`, 200 characters). `AdministrationService.getHealth()` was removed; the module registers read-only queue handles (no workers).
+- **Audit:** `GET /audit` takes `action` as one value or a comma-separated list (`{ in: [...] }`), plus `entityId` (UUID-validated). List rows gain `entity_user { id, full_name, role }` when `entity_type = 'user'`, so actor-less account events are readable. No contact details.
+- **Frontend:** `components/admin/HealthSections.tsx` (moved `HealthTab` out of `AdminSections.tsx`): Database / Redis / Queues cards, the queue table, and a red **Needs attention** banner when the database or Redis is down, a queue can't be read, or a queue holds failed jobs. `IntegrationsList` for the new **`/administration/integrations`** page. **`/administration/security`** (`components/admin/SecurityEvents.tsx`): the seven actions, filters by event, date range and account (the filter icon on a row), account name links to `/administration/users?search=<name>` (Users tab now accepts `?search=`), server paging.
+- **Roles & Permissions:** the notice "Reference list. Access is enforced by each endpoint's role rules, not by this table." The old subtitle claimed changes "take effect on the user's next request", which was false; replaced.
+- **Sidebar:** Security Events and Integrations for the System Administrator (after Audit Log); the dashboard's System health header links to Integrations.
+
+**Deviations from the text above**
+- **Account, not actor, filter** on Security Events: the main events have no actor. "Done by" is still shown per row (the user, an admin's name, or —).
+- `queues[]` items carry a `status` so an unreadable queue isn't shown as zeros. `maps` also reports which tile and routing provider is active (names only).
+- **Failed jobs stay red** until removed from Redis: BullMQ keeps failed jobs, so one old failure keeps the banner on. That's deliberate (it's a real failure nobody has looked at); clearing failed jobs is a follow-up if it gets noisy.
+
+**Verified**
+- Backend type check clean; full suite **42 suites, 655 tests** (7 in `test/administration/health.spec.ts`, 5 in `test/audit/audit-filter.spec.ts`).
+- Frontend type check clean; 59 tests (role-access spec updated for the two links and routes).
+- `SystemHealthService` ran against the dev database and Redis with real BullMQ queues: all `ok` in 371 ms; it found one real failed barangay SMS (`2026-10-21`, `Request failed with status code 401`). With `REDIS_URL` pointed at a closed port: `redis` and all nine queues `error` after 2.0 s, database still `ok`, no hang.
+
+**Pending**
+- Signed-in **Done when** checks above (stop Redis with the backend running; five wrong passwords on a test account).
+- `pnpm lint` in `frontend/` fails before running (ESLint options error in `next lint`), unrelated to this phase.
 
 ---
 

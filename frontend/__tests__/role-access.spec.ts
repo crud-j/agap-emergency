@@ -63,8 +63,15 @@ describe('role-access', () => {
     expect(canOpen(ROLE.PUBLISHER, '/announcements/compose')).toBe(true);
     expect(canOpen(ROLE.PUBLISHER, '/announcements/history')).toBe(true);
     expect(canOpen(ROLE.DISPATCHER, '/announcements/history')).toBe(false);
+    expect(canOpen(ROLE.DISPATCHER, '/operations/history')).toBe(true);
+    expect(canOpen(ROLE.SYS_ADMIN, '/operations/history')).toBe(false);
+    expect(canOpen(ROLE.PUBLISHER, '/operations/history')).toBe(false);
     expect(canOpen(ROLE.SUPERVISOR, '/analyticsX')).toBe(false);
     expect(canOpen(ROLE.SYS_ADMIN, '/administration/users')).toBe(true);
+    expect(canOpen(ROLE.SYS_ADMIN, '/administration/security')).toBe(true);
+    expect(canOpen(ROLE.SYS_ADMIN, '/administration/integrations')).toBe(true);
+    expect(canOpen(ROLE.SUPERVISOR, '/administration/security')).toBe(false);
+    expect(canOpen(ROLE.ORG_ADMIN, '/administration/integrations')).toBe(false);
     expect(canOpen(undefined, '/dashboard')).toBe(false);
     expect(canOpen(ROLE.SYS_ADMIN, '/no-such-page')).toBe(false);
   });
@@ -85,7 +92,7 @@ describe('role-access', () => {
   it('sidebars match the agreed spec', () => {
     expect(labels(ROLE.DISPATCHER)).toEqual([
       'Dashboard', 'Incident Queue', 'Live Map', 'Triage', 'Dispatch',
-      'Multi-Agency', 'Fleet & Units', 'Hospitals & Facilities',
+      'Multi-Agency', 'Fleet & Units', 'Hospitals & Facilities', 'Incident History',
     ]);
     expect(labels(ROLE.PUBLISHER)).toEqual(['Dashboard', 'Announcements', 'Publication History']);
     expect(labels(ROLE.ORG_ADMIN)).toEqual(['Dashboard']);
@@ -98,10 +105,12 @@ describe('role-access', () => {
       'Command / ICS', 'Multi-Agency', 'Surge Mode',
       'Fleet & Units', 'Hospitals & Facilities',
       'Analytics', 'Risk Map',
+      'Incident History',
     ]);
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
       'Dashboard', 'Organizations', 'Fleet & Units', 'Hospitals & Facilities',
-      'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'Audit Log', 'Configuration',
+      'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'Audit Log',
+      'Security Events', 'Integrations', 'Configuration',
     ]);
   });
 });

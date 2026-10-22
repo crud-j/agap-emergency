@@ -89,3 +89,22 @@ export interface MunicipalOverview {
 export function fetchMunicipalOverview(): Promise<MunicipalOverview> {
   return api.get('/analytics/municipal-overview', getToken());
 }
+
+/** GET /analytics/dispatch-summary (Dispatcher, Supervisor): dashboard counts, counted in the database. */
+export interface DispatchSummary {
+  generatedAt: string;
+  active: number;
+  unreviewed: number;
+  awaitingDispatch: number;
+  critical: number;
+  enRoute: number;
+  onScene: number;
+  /** Rolling 24-hour windows ending now. */
+  last24h: { reported: number; critical: number; resolved: number };
+  previous24h: { reported: number; critical: number; resolved: number };
+  units: MunicipalOverview['units'];
+}
+
+export function fetchDispatchSummary(): Promise<DispatchSummary> {
+  return api.get('/analytics/dispatch-summary', getToken());
+}

@@ -119,6 +119,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['incident-locations'] });
           qc.invalidateQueries({ queryKey: ['municipal-overview'] });
           qc.invalidateQueries({ queryKey: ['oversight'] });
+          qc.invalidateQueries({ queryKey: ['dispatch-summary'] });
         });
       },
     );
@@ -145,6 +146,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['incident-locations'] });
           qc.invalidateQueries({ queryKey: ['municipal-overview'] });
           qc.invalidateQueries({ queryKey: ['oversight'] });
+          qc.invalidateQueries({ queryKey: ['dispatch-summary'] });
         });
       },
     );
@@ -184,6 +186,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['incidents'] });
           qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
           qc.invalidateQueries({ queryKey: ['oversight'] });
+          qc.invalidateQueries({ queryKey: ['dispatch-summary'] });
         });
       },
     );
@@ -198,6 +201,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['incident', payload.incidentId] });
           qc.invalidateQueries({ queryKey: ['dispatch-incident', payload.incidentId] });
           qc.invalidateQueries({ queryKey: ['oversight'] });
+          qc.invalidateQueries({ queryKey: ['dispatch-summary'] });
         });
       },
     );
@@ -284,6 +288,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
           qc.invalidateQueries({ queryKey: ['available-units'] });
           qc.invalidateQueries({ queryKey: ['oversight'] });
+          qc.invalidateQueries({ queryKey: ['dispatch-summary'] });
         });
       },
     );
@@ -332,6 +337,9 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           );
 
           qc.invalidateQueries({ queryKey: ['available-units'] });
+          // Unit counts on the Dispatcher and Supervisor dashboards.
+          qc.invalidateQueries({ queryKey: ['dispatch-summary'] });
+          qc.invalidateQueries({ queryKey: ['oversight', 'summary'] });
         });
       },
     );

@@ -14,7 +14,7 @@ import {
   Truck, Building2, HeartPulse, AlarmClock,
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
-  Users, KeyRound, Landmark, Circle, History,
+  Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -39,10 +39,13 @@ const ICONS: Record<string, LucideIcon> = {
   '/operations/risk': Layers,
   '/announcements': Megaphone,
   '/announcements/history': History,
+  '/operations/history': Archive,
   '/administration/users': Users,
   '/administration/permissions': KeyRound,
   '/administration/barangays': Landmark,
   '/administration/config': Settings,
+  '/administration/security': ShieldAlert,
+  '/administration/integrations': Plug,
   '/audit': FileSearch,
 };
 

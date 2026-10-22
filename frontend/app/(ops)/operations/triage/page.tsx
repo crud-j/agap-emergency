@@ -21,6 +21,15 @@ import type { IncidentListItem } from '@/features/incidents/api';
 
 const TRIAGE_STATUSES = ['SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED'];
 const NON_DUP_TERMINAL = ['CLOSED', 'FALSE_ALERT', 'CANCELLED', 'DUPLICATE'];
+/**
+ * Loaded from the server: every incident that hasn't ended (the triage queue plus
+ * duplicate candidates). Filtering server-side keeps an older open incident from
+ * dropping out behind 100 newer closed ones.
+ */
+const OPEN_STATUSES = [
+  'SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING', 'DISPATCHED',
+  'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING', 'RESOLVED', 'UNABLE_TO_RESPOND', 'REFERRED',
+];
 const PRIORITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
 function coordsOf(i: IncidentListItem): [number, number] | null {
@@ -50,7 +59,7 @@ function haversineMeters(a: [number, number], b: [number, number]): number {
  */
 export default function TriagePage(): JSX.Element {
   const wsState = useWsState();
-  const { data, isLoading } = useIncidents({ perPage: 100 });
+  const { data, isLoading } = useIncidents({ statuses: OPEN_STATUSES, perPage: 100 });
   const incidents = useMemo<IncidentListItem[]>(() => data?.data ?? [], [data]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);

@@ -84,6 +84,7 @@ export class AuditService {
     action?: string;
     actorId?: string;
     entityType?: string;
+    entityId?: string;
     from?: string;
     to?: string;
   }) {
@@ -92,9 +93,13 @@ export class AuditService {
     const skip = (page - 1) * perPage;
 
     const where: Prisma.AuditLogWhereInput = {};
-    if (filters.action) where.action = filters.action as any;
+    // `action` is one value or a comma-separated list (Security Events asks for several).
+    const actions = (filters.action ?? '').split(',').map((a) => a.trim()).filter(Boolean);
+    if (actions.length === 1) where.action = actions[0] as any;
+    else if (actions.length > 1) where.action = { in: actions as any };
     if (filters.actorId) where.actor_id = filters.actorId;
     if (filters.entityType) where.entity_type = filters.entityType;
+    if (filters.entityId) where.entity_id = filters.entityId;
     if (filters.from || filters.to) {
       where.occurred_at = {
         ...(filters.from && { gte: new Date(filters.from) }),
@@ -114,7 +119,7 @@ export class AuditService {
     const total = await this.prisma.auditLog.count({ where });
 
     return {
-      data,
+      data: await this.withEntityUsers(data),
       meta: {
         total,
         page,
@@ -124,6 +129,24 @@ export class AuditService {
         hasPrev: page > 1,
       },
     };
+  }
+
+  /**
+   * Account events (failed logins, lockouts) have no actor: the account is the entity.
+   * Attach that user's display name and role so the row is readable. No contact details.
+   */
+  private async withEntityUsers<T extends { entity_type: string | null; entity_id: string | null }>(rows: T[]) {
+    const ids = [...new Set(rows.filter((r) => r.entity_type === 'user' && r.entity_id).map((r) => r.entity_id!))];
+    if (ids.length === 0) return rows.map((r) => ({ ...r, entity_user: null }));
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, full_name: true, role: true },
+    });
+    const byId = new Map(users.map((u) => [u.id, u]));
+    return rows.map((r) => ({
+      ...r,
+      entity_user: r.entity_type === 'user' && r.entity_id ? (byId.get(r.entity_id) ?? null) : null,
+    }));
   }
 
   async findById(id: string) {

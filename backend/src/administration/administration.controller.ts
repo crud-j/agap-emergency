@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AdministrationService } from './administration.service';
+import { SystemHealthService } from './system-health.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -28,7 +29,10 @@ import { RecentAuthGuard } from '../common/guards/recent-auth.guard';
 @Roles(UserRole.SYSTEM_ADMINISTRATOR)
 @Controller({ path: 'administration', version: '1' })
 export class AdministrationController {
-  constructor(private readonly administrationService: AdministrationService) {}
+  constructor(
+    private readonly administrationService: AdministrationService,
+    private readonly systemHealth: SystemHealthService,
+  ) {}
 
   @Get('users')
   @ApiOperation({ summary: 'List all users' })
@@ -148,8 +152,8 @@ export class AdministrationController {
   }
 
   @Get('health')
-  @ApiOperation({ summary: 'System health' })
+  @ApiOperation({ summary: 'System health: database, Redis, queues and integrations (no secrets)' })
   async health() {
-    return this.administrationService.getHealth();
+    return this.systemHealth.getHealth();
   }
 }

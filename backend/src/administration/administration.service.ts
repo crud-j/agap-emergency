@@ -282,16 +282,6 @@ export class AdministrationService {
     });
   }
 
-  async getHealth() {
-    let database = 'ok';
-    try {
-      await this.prisma.$queryRaw`SELECT 1`;
-    } catch {
-      database = 'error';
-    }
-    return { database, redis: 'unknown', timestamp: new Date() };
-  }
-
   private async ensureUser(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');

@@ -3,8 +3,8 @@
 import { useState, type JSX, type ReactNode } from 'react';
 import {
   Search, ChevronLeft, ChevronRight,
-  UserCheck, UserX, Trash2, Edit, CheckCircle2, XCircle,
-  Database, Cpu, Clock, Settings, KeyRound, Plus,
+  UserCheck, UserX, Trash2, Edit, XCircle,
+  Settings, KeyRound, Plus, Info,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,
@@ -16,7 +16,6 @@ import {
 import { titleCase } from '@/lib/incident-format';
 import {
   useAdminUsers,
-  useSystemHealth,
   useSystemConfig,
   useChangeUserRole,
   useActivateUser,
@@ -199,9 +198,9 @@ function DeleteDialog({
 
 // ─── Users Tab ────────────────────────────────────────────────────────────────
 
-export function UsersTab(): JSX.Element {
+export function UsersTab({ initialSearch = '' }: { initialSearch?: string } = {}): JSX.Element {
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const [filterRole, setFilterRole] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [roleTarget, setRoleTarget] = useState<AdminUser | null>(null);
@@ -406,92 +405,6 @@ export function UsersTab(): JSX.Element {
   );
 }
 
-// ─── Health Tab ───────────────────────────────────────────────────────────────
-
-export function HealthTab(): JSX.Element {
-  const { data, isLoading } = useSystemHealth();
-
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {[0,1,2,3].map(i => <Skeleton key={i} className="h-28 rounded-2xl" />)}
-      </div>
-    );
-  }
-
-  if (!data) {
-    return <EmptyState title="Health unavailable" description="Could not reach the health endpoint." />;
-  }
-
-  interface HealthCard {
-    label: string;
-    value: string;
-    icon: typeof Database;
-    ok: boolean;
-  }
-
-  const cards: HealthCard[] = [
-    {
-      label: 'Database',
-      value: data.database === 'ok' ? 'Healthy' : data.database === 'unknown' ? 'Unknown' : 'Error',
-      icon: Database,
-      ok: data.database === 'ok',
-    },
-    {
-      label: 'Redis',
-      value: data.redis === 'ok' ? 'Healthy' : data.redis === 'unknown' ? 'Unknown' : 'Error',
-      icon: Cpu,
-      ok: data.redis === 'ok',
-    },
-    {
-      label: 'Timestamp',
-      value: data.timestamp ? new Date(data.timestamp).toLocaleString('en-PH') : '—',
-      icon: Clock,
-      ok: true,
-    },
-  ];
-
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <div
-              key={card.label}
-              className={cn(
-                'rounded-2xl border p-5 flex items-center gap-4',
-                card.ok
-                  ? 'bg-agap-greenSoft border-[rgba(13,96,83,0.16)]'
-                  : 'bg-agap-dangerSoft border-[rgba(212,72,88,0.18)]',
-              )}
-            >
-              <div className={cn(
-                'flex h-10 w-10 items-center justify-center rounded-xl shrink-0',
-                card.ok ? 'bg-agap-green/10' : 'bg-agap-danger/10',
-              )}>
-                <Icon size={20} className={card.ok ? 'text-agap-green' : 'text-agap-danger'} />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-agap-textSub uppercase tracking-wide">{card.label}</p>
-                <p className="text-base font-bold text-agap-textMain">{card.value}</p>
-              </div>
-              {card.ok
-                ? <CheckCircle2 size={16} className="text-agap-green ml-auto shrink-0" />
-                : <XCircle size={16} className="text-agap-danger ml-auto shrink-0" />
-              }
-            </div>
-          );
-        })}
-      </div>
-
-      <p className="text-xs text-agap-textSub">
-        Health refreshes every 60 seconds automatically.
-      </p>
-    </div>
-  );
-}
-
 // ─── Config Tab ───────────────────────────────────────────────────────────────
 
 export function ConfigTab(): JSX.Element {
@@ -631,7 +544,7 @@ export function PermissionsTab(): JSX.Element {
             <KeyRound size={18} className="text-agap-green" /> Role Permissions
           </h2>
           <p className="text-sm text-agap-textSub mt-0.5">
-            Grant or revoke capabilities for a role. Changes take effect on the user&apos;s next request.
+            Grant or revoke capabilities for a role in the reference list.
           </p>
         </div>
         <div className="w-56">
@@ -644,6 +557,14 @@ export function PermissionsTab(): JSX.Element {
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      <div className="flex items-start gap-2.5 rounded-xl border border-[rgba(37,99,235,0.18)] bg-agap-infoSoft px-4 py-3 text-sm text-agap-info">
+        <Info size={16} className="mt-0.5 shrink-0" />
+        <p>
+          <span className="font-semibold">Reference list.</span> Access is enforced by each endpoint&apos;s role rules,
+          not by this table.
+        </p>
       </div>
 
       {(grant.isError || revoke.isError) && (

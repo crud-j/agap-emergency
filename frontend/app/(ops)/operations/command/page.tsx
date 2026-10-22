@@ -14,7 +14,7 @@ import {
   type Column,
 } from '@/components/ui';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
-import { titleCase } from '@/lib/incident-format';
+import { ACTIVE_STATUSES, titleCase } from '@/lib/incident-format';
 import { useIncidents } from '@/features/incidents/hooks';
 import {
   useIncidentIcs,
@@ -48,10 +48,6 @@ const ICS_POSITIONS = [
   'LIAISON_OFFICER',
 ] as const;
 
-const ACTIVE_STATUSES = [
-  'SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED', 'ASSESSED',
-  'DISPATCH_PENDING', 'DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING',
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -630,7 +626,8 @@ export default function CommandPage(): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data: incidentData, isLoading: incLoading } = useIncidents({
-    perPage: 50,
+    statuses: ACTIVE_STATUSES,
+    perPage: 100,
   });
 
   const activeIncidents = (incidentData?.data ?? []).filter((i) =>

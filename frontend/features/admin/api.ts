@@ -15,9 +15,28 @@ export interface AdminUser {
   last_login_at: string | null;
 }
 
+export type HealthState = 'ok' | 'error';
+
+/** One BullMQ queue's job counts. `status: 'error'` means the counts couldn't be read. */
+export interface QueueHealth {
+  name: string;
+  status: HealthState;
+  waiting: number;
+  active: number;
+  failed: number;
+  delayed: number;
+}
+
+/** GET /administration/health: booleans, counts and provider names only. */
 export interface SystemHealth {
-  database: 'ok' | 'error' | 'unknown';
-  redis: 'ok' | 'error' | 'unknown';
+  database: HealthState;
+  redis: HealthState;
+  queues: QueueHealth[];
+  integrations: {
+    sms: { configured: boolean; lastFailure?: { at: string; reason: string } };
+    push: { configured: boolean };
+    maps: { configured: boolean; tiles: string; routing: string };
+  };
   timestamp: string;
 }
 

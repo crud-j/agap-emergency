@@ -8,9 +8,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
 const TREND_DAYS = 7;
 
-// Trend and performance SQL skip DRAFT (never sent) and DUPLICATE (merged into
-// another incident): neither is a reported incident.
+// Trend, performance and "reported" counts skip DRAFT (never sent) and DUPLICATE
+// (merged into another incident): neither is a reported incident.
 const ACTIVE = [...ACTIVE_INCIDENT_STATUSES] as incident_status[];
+const NOT_REPORTED: incident_status[] = ['DRAFT', 'DUPLICATE'];
 const PRIORITIES: incident_priority[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 const DEPLOYED_UNITS: resource_status[] = ['DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'RETURNING', 'RESERVED'];
 const UNAVAILABLE_UNITS: resource_status[] = ['OUT_OF_SERVICE', 'OFFLINE'];
@@ -30,6 +31,30 @@ export interface UnitCounts {
   available: number;
   deployed: number;
   unavailable: number;
+}
+
+/** Reported / critical / resolved counts for one rolling 24-hour window. */
+export interface DayWindow {
+  reported: number;
+  critical: number;
+  resolved: number;
+}
+
+/**
+ * GET /analytics/dispatch-summary: the Dispatcher dashboard's cards, counted in the
+ * database with the same active-status list as the Incident Queue (counts only).
+ */
+export interface DispatchSummary {
+  generatedAt: string;
+  active: number;
+  unreviewed: number;
+  awaitingDispatch: number;
+  critical: number;
+  enRoute: number;
+  onScene: number;
+  last24h: DayWindow;
+  previous24h: DayWindow;
+  units: UnitCounts;
 }
 
 export interface IncidentPerformance {
@@ -131,6 +156,51 @@ export class AnalyticsService {
       units,
       trend7d,
       performance7d,
+    };
+  }
+
+  async getDispatchSummary(now: Date = new Date()): Promise<DispatchSummary> {
+    const dayAgo = new Date(now.getTime() - DAY_MS);
+    const twoDaysAgo = new Date(now.getTime() - 2 * DAY_MS);
+    const window = (from: Date, to: Date) => {
+      const reportedWhere: Prisma.IncidentWhereInput = {
+        submitted_at: { gte: from, lt: to },
+        status: { notIn: NOT_REPORTED },
+      };
+      return Promise.all([
+        this.prisma.incident.count({ where: reportedWhere }),
+        this.prisma.incident.count({ where: { ...reportedWhere, priority: 'CRITICAL' } }),
+        this.prisma.incident.count({ where: { resolved_at: { gte: from, lt: to } } }),
+      ]).then(([reported, critical, resolved]) => ({ reported, critical, resolved }));
+    };
+
+    const [byStatus, critical, last24h, previous24h, units] = await Promise.all([
+      this.prisma.incident.groupBy({
+        by: ['status'],
+        where: { status: { in: ACTIVE } },
+        orderBy: { status: 'asc' },
+        _count: { _all: true },
+      }),
+      this.prisma.incident.count({ where: { status: { in: ACTIVE }, priority: 'CRITICAL' } }),
+      window(dayAgo, now),
+      window(twoDaysAgo, dayAgo),
+      this.getUnitCounts(),
+    ]);
+
+    const inStatus = (statuses: incident_status[]) =>
+      byStatus.filter((r) => statuses.includes(r.status)).reduce((sum, r) => sum + r._count._all, 0);
+
+    return {
+      generatedAt: now.toISOString(),
+      active: inStatus(ACTIVE),
+      unreviewed: inStatus(['SUBMITTED', 'RECEIVED']),
+      awaitingDispatch: inStatus(['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING']),
+      critical,
+      enRoute: inStatus(['EN_ROUTE']),
+      onScene: inStatus(['ON_SCENE']),
+      last24h,
+      previous24h,
+      units,
     };
   }
 

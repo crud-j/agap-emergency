@@ -1,10 +1,10 @@
 'use client';
 
-import { useMemo, type JSX } from 'react';
+import type { JSX } from 'react';
 import Link from 'next/link';
 import {
-  AlertCircle, Activity, Truck, Clock, RefreshCw,
-  ArrowRight, MapPin,
+  AlertCircle, AlertOctagon, CheckCircle2, Hourglass, Navigation, Truck, RefreshCw,
+  ArrowRight, MapPin, Map as MapIcon, List, Radio,
 } from 'lucide-react';
 import {
   StatCard, PriorityBadge, StatusChip, EmptyState, Button,
@@ -13,11 +13,8 @@ import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
 import { DashboardBanners } from '@/components/dashboard/DashboardBanners';
 import { useWsState } from '@/lib/use-ws-state';
 import { useIncidents } from '@/features/incidents/hooks';
-import { useAvailableResources } from '@/features/resources/hooks';
-import { useResponders } from '@/features/responders/hooks';
-import {
-  ACTIVE_STATUSES, DISPATCHABLE_STATUSES, categoryIcon, timeAgo, titleCase,
-} from '@/lib/incident-format';
+import { useDispatchSummary } from '@/features/analytics/hooks';
+import { categoryIcon, timeAgo, titleCase } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
 
 const RECENT_LIMIT = 8;
@@ -44,40 +41,18 @@ const PRIORITY_DOT: Record<string, string> = {
 export function OpsDashboard(): JSX.Element {
   const wsState = useWsState();
 
-  const incidentsQuery     = useIncidents({ perPage: 100 });
-  const availableQuery     = useAvailableResources();
-  const respondersQuery    = useResponders({ perPage: 100 });
+  // Counts are computed in the database (GET /analytics/dispatch-summary) with the
+  // same active-status list as the Incident Queue; the list below is only the newest
+  // few reports for display, never the source of a count.
+  const summaryQuery   = useDispatchSummary();
+  const incidentsQuery = useIncidents({ perPage: RECENT_LIMIT });
 
-  const incidents: IncidentListItem[] = incidentsQuery.data?.data ?? [];
-  const responders = respondersQuery.data ?? [];
-  const available  = availableQuery.data ?? [];
-
-  const activeCount = useMemo(
-    () => incidents.filter((i) => ACTIVE_STATUSES.includes(i.status)).length,
-    [incidents],
-  );
-  const pendingDispatchCount = useMemo(
-    () => incidents.filter((i) => DISPATCHABLE_STATUSES.includes(i.status)).length,
-    [incidents],
-  );
-  const onSceneCount = useMemo(
-    () => responders.filter((r) => r.status === 'ON_SCENE').length,
-    [responders],
-  );
-  const availableCount = available.length;
-
-  const recent = useMemo(
-    () =>
-      [...incidents]
-        .sort((a, b) => +new Date(b.submitted_at) - +new Date(a.submitted_at))
-        .slice(0, RECENT_LIMIT),
-    [incidents],
-  );
+  const summary = summaryQuery.data;
+  const recent: IncidentListItem[] = incidentsQuery.data?.data ?? [];
 
   const failures = [
-    { label: 'incidents',       q: incidentsQuery },
-    { label: 'available units', q: availableQuery },
-    { label: 'responders',      q: respondersQuery },
+    { label: 'dashboard counts', q: summaryQuery },
+    { label: 'recent incidents', q: incidentsQuery },
   ].filter((f) => f.q.isError);
 
   function retryAll() {
@@ -122,55 +97,71 @@ export function OpsDashboard(): JSX.Element {
       )}
 
       {/* ── KPI grid ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Link
-          href="/operations/incidents"
-          className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
-        >
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <KpiLink href="/operations/incidents">
           <StatCard
-            label="Active Incidents"
-            value={incidentsQuery.isError ? '—' : activeCount}
+            label="Active"
+            value={summary?.active ?? '—'}
             icon={<AlertCircle size={17} />}
-            variant="critical"
-            loading={incidentsQuery.isLoading}
+            trendLabel={summary && `${summary.last24h.reported} reported · ${vsPrevious(summary.last24h.reported, summary.previous24h.reported)}`}
+            loading={summaryQuery.isLoading}
           />
-        </Link>
-        <Link
-          href="/operations/fleet"
-          className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
-        >
+        </KpiLink>
+        <KpiLink href="/operations/triage">
           <StatCard
-            label="Responders On-Scene"
-            value={respondersQuery.isError ? '—' : onSceneCount}
-            icon={<Activity size={17} />}
+            label="Unreviewed"
+            value={summary?.unreviewed ?? '—'}
+            icon={<Hourglass size={17} />}
+            variant={summary && summary.unreviewed > 0 ? 'warning' : 'default'}
+            trendLabel={summary && `${summary.awaitingDispatch} awaiting dispatch`}
+            loading={summaryQuery.isLoading}
+          />
+        </KpiLink>
+        <KpiLink href="/operations/incidents">
+          <StatCard
+            label="Critical"
+            value={summary?.critical ?? '—'}
+            icon={<AlertOctagon size={17} />}
+            variant={summary && summary.critical > 0 ? 'critical' : 'default'}
+            trendLabel={summary && `${summary.last24h.critical} reported · ${vsPrevious(summary.last24h.critical, summary.previous24h.critical)}`}
+            loading={summaryQuery.isLoading}
+          />
+        </KpiLink>
+        <KpiLink href="/operations/dispatch">
+          <StatCard
+            label="En route · on scene"
+            value={summary ? `${summary.enRoute} · ${summary.onScene}` : '—'}
+            icon={<Navigation size={17} />}
+            loading={summaryQuery.isLoading}
+          />
+        </KpiLink>
+        <KpiLink href="/operations/history">
+          <StatCard
+            label="Resolved, 24 h"
+            value={summary?.last24h.resolved ?? '—'}
+            icon={<CheckCircle2 size={17} />}
             variant="success"
-            loading={respondersQuery.isLoading}
+            trendLabel={summary && vsPrevious(summary.last24h.resolved, summary.previous24h.resolved)}
+            loading={summaryQuery.isLoading}
           />
-        </Link>
-        <Link
-          href="/operations/fleet"
-          className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
-        >
+        </KpiLink>
+        <KpiLink href="/operations/fleet">
           <StatCard
-            label="Units Available"
-            value={availableQuery.isError ? '—' : availableCount}
+            label="Units available"
+            value={summary?.units.available ?? '—'}
             icon={<Truck size={17} />}
             variant="success"
-            loading={availableQuery.isLoading}
+            trendLabel={summary && `${summary.units.deployed} deployed · ${summary.units.unavailable} out of service`}
+            loading={summaryQuery.isLoading}
           />
-        </Link>
-        <Link
-          href="/operations/dispatch"
-          className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
-        >
-          <StatCard
-            label="Pending Dispatch"
-            value={incidentsQuery.isError ? '—' : pendingDispatchCount}
-            icon={<Clock size={17} />}
-            variant="warning"
-            loading={incidentsQuery.isLoading}
-          />
-        </Link>
+        </KpiLink>
+      </div>
+
+      {/* ── Quick actions: existing screens only (no incident form, broadcast or SMS) ── */}
+      <div className="flex flex-wrap gap-2">
+        <QuickAction href="/operations/dispatch" icon={<Radio size={14} />}>Assign unit</QuickAction>
+        <QuickAction href="/operations/incidents" icon={<List size={14} />}>View all incidents</QuickAction>
+        <QuickAction href="/operations/map" icon={<MapIcon size={14} />}>Open map</QuickAction>
       </div>
 
       {/* ── Recent incidents ─────────────────────────────────────────────── */}
@@ -231,6 +222,34 @@ export function OpsDashboard(): JSX.Element {
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Pieces ──────────────────────────────────────────────────────────────────
+
+/** "+2 vs previous 24 h": plain differences; percentages mislead on small counts. */
+function vsPrevious(current: number, previous: number): string {
+  const diff = current - previous;
+  if (diff === 0) return 'same as previous 24 h';
+  return `${diff > 0 ? '+' : '−'}${Math.abs(diff)} vs previous 24 h`;
+}
+
+function KpiLink({ href, children }: { href: string; children: JSX.Element }): JSX.Element {
+  return (
+    <Link href={href} className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green">
+      {children}
+    </Link>
+  );
+}
+
+function QuickAction({ href, icon, children }: { href: string; icon: JSX.Element; children: string }): JSX.Element {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-agap-track/60 bg-white px-3.5 py-2 text-sm font-semibold text-agap-textMain shadow-card hover:bg-agap-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green/40"
+    >
+      {icon} {children}
+    </Link>
   );
 }
 
