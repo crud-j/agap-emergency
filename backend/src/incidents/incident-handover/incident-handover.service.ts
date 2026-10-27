@@ -1,15 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { AuditAction } from '@agap/shared';
 
-export interface CreateHandoverDto {
-  toUserId: string;
-  situationSummary: string;
-  pendingActions?: string[];
-  resourcesInField?: Record<string, unknown>;
-}
+import { CreateHandoverDto } from './dto/create-handover.dto';
+
+/** Who can take over an incident: the operations roles that can act on it. */
+const HANDOVER_ROLES = ['DISPATCHER', 'SUPERVISOR'] as const;
 
 /**
  * MOD-44 — Incident Handover. Records operator-to-operator shift transfers with
@@ -29,6 +27,16 @@ export class IncidentHandoverService {
     // Verify incident exists before creating handover
     const incident = await this.prisma.incident.findUnique({ where: { id: incidentId } });
     if (!incident) throw new NotFoundException('Incident not found');
+    if (dto.toUserId === fromUserId) {
+      throw new BadRequestException('Hand the incident over to someone else.');
+    }
+    const recipient = await this.prisma.user.findUnique({
+      where: { id: dto.toUserId },
+      select: { role: true, status: true },
+    });
+    if (!recipient || recipient.status !== 'ACTIVE' || !(HANDOVER_ROLES as readonly string[]).includes(recipient.role)) {
+      throw new BadRequestException('The incoming operator must be an active Dispatcher or Supervisor.');
+    }
 
     const handover = await this.prisma.incident_handovers.create({
       data: {
@@ -63,6 +71,15 @@ export class IncidentHandoverService {
     });
 
     return handover;
+  }
+
+  /** Active dispatchers and supervisors who can receive a handover, except the caller. */
+  async recipients(callerId: string) {
+    return this.prisma.user.findMany({
+      where: { role: { in: [...HANDOVER_ROLES] }, status: 'ACTIVE', id: { not: callerId } },
+      select: { id: true, full_name: true, role: true },
+      orderBy: [{ role: 'asc' }, { full_name: 'asc' }],
+    });
   }
 
   async list(incidentId: string) {

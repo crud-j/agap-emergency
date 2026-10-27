@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 
 @ApiTags('fleet')
 @ApiBearerAuth()
@@ -49,7 +50,7 @@ export class FleetController {
   @ApiOperation({ summary: 'Update a vehicle' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: Partial<CreateVehicleDto>,
+    @Body() dto: UpdateVehicleDto,
   ) {
     return this.fleetService.update(id, dto);
   }

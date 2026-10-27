@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import '@/lib/maplibre-setup';
 import Map, {
   Marker, Popup, Source, Layer, useMap,
-  type MarkerEvent, type MapEvent, type ViewStateChangeEvent,
+  type MarkerEvent, type ViewStateChangeEvent,
 } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Maximize2, Minimize2 } from 'lucide-react';
@@ -17,6 +17,7 @@ import {
   isWithinBocaue,
 } from '@/lib/bocaue-geo';
 import { MapErrorOverlay } from '@/components/map/MapErrorOverlay';
+import { resolveMissingStyleImages } from '@/components/map/missing-style-images';
 import { AmbulanceMarker } from '@/components/map/AmbulanceMarker';
 import { CitizenMarker, reporterLabel } from '@/components/map/CitizenMarker';
 import { titleCase } from '@/lib/incident-format';
@@ -288,25 +289,8 @@ export function IncidentMapView({
         onDragStart={() => {
           if (tracking?.follow) tracking.onFollowChange(false);
         }}
-        onLoad={(event: MapEvent) => {
-          // Some configured MapLibre styles reference optional sprite images
-          // that are not present in the style's sprite sheet. Resolve those
-          // references with a transparent placeholder so the map remains
-          // usable without repeated style-image warnings.
-          const resolvedImageIds = new Set<string>();
-          event.target.setMissingStyleImageResolver((imageId: string) => {
-            // Some style JSON contains an empty sprite reference. It cannot be
-            // registered as a MapLibre image and should be ignored.
-            if (!imageId?.trim() || resolvedImageIds.has(imageId) || event.target.hasImage(imageId)) return;
-            resolvedImageIds.add(imageId);
-            event.target.addImage(imageId, {
-              width: 1,
-              height: 1,
-              data: new Uint8Array(4),
-            });
-          });
-          setTileError(false);
-        }}
+        ref={resolveMissingStyleImages}
+        onLoad={() => setTileError(false)}
       >
         <MapFlyController incidents={incidents} selectedId={selectedId} />
         {tracking && (

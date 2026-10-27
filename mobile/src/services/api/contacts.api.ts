@@ -10,7 +10,6 @@ export interface EmergencyContact {
   phone_number: string;
   email: string | null;
   priority_order: number;
-  notify_on_alert: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -22,7 +21,6 @@ export interface CreateContactDto {
   phoneNumber: string;
   email?: string;
   priorityOrder?: number;
-  notifyOnAlert?: boolean;
 }
 
 async function json<T>(res: Response): Promise<T> {

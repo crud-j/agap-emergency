@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
 
 @ApiTags('organizations')
 @ApiBearerAuth()
@@ -52,7 +53,7 @@ export class OrganizationsController {
   @ApiOperation({ summary: 'Update an organization' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: Partial<CreateOrganizationDto>,
+    @Body() dto: UpdateOrganizationDto,
     @Request() req: any,
   ) {
     return this.organizationsService.update(id, dto, req.user);

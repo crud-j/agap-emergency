@@ -98,7 +98,8 @@ export class AuditService {
     if (actions.length === 1) where.action = actions[0] as any;
     else if (actions.length > 1) where.action = { in: actions as any };
     if (filters.actorId) where.actor_id = filters.actorId;
-    if (filters.entityType) where.entity_type = filters.entityType;
+    // Writers differ in case ('Incident' / 'incident'); one filter matches both.
+    if (filters.entityType) where.entity_type = { equals: filters.entityType, mode: 'insensitive' };
     if (filters.entityId) where.entity_id = filters.entityId;
     if (filters.from || filters.to) {
       where.occurred_at = {

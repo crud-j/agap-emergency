@@ -23,14 +23,14 @@ export interface SlaComplianceData {
   total: number;
   acknowledgeSlaMet: number;
   dispatchSlaMet: number;
-  acknowledgeCompliancePct: number;
-  dispatchCompliancePct: number;
+  acknowledgeCompliancePct: number | null;
+  dispatchCompliancePct: number | null;
 }
 
 export interface FalseAlertRateData {
   totalIncidents: number;
   falseAlerts: number;
-  ratePct: number;
+  ratePct: number | null;
 }
 
 export interface DailySummaryData {
@@ -42,20 +42,29 @@ export interface DailySummaryData {
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
-export function fetchResponseTimes(): Promise<ResponseTimeGroup[]> {
-  return api.get('/analytics/response-times', getToken());
+export interface AnalyticsRange {
+  from: string;
+  to: string;
 }
 
-export function fetchVolume(): Promise<VolumeData> {
-  return api.get('/analytics/volume', getToken());
+function rangeQuery(range: AnalyticsRange): string {
+  return `?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
 }
 
-export function fetchSlaCompliance(): Promise<SlaComplianceData> {
-  return api.get('/analytics/sla-compliance', getToken());
+export function fetchResponseTimes(range: AnalyticsRange): Promise<ResponseTimeGroup[]> {
+  return api.get(`/analytics/response-times${rangeQuery(range)}`, getToken());
 }
 
-export function fetchFalseAlertRate(): Promise<FalseAlertRateData> {
-  return api.get('/analytics/false-alert-rate', getToken());
+export function fetchVolume(range: AnalyticsRange): Promise<VolumeData> {
+  return api.get(`/analytics/volume${rangeQuery(range)}`, getToken());
+}
+
+export function fetchSlaCompliance(range: AnalyticsRange): Promise<SlaComplianceData> {
+  return api.get(`/analytics/sla-compliance${rangeQuery(range)}`, getToken());
+}
+
+export function fetchFalseAlertRate(range: AnalyticsRange): Promise<FalseAlertRateData> {
+  return api.get(`/analytics/false-alert-rate${rangeQuery(range)}`, getToken());
 }
 
 export function fetchDailySummary(date?: string): Promise<DailySummaryData> {

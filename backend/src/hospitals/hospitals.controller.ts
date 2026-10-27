@@ -18,6 +18,22 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { UpdateHospitalDto } from './dto/update-hospital.dto';
+import { NearbyQueryDto } from './dto/nearby-query.dto';
+import { SetLocationDto } from './dto/set-location.dto';
+import { VerifyLocationDto } from './dto/verify-location.dto';
+
+/**
+ * Pre-arrival notes can carry medical detail: never citizens, bystanders or the
+ * System Administrator. Hospital users are further limited to their own hospital
+ * (checked in the service).
+ */
+const REFERRAL_READERS = [
+  UserRole.DISPATCHER,
+  UserRole.SUPERVISOR,
+  UserRole.RESPONDER,
+  UserRole.HOSPITAL_USER,
+] as const;
 
 @ApiTags('hospitals')
 @ApiBearerAuth()
@@ -28,22 +44,23 @@ export class HospitalsController {
   @Get()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'List hospitals' })
-  async findAll() {
-    return this.hospitalsService.findAll();
+  async findAll(@Query('includeUnreviewed') includeUnreviewed: string | undefined, @Request() req: any) {
+    return this.hospitalsService.findAll(req.user, includeUnreviewed === 'true');
   }
 
   @Get('nearby')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'List nearby hospitals' })
-  async findNearby(@Query('lat') lat?: number, @Query('lng') lng?: number) {
-    return this.hospitalsService.findNearby(lat ? +lat : 0, lng ? +lng : 0);
+  async findNearby(@Query() query: NearbyQueryDto) {
+    return this.hospitalsService.findNearby(query.lat, query.lng, query.limit);
   }
 
   @Get('referrals/:refId')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...REFERRAL_READERS)
   @ApiOperation({ summary: 'Get a referral' })
-  async findReferral(@Param('refId', ParseUUIDPipe) refId: string) {
-    return this.hospitalsService.findReferral(refId);
+  async findReferral(@Param('refId', ParseUUIDPipe) refId: string, @Request() req: any) {
+    return this.hospitalsService.findReferralFor(refId, req.user);
   }
 
   @Patch('referrals/:refId/acknowledge')
@@ -54,29 +71,55 @@ export class HospitalsController {
     @Param('refId', ParseUUIDPipe) refId: string,
     @Request() req: any,
   ) {
-    return this.hospitalsService.acknowledgeReferral(refId, req.user.id);
+    return this.hospitalsService.acknowledgeReferral(refId, req.user);
   }
 
   @Patch('referrals/:refId/arrived')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOSPITAL_USER, UserRole.DISPATCHER, UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Mark referral patient arrived' })
   async markArrived(@Param('refId', ParseUUIDPipe) refId: string, @Request() req: any) {
-    return this.hospitalsService.markArrived(refId, req.user.id);
+    return this.hospitalsService.markArrived(refId, req.user);
   }
 
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get a hospital' })
-  async findById(@Param('id', ParseUUIDPipe) id: string) {
-    return this.hospitalsService.findById(id);
+  async findById(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.hospitalsService.findVisibleById(id, req.user);
   }
 
+  /** Org Administrators may create only for their own HOSPITAL organization (checked in the service). */
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SYSTEM_ADMINISTRATOR, UserRole.ORG_ADMINISTRATOR)
   @ApiOperation({ summary: 'Create a hospital' })
-  async create(@Body() dto: CreateHospitalDto) {
-    return this.hospitalsService.create(dto);
+  async create(@Body() dto: CreateHospitalDto, @Request() req: any) {
+    return this.hospitalsService.create(dto, req.user);
+  }
+
+  @Patch(':id/location')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SYSTEM_ADMINISTRATOR, UserRole.SUPERVISOR, UserRole.ORG_ADMINISTRATOR)
+  @ApiOperation({ summary: 'Set hospital coordinates' })
+  async setLocation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetLocationDto,
+    @Request() req: any,
+  ) {
+    return this.hospitalsService.setLocation(id, dto, req.user);
+  }
+
+  @Post(':id/location/verify')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SYSTEM_ADMINISTRATOR, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Verify or reject hospital coordinates' })
+  async verifyLocation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerifyLocationDto,
+    @Request() req: any,
+  ) {
+    return this.hospitalsService.verifyLocation(id, dto, req.user);
   }
 
   @Patch(':id')
@@ -85,9 +128,10 @@ export class HospitalsController {
   @ApiOperation({ summary: 'Update a hospital' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: Partial<CreateHospitalDto>,
+    @Body() dto: UpdateHospitalDto,
+    @Request() req: any,
   ) {
-    return this.hospitalsService.update(id, dto);
+    return this.hospitalsService.update(id, dto, req.user);
   }
 
   @Post(':id/referrals')
@@ -96,16 +140,28 @@ export class HospitalsController {
   @ApiOperation({ summary: 'Create a hospital referral' })
   async createReferral(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: CreateReferralDto & { incidentId: string },
+    @Body() body: CreateReferralDto,
     @Request() req: any,
   ) {
-    return this.hospitalsService.createReferral(id, body.incidentId, body, req.user.id);
+    return this.hospitalsService.createReferral(id, body, req.user.id);
+  }
+
+  @Get('referrals/incident/:incidentId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...REFERRAL_READERS)
+  @ApiOperation({ summary: 'List referrals for an incident' })
+  async findIncidentReferrals(
+    @Param('incidentId', ParseUUIDPipe) incidentId: string,
+    @Request() req: any,
+  ) {
+    return this.hospitalsService.findIncidentReferrals(incidentId, req.user);
   }
 
   @Get(':id/referrals')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...REFERRAL_READERS)
   @ApiOperation({ summary: 'List hospital referrals' })
-  async findReferrals(@Param('id', ParseUUIDPipe) id: string) {
-    return this.hospitalsService.findReferrals(id);
+  async findReferrals(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.hospitalsService.findReferrals(id, req.user);
   }
 }

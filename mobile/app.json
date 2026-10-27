@@ -56,8 +56,10 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "a4b8b258-4898-4421-a2f2-ee8dee1c6102"
-      }
-    }
+        "projectId": "8ca010d9-8a80-4b01-a55a-c394c52c852f"
+      },
+      "router": {}
+    },
+    "owner": "catchy-sql"
   }
 }

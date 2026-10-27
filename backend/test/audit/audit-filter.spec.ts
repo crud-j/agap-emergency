@@ -35,6 +35,11 @@ describe('AuditService.findAll filters (Phase 5a)', () => {
     expect(whereOf()).toEqual({});
   });
 
+  it('matches the entity type regardless of case (writers differ)', async () => {
+    await service.findAll({ entityType: 'incident' });
+    expect(whereOf()).toEqual({ entity_type: { equals: 'incident', mode: 'insensitive' } });
+  });
+
   it('filters by the affected account', async () => {
     await service.findAll({ entityId: 'user-9' });
     expect(whereOf()).toEqual({ entity_id: 'user-9' });

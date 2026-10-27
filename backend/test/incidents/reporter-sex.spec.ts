@@ -1,6 +1,7 @@
 import { reporterSexFrom, toReporterSex } from '../../src/common/utils/reporter-sex';
 import { IncidentsController } from '../../src/incidents/incidents.controller';
 import { RespondersService } from '../../src/responders/responders.service';
+import { IncidentStatusService } from '../../src/incidents/incident-status/incident-status.service';
 
 describe('reporter_sex exposure (WP3.6, least privilege)', () => {
   describe('reporterSexFrom', () => {
@@ -60,7 +61,7 @@ describe('reporter_sex exposure (WP3.6, least privilege)', () => {
         },
       };
       const prisma = { dispatches: { findUnique: jest.fn().mockResolvedValue(dispatch) } };
-      const service = new RespondersService(prisma as any, {} as any, {} as any);
+      const service = new RespondersService(prisma as any, {} as any, {} as any, new IncidentStatusService());
 
       const result: any = await service.getAssignment('dispatch-1', 'resp-1');
 

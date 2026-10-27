@@ -1,26 +1,76 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import { Prisma, facility_location_status } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateHospitalDto } from './dto/create-hospital.dto';
+import { UpdateHospitalDto } from './dto/update-hospital.dto';
+import { SetLocationDto } from './dto/set-location.dto';
+import { VerifyLocationDto } from './dto/verify-location.dto';
 import { CreateReferralDto } from './dto/create-referral.dto';
+import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { AuditAction, IncidentStatus, UserRole, isCoordinateInServiceArea, looksSwapped } from '@agap/shared';
+import { activeMemberOrgIds, assertCanManageOrg } from '../organizations/org-scope';
+import { UNREVIEWED_STATUSES } from './destination-rules';
+import { toFacilityView } from './facility-view';
+
+const LOCATION_REVIEWERS: string[] = [UserRole.SYSTEM_ADMINISTRATOR, UserRole.SUPERVISOR];
 
 @Injectable()
 export class HospitalsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(HospitalsService.name);
 
-  async findAll() {
-    return this.prisma.facility.findMany({
-      where: { facility_type: 'HOSPITAL', is_active: true },
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
+  ) {}
+
+  async findAll(actor?: ReferralActor, includeUnreviewed = false) {
+    const facilities = await this.prisma.facility.findMany({
+      where: {
+        facility_type: 'HOSPITAL',
+        is_active: true,
+        ...(await this.reviewVisibility(actor, includeUnreviewed)),
+      },
       orderBy: { name: 'asc' },
     });
+    return facilities.map((facility) => toFacilityView(facility));
   }
 
-  async findNearby(_lat: number, _lng: number) {
-    // Placeholder — PostGIS distance ordering is a later step.
-    return this.prisma.facility.findMany({
-      where: { facility_type: 'HOSPITAL', is_active: true },
-      orderBy: { name: 'asc' },
-      take: 10,
+  /** GET /hospitals/:id: an unreviewed or rejected hospital is hidden exactly as in findAll. */
+  async findVisibleById(id: string, actor: ReferralActor) {
+    const facility = await this.prisma.facility.findFirst({
+      where: { id, ...(await this.reviewVisibility(actor, true)) },
+      include: { facility_capabilities: true },
     });
+    if (!facility) throw new NotFoundException('Hospital not found');
+    return toFacilityView(facility);
+  }
+
+  async findNearby(lat: number, lng: number, limit = 10) {
+    const rows = await this.prisma.$queryRaw<
+      Array<Record<string, unknown> & { distance_meters: number | string | Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT f.*, ST_Distance(
+        f.location,
+        ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography
+      ) AS distance_meters
+      FROM facilities f
+      WHERE f.facility_type = 'HOSPITAL'
+        AND f.is_active = true
+        AND f.location_status = 'VERIFIED'
+        AND f.location IS NOT NULL
+      ORDER BY distance_meters ASC
+      LIMIT ${limit}
+    `);
+    return rows.map((row) => ({
+      ...toFacilityView(row),
+      distanceMeters: Math.round(Number(row.distance_meters)),
+      distanceKind: 'STRAIGHT_LINE' as const,
+    }));
   }
 
   async findById(id: string) {
@@ -29,33 +79,104 @@ export class HospitalsService {
       include: { facility_capabilities: true },
     });
     if (!facility) throw new NotFoundException('Hospital not found');
-    return facility;
+    return toFacilityView(facility);
   }
 
-  async create(dto: CreateHospitalDto) {
-    return this.prisma.facility.create({
-      data: {
-        name: dto.name,
-        facility_type: 'HOSPITAL',
-        barangay: dto.barangay ?? null,
-        municipality: dto.municipality ?? null,
-        contact_number: dto.contactNumber ?? null,
-        emergency_contact: dto.emergencyContact ?? null,
-        has_emergency_room: dto.hasEmergencyRoom ?? false,
-        has_icu: dto.hasIcu ?? false,
-        blood_bank: dto.bloodBank ?? false,
-      },
-    });
+  /**
+   * System Administrator: any organization or none; a given location is VERIFIED.
+   * Org Administrator: only for their own HOSPITAL organization, and a location is
+   * PENDING_REVIEW until a Supervisor or System Administrator verifies it.
+   */
+  async create(dto: CreateHospitalDto, actor: ReferralActor) {
+    const isOrgAdmin = actor.role === UserRole.ORG_ADMINISTRATOR;
+    if (isOrgAdmin && !dto.organizationId) {
+      throw new BadRequestException('organizationId is required for an Organization Administrator.');
+    }
+    if (dto.organizationId) {
+      const organization = await this.prisma.organization.findUnique({
+        where: { id: dto.organizationId },
+        select: { organization_type: true },
+      });
+      if (!organization) throw new BadRequestException('Organization not found.');
+      if (isOrgAdmin) {
+        await assertCanManageOrg(this.prisma, actor, dto.organizationId);
+        if (organization.organization_type !== 'HOSPITAL') {
+          throw new ForbiddenException('The organization must be a hospital organization.');
+        }
+      }
+    }
+    if (dto.location) this.assertValidLocation(dto.location.latitude, dto.location.longitude);
+    await this.assertNoDuplicate(dto.name, dto.municipality, dto.location?.source, dto.location?.sourceRef);
+
+    const status = !dto.location
+      ? facility_location_status.UNVERIFIED
+      : isOrgAdmin
+        ? facility_location_status.PENDING_REVIEW
+        : facility_location_status.VERIFIED;
+    try {
+      const hospital = toFacilityView(await this.prisma.facility.create({
+        data: {
+          name: dto.name,
+          facility_type: 'HOSPITAL',
+          organization_id: dto.organizationId ?? null,
+          barangay: dto.barangay ?? null,
+          address: dto.address ?? null,
+          municipality: dto.municipality ?? null,
+          province: dto.province ?? null,
+          contact_number: dto.contactNumber ?? null,
+          emergency_contact: dto.emergencyContact ?? null,
+          has_emergency_room: dto.hasEmergencyRoom ?? false,
+          has_icu: dto.hasIcu ?? false,
+          blood_bank: dto.bloodBank ?? false,
+          location_status: status,
+          ...(dto.location && {
+            latitude: dto.location.latitude,
+            longitude: dto.location.longitude,
+            location_source: dto.location.source,
+            location_source_ref: dto.location.sourceRef ?? null,
+            location_confidence: dto.location.confidence ?? null,
+          }),
+          ...(status === facility_location_status.VERIFIED && {
+            location_verified_by_id: actor.id,
+            last_verified_at: new Date(),
+          }),
+        },
+      }));
+      await this.audit.log({
+        action: AuditAction.CREATE,
+        actorId: actor.id,
+        entityType: 'facility',
+        entityId: hospital.id,
+        moduleId: 'MOD-39',
+        newValues: {
+          name: hospital.name,
+          organization_id: hospital.organization_id,
+          latitude: hospital.latitude,
+          longitude: hospital.longitude,
+          location_status: hospital.location_status,
+        },
+      });
+      return hospital;
+    } catch (error) {
+      this.rethrowDuplicate(error);
+    }
   }
 
-  async update(id: string, dto: Partial<CreateHospitalDto>) {
-    await this.findById(id);
-    return this.prisma.facility.update({
+  /** The System Administrator edits any hospital; an Org Administrator only their organization's. */
+  async update(id: string, dto: UpdateHospitalDto, actor?: ReferralActor) {
+    const existing = await this.findById(id);
+    if (actor && actor.role !== UserRole.SYSTEM_ADMINISTRATOR) {
+      if (!existing.organization_id) throw new ForbiddenException('This hospital is not linked to your organization.');
+      await assertCanManageOrg(this.prisma, actor, existing.organization_id);
+    }
+    const updated = await this.prisma.facility.update({
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.barangay !== undefined && { barangay: dto.barangay }),
+        ...(dto.address !== undefined && { address: dto.address }),
         ...(dto.municipality !== undefined && { municipality: dto.municipality }),
+        ...(dto.province !== undefined && { province: dto.province }),
         ...(dto.contactNumber !== undefined && { contact_number: dto.contactNumber }),
         ...(dto.emergencyContact !== undefined && {
           emergency_contact: dto.emergencyContact,
@@ -65,21 +186,225 @@ export class HospitalsService {
         }),
         ...(dto.hasIcu !== undefined && { has_icu: dto.hasIcu }),
         ...(dto.bloodBank !== undefined && { blood_bank: dto.bloodBank }),
+        updated_at: new Date(),
       },
     });
+    await this.audit.log({
+      action: AuditAction.UPDATE,
+      ...(actor && { actorId: actor.id }),
+      entityType: 'facility',
+      entityId: id,
+      moduleId: 'MOD-39',
+      newValues: { ...dto },
+    });
+    return toFacilityView(updated);
+  }
+
+  async setLocation(id: string, dto: SetLocationDto, actor: ReferralActor) {
+    const existing = await this.findById(id);
+    if (actor.role === UserRole.ORG_ADMINISTRATOR) {
+      if (!existing.organization_id) throw new ForbiddenException('This hospital is not linked to your organization.');
+      await assertCanManageOrg(this.prisma, actor, existing.organization_id);
+    }
+    this.assertValidLocation(dto.latitude, dto.longitude);
+    await this.assertNoDuplicate(existing.name, existing.municipality, dto.source, dto.sourceRef, id);
+    const status = actor.role === UserRole.ORG_ADMINISTRATOR
+      ? facility_location_status.PENDING_REVIEW
+      : facility_location_status.VERIFIED;
+    try {
+      const updated = await this.prisma.facility.update({
+        where: { id },
+        data: {
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          location_status: status,
+          location_source: dto.source,
+          location_source_ref: dto.sourceRef ?? null,
+          location_confidence: dto.confidence ?? null,
+          location_verified_by_id: status === facility_location_status.VERIFIED ? actor.id : null,
+          last_verified_at: status === facility_location_status.VERIFIED ? new Date() : null,
+          updated_at: new Date(),
+        },
+      });
+      await this.audit.log({
+        action: AuditAction.UPDATE,
+        actorId: actor.id,
+        entityType: 'facility',
+        entityId: id,
+        moduleId: 'MOD-39',
+        oldValues: {
+          latitude: existing.latitude,
+          longitude: existing.longitude,
+          location_status: existing.location_status,
+        },
+        newValues: { latitude: dto.latitude, longitude: dto.longitude, location_status: status, reason: dto.reason ?? null },
+      });
+      await this.onFacilityLocationChanged(id);
+      return toFacilityView(updated);
+    } catch (error) {
+      this.rethrowDuplicate(error);
+    }
+  }
+
+  async verifyLocation(id: string, dto: VerifyLocationDto, actor: ReferralActor) {
+    const existing = await this.findById(id);
+    if (dto.decision === 'VERIFIED' && (existing.latitude === null || existing.longitude === null)) {
+      throw new UnprocessableEntityException({ code: 'LOCATION_MISSING', message: 'A facility must have coordinates before verification.' });
+    }
+    const updated = await this.prisma.facility.update({
+      where: { id },
+      data: {
+        location_status: dto.decision,
+        location_verified_by_id: actor.id,
+        last_verified_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+    await this.audit.log({
+      action: AuditAction.UPDATE,
+      actorId: actor.id,
+      entityType: 'facility',
+      entityId: id,
+      moduleId: 'MOD-39',
+      oldValues: { latitude: existing.latitude, longitude: existing.longitude, location_status: existing.location_status },
+      newValues: { location_status: dto.decision, note: dto.note ?? null },
+    });
+    return toFacilityView(updated);
+  }
+
+  private assertValidLocation(latitude: number, longitude: number): void {
+    if (!isCoordinateInServiceArea(latitude, longitude)) {
+      if (looksSwapped(latitude, longitude)) {
+        throw new UnprocessableEntityException({
+          code: 'COORDINATES_LIKELY_SWAPPED',
+          message: 'The latitude and longitude appear to be reversed.',
+          suggested: { latitude: longitude, longitude: latitude },
+        });
+      }
+      throw new UnprocessableEntityException({
+        code: 'COORDINATES_OUT_OF_SERVICE_AREA',
+        message: 'The facility coordinates are outside the configured service area.',
+      });
+    }
+  }
+
+  private async assertNoDuplicate(
+    name: string,
+    municipality?: string | null,
+    source?: string,
+    sourceRef?: string,
+    excludeId?: string,
+  ): Promise<void> {
+    // Mirrors the DB unique indexes: lower(name) + lower(coalesce(municipality, '')) among
+    // active hospitals, and (location_source, location_source_ref) across all facilities.
+    const sameMunicipality: Prisma.FacilityWhereInput = municipality
+      ? { municipality: { equals: municipality, mode: 'insensitive' } }
+      : { OR: [{ municipality: null }, { municipality: '' }] };
+    const duplicate = await this.prisma.facility.findFirst({
+      where: {
+        ...(excludeId && { id: { not: excludeId } }),
+        OR: [
+          {
+            is_active: true,
+            facility_type: 'HOSPITAL',
+            name: { equals: name, mode: 'insensitive' },
+            ...sameMunicipality,
+          },
+          ...(source && sourceRef ? [{ location_source: source, location_source_ref: sourceRef }] : []),
+        ],
+      },
+      select: { id: true, name: true },
+    });
+    if (duplicate) {
+      throw new ConflictException({
+        code: 'DUPLICATE_FACILITY',
+        existingFacilityId: duplicate.id,
+        existingName: duplicate.name,
+      });
+    }
+  }
+
+  /**
+   * The shared directory hides PENDING_REVIEW and REJECTED hospitals. With
+   * `includeUnreviewed`, reviewers see all of them and an Org Administrator sees
+   * only their own organizations' ones; every other role is unaffected.
+   */
+  private async reviewVisibility(
+    actor: ReferralActor | undefined,
+    includeUnreviewed: boolean,
+  ): Promise<Prisma.FacilityWhereInput> {
+    const reviewed: Prisma.FacilityWhereInput = { location_status: { notIn: UNREVIEWED_STATUSES } };
+    if (!includeUnreviewed || !actor) return reviewed;
+    if (LOCATION_REVIEWERS.includes(actor.role)) return {};
+    if (actor.role === UserRole.ORG_ADMINISTRATOR) {
+      return { OR: [reviewed, { organization_id: { in: await activeMemberOrgIds(this.prisma, actor.id) } }] };
+    }
+    return reviewed;
+  }
+
+  private rethrowDuplicate(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException({ code: 'DUPLICATE_FACILITY', message: 'A matching hospital already exists.' });
+    }
+    throw error;
+  }
+
+  private async onFacilityLocationChanged(_facilityId: string): Promise<void> {
+    // TODO Prompt 08 emits incident.transport_updated for open transports.
   }
 
   async createReferral(
     hospitalId: string,
-    incidentId: string,
     dto: CreateReferralDto,
     userId: string,
   ) {
-    await this.findById(hospitalId);
-    return this.prisma.facility_referrals.create({
+    const [hospital, incident] = await Promise.all([
+      this.prisma.facility.findFirst({
+        where: { id: hospitalId, facility_type: 'HOSPITAL', is_active: true },
+        include: { facility_capabilities: true },
+      }),
+      this.prisma.incident.findUnique({ where: { id: dto.incidentId } }),
+    ]);
+    if (!hospital) throw new NotFoundException('Hospital not found');
+    if (!incident) throw new NotFoundException('Incident not found');
+    const terminal = new Set<IncidentStatus>([
+      IncidentStatus.CLOSED,
+      IncidentStatus.CANCELLED,
+      IncidentStatus.FALSE_ALERT,
+      IncidentStatus.DUPLICATE,
+    ]);
+    if (terminal.has(incident.status as IncidentStatus)) {
+      throw new BadRequestException('A terminal incident cannot receive a hospital referral.');
+    }
+    if (dto.dispatchId) {
+      const dispatch = await this.prisma.dispatches.findUnique({ where: { id: dto.dispatchId } });
+      if (!dispatch) throw new NotFoundException('Dispatch not found');
+      if (dispatch.incident_id !== dto.incidentId) {
+        throw new BadRequestException('Dispatch does not belong to this incident.');
+      }
+    }
+    if (dto.patientId) {
+      const patient = await this.prisma.incident_patients.findUnique({ where: { id: dto.patientId } });
+      if (!patient || patient.incident_id !== dto.incidentId) {
+        throw new BadRequestException('Patient does not belong to this incident.');
+      }
+    }
+    const pending = await this.prisma.facility_referrals.findFirst({
+      where: {
+        incident_id: dto.incidentId,
+        facility_id: hospitalId,
+        acknowledgment_status: 'PENDING',
+        patient_arrived_at: null,
+      },
+    });
+    if (pending) {
+      throw new ConflictException('A pending referral already exists for this incident and hospital.');
+    }
+
+    const referral = await this.prisma.facility_referrals.create({
       data: {
         facility_id: hospitalId,
-        incident_id: incidentId,
+        incident_id: dto.incidentId,
         dispatch_id: dto.dispatchId ?? null,
         patient_id: dto.patientId ?? null,
         coordinated_by_id: userId,
@@ -87,11 +412,54 @@ export class HospitalsService {
         eta_minutes: dto.etaMinutes ?? null,
       },
     });
+
+    await this.audit.log({
+      action: AuditAction.CREATE,
+      actorId: userId,
+      entityId: referral.id,
+      entityType: 'facility_referral',
+      moduleId: 'MOD-38',
+      incidentId: dto.incidentId,
+      newValues: { facilityId: hospitalId, etaMinutes: dto.etaMinutes ?? null },
+    });
+
+    if (hospital.organization_id) {
+      const members = await this.prisma.organization_memberships.findMany({
+        where: { organization_id: hospital.organization_id, is_active: true },
+        select: { user_id: true },
+      });
+      await Promise.all(members.map((member) => this.notifications.create({
+          userId: member.user_id,
+          eventType: 'HOSPITAL_REFERRAL_CREATED',
+          title: 'New hospital referral',
+          body: `A patient referral has been sent to ${hospital.name}.`,
+          incidentId: dto.incidentId,
+          dataPayload: { referralId: referral.id, facilityId: hospitalId },
+        }).catch((error: unknown) => {
+          this.logger.warn(`Hospital referral notification failed: ${String(error)}`);
+        })));
+    }
+
+    return referral;
   }
 
-  async findReferrals(hospitalId: string) {
+  async findReferrals(hospitalId: string, actor: ReferralActor) {
+    await this.assertHospitalAccess(hospitalId, actor);
     return this.prisma.facility_referrals.findMany({
       where: { facility_id: hospitalId },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  /** A hospital user sees only the referrals sent to their own hospital. */
+  async findIncidentReferrals(incidentId: string, actor: ReferralActor) {
+    const ownOrgs = actor.role === UserRole.HOSPITAL_USER ? await activeMemberOrgIds(this.prisma, actor.id) : null;
+    return this.prisma.facility_referrals.findMany({
+      where: {
+        incident_id: incidentId,
+        ...(ownOrgs && { facilities: { organization_id: { in: ownOrgs } } }),
+      },
+      include: { facilities: { select: { id: true, name: true } } },
       orderBy: { created_at: 'desc' },
     });
   }
@@ -104,19 +472,79 @@ export class HospitalsService {
     return referral;
   }
 
-  async acknowledgeReferral(refId: string, _userId: string) {
-    await this.findReferral(refId);
-    return this.prisma.facility_referrals.update({
-      where: { id: refId },
-      data: { acknowledgment_status: 'ACKNOWLEDGED', acknowledged_at: new Date() },
-    });
+  async findReferralFor(refId: string, actor: ReferralActor) {
+    const referral = await this.findReferral(refId);
+    await this.assertHospitalAccess(referral.facility_id, actor);
+    return referral;
   }
 
-  async markArrived(refId: string, _userId: string) {
-    await this.findReferral(refId);
-    return this.prisma.facility_referrals.update({
+  async acknowledgeReferral(refId: string, actor: ReferralActor) {
+    const referral = await this.findReferralFor(refId, actor);
+    if (referral.patient_arrived_at) {
+      throw new BadRequestException('The patient has already arrived.');
+    }
+    const updated = await this.prisma.facility_referrals.update({
       where: { id: refId },
-      data: { patient_arrived_at: new Date() },
+      data: { acknowledgment_status: 'ACKNOWLEDGED', acknowledged_at: new Date(), updated_at: new Date() },
+    });
+    await this.auditReferral(AuditAction.UPDATE, actor, referral, {
+      acknowledgment_status: 'ACKNOWLEDGED',
+      acknowledged_at: updated.acknowledged_at?.toISOString() ?? null,
+    });
+    return updated;
+  }
+
+  async markArrived(refId: string, actor: ReferralActor) {
+    const referral = await this.findReferralFor(refId, actor);
+    if (referral.patient_arrived_at) {
+      throw new BadRequestException('Arrival is already recorded for this referral.');
+    }
+    const updated = await this.prisma.facility_referrals.update({
+      where: { id: refId },
+      data: { patient_arrived_at: new Date(), updated_at: new Date() },
+    });
+    await this.auditReferral(AuditAction.UPDATE, actor, referral, {
+      patient_arrived_at: updated.patient_arrived_at?.toISOString() ?? null,
+    });
+    return updated;
+  }
+
+  /** Hospital users act only on hospitals whose organization they belong to. */
+  private async assertHospitalAccess(facilityId: string, actor: ReferralActor) {
+    if (actor.role !== UserRole.HOSPITAL_USER) return;
+    const facility = await this.prisma.facility.findUnique({
+      where: { id: facilityId },
+      select: { organization_id: true },
+    });
+    const ownOrgs = await activeMemberOrgIds(this.prisma, actor.id);
+    if (!facility?.organization_id || !ownOrgs.includes(facility.organization_id)) {
+      throw new ForbiddenException('This referral belongs to another hospital.');
+    }
+  }
+
+  private async auditReferral(
+    action: AuditAction,
+    actor: ReferralActor,
+    referral: { id: string; incident_id: string; acknowledgment_status: string | null; patient_arrived_at: Date | null },
+    newValues: Record<string, unknown>,
+  ) {
+    await this.audit.log({
+      action,
+      actorId: actor.id,
+      entityId: referral.id,
+      entityType: 'facility_referral',
+      moduleId: 'MOD-38',
+      incidentId: referral.incident_id,
+      oldValues: {
+        acknowledgment_status: referral.acknowledgment_status,
+        patient_arrived_at: referral.patient_arrived_at?.toISOString() ?? null,
+      },
+      newValues,
     });
   }
+}
+
+export interface ReferralActor {
+  id: string;
+  role: string;
 }

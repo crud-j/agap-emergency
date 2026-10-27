@@ -4,9 +4,11 @@ import type { JSX, SyntheticEvent } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuthUser } from '@/lib/use-auth';
+import { logout } from '@/lib/session';
 import { navForRole, showsSidebar, type NavLink } from '@/lib/role-access';
 import styles from './Sidebar.module.css';
 import {
@@ -14,7 +16,7 @@ import {
   Truck, Building2, HeartPulse, AlarmClock,
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
-  Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug, Inbox,
+  Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug, Inbox, ShieldCheck, MapPinned, LogOut,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -40,10 +42,12 @@ const ICONS: Record<string, LucideIcon> = {
   '/operations/risk': Layers,
   '/announcements': Megaphone,
   '/announcements/history': History,
+  '/operations/approvals': ShieldCheck,
   '/operations/history': Archive,
   '/administration/users': Users,
   '/administration/permissions': KeyRound,
   '/administration/barangays': Landmark,
+  '/administration/risk-areas': MapPinned,
   '/administration/config': Settings,
   '/administration/security': ShieldAlert,
   '/administration/integrations': Plug,
@@ -72,7 +76,7 @@ const DOCK_BG = '#ffffff';
 const SIDEBAR_RADIUS = 0;
 const DOCK_RADIUS = 22;
 const TOGGLE_FLIP_KEY = '__toggle';
-const SIDEBAR_WIDTH = 220;
+const SIDEBAR_WIDTH = 248;
 
 interface Snapshot {
   panel: DOMRect;
@@ -158,6 +162,7 @@ function flipIcons(root: HTMLElement, snap: Snapshot) {
 
 function SidebarNav(): JSX.Element {
   const pathname = usePathname();
+  const router = useRouter();
   const user = useAuthUser();
 
   const [isDesktop, setIsDesktop] = useState(true);
@@ -337,6 +342,11 @@ function SidebarNav(): JSX.Element {
   };
   const hideTip = () => setTip(null);
 
+  async function handleLogout() {
+    await logout();
+    router.replace('/login');
+  }
+
   /* ── Render ─────────────────────────────────────────────────────────────── */
 
   return (
@@ -369,23 +379,21 @@ function SidebarNav(): JSX.Element {
             style={{ width: SIDEBAR_WIDTH }}
           >
             {/* Brand */}
-            <div className={cn('flex h-14 shrink-0 items-center gap-2.5 border-b px-4', styles.brand)}>
-              <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', styles.brandIcon)}>
+            <div className={cn('flex h-[4.5rem] shrink-0 items-center gap-3 border-b px-5', styles.brand)}>
+              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', styles.brandIcon)}>
                 <Image
                   src="/agap-solo-icon.png"
                   alt="AGAP"
-                  width={32}
-                  height={32}
+                  width={40}
+                  height={40}
                   unoptimized
-                  style={{ width: 32, height: 32, objectFit: 'contain' }}
+                  style={{ width: 40, height: 40, objectFit: 'contain' }}
                   priority
                 />
               </div>
               <div className={cn('min-w-0', styles.fadeText)}>
-                <p className={cn('text-[13px] font-bold leading-tight tracking-wide', styles.brandTitle)}>AGAP</p>
-                <p className={cn('text-[10px] font-medium leading-tight uppercase tracking-widest', styles.brandSubtitle)}>
-                  Ops Center
-                </p>
+                <p className={cn('text-[15px] font-bold leading-tight tracking-wide', styles.brandTitle)}>AGAP</p>
+                <p className={cn('mt-1 text-[10px] font-semibold leading-tight uppercase tracking-[0.18em]', styles.brandSubtitle)}>Operations</p>
               </div>
             </div>
 
@@ -442,7 +450,29 @@ function SidebarNav(): JSX.Element {
             </nav>
 
             {/* Collapse toggle */}
-            <div className={cn('shrink-0 border-t p-2', styles.footer)}>
+            <div className={cn('shrink-0 border-t px-3 py-3', styles.footer)}>
+              {user && (
+                <div className={cn('mb-2 flex items-center gap-2.5 rounded-xl px-2 py-2', styles.profileCard)}>
+                  <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', styles.profileAvatar)}>
+                    <span className="text-xs font-bold text-white">
+                      {(user.name ?? user.email ?? '?')[0]?.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className={cn('min-w-0 flex-1', styles.fadeText)}>
+                    <p className={cn('truncate text-xs font-semibold', styles.profileName)}>{user.name ?? user.email}</p>
+                    <p className={cn('mt-0.5 truncate text-[10px] font-medium', styles.profileRole)}>{user.role.replaceAll('_', ' ')}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className={styles.logoutButton}
+                    aria-label="Log out"
+                    title="Log out"
+                  >
+                    <LogOut size={15} />
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={toggle}

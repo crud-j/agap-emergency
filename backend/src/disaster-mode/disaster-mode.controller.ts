@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { DeactivateSurgeDto, LinkSurgeIncidentDto, SurgeBroadcastDto, UpdateTriageTagDto } from './dto/surge-actions.dto';
 
 @ApiTags('surge')
 @ApiBearerAuth()
@@ -43,14 +44,14 @@ export class DisasterModeController {
   @Post('deactivate')
   @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Deactivate disaster surge mode' })
-  async deactivate(@Body() body: { surgeId: string }, @Request() req: any) {
+  async deactivate(@Body() body: DeactivateSurgeDto, @Request() req: any) {
     return this.disasterModeService.deactivate(body.surgeId, req.user.id);
   }
 
   @Post('incidents')
   @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Link an incident to a surge' })
-  async linkIncident(@Body() body: { surgeId: string; incidentId: string }) {
+  async linkIncident(@Body() body: LinkSurgeIncidentDto) {
     return this.disasterModeService.linkIncident(body.surgeId, body.incidentId);
   }
 
@@ -74,7 +75,7 @@ export class DisasterModeController {
   @ApiOperation({ summary: 'Update a triage tag' })
   async updateTriage(
     @Param('tagId', ParseUUIDPipe) tagId: string,
-    @Body() dto: Partial<TriageTagDto>,
+    @Body() dto: UpdateTriageTagDto,
     @Request() req: any,
   ) {
     return this.disasterModeService.updateTriageTag(tagId, dto, req.user.id);
@@ -91,7 +92,7 @@ export class DisasterModeController {
   @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Send surge broadcast to all responders (MOD-52)' })
   async broadcast(
-    @Body() body: { surgeId: string; message: string },
+    @Body() body: SurgeBroadcastDto,
     @Request() req: any,
   ) {
     return this.disasterModeService.broadcast(body, req.user.id);

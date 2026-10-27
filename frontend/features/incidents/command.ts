@@ -180,6 +180,17 @@ export function createHandover(
   return api.post(`/incidents/${incidentId}/handover`, data, getToken());
 }
 
+export interface HandoverRecipient {
+  id: string;
+  full_name: string;
+  role: 'DISPATCHER' | 'SUPERVISOR';
+}
+
+/** Active dispatchers and supervisors other than the caller (MOD-44). */
+export function fetchHandoverRecipients(): Promise<HandoverRecipient[]> {
+  return api.get('/incidents/handover/recipients', getToken());
+}
+
 export function acknowledgeHandover(incidentId: string): Promise<HandoverRecord> {
   return api.patch(`/incidents/${incidentId}/handover/acknowledge`, {}, getToken());
 }

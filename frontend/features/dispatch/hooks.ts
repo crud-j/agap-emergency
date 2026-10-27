@@ -10,6 +10,7 @@ import {
   fetchAvailableUnits,
   fetchDispatchIncidents,
   fetchIncidentDispatches,
+  setIncidentPriority,
   type CreateDispatchBody,
 } from './api';
 
@@ -45,6 +46,20 @@ export function useDispatchRecommendations(incidentId: string | null) {
     queryFn: () => fetchDispatchRecommendations(incidentId!),
     enabled: !!incidentId,
     staleTime: 60_000,
+  });
+}
+
+/** MOD-24 — set the incident's priority (the dispatcher's decision). */
+export function useSetIncidentPriority() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ incidentId, priority, notes }: { incidentId: string; priority: string; notes?: string }) =>
+      setIncidentPriority(incidentId, priority, notes),
+    onSuccess: (_data, { incidentId }) => {
+      qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+      qc.invalidateQueries({ queryKey: ['incidents'] });
+      qc.invalidateQueries({ queryKey: ['priority-recommendation', incidentId] });
+    },
   });
 }
 

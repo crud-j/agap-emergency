@@ -1,3 +1,5 @@
+import { isPointInRing } from './polygon';
+
 export const BOCAUE_BOUNDARY_SOURCE =
   'geoBoundaries PHL-ADM3-30758251 (2020; CC BY 3.0 IGO): https://github.com/wmgeolab/geoBoundaries/blob/9469f09592ced973a3448cf66b6100b741b64c0d/releaseData/gbOpen/PHL/ADM3/geoBoundaries-PHL-ADM3_simplified.geojson';
 
@@ -65,22 +67,6 @@ export const BOCAUE_BOUNDARY_BOUNDS = {
   east: 120.96119559300007,
 } as const;
 
-function isPointOnSegment(
-  longitude: number,
-  latitude: number,
-  [x1, y1]: readonly [number, number],
-  [x2, y2]: readonly [number, number],
-): boolean {
-  const cross = (longitude - x1) * (y2 - y1) - (latitude - y1) * (x2 - x1);
-  if (Math.abs(cross) > 1e-10) return false;
-  return (
-    longitude >= Math.min(x1, x2) - 1e-10 &&
-    longitude <= Math.max(x1, x2) + 1e-10 &&
-    latitude >= Math.min(y1, y2) - 1e-10 &&
-    latitude <= Math.max(y1, y2) + 1e-10
-  );
-}
-
 export function isCoordinateInBocaue(latitude: number, longitude: number): boolean {
   if (
     !Number.isFinite(latitude) ||
@@ -92,30 +78,5 @@ export function isCoordinateInBocaue(latitude: number, longitude: number): boole
   ) {
     return false;
   }
-
-  let inside = false;
-  for (let current = 0, previous = BOCAUE_BOUNDARY.length - 1; current < BOCAUE_BOUNDARY.length; previous = current++) {
-    const currentPoint = BOCAUE_BOUNDARY[current];
-    const previousPoint = BOCAUE_BOUNDARY[previous];
-    if (!currentPoint || !previousPoint) continue;
-
-    const [currentLongitude, currentLatitude] = currentPoint;
-
-    if (isPointOnSegment(longitude, latitude, previousPoint, [currentLongitude, currentLatitude])) {
-      return true;
-    }
-
-    const crossesLatitude =
-      currentLatitude > latitude !== previousPoint[1] > latitude;
-    if (
-      crossesLatitude &&
-      longitude <
-        ((previousPoint[0] - currentLongitude) * (latitude - currentLatitude)) /
-          (previousPoint[1] - currentLatitude) +
-          currentLongitude
-    ) {
-      inside = !inside;
-    }
-  }
-  return inside;
+  return isPointInRing(latitude, longitude, BOCAUE_BOUNDARY);
 }

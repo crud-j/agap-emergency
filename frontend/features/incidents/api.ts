@@ -21,6 +21,7 @@ export interface IncidentListItem {
   category: string;
   priority: string;
   status: string;
+  trigger_method?: 'SOS_BUTTON' | 'SHAKE_GESTURE' | 'MANUAL_REPORT' | 'DISPATCHER_CREATED' | 'SYSTEM_GENERATED' | null;
   description: string | null;
   number_of_patients: number | null;
   submitted_at: string;
@@ -107,6 +108,15 @@ export interface IncidentAttachment {
   capture_source?: string | null;
   authenticity_score?: number | null;
   authenticity_flags?: string[] | null;
+  // Tier 2 — advisory AI plausibility review (MOD-10/MOD-25). Null until the
+  // async check completes, or forever if OPENAI_API_KEY isn't configured.
+  ai_review_label?: 'LIKELY_REAL' | 'SUSPICIOUS' | 'LIKELY_FAKE' | null;
+  ai_review_reason?: string | null;
+  ai_review_checked_at?: string | null;
+  // A dispatcher's manual call that this evidence isn't credible.
+  rejected_at?: string | null;
+  rejected_by_id?: string | null;
+  rejection_notes?: string | null;
 }
 
 export interface IncidentDetail extends IncidentListItem {
@@ -118,6 +128,19 @@ export interface IncidentDetail extends IncidentListItem {
   incident_events?: IncidentEvent[];
   incident_attachments?: IncidentAttachment[];
   on_scene_assessments?: IncidentAssessment[];
+}
+
+export interface IncidentTransport {
+  id: string;
+  incident_id: string;
+  dispatch_id: string;
+  destination_id: string | null;
+  transport_started_at: string | null;
+  estimated_arrival_at: string | null;
+  arrived_at: string | null;
+  destination_changed?: boolean;
+  change_reason?: string | null;
+  facilities: { id: string; name: string } | null;
 }
 
 export interface IncidentListParams {
@@ -161,6 +184,18 @@ export function fetchIncident(id: string): Promise<IncidentDetail> {
 /** Citizen photo/video bytes, streamed through the API with the dispatcher's token (MOD-10). */
 export function fetchAttachmentBlob(incidentId: string, attachmentId: string): Promise<Blob> {
   return api.blob(`/incidents/${incidentId}/attachments/${attachmentId}/file`, getToken());
+}
+
+/**
+ * Dispatcher rejects a piece of submitted evidence as not credible (MOD-10).
+ * Attachment-level only — never changes the incident's status. Warns the reporter.
+ */
+export function rejectAttachment(
+  incidentId: string,
+  attachmentId: string,
+  notes?: string,
+): Promise<IncidentAttachment> {
+  return api.patch(`/incidents/${incidentId}/attachments/${attachmentId}/reject`, { notes }, getToken());
 }
 
 export function acknowledgeIncident(id: string): Promise<IncidentDetail> {
@@ -247,4 +282,16 @@ export function mergeIncident(id: string, masterIncidentId: string): Promise<Inc
 
 export function submitAssessment(incidentId: string, body: SubmitAssessmentBody): Promise<IncidentAssessment> {
   return api.post(`/incidents/${incidentId}/assessment`, body, getToken());
+}
+
+export function fetchIncidentTransports(incidentId: string): Promise<IncidentTransport[]> {
+  return api.get(`/incidents/${incidentId}/transport`, getToken());
+}
+
+export function updateIncidentTransport(
+  incidentId: string,
+  transportId: string,
+  body: { destinationId: string; estimatedArrivalAt?: string; changeReason?: string },
+): Promise<IncidentTransport> {
+  return api.patch(`/incidents/${incidentId}/transport/${transportId}`, body, getToken());
 }

@@ -16,8 +16,8 @@ model User {
   password_hash                                                            String?                        @db.VarChar(255)
   role                                                                     user_role                      @default(CITIZEN)
   status                                                                   user_status                    @default(PENDING_VERIFICATION)
-  must_change_password                                                    Boolean                        @default(false)
-  password_changed_at                                                     DateTime?                      @db.Timestamptz(6)
+  must_change_password                                                     Boolean                        @default(false)
+  password_changed_at                                                      DateTime?                      @db.Timestamptz(6)
   /// Failed password / second-factor attempts since the last lock or successful sign-in (web-console roles only).
   failed_login_count                                                       Int                            @default(0) @db.SmallInt
   /// While in the future the account refuses sign-ins (trusted browsers are exempt). Cleared by a completed sign-in.
@@ -49,6 +49,7 @@ model User {
   alert_triggers                                                           alert_triggers[]
   announcement_deliveries                                                  announcement_deliveries[]
   announcements_announcements_approved_by_idTousers                        Announcement[]                 @relation("announcements_approved_by_idTousers")
+  announcements_announcements_approval_requested_by_idTousers              Announcement[]                 @relation("announcements_approval_requested_by_idTousers")
   announcements                                                            Announcement[]                 @relation("announcement_publisher")
   audit_logs                                                               AuditLog[]
   consent_records                                                          consent_records[]
@@ -58,12 +59,14 @@ model User {
   emergency_contacts                                                       EmergencyContact[]
   escalations                                                              Escalation[]
   facility_referrals                                                       facility_referrals[]
+  facilities_location_verified                                             Facility[]                     @relation("FacilityLocationVerifiedBy")
   false_alerts_false_alerts_classified_by_idTousers                        false_alerts[]                 @relation("false_alerts_classified_by_idTousers")
   false_alerts_false_alerts_user_idTousers                                 false_alerts[]                 @relation("false_alerts_user_idTousers")
   feedback_ratings                                                         feedback_ratings[]
   ics_assignments                                                          ics_assignments[]
   incident_agency_participants                                             incident_agency_participants[]
-  incident_attachments                                                     IncidentAttachment[]
+  incident_attachments                                                     IncidentAttachment[]           @relation("incident_attachments_uploaded_by_idTousers")
+  incident_attachments_rejected                                            IncidentAttachment[]           @relation("incident_attachments_rejected_by_idTousers")
   incident_events                                                          IncidentEvent[]
   incident_handovers_incident_handovers_from_user_idTousers                incident_handovers[]           @relation("incident_handovers_from_user_idTousers")
   incident_handovers_incident_handovers_to_user_idTousers                  incident_handovers[]           @relation("incident_handovers_to_user_idTousers")
@@ -128,7 +131,8 @@ model MedicalProfile {
   id                  String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   user_id             String              @unique @db.Uuid
   consent_record_id   String              @db.Uuid
-  blood_type          String?             @db.VarChar(5)
+  /// Medical fields below are AES-256-GCM sealed by MedicalCryptoService (MEDICAL_ENCRYPTION_KEY).
+  blood_type          String?
   allergies           String[]
   current_medications String[]
   medical_conditions  String[]
@@ -293,8 +297,18 @@ model IncidentAttachment {
   authenticity_score      Int?                @db.SmallInt
   authenticity_flags      String[]            @default([])
   authenticity_checked_at DateTime?           @db.Timestamptz(6)
+  // Tier 2 — AI vision plausibility review (advisory only, never blocks dispatch).
+  ai_review_label         String?             @db.VarChar(20)
+  ai_review_reason        String?
+  ai_review_checked_at    DateTime?           @db.Timestamptz(6)
+  // A dispatcher's manual call that this piece of evidence isn't credible.
+  // Attachment-level only — never changes the incident's own status.
+  rejected_at             DateTime?           @db.Timestamptz(6)
+  rejected_by_id          String?             @db.Uuid
+  rejection_notes         String?
   incidents               Incident            @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users                   User?               @relation(fields: [uploaded_by_id], references: [id], onUpdate: NoAction)
+  users                   User?               @relation("incident_attachments_uploaded_by_idTousers", fields: [uploaded_by_id], references: [id], onUpdate: NoAction)
+  rejected_by             User?               @relation("incident_attachments_rejected_by_idTousers", fields: [rejected_by_id], references: [id], onUpdate: NoAction)
   incident_messages       incident_messages[]
 
   @@map("incident_attachments")
@@ -336,34 +350,44 @@ model Vehicle {
 }
 
 model Facility {
-  id                    String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  organization_id       String?                   @db.Uuid
-  name                  String                    @db.VarChar(255)
-  facility_type         facility_type
-  barangay              String?                   @db.VarChar(100)
-  municipality          String?                   @db.VarChar(100)
-  province              String?                   @db.VarChar(100)
-  address               String?
-  location              Unsupported("geography")?
-  contact_number        String?                   @db.VarChar(20)
-  emergency_contact     String?                   @db.VarChar(20)
-  receiving_status      facility_receiving_status @default(UNKNOWN)
-  capacity_total        Int?                      @db.SmallInt
-  capacity_available    Int?                      @db.SmallInt
-  has_emergency_room    Boolean?                  @default(false)
-  has_icu               Boolean?                  @default(false)
-  blood_bank            Boolean?                  @default(false)
-  is_evacuation_center  Boolean?                  @default(false)
-  elevation_masl        Decimal?                  @db.Decimal(6, 1)
-  is_active             Boolean                   @default(true)
-  last_verified_at      DateTime?                 @db.Timestamptz(6)
-  created_at            DateTime                  @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime                  @default(now()) @db.Timestamptz(6)
-  organizations         Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
-  facility_capabilities facility_capabilities[]
-  facility_referrals    facility_referrals[]
-  transport_records     TransportRecord[]
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organization_id         String?                   @db.Uuid
+  name                    String                    @db.VarChar(255)
+  facility_type           facility_type
+  barangay                String?                   @db.VarChar(100)
+  municipality            String?                   @db.VarChar(100)
+  province                String?                   @db.VarChar(100)
+  address                 String?
+  latitude                Decimal?                  @db.Decimal(10, 7)
+  longitude               Decimal?                  @db.Decimal(10, 7)
+  location                Unsupported("geography")?
+  location_status         facility_location_status  @default(UNVERIFIED)
+  location_source         String?                   @db.VarChar(50)
+  location_source_ref     String?                   @db.VarChar(100)
+  location_confidence     Decimal?                  @db.Decimal(3, 2)
+  location_verified_by_id String?                   @db.Uuid
+  contact_number          String?                   @db.VarChar(20)
+  emergency_contact       String?                   @db.VarChar(20)
+  receiving_status        facility_receiving_status @default(UNKNOWN)
+  capacity_total          Int?                      @db.SmallInt
+  capacity_available      Int?                      @db.SmallInt
+  has_emergency_room      Boolean?                  @default(false)
+  has_icu                 Boolean?                  @default(false)
+  blood_bank              Boolean?                  @default(false)
+  is_evacuation_center    Boolean?                  @default(false)
+  elevation_masl          Decimal?                  @db.Decimal(6, 1)
+  is_active               Boolean                   @default(true)
+  last_verified_at        DateTime?                 @db.Timestamptz(6)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  organizations           Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  location_verified_by    User?                     @relation("FacilityLocationVerifiedBy", fields: [location_verified_by_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  facility_capabilities   facility_capabilities[]
+  facility_referrals      facility_referrals[]
+  transport_records       TransportRecord[]
 
+  @@index([location], map: "idx_facilities_location", type: Gist)
+  @@index([location_status], map: "idx_facilities_location_status")
   @@map("facilities")
 }
 
@@ -478,8 +502,9 @@ model AuditLog {
   user_agent  String?
   incident_id String?      @db.Uuid
   occurred_at DateTime     @default(now()) @db.Timestamptz(6)
-  users       User?        @relation(fields: [actor_id], references: [id], onUpdate: NoAction)
-  incidents   Incident?    @relation(fields: [incident_id], references: [id], onUpdate: NoAction)
+  // NoAction, not SetNull: deleting a user or an incident must never rewrite audit rows.
+  users       User?        @relation(fields: [actor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  incidents   Incident?    @relation(fields: [incident_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([action], map: "idx_audit_logs_action")
   @@index([actor_id], map: "idx_audit_logs_actor")
@@ -490,48 +515,54 @@ model AuditLog {
 }
 
 model Announcement {
-  id                                        String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  publisher_id                              String                    @db.Uuid
-  organization_id                           String?                   @db.Uuid
-  title                                     String                    @db.VarChar(500)
-  body                                      String
-  category                                  announcement_category
-  severity                                  announcement_severity     @default(INFORMATIONAL)
-  scope                                     announcement_scope        @default(MUNICIPALITY_WIDE)
-  target_barangays                          String[]
-  status                                    announcement_status       @default(DRAFT)
-  publish_now                               Boolean                   @default(true)
-  scheduled_at                              DateTime?                 @db.Timestamptz(6)
-  published_at                              DateTime?                 @db.Timestamptz(6)
-  archived_at                               DateTime?                 @db.Timestamptz(6)
-  superseded_by_id                          String?                   @db.Uuid
-  push_sent_count                           Int?                      @default(0)
-  sms_sent_count                            Int?                      @default(0)
-  created_at                                DateTime                  @default(now()) @db.Timestamptz(6)
-  updated_at                                DateTime                  @default(now()) @updatedAt @db.Timestamptz(6)
-  image_storage_key                         String?                   @db.VarChar(500)
-  image_url                                 String?                   @db.VarChar(1000)
-  action_required                           String?
-  approved_at                               DateTime?                 @db.Timestamptz(6)
-  approved_by_id                            String?                   @db.Uuid
-  cancelled_at                              DateTime?                 @db.Timestamptz(6)
-  contact_info                              String?                   @db.VarChar(300)
-  correction_note                           String?
-  effective_end_at                          DateTime?                 @db.Timestamptz(6)
-  effective_start_at                        DateTime?                 @db.Timestamptz(6)
-  image_alt_text                            String?                   @db.VarChar(300)
-  issuing_office                            String?                   @db.VarChar(200)
-  language                                  announcement_language     @default(FIL)
-  source_reference                          String?                   @db.VarChar(500)
-  summary                                   String?                   @db.VarChar(400)
-  template_data                             Json?
-  template_key                              String?                   @db.VarChar(50)
-  announcement_deliveries                   announcement_deliveries[]
-  users_announcements_approved_by_idTousers User?                     @relation("announcements_approved_by_idTousers", fields: [approved_by_id], references: [id], onUpdate: NoAction)
-  organizations                             Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
-  users                                     User                      @relation("announcement_publisher", fields: [publisher_id], references: [id], onUpdate: NoAction)
-  announcements                             Announcement?             @relation("announcementsToannouncements", fields: [superseded_by_id], references: [id], onUpdate: NoAction)
-  other_announcements                       Announcement[]            @relation("announcementsToannouncements")
+  id                                                  String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  publisher_id                                        String                    @db.Uuid
+  organization_id                                     String?                   @db.Uuid
+  title                                               String                    @db.VarChar(500)
+  body                                                String
+  category                                            announcement_category
+  severity                                            announcement_severity     @default(INFORMATIONAL)
+  scope                                               announcement_scope        @default(MUNICIPALITY_WIDE)
+  target_barangays                                    String[]
+  status                                              announcement_status       @default(DRAFT)
+  publish_now                                         Boolean                   @default(true)
+  scheduled_at                                        DateTime?                 @db.Timestamptz(6)
+  published_at                                        DateTime?                 @db.Timestamptz(6)
+  archived_at                                         DateTime?                 @db.Timestamptz(6)
+  superseded_by_id                                    String?                   @db.Uuid
+  push_sent_count                                     Int?                      @default(0)
+  sms_sent_count                                      Int?                      @default(0)
+  created_at                                          DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                                          DateTime                  @default(now()) @updatedAt @db.Timestamptz(6)
+  image_storage_key                                   String?                   @db.VarChar(500)
+  image_url                                           String?                   @db.VarChar(1000)
+  action_required                                     String?
+  approved_at                                         DateTime?                 @db.Timestamptz(6)
+  approved_by_id                                      String?                   @db.Uuid
+  cancelled_at                                        DateTime?                 @db.Timestamptz(6)
+  contact_info                                        String?                   @db.VarChar(300)
+  correction_note                                     String?
+  effective_end_at                                    DateTime?                 @db.Timestamptz(6)
+  effective_start_at                                  DateTime?                 @db.Timestamptz(6)
+  image_alt_text                                      String?                   @db.VarChar(300)
+  issuing_office                                      String?                   @db.VarChar(200)
+  language                                            announcement_language     @default(FIL)
+  source_reference                                    String?                   @db.VarChar(500)
+  summary                                             String?                   @db.VarChar(400)
+  template_data                                       Json?
+  template_key                                        String?                   @db.VarChar(50)
+  /// CRITICAL approval (Phase 7): when and by whom the draft was submitted to MDRRMO.
+  approval_requested_at                               DateTime?                 @db.Timestamptz(6)
+  approval_requested_by_id                            String?                   @db.Uuid
+  /// The Supervisor's reason when returning a submission to draft.
+  review_note                                         String?
+  announcement_deliveries                             announcement_deliveries[]
+  users_announcements_approved_by_idTousers           User?                     @relation("announcements_approved_by_idTousers", fields: [approved_by_id], references: [id], onUpdate: NoAction)
+  users_announcements_approval_requested_by_idTousers User?                     @relation("announcements_approval_requested_by_idTousers", fields: [approval_requested_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations                                       Organization?             @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  users                                               User                      @relation("announcement_publisher", fields: [publisher_id], references: [id], onUpdate: NoAction)
+  announcements                                       Announcement?             @relation("announcementsToannouncements", fields: [superseded_by_id], references: [id], onUpdate: NoAction)
+  other_announcements                                 Announcement[]            @relation("announcementsToannouncements")
 
   @@index([category], map: "idx_announcements_category")
   @@index([severity], map: "idx_announcements_severity")
@@ -1547,17 +1578,17 @@ model incident_barangay_notices {
 /// Append-only log of every SMS received from a barangay, applied or not. Application code
 /// only INSERTs. `provider_message_id` makes webhook retries and re-polls idempotent.
 model barangay_sms_inbound {
-  id                  String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  provider_message_id String                   @unique(map: "uq_barangay_sms_inbound_provider_message") @db.VarChar(100)
-  from_phone          String                   @db.VarChar(32)
-  from_phone_e164     String?                  @db.VarChar(16)
+  id                  String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  provider_message_id String                     @unique(map: "uq_barangay_sms_inbound_provider_message") @db.VarChar(100)
+  from_phone          String                     @db.VarChar(32)
+  from_phone_e164     String?                    @db.VarChar(16)
   body                String
-  received_at         DateTime                 @db.Timestamptz(6)
-  parsed_command      String?                  @db.VarChar(12)
-  parsed_code         String?                  @db.VarChar(4)
-  notice_id           String?                  @db.Uuid
+  received_at         DateTime                   @db.Timestamptz(6)
+  parsed_command      String?                    @db.VarChar(12)
+  parsed_code         String?                    @db.VarChar(4)
+  notice_id           String?                    @db.Uuid
   outcome             barangay_inbound_outcome
-  created_at          DateTime                 @default(now()) @db.Timestamptz(6)
+  created_at          DateTime                   @default(now()) @db.Timestamptz(6)
   notice              incident_barangay_notices? @relation(fields: [notice_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([notice_id], map: "idx_barangay_sms_inbound_notice")
@@ -1645,6 +1676,7 @@ enum announcement_severity {
 
 enum announcement_status {
   DRAFT
+  PENDING_APPROVAL
   SCHEDULED
   PUBLISHED
   ARCHIVED
@@ -1728,6 +1760,13 @@ enum escalation_status {
   ACKNOWLEDGED
   RESOLVED
   CANCELLED
+}
+
+enum facility_location_status {
+  UNVERIFIED
+  PENDING_REVIEW
+  VERIFIED
+  REJECTED
 }
 
 enum facility_receiving_status {

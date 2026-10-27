@@ -1,7 +1,8 @@
 import type { CreateIncidentInput } from '@agap/shared';
 import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
+import { File, UploadTask, UploadType } from 'expo-file-system';
 import { authedFetch } from './authed-fetch';
-import { apiFetch, defaultHeaders, multipartHeaders, ApiError } from './http';
+import { apiFetch, ApiError } from './http';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -34,32 +35,52 @@ export async function uploadIncidentPhoto(
   const ext  = name.split('.').pop()?.toLowerCase() ?? '';
   const MIME: Record<string, string> = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg',
-    png: 'image/png', webp: 'image/webp', mp4: 'video/mp4',
+    png: 'image/png', webp: 'image/webp',
+    mp4: 'video/mp4',
+    // expo-camera's recordAsync() writes a QuickTime container on iOS (Android writes mp4).
+    mov: 'video/quicktime', qt: 'video/quicktime',
   };
-  const type = MIME[ext] ?? 'image/jpeg';
-  const form = new FormData();
-  // React Native FormData file shape.
-  form.append('file', { uri, name, type } as unknown as Blob);
+  // Fall back to a generic binary type rather than image/jpeg when the extension
+  // is unrecognized — mislabeling a video as a photo sends it through the wrong
+  // size-limit tier on the backend and gets it silently rejected.
+  const type = MIME[ext] ?? 'application/octet-stream';
 
+  const parameters: Record<string, string> = {};
   // Trusted capture provenance — stamped on-device at the shutter, not from EXIF.
   if (meta) {
-    form.append('capturedAt', String(meta.capturedAt));
-    form.append('captureSource', meta.source);
-    if (meta.lat != null)      form.append('captureLat', String(meta.lat));
-    if (meta.lng != null)      form.append('captureLng', String(meta.lng));
-    if (meta.accuracy != null) form.append('captureAccuracy', String(meta.accuracy));
+    parameters.capturedAt = String(meta.capturedAt);
+    if (meta.source != null)   parameters.captureSource = meta.source;
+    if (meta.lat != null)      parameters.captureLat = String(meta.lat);
+    if (meta.lng != null)      parameters.captureLng = String(meta.lng);
+    if (meta.accuracy != null) parameters.captureAccuracy = String(meta.accuracy);
   }
 
-  const res = await authedFetch(`${API_BASE}/v1/incidents/${incidentId}/attachments`, {
-    method: 'POST',
-    // Content-Type intentionally omitted — runtime sets multipart boundary.
-    headers: multipartHeaders(token),
-    body: form,
-  });
+  // Uses expo-file-system's native UploadTask rather than fetch()+FormData:
+  // React Native's own FormData file-part shape ({ uri, name, type }) is rejected
+  // by this RN version's New Architecture networking module with "Unsupported
+  // FormDataPart implementation" — every photo/video upload failed with a generic
+  // NetworkError before it ever left the device. The native multipart upload
+  // sidesteps RN's fetch/FormData bridge entirely.
+  const task = new UploadTask(
+    new File(uri),
+    `${API_BASE}/v1/incidents/${incidentId}/attachments`,
+    {
+      httpMethod: 'POST',
+      uploadType: UploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType: type,
+      parameters,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'ngrok-skip-browser-warning': '1',
+      },
+    },
+  );
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new ApiError((err as any).message ?? `HTTP ${res.status}`, res.status);
+  const result = await task.uploadAsync();
+  if (result.status < 200 || result.status >= 300) {
+    const body = (() => { try { return JSON.parse(result.body); } catch { return {}; } })();
+    throw new ApiError((body as any).message ?? `HTTP ${result.status}`, result.status, body);
   }
 }
 

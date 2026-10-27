@@ -90,9 +90,9 @@ Have important medical facts written down ahead of time, with the citizen's expl
 | 4 | Back on Medical Profile, the citizen picks a blood type (A+, A−, B+, B−, AB+, AB−, O+, O−, another value or unknown) and adds allergies, conditions, medications, disabilities and notes. | User Action |
 | 5 | The backend validates the entries: blood type up to 5 characters, at most 20 items per list and 60 characters per item, notes up to 500 characters. Blank entries are trimmed out. | Validation |
 | 6 | The backend refuses to create a profile if no granted consent exists, or if a profile already exists. | Validation |
-| 7 | The backend saves the medical profile linked to the citizen and to the consent record. | Database |
-| 8 | The app shows the saved profile by section, with a count per list and allergies highlighted. | Processing |
-| 9 | To edit, the citizen changes any field and saves. The backend updates the profile and records the review date. | Database |
+| 7 | The backend encrypts each medical entry (AES-256-GCM, bound to the citizen) and saves the profile linked to the citizen and to the consent record. Only encrypted values are stored in the database. | Database |
+| 8 | The backend decrypts the profile for its owner, and the app shows it by section, with a count per list and allergies highlighted. | Processing |
+| 9 | To edit, the citizen changes any field and saves. The backend re-encrypts the profile, updates it and records the review date. | Database |
 | 10 | The citizen can withdraw consent in Privacy after a confirmation. The backend marks the consent Withdrawn, and the medical screen locks again. | Database |
 
 **TO-BE Outputs**
@@ -100,7 +100,7 @@ Have important medical facts written down ahead of time, with the citizen's expl
 | No. | Output Produced by the Proposed Process |
 |---|---|
 | 1 | Medical data consent record (Granted or Withdrawn, with timestamps) |
-| 2 | Saved medical profile linked to the citizen and to their consent |
+| 2 | Saved medical profile, encrypted at rest, linked to the citizen and to their consent |
 | 3 | Medical profile summary shown to the citizen by section |
 | 4 | Updated profile with the date it was last reviewed |
 | 5 | Validation and refusal messages (no consent, entry too long, profile already exists) |
@@ -116,8 +116,9 @@ Have important medical facts written down ahead of time, with the citizen's expl
 4. Withdraw consent and confirm the screen locks.
 5. Try a 61-character item and confirm it's rejected.
 
+**Encryption (added 2026-10-23):** every medical value is AES-256-GCM encrypted with `MEDICAL_ENCRYPTION_KEY` before it is saved, and bound to its owner. A screenshot of the `medical_profiles` row (values start with `v1.`) next to the readable app screen shows it. The server needs the key set; without it a profile can't be saved (dispatch is never affected).
+
 **Do not claim:**
-- **Encryption** of medical data. The project guide says it should be encrypted, but it is stored as normal database columns.
 - **Responders viewing the profile in an app.** The backend `GET /medical-profiles/:userId` (with an access log) exists, but no web or mobile screen calls it.
 - **Deleting the profile from the app.** The backend `DELETE /medical-profiles/me` exists, but no screen uses it.
 - **The access log and data export** on the Privacy screen. They belong to MOD-48, not this module.

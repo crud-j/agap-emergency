@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString, IsIn } from 'class-validator';
+import { TRIAGE_COLORS } from '../../incidents/assessment/dto/submit-assessment.dto';
 
 export class TriageTagDto {
   @ApiPropertyOptional()
@@ -12,9 +13,9 @@ export class TriageTagDto {
   @IsString()
   incidentId?: string;
 
-  @ApiProperty({ example: 'RED' })
-  @IsString()
-  triageColor!: string;
+  @ApiProperty({ enum: TRIAGE_COLORS, example: 'RED' })
+  @IsIn(TRIAGE_COLORS)
+  triageColor!: (typeof TRIAGE_COLORS)[number];
 
   @ApiPropertyOptional()
   @IsOptional()

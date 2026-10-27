@@ -11,6 +11,7 @@ import {
   BOCAUE_OUTSIDE_MASK,
 } from '@/lib/bocaue-geo';
 import { MapErrorOverlay } from '@/components/map/MapErrorOverlay';
+import { resolveMissingStyleImages } from '@/components/map/missing-style-images';
 import type { HeatmapPoint, RiskArea } from '@/features/risk/api';
 
 // Approximate barangay centroids for Bocaue — [lng, lat] MapLibre order.
@@ -168,6 +169,7 @@ export function RiskHeatmapView({ heatmap, floodZones, riskAreas }: Props): JSX.
         maxZoom={BOCAUE_MAX_ZOOM}
         style={{ height: '100%', width: '100%' }}
         scrollZoom
+        ref={resolveMissingStyleImages}
         onError={() => setTileError(true)}
         onLoad={() => setTileError(false)}
       >

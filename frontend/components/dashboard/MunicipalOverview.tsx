@@ -3,14 +3,14 @@
 import type { JSX } from 'react';
 import Link from 'next/link';
 import {
-  Activity, AlertOctagon, ArrowRight, CalendarDays, Clock, History, Plus, Truck, WifiOff,
+  Activity, AlertOctagon, ArrowRight, CalendarDays, Clock, History, Plus, ShieldCheck, Truck, WifiOff,
 } from 'lucide-react';
 import { Badge, Skeleton, StatCard } from '@/components/ui';
 import { DashboardBanners } from '@/components/dashboard/DashboardBanners';
 import { DashboardPanel } from '@/components/dashboard/DashboardPanel';
 import { useMunicipalOverview } from '@/features/analytics/hooks';
 import type { MunicipalOverview as Overview } from '@/features/analytics/api';
-import { useAnnouncements } from '@/features/announcements/hooks';
+import { useAnnouncementPolicy, useAnnouncements } from '@/features/announcements/hooks';
 import { categoryLabel as announcementCategory, fmtManila, severityMeta } from '@/features/announcements/labels';
 import { categoryIcon, formatDurationSec as fmtDuration, titleCase } from '@/lib/incident-format';
 import { useNow } from '@/lib/use-now';
@@ -135,6 +135,12 @@ function TrendChart({ trend }: { trend: Overview['trend7d'] }): JSX.Element {
 export function MunicipalOverview(): JSX.Element {
   const query = useMunicipalOverview();
   const announcements = useAnnouncements({ status: 'PUBLISHED', page: 1, perPage: LATEST_ANNOUNCEMENTS });
+  // Phase 7: CRITICAL advisories waiting at, or sent back by, MDRRMO.
+  const policy = useAnnouncementPolicy();
+  const pending = useAnnouncements({ status: 'PENDING_APPROVAL', page: 1, perPage: 1 });
+  const returned = useAnnouncements({ returned: true, page: 1, perPage: 1 });
+  const pendingCount = pending.data?.meta.total ?? 0;
+  const returnedCount = returned.data?.meta.total ?? 0;
   const now = useNow(15_000);
 
   const data = query.data;
@@ -172,6 +178,23 @@ export function MunicipalOverview(): JSX.Element {
       </div>
 
       <DashboardBanners />
+
+      {(policy.data?.criticalNeedsApproval || pendingCount > 0 || returnedCount > 0) && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-[rgba(168,181,193,0.3)] bg-white px-4 py-2.5 text-sm text-agap-textMid">
+          <span className="flex items-center gap-1.5 font-semibold text-agap-textMain">
+            <ShieldCheck size={15} className="text-agap-info" aria-hidden /> MDRRMO approval
+          </span>
+          <Link href="/announcements?tab=PENDING_APPROVAL" className="hover:text-agap-textMain">
+            <span className="font-mono font-semibold tabular-nums text-agap-textMain">{pendingCount}</span> pending
+          </Link>
+          <Link
+            href="/announcements?tab=RETURNED"
+            className={cn('hover:text-agap-textMain', returnedCount > 0 && 'font-semibold text-agap-amber')}
+          >
+            <span className="font-mono tabular-nums">{returnedCount}</span> returned with a note
+          </Link>
+        </div>
+      )}
 
       {(stale || (query.isError && !data)) && (
         <div role="status" className="flex items-center gap-2 rounded-xl border border-[rgba(217,119,6,0.25)] bg-agap-amberSoft px-4 py-2.5 text-sm text-agap-textMid">

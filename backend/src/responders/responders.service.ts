@@ -12,6 +12,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
+import { IncidentStatusService } from '../incidents/incident-status/incident-status.service';
 import { UpdateAssignmentStatusDto } from './dto/update-assignment-status.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { TrackLocationDto } from '../locations/dto/track-location.dto';
@@ -73,6 +74,7 @@ export class RespondersService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
+    private readonly statusService: IncidentStatusService,
     @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
   ) {}
 
@@ -314,6 +316,16 @@ export class RespondersService {
         data: { status: 'ACCEPTED', accepted_at: new Date() },
       });
     });
+    void this.audit.log({
+      action: AuditAction.STATUS_CHANGE,
+      actorId: userId,
+      actorRole: 'RESPONDER',
+      entityType: 'dispatch',
+      entityId: dispatchId,
+      moduleId: 'MOD-32',
+      incidentId: accepted.incident_id,
+      newValues: { status: 'ACCEPTED' },
+    });
     // Emitted after commit; a failed emit never affects the acceptance.
     this.emitDispatchUpdated(accepted);
     return accepted;
@@ -324,6 +336,16 @@ export class RespondersService {
     const declined = await this.prisma.dispatches.update({
       where: { id: dispatchId },
       data: { status: 'REJECTED', rejected_at: new Date(), rejected_reason: reason },
+    });
+    void this.audit.log({
+      action: AuditAction.STATUS_CHANGE,
+      actorId: userId,
+      actorRole: 'RESPONDER',
+      entityType: 'dispatch',
+      entityId: dispatchId,
+      moduleId: 'MOD-32',
+      incidentId: declined.incident_id,
+      newValues: { status: 'REJECTED', reason },
     });
     this.emitDispatchUpdated(declined);
     return declined;
@@ -376,24 +398,14 @@ export class RespondersService {
     // Every active dispatch on the incident ends when it is resolved — the
     // units go back to AVAILABLE so the dashboard can assign them again.
     const finishedDispatches = await this.prisma.$transaction(async (tx) => {
-      await tx.incident.update({
-        where: { id: dispatch.incident_id },
-        data: {
-          status: incidentStatus as any,
-          ...(incidentStatus === IncidentStatus.EN_ROUTE && { en_route_at: now }),
-          ...(incidentStatus === IncidentStatus.ON_SCENE && { on_scene_at: now }),
-          ...(resolving && { resolved_at: now }),
-        },
-      });
-      await tx.incidentEvent.create({
-        data: {
-          incident_id: dispatch.incident_id,
-          from_status: currentStatus as any,
-          to_status: incidentStatus as any,
-          triggered_by_id: userId,
-          triggered_by_role: 'RESPONDER',
-          notes: dto.notes ?? null,
-        },
+      await this.statusService.recordTransition(tx, {
+        incidentId: dispatch.incident_id,
+        from: currentStatus,
+        to: incidentStatus,
+        actorId: userId,
+        actorRole: 'RESPONDER',
+        notes: dto.notes ?? null,
+        at: now,
       });
 
       if (!resolving) return [];
@@ -462,6 +474,16 @@ export class RespondersService {
     }
 
     for (const d of finishedDispatches) {
+      // The unit is free again (only units still pinned to this incident were released).
+      try {
+        this.realtime.resourceStatusChanged({
+          resourceId: d.resource_id,
+          newStatus: 'AVAILABLE',
+          changedAt: now.toISOString(),
+        });
+      } catch (err) {
+        this.logger.warn(`Realtime emit failed for unit ${d.resource_id}: ${String(err)}`);
+      }
       if (d.status === 'CANCELLED') {
         try {
           this.realtime.notifyDispatchCancelled(dispatch.incident_id, {

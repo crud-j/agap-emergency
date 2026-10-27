@@ -163,7 +163,10 @@ function ActiveIncidentCard({ incident }: { incident: any }) {
         </Text>
       )}
 
-      <TouchableOpacity style={styles.cancelBtn} onPress={() => router.push('/emergency/confirmation' as any)}>
+      <TouchableOpacity
+        style={styles.cancelBtn}
+        onPress={() => router.push({ pathname: '/emergency/cancel', params: { id: incident.id } } as any)}
+      >
         <Text style={styles.cancelBtnText}>{t.home.activeIncidentCancel}</Text>
       </TouchableOpacity>
     </View>
@@ -239,6 +242,8 @@ export default function HomeScreen() {
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
   const reducedMotion = useAccessibilityStore((s) => s.reducedMotion);
+  const shakeToAlert = useAccessibilityStore((s) => s.shakeToAlert);
+  const setAccessibilityPreferences = useAccessibilityStore((s) => s.setPreferences);
 
   const screenProgress = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
   const { incident: activeIncident } = useActiveIncident();
@@ -381,7 +386,12 @@ export default function HomeScreen() {
 
         {activeIncident && <ActiveIncidentCard incident={activeIncident} />}
 
-        <SOSAlert hasActiveIncident={!!activeIncident} reducedMotion={reducedMotion} />
+        <SOSAlert
+          hasActiveIncident={!!activeIncident}
+          reducedMotion={reducedMotion}
+          shakeToAlert={shakeToAlert}
+          onShakeToAlertChange={(value) => void setAccessibilityPreferences({ shakeToAlert: value })}
+        />
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{t.home.quickActionsTitle}</Text>

@@ -4,8 +4,8 @@ import { Suspense, useState, type JSX } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Archive, Ban, CalendarClock, CheckCircle2, ImageIcon, Megaphone, PencilLine,
-  Plus, Radio, Send, Undo2, X,
+  Archive, Ban, CalendarClock, CheckCircle2, Hourglass, ImageIcon, Megaphone, MessageSquareWarning,
+  PencilLine, Plus, Radio, Send, ShieldCheck, Undo2, X,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,
@@ -24,6 +24,8 @@ import {
   useUnscheduleAnnouncement,
   useCancelAnnouncement,
   useArchiveAnnouncement,
+  useSubmitAnnouncement,
+  useWithdrawAnnouncement,
 } from '@/features/announcements/hooks';
 import type { Announcement } from '@/features/announcements/api';
 import { AnnouncementPreview } from '@/components/announcements/AnnouncementPreview';
@@ -35,7 +37,10 @@ import { getTemplate, manilaInputToIso, isoToManilaInput, SOURCE_REQUIRED_CATEGO
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 // ADVISORIES filters by severity (hazard notices), not status: spec §2, a filter, not a page.
-const STATUS_TABS = ['ALL', 'ADVISORIES', 'DRAFT', 'SCHEDULED', 'PUBLISHED', 'CANCELLED', 'ARCHIVED', 'SUPERSEDED'] as const;
+// PENDING_APPROVAL and RETURNED are Phase 7's filters (the LGU account gets no new page).
+const STATUS_TABS = [
+  'ALL', 'ADVISORIES', 'DRAFT', 'PENDING_APPROVAL', 'RETURNED', 'SCHEDULED', 'PUBLISHED', 'CANCELLED', 'ARCHIVED', 'SUPERSEDED',
+] as const;
 const ADVISORY_SEVERITIES = 'WARNING,CRITICAL';
 type StatusTab = (typeof STATUS_TABS)[number];
 
@@ -80,13 +85,17 @@ function ScheduleDialog({ target, onClose }: { target: Announcement | null; onCl
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const schedule = useScheduleAnnouncement();
+  const submit = useSubmitAnnouncement();
+  // Phase 7: a CRITICAL advisory is submitted with its release time instead.
+  const viaApproval = !!target?.requiresApproval;
 
   async function confirm() {
     const iso = manilaInputToIso(value);
     if (!target || !iso) { setError('Choose a date and time.'); return; }
     try {
       setError(null);
-      await schedule.mutateAsync({ id: target.id, scheduledAt: iso });
+      if (viaApproval) await submit.mutateAsync({ id: target.id, scheduledAt: iso });
+      else await schedule.mutateAsync({ id: target.id, scheduledAt: iso });
       setValue('');
       onClose();
     } catch (e) {
@@ -115,12 +124,16 @@ function ScheduleDialog({ target, onClose }: { target: Announcement | null; onCl
           className={inputCls}
         />
         <p className="mt-2 text-xs text-agap-textSub">
-          Scheduling approves the notice. It goes out automatically within a minute of this time.
+          {viaApproval
+            ? 'An MDRRMO Supervisor approves it first. If approval comes after this time, it goes out on approval.'
+            : 'Scheduling approves the notice. It goes out automatically within a minute of this time.'}
         </p>
         {error && <p className="mt-2 text-xs text-agap-danger">{error}</p>}
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={schedule.isPending} onClick={confirm}>Approve &amp; schedule</Button>
+          <Button variant="primary" loading={schedule.isPending || submit.isPending} onClick={confirm}>
+            {viaApproval ? 'Submit for approval' : <>Approve &amp; schedule</>}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -194,6 +207,8 @@ function DetailDrawer({
   const router = useRouter();
   const missingFields = item ? getMissingPublishFields(item) : [];
   const publish = usePublishAnnouncement();
+  const submit = useSubmitAnnouncement();
+  const withdraw = useWithdrawAnnouncement();
   const unschedule = useUnscheduleAnnouncement();
   const archive = useArchiveAnnouncement();
   const [confirmPublish, setConfirmPublish] = useState(false);
@@ -206,6 +221,8 @@ function DetailDrawer({
 
   const st = statusMeta(item.status);
   const template = getTemplate(item.template_key);
+  // Phase 7: the server decides; a CRITICAL draft goes to MDRRMO instead of out.
+  const viaApproval = !!item.requiresApproval && item.status === 'DRAFT';
 
   async function run(fn: () => Promise<unknown>, fallback: string) {
     try { setError(null); await fn(); } catch (e) { setError(errMsg(e, fallback)); }
@@ -221,7 +238,11 @@ function DetailDrawer({
     ['Contact', item.contact_info ?? '—'],
     ...(item.effective_start_at ? [['Effective', `${fmtManila(item.effective_start_at)}${item.effective_end_at ? ` – ${fmtManila(item.effective_end_at)}` : ''}`] as [string, string]] : []),
     ['Created', fmtManila(item.created_at)],
-    ...(item.approved_at ? [['Approved', fmtManila(item.approved_at)] as [string, string]] : []),
+    ...(item.approval_requested_at && item.status !== 'DRAFT'
+      ? [['Submitted', `${fmtManila(item.approval_requested_at)}${item.requestedByName ? ` · ${item.requestedByName}` : ''}`] as [string, string]]
+      : []),
+    ...(item.status === 'PENDING_APPROVAL' && item.scheduled_at ? [['Requested time', fmtManila(item.scheduled_at)] as [string, string]] : []),
+    ...(item.approved_at ? [['Approved', `${fmtManila(item.approved_at)}${item.approverName ? ` · ${item.approverName}` : ''}`] as [string, string]] : []),
     ...(item.scheduled_at && item.status === 'SCHEDULED' ? [['Goes out', fmtManila(item.scheduled_at)] as [string, string]] : []),
     ...(item.published_at ? [['Published', fmtManila(item.published_at)] as [string, string]] : []),
     ...(item.status === 'PUBLISHED' || item.status === 'CANCELLED' ? [['SMS queued', String(item.sms_sent_count ?? 0)] as [string, string]] : []),
@@ -266,6 +287,26 @@ function DetailDrawer({
             ))}
           </dl>
 
+          {item.status === 'DRAFT' && item.review_note && (
+            <div role="note" className="rounded-xl border border-[rgba(217,119,6,0.35)] bg-agap-amberSoft px-4 py-3 text-sm">
+              <p className="flex items-center gap-1.5 text-xs font-bold text-agap-amber">
+                <MessageSquareWarning size={14} aria-hidden /> Returned by MDRRMO
+              </p>
+              <p className="mt-1 whitespace-pre-line text-agap-textMain">{item.review_note}</p>
+              <p className="mt-1.5 text-xs text-agap-textSub">Edit the draft, then submit it again.</p>
+            </div>
+          )}
+
+          {item.status === 'PENDING_APPROVAL' && (
+            <div role="status" className="flex items-start gap-2 rounded-xl border border-[rgba(37,99,235,0.2)] bg-agap-infoSoft px-4 py-3 text-sm text-agap-textMid">
+              <Hourglass size={15} className="mt-0.5 shrink-0 text-agap-info" aria-hidden />
+              <p>
+                Waiting for an MDRRMO Supervisor since {fmtManila(item.approval_requested_at)}. It is locked until it is approved or returned.
+                Withdraw it if you need to change something.
+              </p>
+            </div>
+          )}
+
           {item.correction_note && (
             <div className="rounded-xl border border-[rgba(212,72,88,0.2)] bg-agap-dangerSoft px-4 py-3 text-sm">
               <p className="text-xs font-bold text-agap-danger">Correction note</p>
@@ -288,23 +329,43 @@ function DetailDrawer({
                 </div>
               </div>
             ) : (
-              <div className="rounded-xl border border-agap-green bg-agap-greenSoft px-4 py-3 text-sm">
-                <p className="font-semibold text-agap-textMain">Approve and publish now?</p>
-                <p className="mt-1 text-xs text-agap-textMid">
-                  It appears in the citizen app immediately and goes to push and SMS subscribers.
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setConfirmPublish(false)}>Back</Button>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    loading={publish.isPending}
-                    onClick={() => run(async () => { await publish.mutateAsync(item.id); setConfirmPublish(false); onClose(); }, 'Failed to publish.')}
-                  >
-                    <Send size={13} /> Approve &amp; publish
-                  </Button>
+              viaApproval ? (
+                <div className="rounded-xl border border-agap-green bg-agap-greenSoft px-4 py-3 text-sm">
+                  <p className="font-semibold text-agap-textMain">Submit for MDRRMO approval?</p>
+                  <p className="mt-1 text-xs text-agap-textMid">
+                    A Supervisor reviews it. Nothing reaches residents until it is approved.
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => setConfirmPublish(false)}>Back</Button>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      loading={submit.isPending}
+                      onClick={() => run(async () => { await submit.mutateAsync({ id: item.id }); setConfirmPublish(false); }, 'Failed to submit.')}
+                    >
+                      <ShieldCheck size={13} /> Submit for approval
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-xl border border-agap-green bg-agap-greenSoft px-4 py-3 text-sm">
+                  <p className="font-semibold text-agap-textMain">Approve and publish now?</p>
+                  <p className="mt-1 text-xs text-agap-textMid">
+                    It appears in the citizen app immediately and goes to push and SMS subscribers.
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => setConfirmPublish(false)}>Back</Button>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      loading={publish.isPending}
+                      onClick={() => run(async () => { await publish.mutateAsync(item.id); setConfirmPublish(false); onClose(); }, 'Failed to publish.')}
+                    >
+                      <Send size={13} /> Approve &amp; publish
+                    </Button>
+                  </div>
+                </div>
+              )
             )
           )}
 
@@ -320,15 +381,25 @@ function DetailDrawer({
             {item.status === 'DRAFT' && (
               <>
                 <Button size="sm" variant="primary" onClick={() => setConfirmPublish(true)} disabled={confirmPublish}>
-                  <Send size={13} /> Publish
+                  {viaApproval ? <><ShieldCheck size={13} /> Submit for MDRRMO approval</> : <><Send size={13} /> Publish</>}
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => onSchedule(item)}>
-                  <CalendarClock size={13} /> Schedule
+                  <CalendarClock size={13} /> {viaApproval ? 'Submit with a release time' : 'Schedule'}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => router.push(`/announcements/compose?id=${item.id}`)}>
                   <PencilLine size={13} /> Edit
                 </Button>
               </>
+            )}
+            {item.status === 'PENDING_APPROVAL' && (
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={withdraw.isPending}
+                onClick={() => run(() => withdraw.mutateAsync(item.id), 'Failed to withdraw.')}
+              >
+                <Undo2 size={13} /> Withdraw to draft
+              </Button>
             )}
             {item.status === 'SCHEDULED' && (
               <>
@@ -374,9 +445,12 @@ function AnnouncementsList(): JSX.Element {
   const canPublish = hasRole(user, 'ANNOUNCEMENTS_PUBLISHER', 'SYSTEM_ADMINISTRATOR');
   const router = useRouter();
   const params = useSearchParams();
-  const flash = params.get('published') ? 'published' : params.get('saved') ? 'saved' : null;
+  const flash = params.get('published') ? 'published' : params.get('submitted') ? 'submitted' : params.get('saved') ? 'saved' : null;
 
-  const [activeTab, setActiveTab] = useState<StatusTab>('ALL');
+  const tabParam = params.get('tab');
+  const [activeTab, setActiveTab] = useState<StatusTab>(
+    STATUS_TABS.includes(tabParam as StatusTab) ? (tabParam as StatusTab) : 'ALL',
+  );
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scheduleTarget, setScheduleTarget] = useState<Announcement | null>(null);
@@ -387,7 +461,9 @@ function AnnouncementsList(): JSX.Element {
     perPage: 20,
     ...(activeTab === 'ADVISORIES'
       ? { severity: ADVISORY_SEVERITIES }
-      : activeTab !== 'ALL' && { status: activeTab }),
+      : activeTab === 'RETURNED'
+        ? { returned: true }
+        : activeTab !== 'ALL' && { status: activeTab }),
   });
   const rows: Announcement[] = data?.data ?? [];
   // Keep the drawer in sync with refetched rows after an action.
@@ -432,7 +508,12 @@ function AnnouncementsList(): JSX.Element {
       header: 'Status',
       accessor: (row) => {
         const s = statusMeta(row.status);
-        return <Badge variant={s.variant}>{s.label}</Badge>;
+        return (
+          <span className="flex flex-wrap items-center gap-1">
+            <Badge variant={s.variant}>{s.label}</Badge>
+            {row.status === 'DRAFT' && row.review_note && <Badge variant="amber">Returned</Badge>}
+          </span>
+        );
       },
     },
     {
@@ -475,7 +556,9 @@ function AnnouncementsList(): JSX.Element {
           <CheckCircle2 size={16} className="shrink-0 text-agap-green" aria-hidden />
           {flash === 'published'
             ? 'Announcement published. It is now in the citizen app and queued for push and SMS.'
-            : 'Draft saved. Open it below to publish or schedule.'}
+            : flash === 'submitted'
+              ? 'Submitted for MDRRMO approval. It goes out once a Supervisor approves it.'
+              : 'Draft saved. Open it below to publish or schedule.'}
           <Link href="/announcements" className="ml-auto text-agap-textSub hover:text-agap-textMain" aria-label="Dismiss">
             <X size={14} />
           </Link>
@@ -509,7 +592,7 @@ function AnnouncementsList(): JSX.Element {
               activeTab === tab ? 'bg-white text-agap-textMain shadow-tile' : 'text-agap-textSub hover:text-agap-textMain',
             )}
           >
-            {tab === 'ALL' ? 'All' : tab === 'ADVISORIES' ? 'Advisories' : tab === 'ARCHIVED' ? 'Archive' : statusMeta(tab).label}
+            {tab === 'ALL' ? 'All' : tab === 'ADVISORIES' ? 'Advisories' : tab === 'RETURNED' ? 'Returned' : tab === 'ARCHIVED' ? 'Archive' : statusMeta(tab).label}
           </button>
         ))}
       </div>
@@ -528,7 +611,9 @@ function AnnouncementsList(): JSX.Element {
               ? 'Click “New announcement” to compose one from a template.'
               : activeTab === 'ADVISORIES'
                 ? 'No Warning or Critical advisories.'
-                : `No ${statusMeta(activeTab).label.toLowerCase()} announcements.`
+                : activeTab === 'RETURNED'
+                  ? 'No drafts returned by MDRRMO.'
+                  : `No ${statusMeta(activeTab).label.toLowerCase()} announcements.`
           }
         />
       )}

@@ -22,7 +22,7 @@ const SIZES = [
 export default function AccessibilityScreen() {
   const t = useTranslations();
   const accessToken = useAuthStore((s) => s.accessToken);
-  const { language, textSize, highContrast, reducedMotion, setPreferences } = useAccessibilityStore();
+  const { language, textSize, highContrast, reducedMotion, shakeToAlert, setPreferences } = useAccessibilityStore();
 
   // Persist locally (always) + best-effort server sync so preferences follow
   // the account. Never blocks the UI (offline-safe).
@@ -74,6 +74,13 @@ export default function AccessibilityScreen() {
           subtitle={t.onboarding4.reducedMotion.subtitle}
           value={reducedMotion}
           onChange={(v) => save({ reducedMotion: v })}
+        />
+
+        <ToggleField
+          title={t.onboarding4.shakeToAlert.title}
+          subtitle={t.onboarding4.shakeToAlert.subtitle}
+          value={shakeToAlert}
+          onChange={(v) => save({ shakeToAlert: v })}
         />
       </ScrollView>
     </View>

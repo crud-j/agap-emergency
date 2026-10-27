@@ -22,3 +22,12 @@ export async function assertCanManageOrg(prisma: PrismaService, actor: OrgActor,
   });
   if (!membership) throw new ForbiddenException('You can only manage your own organization');
 }
+
+/** Organizations the user is an active member of; scopes hospital users to their own facilities. */
+export async function activeMemberOrgIds(prisma: PrismaService, userId: string): Promise<string[]> {
+  const rows = await prisma.organization_memberships.findMany({
+    where: { user_id: userId, is_active: true },
+    select: { organization_id: true },
+  });
+  return rows.map((row) => row.organization_id);
+}

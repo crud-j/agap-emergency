@@ -5,4 +5,5 @@ export * from './escalation.events';
 export * from './announcement.events';
 export * from './barangay.events';
 export * from './notification.events';
+export * from './resource.events';
 export * from './websocket-event.types';

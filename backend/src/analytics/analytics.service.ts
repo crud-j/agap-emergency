@@ -15,6 +15,23 @@ const NOT_REPORTED: incident_status[] = ['DRAFT', 'DUPLICATE'];
 const PRIORITIES: incident_priority[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 const DEPLOYED_UNITS: resource_status[] = ['DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'RETURNING', 'RESERVED'];
 const UNAVAILABLE_UNITS: resource_status[] = ['OUT_OF_SERVICE', 'OFFLINE'];
+const DEFAULT_ANALYTICS_DAYS = 30;
+
+export interface AnalyticsDateRange {
+  from: Date;
+  to: Date;
+}
+
+export function defaultAnalyticsDateRange(now = new Date()): AnalyticsDateRange {
+  return {
+    from: new Date(now.getTime() - DEFAULT_ANALYTICS_DAYS * DAY_MS),
+    to: now,
+  };
+}
+
+function nullableNumber(value: unknown): number | null {
+  return value === null || value === undefined ? null : Math.round(Number(value));
+}
 
 /** Start of the Asia/Manila calendar day containing `at`, independent of the server's time zone. */
 export function manilaMidnight(at: Date): Date {
@@ -249,65 +266,138 @@ export class AnalyticsService {
     };
   }
 
-  async getResponseTimes(_filters: Record<string, unknown>) {
-    const grouped = await this.prisma.incident_metrics.groupBy({
-      by: ['category'],
-      orderBy: { category: 'asc' },
+  async getResponseTimes(range: AnalyticsDateRange = defaultAnalyticsDateRange()) {
+    // These figures come directly from incident lifecycle timestamps; incident_metrics is not populated.
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        category: string;
+        acknowledge: number | null;
+        dispatch: number | null;
+        response: number | null;
+        total: number | null;
+        count: number;
+      }>
+    >`
+      SELECT category::text AS category,
+             AVG(EXTRACT(EPOCH FROM (acknowledged_at - submitted_at))) AS acknowledge,
+             AVG(EXTRACT(EPOCH FROM (dispatched_at - submitted_at))) AS dispatch,
+             AVG(EXTRACT(EPOCH FROM (on_scene_at - submitted_at))) AS response,
+             AVG(EXTRACT(EPOCH FROM (resolved_at - submitted_at))) AS total,
+             COUNT(*)::int AS count
+        FROM incidents
+       WHERE submitted_at >= ${range.from}
+         AND submitted_at < ${range.to}
+         AND status::text NOT IN ('DRAFT', 'DUPLICATE')
+       GROUP BY category
+       ORDER BY category`;
+
+    return rows.map((row) => ({
+      category: row.category,
       _avg: {
-        acknowledge_duration_secs: true,
-        dispatch_duration_secs: true,
-        response_duration_secs: true,
-        total_duration_secs: true,
+        acknowledge_duration_secs: nullableNumber(row.acknowledge),
+        dispatch_duration_secs: nullableNumber(row.dispatch),
+        response_duration_secs: nullableNumber(row.response),
+        total_duration_secs: nullableNumber(row.total),
       },
-      _count: { _all: true },
-    });
-    return grouped;
+      _count: { _all: Number(row.count) },
+    }));
   }
 
-  async getVolume(_filters: Record<string, unknown>) {
+  async getVolume(range: AnalyticsDateRange = defaultAnalyticsDateRange()) {
+    const where: Prisma.IncidentWhereInput = {
+      submitted_at: { gte: range.from, lt: range.to },
+      status: { notIn: NOT_REPORTED },
+    };
     const byCategory = await this.prisma.incident.groupBy({
       by: ['category'],
+      where,
       orderBy: { category: 'asc' },
       _count: { _all: true },
     });
     const byStatus = await this.prisma.incident.groupBy({
       by: ['status'],
+      where,
       orderBy: { status: 'asc' },
       _count: { _all: true },
     });
     return { byCategory, byStatus };
   }
 
-  async getSlaCompliance(_filters: Record<string, unknown>) {
-    const [total, ackMet, dispatchMet] = await this.prisma.$transaction([
-      this.prisma.incident_metrics.count(),
-      this.prisma.incident_metrics.count({ where: { acknowledge_sla_met: true } }),
-      this.prisma.incident_metrics.count({ where: { dispatch_sla_met: true } }),
-    ]);
+  async getSlaCompliance(range: AnalyticsDateRange = defaultAnalyticsDateRange()) {
+    const [row] = await this.prisma.$queryRaw<
+      Array<{
+        total: number;
+        acknowledge_measured: number;
+        acknowledge_met: number;
+        dispatch_measured: number;
+        dispatch_met: number;
+      }>
+    >`
+      SELECT COUNT(*)::int AS total,
+             COUNT(*) FILTER (WHERE i.acknowledged_at IS NOT NULL)::int AS acknowledge_measured,
+             COUNT(*) FILTER (
+               WHERE i.acknowledged_at IS NOT NULL
+                 AND EXTRACT(EPOCH FROM (i.acknowledged_at - i.submitted_at))
+                   <= COALESCE(ack_policy.acknowledge_threshold_secs, 120)
+             )::int AS acknowledge_met,
+             COUNT(*) FILTER (WHERE i.dispatched_at IS NOT NULL)::int AS dispatch_measured,
+             COUNT(*) FILTER (
+               WHERE i.dispatched_at IS NOT NULL
+                 AND EXTRACT(EPOCH FROM (i.dispatched_at - i.submitted_at))
+                   <= COALESCE(ack_policy.dispatch_threshold_secs, 300)
+             )::int AS dispatch_met
+        FROM incidents i
+        LEFT JOIN LATERAL (
+          SELECT p.acknowledge_threshold_secs, p.dispatch_threshold_secs
+            FROM sla_policies p
+           WHERE p.is_active = true
+             AND (p.incident_category IS NULL OR p.incident_category = i.category)
+             AND (p.priority IS NULL OR p.priority = i.priority)
+           ORDER BY
+             CASE WHEN p.incident_category IS NOT NULL AND p.priority IS NOT NULL THEN 2
+                  WHEN p.incident_category IS NOT NULL OR p.priority IS NOT NULL THEN 1
+                  ELSE 0 END DESC,
+             p.created_at DESC
+           LIMIT 1
+        ) ack_policy ON true
+       WHERE i.submitted_at >= ${range.from}
+         AND i.submitted_at < ${range.to}
+         AND i.status::text NOT IN ('DRAFT', 'DUPLICATE')`;
+
+    const total = Number(row?.total ?? 0);
+    const ackMet = Number(row?.acknowledge_met ?? 0);
+    const dispatchMet = Number(row?.dispatch_met ?? 0);
+    const ackMeasured = Number(row?.acknowledge_measured ?? 0);
+    const dispatchMeasured = Number(row?.dispatch_measured ?? 0);
     return {
       total,
       acknowledgeSlaMet: ackMet,
       dispatchSlaMet: dispatchMet,
-      acknowledgeCompliancePct: total ? Math.round((ackMet / total) * 100) : 0,
-      dispatchCompliancePct: total ? Math.round((dispatchMet / total) * 100) : 0,
+      acknowledgeCompliancePct: ackMeasured ? Math.round((ackMet / ackMeasured) * 100) : null,
+      dispatchCompliancePct: dispatchMeasured ? Math.round((dispatchMet / dispatchMeasured) * 100) : null,
     };
   }
 
-  async getFalseAlertRate(_filters: Record<string, unknown>) {
+  async getFalseAlertRate(range: AnalyticsDateRange = defaultAnalyticsDateRange()) {
     const [totalIncidents, falseAlerts] = await this.prisma.$transaction([
-      this.prisma.incident.count(),
-      this.prisma.false_alerts.count(),
+      this.prisma.incident.count({
+        where: { submitted_at: { gte: range.from, lt: range.to }, status: { notIn: NOT_REPORTED } },
+      }),
+      this.prisma.false_alerts.count({
+        where: { incidents: { submitted_at: { gte: range.from, lt: range.to } } },
+      }),
     ]);
     return {
       totalIncidents,
       falseAlerts,
-      ratePct: totalIncidents ? Math.round((falseAlerts / totalIncidents) * 100) : 0,
+      ratePct: totalIncidents ? Math.round((falseAlerts / totalIncidents) * 100) : null,
     };
   }
 
-  async getResourceUtilization(_filters: Record<string, unknown>) {
+  async getResourceUtilization(range: AnalyticsDateRange = defaultAnalyticsDateRange()) {
     return this.prisma.dispatches.groupBy({
       by: ['resource_id'],
+      where: { incidents: { submitted_at: { gte: range.from, lt: range.to } } },
       orderBy: { resource_id: 'asc' },
       _count: { _all: true },
     });

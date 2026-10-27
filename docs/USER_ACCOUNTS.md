@@ -36,18 +36,62 @@ Citizen/guest reporter accounts are intentionally excluded.
 - **System Administrator password:** value of `INITIAL_ADMIN_PASSWORD` in `.env` (placeholder default: `ChangeThisPasswordImmediately!`).
 - **Login:** email + password. Web → Operations Center at `http://localhost:3001/login`. Mobile → responders sign in with email + password (reuses the same auth; no separate rescuer login).
 
-| Role | Name | Email (login) | Phone | Password | Org | Logs in to |
+---
+
+## Website (Operations Center) accounts
+
+These seven accounts can sign in at `http://localhost:3001/login` and open pages there. Checked against the dev
+database on **2026-10-22**: it holds exactly these staff accounts, with none added through *Users & Accounts*.
+Which pages each role sees comes from `frontend/lib/role-access.ts`; the backend's `@Roles(...)` checks are what
+actually enforce access.
+
+| # | Role | Name | Email (login) | Password | Organization | Lands on |
 |---|---|---|---|---|---|---|
-| System Administrator | System Administrator | `admin@agap.local` *(= `INITIAL_ADMIN_EMAIL`)* | — | `INITIAL_ADMIN_PASSWORD` | Platform | Web (Admin) |
-| Dispatcher | Juan dela Cruz | `dispatcher1@mdrrmo.bocaue.gov.ph` | +639171234001 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
-| Dispatcher | Maria Santos | `dispatcher2@mdrrmo.bocaue.gov.ph` | +639171234002 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
-| Supervisor | Roberto Reyes | `supervisor@mdrrmo.bocaue.gov.ph` | +639171234003 | `AgapDev2026!` | MDRRMO Bocaue | Web (Operations Center) |
-| Responder | Jose Mendoza | `responder1@mdrrmo.bocaue.gov.ph` | +639171234004 | `AgapDev2026!` | MDRRMO Bocaue | Mobile (Responder) |
-| Responder | Ana Garcia | `responder2@mdrrmo.bocaue.gov.ph` | +639171234005 | `AgapDev2026!` | MDRRMO Bocaue | Mobile (Responder) |
-| Responder | Carlos Bautista | `responder3@bfp.bocaue.gov.ph` | +639171234006 | `AgapDev2026!` | BFP Bocaue | Mobile (Responder) |
-| Hospital User | Dr. Luz Aquino | `receiving@bocauehospital.gov.ph` | +639171234007 | `AgapDev2026!` | Bocaue General Hospital | Web (Hospital Portal) |
-| Announcements Publisher | LGU Information Officer (Office of the Mayor) | `announcements@lgu.bocaue.gov.ph` | +639171234008 | `AgapDev2026!` | LGU | Web (Municipal Overview + Announcements) |
-| Org Administrator | Elena Villanueva | `orgadmin@mdrrmo.bocaue.gov.ph` | +639171234009 | `AgapDev2026!` | MDRRMO Bocaue | Web (Organization Administration) |
+| 1 | System Administrator | System Administrator | `admin@agap.local` *(= `INITIAL_ADMIN_EMAIL`)* | `INITIAL_ADMIN_PASSWORD` | — (platform) | Dashboard: system health |
+| 2 | Supervisor | Roberto Reyes | `supervisor@mdrrmo.bocaue.gov.ph` | `AgapDev2026!` ¹ | MDRRMO Bocaue | Dashboard: Operations Oversight |
+| 3 | Dispatcher | Juan dela Cruz | `dispatcher1@mdrrmo.bocaue.gov.ph` | `AgapDev2026!` ¹ | MDRRMO Bocaue | Dispatch |
+| 4 | Dispatcher | Maria Santos | `dispatcher2@mdrrmo.bocaue.gov.ph` | `AgapDev2026!` | MDRRMO Bocaue | Dispatch |
+| 5 | Announcements Publisher | LGU Information Officer (Office of the Mayor) | `announcements@lgu.bocaue.gov.ph` | `AgapDev2026!` ¹ | — (LGU, no membership) | Dashboard: Municipal Overview |
+| 6 | Org Administrator | Elena Villanueva | `orgadmin@mdrrmo.bocaue.gov.ph` | `AgapDev2026!` | MDRRMO Bocaue | Dashboard: organization |
+| 7 | Hospital User | Dr. Luz Aquino | `receiving@bocauehospital.gov.ph` | `AgapDev2026!` ¹ | Bocaue General Hospital (BGH) | Hospital Portal (no sidebar) |
+
+¹ **Already changed in the dev database.** These accounts finished the forced first-login password change,
+so `AgapDev2026!` no longer works for them. Ask whoever changed it, or have the System Administrator reset it.
+Only `dispatcher2` and `orgadmin` still accept `AgapDev2026!`, and they must change it on first sign-in.
+Reseeding (`pnpm prisma db seed`) restores the shared password for every account.
+
+All accounts are `PENDING_VERIFICATION` in the database. That is expected (`auth/account-status.ts`): staff can still sign in.
+
+### What each website account sees (sidebar)
+
+| Role | Sidebar pages |
+|---|---|
+| **System Administrator** | Dashboard · Organizations · Fleet & Units · Hospitals & Facilities · Users & Accounts · Roles & Permissions · Barangay Directory · Audit Log · Security Events · Integrations · Configuration |
+| **Supervisor** | Dashboard · Incident Queue · Live Map · Triage · Dispatch · Escalations · Activity Log · Command / ICS · Multi-Agency · Surge Mode · Fleet & Units · Hospitals & Facilities · Analytics · Risk Map · Approvals · Incident History |
+| **Dispatcher** | Dashboard · Incident Queue · Live Map · Triage · Dispatch · Multi-Agency · Fleet & Units · Hospitals & Facilities · Incident History |
+| **Announcements Publisher** | Dashboard · Announcements · Publication History (plus *Create announcement*) |
+| **Org Administrator** | Dashboard · Organizations · Fleet & Units · Requests · Barangay Directory |
+| **Hospital User** | Hospital Portal only (`/hospitals`) |
+
+### Accounts with no website access
+
+| Role | Accounts | Where they sign in |
+|---|---|---|
+| Responder | `responder1@mdrrmo.bocaue.gov.ph` (Jose Mendoza), `responder2@mdrrmo.bocaue.gov.ph` (Ana Garcia), `responder3@bfp.bocaue.gov.ph` (Carlos Bautista) | Mobile app only. Signing in on the website works, but every page shows "not available". |
+| Citizen / Bystander | Self-registered citizens; guests need no account | Mobile app only |
+
+---
+
+## Mobile (Responder) accounts
+
+| Role | Name | Email (login) | Phone | Password | Org |
+|---|---|---|---|---|---|
+| Responder | Jose Mendoza | `responder1@mdrrmo.bocaue.gov.ph` | +639171234004 | `AgapDev2026!` | MDRRMO Bocaue |
+| Responder | Ana Garcia | `responder2@mdrrmo.bocaue.gov.ph` | +639171234005 | `AgapDev2026!` | MDRRMO Bocaue |
+| Responder | Carlos Bautista | `responder3@bfp.bocaue.gov.ph` | +639171234006 | `AgapDev2026!` | BFP Bocaue |
+
+Staff phone numbers (seed): dispatcher1 +639171234001, dispatcher2 +639171234002, supervisor +639171234003,
+hospital user +639171234007, publisher +639171234008, org admin +639171234009.
 
 ---
 
@@ -57,17 +101,17 @@ Citizen/guest reporter accounts are intentionally excluded.
 - **Account:** `admin@agap.local` (overridable via `INITIAL_ADMIN_EMAIL`).
 - **Password:** `INITIAL_ADMIN_PASSWORD` (env).
 - **Authority (MOD-47/49):** platform-wide — manage accounts, roles, system config, health. **No operational authority** (no dispatch, triage, escalation or surge); see the [role spec](AGAP_Role_Rules_and_Dashboard_Content.md) §5.
-- **Surface:** Operations Center → Dashboard (system health) and the Administration pages (`/administration/users`, `/permissions`, `/barangays`, `/config`).
+- **Surface:** Operations Center → Dashboard (system health) and the Administration pages (`/administration/users`, `/permissions`, `/barangays`, `/security`, `/integrations`, `/config`), plus the Audit Log. Incident chat is read-only.
 
 ### 🧭 Dispatcher (Operations Center staff)
-- **Accounts:** `dispatcher1@mdrrmo.bocaue.gov.ph` (Juan dela Cruz), `dispatcher2@mdrrmo.bocaue.gov.ph` (Maria Santos).
+- **Accounts:** `dispatcher1@mdrrmo.bocaue.gov.ph` (Juan dela Cruz), `dispatcher2@mdrrmo.bocaue.gov.phF` (Maria yantos).
 - **Authority:** receive, acknowledge, triage/assess, validate, **authorize dispatch**, escalate, monitor — within assigned authority. Can close an incident once its resolution is recorded. Cannot perform responder/field-only actions.
-- **Surface:** Operations Center → Dispatch, Command Queue, Map.
+- **Surface:** Operations Center → lands on Dispatch; Incident Queue, Live Map, Triage, Multi-Agency, Incident History.
 
 ### 👮 Supervisor / Incident Commander
 - **Account:** `supervisor@mdrrmo.bocaue.gov.ph` (Roberto Reyes).
-- **Authority:** everything a dispatcher can, plus review/approve/override, receive escalations, authorize special actions (ICS activation, multi-agency, mutual-aid approval, surge mode).
-- **Surface:** Operations Center (full ops authority).
+- **Authority:** everything a dispatcher can, plus review/approve/override, receive escalations, authorize special actions (ICS activation, multi-agency, surge mode). Approves or returns CRITICAL advisories when `ANNOUNCEMENT_APPROVAL_REQUIRED=true` (MOD-53), but cannot approve one it submitted itself.
+- **Surface:** Operations Center → Operations Oversight dashboard (full ops authority), Escalations, Activity Log, Command / ICS, Surge Mode, Analytics, Risk Map, Approvals.
 
 ### 🚑 Responder / Ambulance Crew (Rescuer)
 - **Accounts:** `responder1@mdrrmo.bocaue.gov.ph` (Jose Mendoza, MDRRMO), `responder2@mdrrmo.bocaue.gov.ph` (Ana Garcia, MDRRMO), `responder3@bfp.bocaue.gov.ph` (Carlos Bautista, BFP).
@@ -82,13 +126,13 @@ Citizen/guest reporter accounts are intentionally excluded.
 
 ### 📢 Announcements Publisher — LGU Information Officer (Office of the Mayor)
 - **Account:** `announcements@lgu.bocaue.gov.ph` (LGU Information Officer). Posts on the Mayor's behalf; the Mayor has no account (role spec §1).
-- **Authority (MOD-53):** compose, schedule, publish, archive public announcements. **One-way broadcast only — not an emergency dispatch channel** (Rule 16). Sees aggregated counts only, never incident details.
+- **Authority (MOD-53):** compose, schedule, publish, archive public announcements. With `ANNOUNCEMENT_APPROVAL_REQUIRED=true`, a CRITICAL advisory is *submitted* to an MDRRMO Supervisor instead of published. **One-way broadcast only — not an emergency dispatch channel** (Rule 16). Sees aggregated counts only, never incident details.
 - **Surface:** Web (Municipal Overview + Announcements).
 
 ### 🏢 Org Administrator
 - **Account:** `orgadmin@mdrrmo.bocaue.gov.ph` (Elena Villanueva, MDRRMO Bocaue).
-- **Authority:** manage its own organization's members, units and resource requests. No dispatch, triage or incident authority.
-- **Surface:** Web (Organization Administration). Its organization pages are being added (role dashboards plan, Phase 6); until then it sees its Dashboard only.
+- **Authority:** manage its own organization's members, units and resource requests (own-org is checked on the server). Answers mutual-aid requests. No dispatch, triage, incident or chat authority.
+- **Surface:** Web → organization Dashboard, Organizations, Fleet & Units (Registry tab), Requests, Barangay Directory.
 
 ---
 

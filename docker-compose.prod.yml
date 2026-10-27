@@ -42,6 +42,11 @@ services:
       NODE_ENV: production
     env_file:
       - .env.prod
+    volumes:
+      # Local-disk fallback for incident photo/video attachments (MOD-10) when
+      # object storage is unreachable/misconfigured — must survive container
+      # restarts/redeploys, or evidence saved here is lost on the next deploy.
+      - agap_local_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,3 +73,4 @@ services:
 volumes:
   agap_postgres_data:
   agap_redis_data:
+  agap_local_uploads:

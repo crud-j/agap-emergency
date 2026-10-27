@@ -23,7 +23,6 @@ export class EmergencyContactsService {
         phone_number: dto.phoneNumber,
         email: dto.email ?? null,
         priority_order: dto.priorityOrder ?? 1,
-        notify_on_alert: dto.notifyOnAlert ?? true,
       },
     });
   }
@@ -38,7 +37,6 @@ export class EmergencyContactsService {
         ...(dto.phoneNumber !== undefined && { phone_number: dto.phoneNumber }),
         ...(dto.email !== undefined && { email: dto.email }),
         ...(dto.priorityOrder !== undefined && { priority_order: dto.priorityOrder }),
-        ...(dto.notifyOnAlert !== undefined && { notify_on_alert: dto.notifyOnAlert }),
       },
     });
   }

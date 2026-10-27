@@ -18,6 +18,7 @@ export class MfaStateStore implements OnModuleDestroy {
   private readonly logger = new Logger(MfaStateStore.name);
   private readonly redis: Redis | null;
   private readonly memory = new Map<string, { value: string; expiresAt: number }>();
+  private redisWarningLogged = false;
 
   constructor(config: ConfigService) {
     const url = config.get<string>('REDIS_URL');
@@ -25,8 +26,19 @@ export class MfaStateStore implements OnModuleDestroy {
       this.redis = null;
       return;
     }
-    this.redis = new Redis(url, { lazyConnect: true, enableOfflineQueue: false, maxRetriesPerRequest: 1 });
-    this.redis.on('error', (err) => this.logger.warn(`Redis unavailable for MFA state: ${err.message}`));
+    this.redis = new Redis(url, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+      // MFA has an in-process fallback. Do not reconnect forever when optional
+      // local Redis is stopped; that turns one outage into a log storm.
+      retryStrategy: () => null,
+    });
+    this.redis.on('error', (err) => {
+      if (this.redisWarningLogged) return;
+      this.redisWarningLogged = true;
+      this.logger.warn(`Redis unavailable for MFA state; using memory fallback: ${err.message}`);
+    });
     void this.redis.connect().catch(() => undefined);
   }
 

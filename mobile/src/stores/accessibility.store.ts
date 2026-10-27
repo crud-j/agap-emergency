@@ -11,6 +11,7 @@ export interface AccessibilityPrefs {
   textSize: TextSize;
   highContrast: boolean;
   reducedMotion: boolean;
+  shakeToAlert: boolean;
 }
 
 interface AccessibilityState extends AccessibilityPrefs {
@@ -24,6 +25,7 @@ const DEFAULTS: AccessibilityPrefs = {
   textSize: 'medium',
   highContrast: false,
   reducedMotion: false,
+  shakeToAlert: true,
 };
 
 export const useAccessibilityStore = create<AccessibilityState>((set, get) => ({
@@ -52,13 +54,14 @@ export const useAccessibilityStore = create<AccessibilityState>((set, get) => ({
       textSize: prefs.textSize ?? state.textSize,
       highContrast: prefs.highContrast ?? state.highContrast,
       reducedMotion: prefs.reducedMotion ?? state.reducedMotion,
+      shakeToAlert: prefs.shakeToAlert ?? state.shakeToAlert,
     }));
     // Persist after the state is already updated
-    const { language, textSize, highContrast, reducedMotion } = get();
+    const { language, textSize, highContrast, reducedMotion, shakeToAlert } = get();
     try {
       await SecureStore.setItemAsync(
         STORE_KEY,
-        JSON.stringify({ language, textSize, highContrast, reducedMotion }),
+        JSON.stringify({ language, textSize, highContrast, reducedMotion, shakeToAlert }),
       );
     } catch {
       // SecureStore unavailable (e.g. web/simulator without native module)

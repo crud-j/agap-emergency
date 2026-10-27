@@ -101,7 +101,9 @@ export default function RiskPage(): JSX.Element {
 
   const heatmap = heatmapQ.data ?? [];
   const floodZones = floodQ.data ?? [];
-  const riskAreas = areasQ.data ?? [];
+  // Deactivated areas stay in Administration → Risk Areas, not on the operational map
+  // (flood zones are already filtered server-side).
+  const riskAreas = (areasQ.data ?? []).filter((a) => a.is_active);
 
   const isLoading = heatmapQ.isLoading || floodQ.isLoading;
   const isError = heatmapQ.isError || floodQ.isError;

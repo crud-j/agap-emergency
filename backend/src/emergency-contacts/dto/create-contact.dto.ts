@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsBoolean,
   IsEmail,
   IsInt,
   IsOptional,
@@ -32,9 +31,4 @@ export class CreateContactDto {
   @IsInt()
   @Min(1)
   priorityOrder?: number;
-
-  @ApiPropertyOptional({ example: true })
-  @IsOptional()
-  @IsBoolean()
-  notifyOnAlert?: boolean;
 }

@@ -22,6 +22,8 @@ import {
   useUpdateAnnouncement,
   useUploadAnnouncementImage,
   usePublishAnnouncement,
+  useSubmitAnnouncement,
+  useAnnouncementPolicy,
 } from '@/features/announcements/hooks';
 import type { CreateAnnouncementBody } from '@/features/announcements/api';
 import {
@@ -201,6 +203,8 @@ function Composer(): JSX.Element {
   const update = useUpdateAnnouncement();
   const upload = useUploadAnnouncementImage();
   const publish = usePublishAnnouncement();
+  const submit = useSubmitAnnouncement();
+  const policy = useAnnouncementPolicy(canPublish);
 
   const template = getTemplate(templateKey);
 
@@ -388,20 +392,28 @@ function Composer(): JSX.Element {
     if (id) router.push(`/announcements?saved=${id}`);
   }
 
+  // Phase 7: with approval on, a CRITICAL notice goes to an MDRRMO Supervisor instead.
+  const needsApproval = !!policy.data?.criticalNeedsApproval && severity === 'CRITICAL';
+
   async function onConfirmPublish() {
     const id = await save();
     if (!id) { setConfirmOpen(false); return; }
     try {
-      await publish.mutateAsync(id);
-      router.push(`/announcements?published=${id}`);
+      if (needsApproval) {
+        await submit.mutateAsync({ id });
+        router.push(`/announcements?submitted=${id}`);
+      } else {
+        await publish.mutateAsync(id);
+        router.push(`/announcements?published=${id}`);
+      }
     } catch (e) {
       setConfirmOpen(false);
-      setError(`Saved as draft, but not published: ${e instanceof Error ? e.message : 'unknown error'}`);
+      setError(`Saved as draft, but not ${needsApproval ? 'submitted' : 'published'}: ${e instanceof Error ? e.message : 'unknown error'}`);
       if (!editId) router.replace(`/announcements/compose?id=${id}`);
     }
   }
 
-  const busy = create.isPending || update.isPending || upload.isPending || publish.isPending;
+  const busy = create.isPending || update.isPending || upload.isPending || publish.isPending || submit.isPending;
 
   if (!canPublish) {
     return (
@@ -763,7 +775,10 @@ function Composer(): JSX.Element {
                   ))}
                 </select>
                 {severity === 'CRITICAL' && (
-                  <p className="mt-1.5 text-xs text-agap-textSub">Critical notices are pinned at the top of the citizen app.</p>
+                  <p className="mt-1.5 text-xs text-agap-textSub">
+                    Critical notices are pinned at the top of the citizen app.
+                    {needsApproval && ' An MDRRMO Supervisor approves them before release.'}
+                  </p>
                 )}
               </div>
 
@@ -789,7 +804,7 @@ function Composer(): JSX.Element {
                   Save draft
                 </Button>
                 <Button variant="primary" className="flex-1" disabled={!ready || busy} onClick={() => setConfirmOpen(true)}>
-                  <Send size={14} /> Review &amp; publish
+                  <Send size={14} /> {needsApproval ? 'Submit for MDRRMO approval' : <>Review &amp; publish</>}
                 </Button>
               </div>
               <p className="text-[11px] leading-snug text-agap-textSub">
@@ -801,12 +816,14 @@ function Composer(): JSX.Element {
       </div>
 
       {/* Approval confirmation */}
-      <Dialog open={confirmOpen} onOpenChange={(o) => !publish.isPending && setConfirmOpen(o)}>
+      <Dialog open={confirmOpen} onOpenChange={(o) => !busy && setConfirmOpen(o)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Publish as an official announcement?</DialogTitle>
+            <DialogTitle>{needsApproval ? 'Submit for MDRRMO approval?' : 'Publish as an official announcement?'}</DialogTitle>
             <DialogDescription>
-              You are approving this notice for release by <span className="font-semibold text-agap-textMain">{preview.issuingOffice}</span>.
+              {needsApproval
+                ? <>An MDRRMO Supervisor reviews this notice for <span className="font-semibold text-agap-textMain">{preview.issuingOffice}</span> before anything is sent.</>
+                : <>You are approving this notice for release by <span className="font-semibold text-agap-textMain">{preview.issuingOffice}</span>.</>}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 rounded-xl bg-agap-pearl px-4 py-3 text-sm">
@@ -820,12 +837,14 @@ function Composer(): JSX.Element {
             </p>
           </div>
           <p className="text-xs text-agap-textSub">
-            It appears in the citizen app immediately and is sent by push and SMS to subscribers. Corrections are issued by cancelling it with a note — published text cannot be edited.
+            {needsApproval
+              ? 'It is locked while it waits. Once approved it appears in the citizen app and goes to push and SMS subscribers. If it is returned, you will see the reason on the Announcements page.'
+              : 'It appears in the citizen app immediately and is sent by push and SMS to subscribers. Corrections are issued by cancelling it with a note — published text cannot be edited.'}
           </p>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={busy}>Back</Button>
             <Button variant="primary" loading={busy} onClick={onConfirmPublish}>
-              <Send size={14} /> Approve &amp; publish
+              <Send size={14} /> {needsApproval ? 'Submit for approval' : <>Approve &amp; publish</>}
             </Button>
           </DialogFooter>
         </DialogContent>

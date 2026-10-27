@@ -1,9 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsRecordId } from '../../common/decorators/is-record-id.decorator';
 
 export class WebAuthnRegisterCompleteDto {
   @ApiProperty({ description: 'UUID of the webauthn_challenges record returned by begin' })
-  @IsUUID()
+  @IsRecordId()
   @IsNotEmpty()
   challengeId!: string;
 

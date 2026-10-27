@@ -820,6 +820,51 @@ export class AuthService {
     return { message: 'If this number is registered, an OTP has been sent.' };
   }
 
+  /**
+   * Demo-only recovery for environments where Textbee is unavailable.
+   * OTPs are already persisted before SMS delivery is queued; this exposes the
+   * pending value without weakening the production verification flow.
+   */
+  async getDemoOtp(userId?: string, rawPhoneNumber?: string) {
+    const phoneNumber = rawPhoneNumber ? this.normalizePhone(rawPhoneNumber) : undefined;
+    const user = userId
+      ? await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } })
+      : phoneNumber
+        ? await this.prisma.user.findUnique({ where: { phone_number: phoneNumber }, select: { id: true } })
+        : null;
+
+    if (!user) {
+      throw new NotFoundException('No user was found for the demo OTP lookup');
+    }
+
+    const verification = await this.prisma.user_verifications.findFirst({
+      where: {
+        user_id: user.id,
+        verification_type: 'PHONE',
+        status: 'PENDING',
+        expires_at: { gt: new Date() },
+      },
+      orderBy: { created_at: 'desc' },
+      select: {
+        token: true,
+        verification_type: true,
+        expires_at: true,
+        created_at: true,
+      },
+    });
+
+    if (!verification) {
+      throw new NotFoundException('No pending demo OTP was found for this user');
+    }
+
+    return {
+      code: verification.token,
+      type: verification.verification_type,
+      expiresAt: verification.expires_at,
+      createdAt: verification.created_at,
+    };
+  }
+
   async verifyPhoneOtp(phoneNumber: string, code: string) {
     try {
       return await this.verifyPhoneOtpInternal(phoneNumber, code);

@@ -7,6 +7,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    /** The parsed error body, for callers that read structured fields (e.g. `code`). */
+    public readonly body?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -55,7 +57,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));
-    throw new ApiError(body.message ?? 'Request failed', res.status);
+    throw new ApiError(body.message ?? 'Request failed', res.status, body);
   }
 
   if (res.status === 204) return undefined as T;

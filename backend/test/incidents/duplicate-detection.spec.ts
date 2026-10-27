@@ -149,6 +149,42 @@ describe('IncidentsService.mergeDuplicate', () => {
     ).rejects.toThrow(/not found/);
   });
 
+  it.each([IncidentStatus.DISPATCHED, IncidentStatus.CLOSED, IncidentStatus.DUPLICATE])(
+    'refuses to merge a %s incident',
+    async (status) => {
+      prisma.incident.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve(where.id === 'inc-A'
+          ? { id: 'inc-A', status, public_reference: 'INC-A' }
+          : { id: 'inc-master', status: IncidentStatus.ACKNOWLEDGED, public_reference: 'INC-M' }),
+      );
+      await expect(service_mergeDuplicate()).rejects.toThrow(/can no longer be merged/);
+      expect(txUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('merges a SUBMITTED report (still in the Triage queue)', async () => {
+    prisma.incident.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+      Promise.resolve(where.id === 'inc-A'
+        ? { id: 'inc-A', status: IncidentStatus.SUBMITTED, public_reference: 'INC-A' }
+        : { id: 'inc-master', status: IncidentStatus.ACKNOWLEDGED, public_reference: 'INC-M' }),
+    );
+    await service_mergeDuplicate();
+    expect(txUpdate).toHaveBeenCalled();
+  });
+
+  it('refuses a master that is itself a duplicate (no chains)', async () => {
+    prisma.incident.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+      Promise.resolve(where.id === 'inc-A'
+        ? { id: 'inc-A', status: IncidentStatus.ACKNOWLEDGED, public_reference: 'INC-A' }
+        : { id: 'inc-master', status: IncidentStatus.DUPLICATE, public_reference: 'INC-M' }),
+    );
+    await expect(service_mergeDuplicate()).rejects.toThrow(/itself a duplicate/);
+  });
+
+  it('markDuplicate requires a master', async () => {
+    await expect(makeService().markDuplicate('inc-A', 'dispatcher-1')).rejects.toThrow(/masterIncidentId/);
+  });
+
   function service_mergeDuplicate() {
     return makeService().mergeDuplicate('inc-A', 'inc-master', 'dispatcher-1');
   }

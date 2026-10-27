@@ -162,6 +162,21 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       },
     );
 
+    const offTransporting = onIncidentEvent<{ incidentId: string }>(
+      'incident.transporting',
+      ({ incidentId }) => {
+        qc.invalidateQueries({ queryKey: ['incident-transports', incidentId] });
+        qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+      },
+    );
+    const offFacilityArrival = onIncidentEvent<{ incidentId: string }>(
+      'incident.facility_arrival',
+      ({ incidentId }) => {
+        qc.invalidateQueries({ queryKey: ['incident-transports', incidentId] });
+        qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+      },
+    );
+
     // ─── incident.assessment_updated (MOD-37) ─────────────────────────────────
     const offAssessment = onIncidentEvent<{ incidentId: string }>(
       'incident.assessment_updated',
@@ -345,6 +360,8 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
     );
 
     return () => {
+      offTransporting();
+      offFacilityArrival();
       leaveOps();
       socket.off('connect', onConnect);
       offStatus();

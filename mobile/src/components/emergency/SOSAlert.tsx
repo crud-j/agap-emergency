@@ -8,6 +8,9 @@ import { useTranslations } from '../../hooks/useAccessibility';
 import { SoundSource } from '../../hooks/useSOSAudio';
 import { HoldToSOS } from './HoldToSOS';
 import { useIncidentStore } from '../../stores/incident.store';
+import { useAccessibilityStore } from '../../stores/accessibility.store';
+import { useShakeToAlert } from '../../hooks/useShakeToAlert';
+import { ShakeCountdown } from './ShakeCountdown';
 
 /**
  * Looping alert sound played while the SOS button is held.
@@ -120,15 +123,32 @@ export function CircleLoader({
 export default function SOSAlert({
   hasActiveIncident,
   reducedMotion,
+  shakeToAlert: shakeToAlertProp,
+  onShakeToAlertChange,
 }: {
   hasActiveIncident: boolean;
   reducedMotion: boolean;
+  shakeToAlert?: boolean;
+  onShakeToAlertChange?: (value: boolean) => void;
 }) {
   const router = useRouter();
   const t = useTranslations();
   const startSOS = useIncidentStore((s) => s.startSOS);
   const activeIncidentId = useIncidentStore((s) => s.activeIncidentId);
-  const shakeEnabled = reducedMotion === false;
+  const storedShakeToAlert = useAccessibilityStore((s) => s.shakeToAlert);
+  const shakeToAlert = shakeToAlertProp ?? storedShakeToAlert;
+  const [countdownVisible, setCountdownVisible] = React.useState(false);
+  const shakeEnabled = shakeToAlert;
+
+  const handleShake = React.useCallback(() => {
+    setCountdownVisible(true);
+  }, []);
+
+  useShakeToAlert({
+    enabled: shakeToAlert,
+    hasActiveIncident,
+    onShake: handleShake,
+  });
 
   function handleHoldComplete() {
     // Capture location first (step 1 — "Confirm Location"): a precise position is
@@ -138,8 +158,23 @@ export default function SOSAlert({
     router.push('/emergency/location' as never);
   }
 
+  const sendShakeAlert = React.useCallback(() => {
+    setCountdownVisible(false);
+    startSOS('SHAKE_GESTURE');
+    router.push('/emergency/location' as never);
+  }, [router, startSOS]);
+
+  function toggleShake() {
+    if (onShakeToAlertChange) {
+      onShakeToAlertChange(!shakeToAlert);
+      return;
+    }
+    void useAccessibilityStore.getState().setPreferences({ shakeToAlert: !shakeToAlert });
+  }
+
   return (
     <View style={styles.sosSection}>
+      <ShakeCountdown visible={countdownVisible} onCancel={() => setCountdownVisible(false)} onSend={sendShakeAlert} />
       {hasActiveIncident ? (
         <TouchableOpacity
           style={styles.viewActiveBtn}
@@ -168,7 +203,13 @@ export default function SOSAlert({
       <Text style={styles.sosHeading}>{t.home.sosHeading}</Text>
       <Text style={styles.sosBody}>{t.home.sosBody}</Text>
 
-      <TouchableOpacity style={styles.shakeChip} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={styles.shakeChip}
+        activeOpacity={0.7}
+        onPress={toggleShake}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: shakeEnabled }}
+      >
         <Ionicons name="phone-portrait-outline" size={14} color={shakeEnabled ? '#0D6053' : '#9CA3AF'} style={{ marginRight: 6 }} />
         <Text style={[styles.shakeChipText, { color: shakeEnabled ? '#0D6053' : '#9CA3AF' }]}>
           {shakeEnabled ? t.home.shakeOn : t.home.shakeOff}
@@ -190,6 +231,6 @@ const styles = StyleSheet.create({
   viewActiveBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
   sosHeading: { marginTop: 4, marginBottom: 8, fontSize: 24, fontWeight: '800', color: '#1C2B3A', textAlign: 'center' },
   sosBody: { maxWidth: 300, marginBottom: 16, fontSize: 14, lineHeight: 22, fontWeight: '500', color: '#8795A3', textAlign: 'center' },
-  shakeChip: { minHeight: 36, paddingHorizontal: 16, borderRadius: 18, backgroundColor: '#EDF1F4', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  shakeChipText: { fontSize: 12, fontWeight: '700' },
+  shakeChip: { minHeight: 40, paddingHorizontal: 18, borderRadius: 20, backgroundColor: '#EDF1F4', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  shakeChipText: { fontSize: 13, fontWeight: '700', lineHeight: 18 },
 });

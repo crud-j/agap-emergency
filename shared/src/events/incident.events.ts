@@ -1,6 +1,7 @@
 import type { IncidentStatus } from '../enums/incident-status.enum';
 import type { IncidentPriority } from '../enums/incident-priority.enum';
 import type { IncidentType } from '../enums/incident-type.enum';
+import type { TransportDestinationView } from '../maps/map.types';
 
 export const INCIDENT_EVENTS = {
   CREATED: 'incident.created',
@@ -15,6 +16,7 @@ export const INCIDENT_EVENTS = {
   ASSESSMENT_UPDATED: 'incident.assessment_updated',
   TRANSPORTING: 'incident.transporting',
   FACILITY_ARRIVAL: 'incident.facility_arrival',
+  TRANSPORT_UPDATED: 'incident.transport_updated',
   HANDOVER: 'incident.handover',
   RESOLVED: 'incident.resolved',
   CLOSED: 'incident.closed',
@@ -59,23 +61,48 @@ export interface IncidentAssignedPayload {
   assignedAt: string;
 }
 
-/** MOD-40 — responder begins transporting patient(s) to a facility. */
+/**
+ * MOD-40 — responder begins transporting patient(s) to a facility.
+ * The fields marked "ops copy only" go to `ops:all`; the incident-room copy is
+ * status-only (Correction C18): incidentId, transportId, dispatchId, transportStartedAt.
+ */
 export interface IncidentTransportingPayload {
   incidentId: string;
   transportId: string;
   dispatchId: string;
-  destinationId: string | null;
-  destinationName: string | null;
-  patientId: string | null;
+  /** Ops copy only. */
+  destinationId?: string | null;
+  /** Ops copy only. */
+  destinationName?: string | null;
+  /** Ops copy only. */
+  destination?: TransportDestinationView | null;
+  /** Ops copy only. Never reaches an incident room or the reporter (§0 rule 5). */
+  patientId?: string | null;
   transportStartedAt: string;
 }
 
-/** MOD-40 — ambulance/unit arrives at the receiving facility. */
+/** MOD-40 — ambulance/unit arrives at the receiving facility. The incident-room copy has no destinationId (C18). */
 export interface IncidentFacilityArrivalPayload {
   incidentId: string;
   transportId: string;
-  destinationId: string | null;
+  dispatchId?: string;
+  /** Ops copy only. */
+  destinationId?: string | null;
   arrivedAt: string;
+}
+
+/**
+ * MOD-40 — a transport's destination changed (or the hospital was deactivated or
+ * filled up). Never sent to the incident room: a destination only exists on the
+ * hospital leg (C18). Ops gets the full payload; per-user copies have no `destination.id`.
+ */
+export interface IncidentTransportUpdatedPayload {
+  incidentId: string;
+  dispatchId: string;
+  transportId: string;
+  destination: (TransportDestinationView & { id?: string }) | null;
+  destinationWarning?: 'FACILITY_DEACTIVATED' | 'FACILITY_AT_CAPACITY';
+  changedAt: string;
 }
 
 /**

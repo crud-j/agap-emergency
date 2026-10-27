@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useIncidentStore } from '@/src/stores/incident.store';
 import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
 
@@ -29,7 +29,6 @@ const MAX_VIDEO_BYTES = 24 * 1024 * 1024;
 
 export default function CaptureScreen() {
   const router  = useRouter();
-  const { retake } = useLocalSearchParams<{ retake?: string }>();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [facing,     setFacing]     = useState<'back' | 'front'>('back');
@@ -38,14 +37,15 @@ export default function CaptureScreen() {
   const [recording,  setRecording]  = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
 
-  const startSOS          = useIncidentStore((s) => s.startSOS);
   const setPhotos         = useIncidentStore((s) => s.setPhotos);
   const setVideoUri       = useIncidentStore((s) => s.setVideoUri);
   const setPhotoCaptureMeta = useIncidentStore((s) => s.setPhotoCaptureMeta);
 
-  useEffect(() => {
-    if (!retake) startSOS();
-  }, [retake, startSOS]);
+  // This screen is only ever reached from Rapid Incident Details (MOD-09),
+  // which has already called startSOS() at the top of the flow (see
+  // bottom-nav.tsx / SOSAlert.tsx). It must never call startSOS() itself —
+  // that would wipe the in-progress draft (type, location, patient, intake)
+  // back to defaults the moment the citizen captures a photo or video.
 
   // Recording timer — resets to 0 when recording stops
   useEffect(() => {

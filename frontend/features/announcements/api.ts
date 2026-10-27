@@ -8,6 +8,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 export type AnnouncementStatus =
   | 'DRAFT'
+  | 'PENDING_APPROVAL'
   | 'SCHEDULED'
   | 'PUBLISHED'
   | 'ARCHIVED'
@@ -50,9 +51,21 @@ export interface Announcement {
   organization_id: string | null;
   created_at: string;
   updated_at: string;
-  /** Publisher list only (GET /announcements/publisher/all). */
+  /** CRITICAL approval (Phase 7). */
+  approval_requested_at?: string | null;
+  approval_requested_by_id?: string | null;
+  /** A Supervisor's reason for returning the submission to draft. */
+  review_note?: string | null;
+  /** Server decision: this one goes to MDRRMO instead of publishing. Publisher responses only. */
+  requiresApproval?: boolean;
+  /** Publisher and approvals lists only. */
   publisherName?: string | null;
   approverName?: string | null;
+  requestedByName?: string | null;
+}
+
+export interface AnnouncementPolicy {
+  criticalNeedsApproval: boolean;
 }
 
 export interface AnnouncementListParams {
@@ -61,6 +74,8 @@ export interface AnnouncementListParams {
   category?: string;
   /** One severity or a comma-separated list. */
   severity?: string;
+  /** Drafts a Supervisor returned with a note. */
+  returned?: boolean;
   page?: number;
   perPage?: number;
 }
@@ -95,7 +110,8 @@ export function fetchAnnouncementsForPublisher(
   if (params?.status)   qs.set('status', params.status);
   if (params?.category) qs.set('category', params.category);
   if (params?.severity) qs.set('severity', params.severity);
-  if (params?.page)     qs.set('page', String(params.page));
+  if (params?.returned) qs.set('returned', 'true');
+  if (params?.page)    qs.set('page', String(params.page));
   if (params?.perPage)  qs.set('perPage', String(params.perPage));
   return api.get(`/announcements/publisher/all?${qs}`, getToken());
 }
@@ -130,6 +146,43 @@ export function scheduleAnnouncement(id: string, scheduledAt: string): Promise<A
 
 export function unscheduleAnnouncement(id: string): Promise<Announcement> {
   return api.post(`/announcements/${id}/unschedule`, {}, getToken());
+}
+
+// ─── CRITICAL approval (Phase 7) ─────────────────────────────────────────────
+
+export function fetchAnnouncementPolicy(): Promise<AnnouncementPolicy> {
+  return api.get('/announcements/policy', getToken());
+}
+
+/** Supervisor queue: submissions awaiting a decision, oldest first. */
+export function fetchPendingApprovals(): Promise<Announcement[]> {
+  return api.get('/announcements/approvals', getToken());
+}
+
+export function submitAnnouncement(id: string, scheduledAt?: string): Promise<Announcement> {
+  return api.post(`/announcements/${id}/submit`, scheduledAt ? { scheduledAt } : {}, getToken());
+}
+
+export function withdrawAnnouncement(id: string): Promise<Announcement> {
+  return api.post(`/announcements/${id}/withdraw`, {}, getToken());
+}
+
+export function approveAnnouncement(id: string): Promise<Announcement> {
+  return api.post(`/announcements/${id}/approve`, {}, getToken());
+}
+
+export function returnAnnouncement(id: string, note: string): Promise<Announcement> {
+  return api.post(`/announcements/${id}/return`, { note }, getToken());
+}
+
+/** Image of a submission, through the Supervisor's review endpoint. */
+export async function fetchApprovalImageBlob(id: string): Promise<Blob> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/v1/announcements/approvals/${id}/image`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Image unavailable (${res.status})`);
+  return res.blob();
 }
 
 export function cancelAnnouncement(id: string, correctionNote: string): Promise<Announcement> {

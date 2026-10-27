@@ -1,12 +1,16 @@
 /**
  * Municipal announcements are a one-way broadcast system.
  * They are completely separate from emergency incident records.
+ *
+ * Matches `announcement_status` in backend/prisma/schema.prisma.
  */
 export enum AnnouncementStatus {
   DRAFT = 'DRAFT',
-  REVIEW = 'REVIEW',
-  APPROVED = 'APPROVED',
+  /** CRITICAL advisory waiting for an MDRRMO Supervisor (ANNOUNCEMENT_APPROVAL_REQUIRED). */
+  PENDING_APPROVAL = 'PENDING_APPROVAL',
+  SCHEDULED = 'SCHEDULED',
   PUBLISHED = 'PUBLISHED',
-  EXPIRED = 'EXPIRED',
   ARCHIVED = 'ARCHIVED',
+  SUPERSEDED = 'SUPERSEDED',
+  CANCELLED = 'CANCELLED',
 }

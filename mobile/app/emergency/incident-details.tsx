@@ -286,6 +286,17 @@ export default function IncidentDetailsScreen() {
     router.push('/emergency/transmission');
   }
 
+  // Capture (MOD-10) replaces this screen rather than stacking on top of it, so
+  // on return it remounts from the Zustand draft — local state typed before
+  // leaving must be saved here first or it's lost on remount.
+  function goToCapture() {
+    setDescription(description.trim() || null);
+    setPatient(selfStatus === ReporterStatus.NEEDS_HELP ? { isReporter: true, isUnknown: false } : null);
+    setAffectedCount(affectedCount);
+    setIntake({ answers, reporterStatus: selfStatus, landmark: landmark.trim() || null });
+    router.replace('/emergency/capture');
+  }
+
   const gpsReady       = gps === 'ready';
   const gpsLocating    = gps === 'locating';
   const gpsUnavailable = gps === 'unavailable';
@@ -503,17 +514,17 @@ export default function IncidentDetailsScreen() {
                   <Text style={styles.videoCapturedTitle}>Video captured</Text>
                   <Text style={styles.videoCapturedSub}>It will be sent with your report</Text>
                 </View>
-                <RetakeButton label="Re-record" onPress={() => router.replace('/emergency/capture?retake=1')} />
+                <RetakeButton label="Re-record" onPress={goToCapture} />
               </>
             ) : photoUri ? (
               <>
                 <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="cover" />
-                <RetakeButton label="Retake" onPress={() => router.replace('/emergency/capture?retake=1')} />
+                <RetakeButton label="Retake" onPress={goToCapture} />
               </>
             ) : (
               <TouchableOpacity
                 style={styles.photoEmpty}
-                onPress={() => router.replace('/emergency/capture?retake=1')}
+                onPress={goToCapture}
                 activeOpacity={0.8}
                 accessibilityRole="button"
                 accessibilityLabel="Add a photo or video"

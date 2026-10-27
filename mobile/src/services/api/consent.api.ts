@@ -23,6 +23,8 @@ export interface AccessLogEntry {
   purpose: string | null;
   accessed_at: string;
   incident_id: string | null;
+  /** Role of whoever opened the data (never their name). */
+  accessor_role?: string;
 }
 
 async function json<T>(res: Response): Promise<T> {

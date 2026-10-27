@@ -12,6 +12,7 @@ import {
   fetchAvailableAgencies,
   addAgency,
   fetchHandovers,
+  fetchHandoverRecipients,
   createHandover,
   acknowledgeHandover,
   fetchMutualAidRequests,
@@ -162,6 +163,15 @@ export function useCreateHandover() {
     onSuccess: (_data, { incidentId }) => {
       qc.invalidateQueries({ queryKey: ['handovers', incidentId] });
     },
+  });
+}
+
+export function useHandoverRecipients(enabled: boolean) {
+  return useQuery({
+    queryKey: ['handover-recipients'],
+    queryFn: fetchHandoverRecipients,
+    enabled,
+    staleTime: 60_000,
   });
 }
 

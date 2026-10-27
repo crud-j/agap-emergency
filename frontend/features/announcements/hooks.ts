@@ -15,6 +15,13 @@ import {
   archiveAnnouncement,
   updateAnnouncement,
   uploadAnnouncementImage,
+  fetchAnnouncementPolicy,
+  fetchPendingApprovals,
+  fetchApprovalImageBlob,
+  submitAnnouncement,
+  withdrawAnnouncement,
+  approveAnnouncement,
+  returnAnnouncement,
   type AnnouncementListParams,
   type CreateAnnouncementBody,
 } from './api';
@@ -49,10 +56,16 @@ export function useAnnouncement(id: string | null) {
  * component owns (and revokes) its own object URL. `version` (e.g. updated_at)
  * busts the cache after a replacement upload.
  */
-export function useAnnouncementImage(id: string | null, hasImage: boolean, version?: string) {
+export function useAnnouncementImage(
+  id: string | null,
+  hasImage: boolean,
+  version?: string,
+  /** 'approval': the Supervisor's review endpoint (submissions only). */
+  source: 'publisher' | 'approval' = 'publisher',
+) {
   const query = useQuery({
-    queryKey: ['announcement-image', id, version],
-    queryFn: () => fetchAnnouncementImageBlob(id!),
+    queryKey: ['announcement-image', id, version, source],
+    queryFn: () => (source === 'approval' ? fetchApprovalImageBlob(id!) : fetchAnnouncementImageBlob(id!)),
     enabled: !!id && hasImage,
     staleTime: Infinity,
     gcTime: 5 * 60_000,
@@ -131,6 +144,61 @@ export function useUpdateAnnouncement() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: Partial<CreateAnnouncementBody> }) =>
       updateAnnouncement(id, body),
+    onSuccess: (_data, { id }) => invalidate(id),
+  });
+}
+
+// ─── CRITICAL approval (Phase 7) ─────────────────────────────────────────────
+
+/** Whether CRITICAL advisories go to MDRRMO; decided by the server's flag. */
+export function useAnnouncementPolicy(enabled = true) {
+  return useQuery({
+    queryKey: ['announcements', 'policy'],
+    queryFn: fetchAnnouncementPolicy,
+    staleTime: 5 * 60_000,
+    enabled,
+  });
+}
+
+/** Supervisor queue. Polled: the Supervisor's push needs a phone, the console does not. */
+export function usePendingApprovals(enabled = true) {
+  return useQuery({
+    queryKey: ['announcements', 'approvals'],
+    queryFn: fetchPendingApprovals,
+    refetchInterval: 60_000,
+    staleTime: 15_000,
+    enabled,
+  });
+}
+
+export function useSubmitAnnouncement() {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: ({ id, scheduledAt }: { id: string; scheduledAt?: string }) => submitAnnouncement(id, scheduledAt),
+    onSuccess: (_data, { id }) => invalidate(id),
+  });
+}
+
+export function useWithdrawAnnouncement() {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: (id: string) => withdrawAnnouncement(id),
+    onSuccess: (_data, id) => invalidate(id),
+  });
+}
+
+export function useApproveAnnouncement() {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: (id: string) => approveAnnouncement(id),
+    onSuccess: (_data, id) => invalidate(id),
+  });
+}
+
+export function useReturnAnnouncement() {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) => returnAnnouncement(id, note),
     onSuccess: (_data, { id }) => invalidate(id),
   });
 }

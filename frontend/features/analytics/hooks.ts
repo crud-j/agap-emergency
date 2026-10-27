@@ -9,36 +9,37 @@ import {
   fetchDailySummary,
   fetchMunicipalOverview,
   fetchDispatchSummary,
+  type AnalyticsRange,
 } from './api';
 
-export function useResponseTimes() {
+export function useResponseTimes(range: AnalyticsRange) {
   return useQuery({
-    queryKey: ['analytics-response-times'],
-    queryFn: fetchResponseTimes,
+    queryKey: ['analytics-response-times', range],
+    queryFn: () => fetchResponseTimes(range),
     staleTime: 60_000,
   });
 }
 
-export function useVolume() {
+export function useVolume(range: AnalyticsRange) {
   return useQuery({
-    queryKey: ['analytics-volume'],
-    queryFn: fetchVolume,
+    queryKey: ['analytics-volume', range],
+    queryFn: () => fetchVolume(range),
     staleTime: 60_000,
   });
 }
 
-export function useSlaCompliance() {
+export function useSlaCompliance(range: AnalyticsRange) {
   return useQuery({
-    queryKey: ['analytics-sla-compliance'],
-    queryFn: fetchSlaCompliance,
+    queryKey: ['analytics-sla-compliance', range],
+    queryFn: () => fetchSlaCompliance(range),
     staleTime: 60_000,
   });
 }
 
-export function useFalseAlertRate() {
+export function useFalseAlertRate(range: AnalyticsRange) {
   return useQuery({
-    queryKey: ['analytics-false-alert-rate'],
-    queryFn: fetchFalseAlertRate,
+    queryKey: ['analytics-false-alert-rate', range],
+    queryFn: () => fetchFalseAlertRate(range),
     staleTime: 60_000,
   });
 }

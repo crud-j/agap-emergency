@@ -1,6 +1,7 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateResourceDto } from './dto/create-resource.dto';
 import { UpdateResourceStatusDto } from './dto/update-resource-status.dto';
 import { ResourceRequestDto } from './dto/resource-request.dto';
@@ -13,6 +14,7 @@ export class ResourcesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    @Optional() private readonly realtime?: RealtimeService,
   ) {}
 
   async findAll(filters: { status?: string; type?: string; orgId?: string }) {
@@ -20,10 +22,13 @@ export class ResourcesService {
     if (filters.status) where.status = filters.status as any;
     if (filters.type) where.resource_type = filters.type as any;
     if (filters.orgId) where.organization_id = filters.orgId;
-    return this.prisma.resources.findMany({
+    const rows = await this.prisma.resources.findMany({
       where,
       orderBy: { created_at: 'desc' },
+      include: { organizations: { select: { id: true, name: true, short_name: true } } },
     });
+    // The registry and fleet board read `organization` (MOD-27).
+    return rows.map(({ organizations, ...resource }) => ({ ...resource, organization: organizations }));
   }
 
   async findAvailable() {
@@ -88,6 +93,22 @@ export class ResourcesService {
         data: { status: dto.status as any },
       }),
     ]);
+
+    void this.audit.log({
+      action: AuditAction.STATUS_CHANGE,
+      actorId: userId,
+      entityType: 'resource',
+      entityId: id,
+      moduleId: 'MOD-28',
+      oldValues: { status: resource.status },
+      newValues: { status: dto.status },
+    });
+    this.realtime?.resourceStatusChanged({
+      resourceId: id,
+      previousStatus: String(resource.status),
+      newStatus: String(updated.status),
+      changedAt: new Date().toISOString(),
+    });
     return updated;
   }
 

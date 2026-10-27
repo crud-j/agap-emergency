@@ -12,6 +12,7 @@ import { MediaModule } from '../media/media.module';
     MediaModule,
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.PUSH_NOTIFICATIONS }),
+    BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
   ],
   controllers: [AnnouncementsController],
   providers: [AnnouncementsService],

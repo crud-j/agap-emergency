@@ -39,6 +39,13 @@ describe('EtaRefreshProcessor', () => {
     );
   });
 
+  it('never writes the scene-route ETA into transport_records (plan G3)', async () => {
+    const { processor, prisma, realtime } = setup('ACCEPTED', { latitude: 14.795, longitude: 120.925 });
+    await processor.process(job);
+    expect(prisma.transportRecord.updateMany).not.toHaveBeenCalled();
+    expect(realtime.notifyEtaUpdated).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to the enqueued point when no fix is stored', async () => {
     const { processor, maps } = setup('ACCEPTED', null);
     await processor.process(job);

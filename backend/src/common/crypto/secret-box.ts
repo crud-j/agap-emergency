@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 /**
- * AES-256-GCM sealing for secrets that must be recoverable (TOTP seeds). Not for
- * passwords or codes — those are hashed.
+ * AES-256-GCM sealing for secrets that must be recoverable (TOTP seeds, medical
+ * profile fields). Not for passwords or codes — those are hashed.
  *
  * Format: `v1.<iv>.<tag>.<ciphertext>` (base64url). `aad` binds the ciphertext to
  * its owner (the user id), so a sealed value copied onto another account's row
@@ -12,13 +12,13 @@ const VERSION = 'v1';
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 
-/** Decode MFA_ENCRYPTION_KEY (32 bytes, base64). Returns null when unset; throws when set but malformed. */
-export function parseEncryptionKey(raw: string | undefined): Buffer | null {
+/** Decode a 32-byte base64 key (e.g. MFA_ENCRYPTION_KEY). Returns null when unset; throws when set but malformed. */
+export function parseEncryptionKey(raw: string | undefined, name = 'MFA_ENCRYPTION_KEY'): Buffer | null {
   const value = raw?.trim();
   if (!value) return null;
   const key = Buffer.from(value, 'base64');
   if (key.length !== KEY_BYTES) {
-    throw new Error(`MFA_ENCRYPTION_KEY must be ${KEY_BYTES} bytes, base64-encoded (got ${key.length})`);
+    throw new Error(`${name} must be ${KEY_BYTES} bytes, base64-encoded (got ${key.length})`);
   }
   return key;
 }
@@ -34,6 +34,11 @@ export function seal(plaintext: string, key: Buffer, aad: string): string {
 }
 
 /** Throws when the key, the owner (`aad`) or the stored value is wrong or has been tampered with. */
+/** Whether a stored value is in the sealed format (rows written before encryption are not). */
+export function isSealed(value: string): boolean {
+  return value.startsWith(`${VERSION}.`);
+}
+
 export function open(sealed: string, key: Buffer, aad: string): string {
   const [version, iv, tag, ciphertext] = sealed.split('.');
   if (version !== VERSION || !iv || !tag || !ciphertext) throw new Error('Unsupported sealed value');

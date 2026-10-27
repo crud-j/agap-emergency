@@ -10,7 +10,8 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { SosAlertDto } from './dto/sos-alert.dto';
 import { RealtimeService } from '../realtime/realtime.service';
-import { BarangayNotifyService, configuredOpsPhone } from '../barangay-coordination/barangay-notify.service';
+import { BarangayNotifyService } from '../barangay-coordination/barangay-notify.service';
+import { OpsAlertService } from './ops-alert.service';
 import { IncidentStatus, QUEUE_NAMES } from '@agap/shared';
 import * as crypto from 'crypto';
 
@@ -21,9 +22,8 @@ export class EmergencyAlertsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
-    @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
     @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue: Queue,
-    @InjectQueue(QUEUE_NAMES.SLA_MONITOR) private readonly slaQueue: Queue,
+    private readonly opsAlert: OpsAlertService,
     @Optional() private readonly barangayNotify?: BarangayNotifyService,
   ) {}
 
@@ -134,25 +134,16 @@ export class EmergencyAlertsService {
       this.logger.error(`Realtime notify failed for ${incident.id}: ${String(err)}`);
     }
 
+    // MOD-17 ops SMS and the MOD-41 first SLA check (shared with POST /incidents). Never throws.
+    await this.opsAlert.onIncidentSaved(
+      { ...incident, category: String(incident.category) },
+      dto.latitude !== undefined && dto.longitude !== undefined
+        ? { lat: dto.latitude, lng: dto.longitude }
+        : null,
+    );
+
     // Queue jobs are best-effort; failure must never affect the persisted incident.
     try {
-      const hasCoords = (dto.latitude !== undefined && dto.longitude !== undefined) ? 'Y' : 'N';
-      const lat = dto.latitude?.toFixed(4) ?? '0';
-      const lng = dto.longitude?.toFixed(4) ?? '0';
-      const unixTs = Math.floor(incident.created_at.getTime() / 1000);
-      const smsPayload = `AGAP|${incident.public_reference}|${lat},${lng}|${unixTs}|${incident.category}|C:${hasCoords}`;
-
-      const opsPhone = configuredOpsPhone(process.env['MDRRMO_OPS_PHONE']);
-      if (opsPhone) {
-        await this.smsQueue.add('emergency-sms', {
-          phone: opsPhone,
-          message: smsPayload.slice(0, 160),
-          incidentId: incident.id,
-        });
-      } else {
-        this.logger.warn(`Ops SMS skipped for ${incident.public_reference}: MDRRMO_OPS_PHONE unset or placeholder`);
-      }
-
       await this.notificationQueue.add('ops-center-alert', {
         channel: 'PUSH',
         title: `New ${incident.category} Alert`,
@@ -168,12 +159,6 @@ export class EmergencyAlertsService {
           data: { incidentId: incident.id },
         });
       }
-
-      await this.slaQueue.add(
-        'sla-monitor',
-        { incidentId: incident.id, escalationType: 'ACKNOWLEDGEMENT' },
-        { delay: Number(process.env['DEFAULT_SLA_ACKNOWLEDGE_SECONDS'] ?? 120) * 1000 },
-      );
     } catch (err) {
       this.logger.error(`Queue jobs failed for ${incident.id}: ${String(err)}. Incident unaffected.`);
     }

@@ -1,5 +1,6 @@
 import { BarangayNotifyService, BarangayNotFoundError } from '../../src/barangay-coordination/barangay-notify.service';
 import { IncidentsService } from '../../src/incidents/incidents.service';
+import { IncidentStatusService } from '../../src/incidents/incident-status/incident-status.service';
 
 /** Phase 2: tagging an incident with its barangay never blocks, and never throws. */
 
@@ -172,7 +173,8 @@ describe('incident status closes the barangay notice', () => {
     };
     const service = new IncidentsService(
       prisma,
-      { validateTransition: jest.fn() } as any,
+      // Real status writer; validation stubbed so any target status can be exercised.
+      Object.assign(new IncidentStatusService(), { validateTransition: jest.fn() }),
       {} as any,
       {} as any,
       { notifyIncidentStatusChanged: jest.fn() } as any,

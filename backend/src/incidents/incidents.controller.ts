@@ -26,6 +26,7 @@ import { IncidentHandoverService } from './incident-handover/incident-handover.s
 import { TransportService } from './transport/transport.service';
 import { StartTransportDto } from './transport/dto/start-transport.dto';
 import { RecordArrivalDto } from './transport/dto/record-arrival.dto';
+import { UpdateTransportDto } from './transport/dto/update-transport.dto';
 import { MediaService, MULTER_MEMORY_STORAGE, MAX_VIDEO_UPLOAD_BYTES } from '../media/media.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { UpdateIncidentStatusDto } from './dto/update-incident-status.dto';
@@ -36,6 +37,13 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole, IncidentStatus } from '@agap/shared';
 import { IncidentParticipantService } from '../realtime/incident-participant.service';
+import {
+  ActivateIcsDto, AddAgencyDto, AssignIcsPositionDto, AssignIncidentCommanderDto, FalseAlertDto,
+  IncidentFeedbackDto, MarkDuplicateDto, MergeIncidentDto, UpdateIcsDto,
+} from './dto/incident-actions.dto';
+import { CreateHandoverDto } from './incident-handover/dto/create-handover.dto';
+import { CreateResolutionDto } from './dto/create-resolution.dto';
+import { RejectAttachmentDto } from './dto/reject-attachment.dto';
 
 @ApiTags('incidents')
 @Controller({ path: 'incidents', version: '1' })
@@ -191,6 +199,8 @@ export class IncidentsController {
       accuracy: num(body?.captureAccuracy),
       source: body?.captureSource || undefined,
     };
+    // Only the incident's own reporter attaches evidence (the app uploads right after submitting).
+    await this.incidentsService.assertReporter(id, req.user.id);
     const attachment = await this.mediaService.uploadIncidentPhoto(file, id, req.user?.id, capture);
     // Photos arrive after the incident is created, so tell the dashboard to refetch.
     this.incidentsService.notifyAttachmentAdded(id, attachment.id);
@@ -223,6 +233,24 @@ export class IncidentsController {
       type: file.contentType,
       ...(file.contentLength !== undefined && { length: file.contentLength }),
     });
+  }
+
+  @Patch(':id/attachments/:attachmentId/reject')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Reject a piece of submitted evidence as not credible (MOD-10). Attachment-level only — ' +
+      'never changes the incident status or blocks dispatch. Warns the reporter.',
+  })
+  async rejectAttachment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+    @Body() dto: RejectAttachmentDto,
+    @Request() req: any,
+  ) {
+    return this.incidentsService.rejectAttachment(id, attachmentId, req.user.id, dto.notes);
   }
 
   // ---- Events & timeline ----
@@ -277,7 +305,7 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Classify an incident as a false alert' })
   async falseAlert(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { notes?: string },
+    @Body() body: FalseAlertDto,
     @Request() req: any,
   ) {
     return this.incidentsService.markFalseAlert(id, req.user.id, body?.notes);
@@ -290,7 +318,7 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Classify an incident as a duplicate' })
   async duplicate(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { masterIncidentId?: string },
+    @Body() body: MarkDuplicateDto,
     @Request() req: any,
   ) {
     return this.incidentsService.markDuplicate(id, req.user.id, body?.masterIncidentId);
@@ -306,7 +334,7 @@ export class IncidentsController {
   })
   async merge(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { masterIncidentId: string },
+    @Body() body: MergeIncidentDto,
     @Request() req: any,
   ) {
     return this.incidentsService.mergeDuplicate(id, body.masterIncidentId, req.user.id);
@@ -319,8 +347,7 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Record incident resolution' })
   async createResolution(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: { outcome: string; patientDisposition?: string; resolutionNotes?: string },
+    @Body() body: CreateResolutionDto,
     @Request() req: any,
   ) {
     return this.incidentsService.createResolution(id, body, req.user.id);
@@ -358,9 +385,11 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Submit incident feedback' })
   async feedback(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { overallRating?: number; comments?: string },
+    @Body() body: IncidentFeedbackDto,
     @Request() req: any,
   ) {
+    // Only the person who reported the incident rates it.
+    await this.incidentsService.assertReporter(id, req.user.id);
     return this.incidentsService.submitFeedback(id, body, req.user.id);
   }
 
@@ -398,7 +427,7 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Add a participating agency (MOD-34)' })
   async addAgency(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { organizationId: string; roleInIncident?: string },
+    @Body() body: AddAgencyDto,
     @Request() req: any,
   ) {
     return this.incidentsService.addAgency(id, body.organizationId, req.user.id);
@@ -412,19 +441,6 @@ export class IncidentsController {
   @ApiOperation({ summary: 'List on-scene assessments' })
   async listAssessments(@Param('id', ParseUUIDPipe) id: string) {
     return this.incidentsService.listAssessments(id);
-  }
-
-  @Post(':id/assessments')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.RESPONDER)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create an on-scene assessment' })
-  async createAssessment(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: Record<string, unknown>,
-    @Request() req: any,
-  ) {
-    return this.incidentsService.createAssessment(id, body, req.user.id);
   }
 
   @Post(':id/assessment')
@@ -442,19 +458,6 @@ export class IncidentsController {
     return this.assessmentService.submit(id, dto, req.user.id);
   }
 
-  @Patch(':id/assessments/:aId')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.RESPONDER)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update an on-scene assessment' })
-  async updateAssessment(
-    @Param('aId', ParseUUIDPipe) aId: string,
-    @Body() body: Record<string, unknown>,
-    @Request() req: any,
-  ) {
-    return this.incidentsService.updateAssessment(aId, body, req.user.id);
-  }
-
   // ---- ICS ----
 
   @Post(':id/ics/activate')
@@ -464,7 +467,7 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Activate ICS for an incident' })
   async activateIcs(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { objectives?: string[] },
+    @Body() body: ActivateIcsDto,
     @Request() req: any,
   ) {
     return this.incidentsService.activateIcs(id, body?.objectives ?? [], req.user.id);
@@ -486,7 +489,7 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Assign an ICS position (MOD-36)' })
   async addIcsPosition(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { userId: string; position: string; organizationId?: string },
+    @Body() body: AssignIcsPositionDto,
     @Request() req: any,
   ) {
     return this.incidentsService.addIcsPosition(id, body, req.user.id);
@@ -499,7 +502,7 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Assign the Incident Commander (shortcut for INCIDENT_COMMANDER position) (MOD-36)' })
   async assignIncidentCommander(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { userId: string; organizationId?: string },
+    @Body() body: AssignIncidentCommanderDto,
     @Request() req: any,
   ) {
     return this.incidentsService.addIcsPosition(
@@ -518,11 +521,19 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Create an incident handover record — transfers situational awareness to incoming operator (MOD-44)' })
   async createHandover(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: { toUserId: string; situationSummary: string; pendingActions?: string[]; resourcesInField?: Record<string, unknown> },
+    @Body() body: CreateHandoverDto,
     @Request() req: any,
   ) {
     return this.handoverService.create(id, body, req.user.id);
+  }
+
+  @Get('handover/recipients')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Active dispatchers and supervisors who can receive a handover (MOD-44)' })
+  async handoverRecipients(@Request() req: any) {
+    return this.handoverService.recipients(req.user.id);
   }
 
   @Get(':id/handover')
@@ -549,9 +560,9 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER, UserRole.HOSPITAL_USER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'List transport records for an incident (MOD-40)' })
-  async listTransports(@Param('id', ParseUUIDPipe) id: string) {
-    return this.transportService.listTransports(id);
+  @ApiOperation({ summary: 'List transport records for an incident (MOD-40). Hospital users see only their own facilities\' transports.' })
+  async listTransports(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.transportService.listTransports(id, { id: req.user.id, role: req.user.role });
   }
 
   @Post(':id/transport')
@@ -564,7 +575,7 @@ export class IncidentsController {
     @Body() dto: StartTransportDto,
     @Request() req: any,
   ) {
-    return this.transportService.startTransport(id, dto, req.user.id);
+    return this.transportService.startTransport(id, dto, req.user.id, req.user.role);
   }
 
   @Patch(':id/transport/:transportId/arrive')
@@ -578,21 +589,22 @@ export class IncidentsController {
     @Body() dto: RecordArrivalDto,
     @Request() req: any,
   ) {
-    return this.transportService.recordArrival(id, transportId, dto, req.user.id);
+    return this.transportService.recordArrival(id, transportId, dto, req.user.id, req.user.role);
   }
 
   @Patch(':id/transport/:transportId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  // Responders only for a dispatch they crew, and only before arrival (service checks).
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update transport record — destination change or ETA update (MOD-40)' })
   async updateTransport(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('transportId', ParseUUIDPipe) transportId: string,
-    @Body() body: { destinationId?: string; estimatedArrivalAt?: string; changeReason?: string },
+    @Body() body: UpdateTransportDto,
     @Request() req: any,
   ) {
-    return this.transportService.updateTransport(id, transportId, body, req.user.id);
+    return this.transportService.updateTransport(id, transportId, body, req.user.id, req.user.role);
   }
 
   // ---- ICS extended ----
@@ -604,7 +616,7 @@ export class IncidentsController {
   @ApiOperation({ summary: 'Update ICS objectives and situation notes (MOD-36)' })
   async updateIcs(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { objectives?: string[]; situationNotes?: string | null },
+    @Body() body: UpdateIcsDto,
     @Request() req: any,
   ) {
     return this.incidentsService.updateIcs(id, body, req.user.id);

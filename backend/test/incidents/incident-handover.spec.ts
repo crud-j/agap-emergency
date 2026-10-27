@@ -28,6 +28,7 @@ function mockHandover(overrides: Record<string, unknown> = {}) {
 
 const mockPrisma = {
   incident: { findUnique: jest.fn() },
+  user: { findUnique: jest.fn(), findMany: jest.fn() },
   incident_handovers: {
     create: jest.fn(),
     findMany: jest.fn(),
@@ -54,6 +55,36 @@ describe('IncidentHandoverService — MOD-44', () => {
 
     service = module.get<IncidentHandoverService>(IncidentHandoverService);
     jest.clearAllMocks();
+    // Default recipient: an active Dispatcher.
+    mockPrisma.user.findUnique.mockResolvedValue({ role: 'DISPATCHER', status: 'ACTIVE' });
+  });
+
+  describe('recipient rules', () => {
+    beforeEach(() => mockPrisma.incident.findUnique.mockResolvedValue({ id: INCIDENT_ID, status: 'ON_SCENE' }));
+
+    it.each([
+      ['a citizen', { role: 'CITIZEN', status: 'ACTIVE' }],
+      ['a deactivated dispatcher', { role: 'DISPATCHER', status: 'DEACTIVATED' }],
+      ['an unknown user', null],
+    ])('refuses %s', async (_label, recipient) => {
+      mockPrisma.user.findUnique.mockResolvedValue(recipient);
+      await expect(service.create(INCIDENT_ID, { toUserId: TO_USER, situationSummary: 'x' }, FROM_USER))
+        .rejects.toThrow(/active Dispatcher or Supervisor/);
+      expect(mockPrisma.incident_handovers.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a handover to yourself', async () => {
+      await expect(service.create(INCIDENT_ID, { toUserId: FROM_USER, situationSummary: 'x' }, FROM_USER))
+        .rejects.toThrow(/someone else/);
+    });
+
+    it('lists active dispatchers and supervisors except the caller', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      await service.recipients(FROM_USER);
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { role: { in: ['DISPATCHER', 'SUPERVISOR'] }, status: 'ACTIVE', id: { not: FROM_USER } },
+      }));
+    });
   });
 
   // ── create ──────────────────────────────────────────────────────────────────

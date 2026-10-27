@@ -1,4 +1,5 @@
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsRecordId } from '../../common/decorators/is-record-id.decorator';
 
 export const BARANGAY_OUTCOMES = ['ON_THE_WAY', 'HANDLED', 'NEEDS_BACKUP', 'NO_ANSWER'] as const;
 export type BarangayOutcome = (typeof BARANGAY_OUTCOMES)[number];
@@ -16,7 +17,7 @@ export class LinkReportDto {
 }
 
 export class CallAttemptDto {
-  @IsUUID()
+  @IsRecordId()
   contactId!: string;
 }
 

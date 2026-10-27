@@ -12,6 +12,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CommunicationsService } from './communications.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SendMessageDto } from './dto/send-message.dto';
 
 @ApiTags('communications')
 @ApiBearerAuth()
@@ -33,7 +34,7 @@ export class CommunicationsController {
   @ApiOperation({ summary: 'Send an incident message' })
   async sendMessage(
     @Param('incidentId', ParseUUIDPipe) incidentId: string,
-    @Body() dto: { messageText: string; attachmentId?: string },
+    @Body() dto: SendMessageDto,
     @Request() req: any,
   ) {
     return this.communicationsService.sendMessage(incidentId, dto, req.user.id);

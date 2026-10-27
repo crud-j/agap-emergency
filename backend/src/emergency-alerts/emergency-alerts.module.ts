@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { EmergencyAlertsController } from './emergency-alerts.controller';
 import { EmergencyAlertsService } from './emergency-alerts.service';
+import { OpsAlertService } from './ops-alert.service';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
 import { QUEUE_NAMES } from '@agap/shared';
@@ -15,7 +16,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     BullModule.registerQueue({ name: QUEUE_NAMES.SLA_MONITOR }),
   ],
   controllers: [EmergencyAlertsController],
-  providers: [EmergencyAlertsService],
-  exports: [EmergencyAlertsService],
+  providers: [EmergencyAlertsService, OpsAlertService],
+  exports: [EmergencyAlertsService, OpsAlertService],
 })
 export class EmergencyAlertsModule {}

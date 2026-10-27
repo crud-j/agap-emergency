@@ -32,6 +32,10 @@ import { isNativeMapAvailable } from '@/src/components/tracking/native-map-avail
 import { categoryIcon, categoryColor, priorityColor, titleCase } from '@/src/lib/incident-visuals';
 import { nextAssignmentActions, shouldShareLocation, type NextAction } from '@/src/lib/assignment-progress';
 import { colors, cardShadow, radius } from '@/src/theme/tokens';
+import { DestinationPicker } from '@/src/components/responder/DestinationPicker';
+import {
+  listTransports, recordArrival, startTransport, updateTransportDestination, type TransportRecord,
+} from '@/src/services/api/transport.api';
 
 const LiveTrackingMap = React.lazy(() => Promise.resolve({
   default: require('../../../src/components/tracking/live-tracking-map').default as typeof import('../../../src/components/tracking/live-tracking-map').default,
@@ -61,6 +65,9 @@ export default function AssignmentDetailScreen() {
   const qc = useQueryClient();
   const token = useAuthStore((s) => s.accessToken);
   const [busy, setBusy] = useState(false);
+  const [destinationPickerOpen, setDestinationPickerOpen] = useState(false);
+  // The server's reason, shown inside the picker (the card behind it is hidden while it is open).
+  const [transportSaveError, setTransportSaveError] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['responder-assignment', dispatchId],
@@ -75,6 +82,13 @@ export default function AssignmentDetailScreen() {
     enabled: MAP_AVAILABLE,
     staleTime: 5 * 60 * 1000,
     retry: false,
+  });
+
+  const { data: transports = [], refetch: refetchTransports } = useQuery({
+    queryKey: ['incident-transports', data?.incident_id],
+    queryFn: () => listTransports(data!.incident_id, token!),
+    enabled: !!data?.incident_id && !!token,
+    refetchInterval: 10_000,
   });
 
   const incident = data?.incidents ?? null;
@@ -96,6 +110,10 @@ export default function AssignmentDetailScreen() {
   const shareEnabled = shouldShareLocation(dispatchStatus, incidentStatus);
   // Field progress lives on the incident once the crew has accepted.
   const stage = accepted && incidentStatus ? incidentStatus : dispatchStatus;
+  // Several units can transport from one incident; this screen only handles this crew's dispatch.
+  const ownTransports = transports.filter((transport) => transport.dispatch_id === dispatchId);
+  const activeTransport = ownTransports.find((transport) => !transport.arrived_at) ?? ownTransports[0];
+  const transportArrived = !!activeTransport?.arrived_at;
 
   const share = useResponderLocationShare(data?.incident_id, shareEnabled);
   const myPoint: (LatLngLite & { heading?: number; updatedAt?: string }) | null = share.myPosition
@@ -142,6 +160,10 @@ export default function AssignmentDetailScreen() {
         // Resolving frees the crew; Home's duty card shows it right away.
         qc.invalidateQueries({ queryKey: ['responder-me'] }),
       ]);
+      if (action.kind === 'status' && action.status === 'TRANSPORTING') {
+        setTransportSaveError(null);
+        setDestinationPickerOpen(true);
+      }
     } catch (err) {
       Alert.alert(
         'Action failed',
@@ -149,6 +171,49 @@ export default function AssignmentDetailScreen() {
           ? err.message
           : 'Could not update the assignment. Please try again.',
       );
+    } finally {
+      setBusy(false);
+    }
+
+  }
+
+  async function saveDestination(destinationId?: string) {
+    if (!data?.incident_id || !token) return;
+    // One open transport per dispatch: after "Decide later" (or to change hospitals)
+    // update that record; only start one when none is open.
+    const open = ownTransports.find((transport) => !transport.arrived_at);
+    // Arrival closes this crew's transport; a new one is never opened from here afterwards.
+    if (!open && transportArrived) {
+      setDestinationPickerOpen(false);
+      return;
+    }
+    try {
+      if (open) {
+        if (destinationId) await updateTransportDestination(data.incident_id, open.id, destinationId, token);
+      } else {
+        await startTransport(data.incident_id, {
+          dispatchId,
+          ...(destinationId ? { destinationId } : {}),
+        }, token);
+      }
+      setTransportSaveError(null);
+      setDestinationPickerOpen(false);
+      await refetchTransports();
+    } catch (err) {
+      setTransportSaveError(err instanceof Error && err.message ? err.message : 'Destination not saved.');
+      // The list may be stale (e.g. a transport opened elsewhere); a retry uses fresh state.
+      void refetchTransports();
+    }
+  }
+
+  async function markArrived() {
+    if (!data?.incident_id || !token || !activeTransport) return;
+    setBusy(true);
+    try {
+      await recordArrival(data.incident_id, activeTransport.id, token);
+      await refetchTransports();
+    } catch (err) {
+      Alert.alert('Arrival failed', err instanceof Error ? err.message : 'Could not record arrival.');
     } finally {
       setBusy(false);
     }
@@ -299,6 +364,50 @@ export default function AssignmentDetailScreen() {
               <InfoRow icon="people" label="Patients" value={String(incident.number_of_patients)} />
             )}
 
+            {incidentStatus === 'TRANSPORTING' && (
+              <View style={[styles.card, styles.transportCard]}>
+                <View style={styles.transportHeader}>
+                  <Ionicons name="medical" size={18} color={colors.primary} />
+                  <Text style={styles.infoLabel}>Transport destination</Text>
+                </View>
+                <Text style={styles.infoValue}>
+                  {activeTransport?.facilities?.name ?? 'Not set'}
+                </Text>
+                {activeTransport?.estimated_arrival_at && (
+                  <Text style={styles.infoSub}>
+                    Est. arrival {new Date(activeTransport.estimated_arrival_at).toLocaleTimeString()}
+                  </Text>
+                )}
+                {!!transportSaveError && (
+                  <TouchableOpacity onPress={() => setDestinationPickerOpen(true)} accessibilityRole="button">
+                    <Text style={styles.errorText}>Destination not saved, tap to retry.</Text>
+                  </TouchableOpacity>
+                )}
+                {transportArrived ? (
+                  <Text style={styles.infoSub}>
+                    Arrived {new Date(activeTransport!.arrived_at!).toLocaleTimeString()}
+                  </Text>
+                ) : (
+                  <View style={styles.transportActions}>
+                    <TouchableOpacity
+                      style={styles.destinationButton}
+                      onPress={() => setDestinationPickerOpen(true)}
+                      disabled={busy}
+                    >
+                      <Text style={styles.destinationButtonText}>
+                        {activeTransport?.facilities ? 'Change destination' : 'Set destination'}
+                      </Text>
+                    </TouchableOpacity>
+                    {activeTransport && (
+                      <TouchableOpacity style={styles.arrivedButton} onPress={() => void markArrived()} disabled={busy}>
+                        <Text style={styles.arrivedButtonText}>Arrived at hospital</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
+
             <NavigateButton
               lat={citizenPoint?.lat}
               lng={citizenPoint?.lng}
@@ -337,6 +446,17 @@ export default function AssignmentDetailScreen() {
               <HandoverSection incidentId={data.incident_id} token={token} />
             )}
           </ScrollView>
+
+          {data.incident_id && token && (
+            <DestinationPicker
+              visible={destinationPickerOpen}
+              token={token}
+              position={myPoint}
+              saveError={transportSaveError}
+              onSelect={(destinationId) => void saveDestination(destinationId)}
+              onClose={() => setDestinationPickerOpen(false)}
+            />
+          )}
 
           {actions.length > 0 && (
             <SafeAreaView edges={['bottom']} style={styles.footer}>
@@ -727,6 +847,14 @@ const styles = StyleSheet.create({
   infoLabel: { color: colors.textSub, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
   infoValue: { color: colors.text, fontSize: 15, lineHeight: 21 },
   infoSub: { color: colors.textSub, fontSize: 12, fontFamily: 'monospace', marginTop: 4 },
+  transportCard: { padding: 14, marginTop: 12 },
+  transportHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 7 },
+  transportActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  destinationButton: { flex: 1, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, paddingVertical: 10, alignItems: 'center' },
+  destinationButtonText: { color: colors.primary, fontWeight: '800', fontSize: 12 },
+  arrivedButton: { flex: 1, backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 10, alignItems: 'center' },
+  arrivedButtonText: { color: colors.white, fontWeight: '800', fontSize: 12 },
+  errorText: { color: colors.danger, fontSize: 12, marginTop: 8 },
 
   linkRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, padding: 16 },
   linkText: { color: colors.text, fontSize: 15, fontWeight: '700' },

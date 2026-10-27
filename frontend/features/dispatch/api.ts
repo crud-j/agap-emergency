@@ -104,6 +104,19 @@ export function fetchPriorityRecommendation(incidentId: string): Promise<Priorit
   return api.get(`/dispatch/priority/${incidentId}`, getToken());
 }
 
+/** MOD-24 — the dispatcher's priority decision. Audited; refused for finished incidents. */
+export function setIncidentPriority(
+  incidentId: string,
+  priority: string,
+  notes?: string,
+): Promise<{ id: string; priority: string }> {
+  return api.post(
+    `/dispatch/triage/${incidentId}`,
+    { priorityAssessment: priority, ...(notes ? { notes } : {}) },
+    getToken(),
+  );
+}
+
 export function fetchAvailableUnits(): Promise<ResourceSummary[]> {
   return api.get('/resources/available', getToken());
 }

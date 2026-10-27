@@ -253,6 +253,7 @@ Maintain one organization's own records: its members, response units, capabiliti
 - The organization's resources and capabilities.
 - Resource and mutual-aid requests addressed to the organization (approve or deny).
 - Barangay directory (MDRRMO organization).
+- Hospital registry (hospital organization): register its own hospitals and set their location. Both wait for MDRRMO review before ambulance crews can select them. No referral access.
 
 ### Rules
 - Works only within its own organization.
@@ -260,7 +261,7 @@ Maintain one organization's own records: its members, response units, capabiliti
 - No platform-wide accounts, roles or configuration.
 
 ### Sidebar
-Dashboard · Organizations · Fleet & Units · Requests · Barangay Directory
+Dashboard · Organizations · Fleet & Units · Requests · Hospitals & Facilities · Barangay Directory
 
 No mockup exists yet for this role.
 

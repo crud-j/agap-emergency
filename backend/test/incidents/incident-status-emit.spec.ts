@@ -12,6 +12,8 @@ import { v4 as uuidv4 } from 'uuid';
 describe('IncidentsService.updateStatus — realtime emit (WS-1.2)', () => {
   const incidentId = uuidv4();
 
+  const falseAlertCreate = jest.fn().mockResolvedValue({});
+
   function build(order: string[]) {
     const mockPrisma = {
       incident: {
@@ -30,6 +32,7 @@ describe('IncidentsService.updateStatus — realtime emit (WS-1.2)', () => {
             }),
           },
           incidentEvent: { create: jest.fn().mockResolvedValue({}) },
+          false_alerts: { create: falseAlertCreate },
         };
         return fn(tx);
       }),
@@ -39,16 +42,46 @@ describe('IncidentsService.updateStatus — realtime emit (WS-1.2)', () => {
         order.push('emit');
       }),
     };
+    const mockAudit = { log: jest.fn().mockResolvedValue(undefined) };
     const service = new IncidentsService(
       mockPrisma as any,
       new IncidentStatusService(),
       {} as any, // DuplicateDetectionService — unused by updateStatus
       {} as any, // PriorityService — unused by updateStatus
       mockRealtime as any,
-      { log: jest.fn() } as any, // AuditService — unused by updateStatus
+      mockAudit as any,
     );
-    return { service, mockPrisma, mockRealtime };
+    return { service, mockPrisma, mockRealtime, mockAudit };
   }
+
+  it('records a false_alerts row when the drawer confirms a false alert', async () => {
+    const { service } = build([]);
+    falseAlertCreate.mockClear();
+    await service.updateStatus(incidentId, IncidentStatus.FALSE_ALERT, 'dispatcher-1');
+    expect(falseAlertCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ incident_id: incidentId, classified_by_id: 'dispatcher-1' }),
+    });
+  });
+
+  it('does not record a false alert for other transitions', async () => {
+    const { service } = build([]);
+    falseAlertCreate.mockClear();
+    await service.updateStatus(incidentId, IncidentStatus.ASSESSED, 'dispatcher-1');
+    expect(falseAlertCreate).not.toHaveBeenCalled();
+  });
+
+  it('writes a MOD-15 audit row for the transition', async () => {
+    const { service, mockAudit } = build([]);
+    await service.updateStatus(incidentId, IncidentStatus.ASSESSED, 'dispatcher-1', 'caller confirmed');
+    expect(mockAudit.log).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'STATUS_CHANGE',
+      actorId: 'dispatcher-1',
+      moduleId: 'MOD-15',
+      incidentId,
+      oldValues: { status: IncidentStatus.ACKNOWLEDGED },
+      newValues: { status: IncidentStatus.ASSESSED, reason: 'caller confirmed' },
+    }));
+  });
 
   it('emits incident.status_changed AFTER the Prisma update commits', async () => {
     const order: string[] = [];

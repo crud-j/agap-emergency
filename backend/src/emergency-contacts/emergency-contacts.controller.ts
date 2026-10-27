@@ -17,6 +17,7 @@ import { EmergencyContactsService } from './emergency-contacts.service';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ContactPriorityDto } from './dto/contact-priority.dto';
 
 @ApiTags('contacts')
 @ApiBearerAuth()
@@ -60,7 +61,7 @@ export class EmergencyContactsController {
   async reorder(
     @Param('id', ParseUUIDPipe) id: string,
     @Request() req: any,
-    @Body() body: { priorityOrder: number },
+    @Body() body: ContactPriorityDto,
   ) {
     return this.emergencyContactsService.reorderPriority(id, req.user.id, body.priorityOrder);
   }

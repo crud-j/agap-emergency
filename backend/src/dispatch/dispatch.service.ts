@@ -19,6 +19,7 @@ import {
   AuditAction,
   IncidentStatus,
   QUEUE_NAMES,
+  TERMINAL_INCIDENT_STATUSES,
   recommendIntakePriority,
   sanitizeIntakeAnswers,
 } from '@agap/shared';
@@ -193,6 +194,12 @@ export class DispatchService {
         resourceId: dispatch.resource_id,
         status: dispatch.status,
       });
+      this.realtime.resourceStatusChanged({
+        resourceId: dispatch.resource_id,
+        previousStatus: String(resource.status),
+        newStatus: 'DISPATCHED',
+        changedAt: assignedAt,
+      });
     } catch (err) {
       this.logger.warn(`Realtime emit failed for dispatch create: ${String(err)}`);
     }
@@ -234,6 +241,11 @@ export class DispatchService {
       this.realtime.notifyDispatchCancelled(dispatch.incident_id, {
         dispatchId: id,
         resourceId: dispatch.resource_id,
+      });
+      this.realtime.resourceStatusChanged({
+        resourceId: dispatch.resource_id,
+        newStatus: 'AVAILABLE',
+        changedAt: new Date().toISOString(),
       });
     } catch (err) {
       this.logger.warn(`Realtime emit failed for dispatch cancel: ${String(err)}`);
@@ -335,11 +347,14 @@ export class DispatchService {
     };
   }
 
-  async submitTriage(dto: SubmitTriageDto, userId: string) {
+  async submitTriage(dto: SubmitTriageDto & { incidentId: string }, userId: string) {
     const incident = await this.prisma.incident.findUnique({
       where: { id: dto.incidentId },
     });
     if (!incident) throw new NotFoundException('Incident not found');
+    if (TERMINAL_INCIDENT_STATUSES.has(incident.status as unknown as IncidentStatus)) {
+      throw new BadRequestException(`A ${incident.status} incident's priority can no longer be changed.`);
+    }
 
     const updated = await this.prisma.incident.update({
       where: { id: dto.incidentId },
@@ -364,7 +379,8 @@ export class DispatchService {
       entityType: 'incident',
       moduleId: 'MOD-25',
       incidentId: dto.incidentId,
-      newValues: { priority: dto.priorityAssessment },
+      oldValues: { priority: incident.priority },
+      newValues: { priority: dto.priorityAssessment, ...(dto.notes ? { notes: dto.notes } : {}) },
     });
 
     // Priority is an incident-record change (not a lifecycle status change), so
@@ -379,88 +395,5 @@ export class DispatchService {
     }
 
     return updated;
-  }
-
-  async mergeDuplicates(incidentId: string, masterIncidentId: string) {
-    const incident = await this.prisma.incident.findUnique({
-      where: { id: incidentId },
-    });
-    if (!incident) throw new NotFoundException('Incident not found');
-
-    const updated = await this.prisma.incident.update({
-      where: { id: incidentId },
-      data: { status: IncidentStatus.DUPLICATE as any },
-    });
-
-    await this.prisma.incidentEvent.create({
-      data: {
-        incident_id: incidentId,
-        from_status: incident.status as any,
-        to_status: IncidentStatus.DUPLICATE as any,
-        notes: `Merged into master incident ${masterIncidentId}`,
-      },
-    });
-
-    return updated;
-  }
-
-  // ---- Transport lifecycle (MOD-40) ----
-
-  async startTransport(
-    dispatchId: string,
-    dto: { destinationId?: string; patientId?: string },
-    _userId: string,
-  ) {
-    const dispatch = await this.findById(dispatchId);
-    return this.prisma.transportRecord.create({
-      data: {
-        dispatch_id: dispatchId,
-        incident_id: dispatch.incident_id,
-        destination_id: dto.destinationId ?? null,
-        patient_id: dto.patientId ?? null,
-        transport_started_at: new Date(),
-      },
-    });
-  }
-
-  async getTransport(dispatchId: string) {
-    const record = await this.prisma.transportRecord.findFirst({
-      where: { dispatch_id: dispatchId },
-      orderBy: { created_at: 'desc' },
-    });
-    if (!record) throw new NotFoundException('Transport record not found');
-    return record;
-  }
-
-  async changeTransportDestination(
-    dispatchId: string,
-    dto: { destinationId: string; reason?: string },
-    _userId: string,
-  ) {
-    const record = await this.getTransport(dispatchId);
-    return this.prisma.transportRecord.update({
-      where: { id: record.id },
-      data: {
-        destination_id: dto.destinationId,
-        destination_changed: true,
-        change_reason: dto.reason ?? null,
-      },
-    });
-  }
-
-  async markTransportArrived(dispatchId: string, _userId: string) {
-    const record = await this.getTransport(dispatchId);
-    return this.prisma.transportRecord.update({
-      where: { id: record.id },
-      data: { arrived_at: new Date() },
-    });
-  }
-
-  async completePatientHandover(dispatchId: string, _userId: string) {
-    const record = await this.getTransport(dispatchId);
-    return this.prisma.transportRecord.update({
-      where: { id: record.id },
-      data: { handover_completed_at: new Date() },
-    });
   }
 }

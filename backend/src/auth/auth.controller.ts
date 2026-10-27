@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, HttpCode, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, ParseUUIDPipe, Ip, Res, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Controller, HttpCode, Post, Body, UseGuards, Request, Headers, Get, Delete, Param, ParseUUIDPipe, Ip, Res, UnauthorizedException, Query, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { CookieOptions, Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
@@ -45,7 +45,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly webAuthnService: WebAuthnService,
     private readonly mfa: MfaService,
-    config: ConfigService,
+    private readonly config: ConfigService,
   ) {
     this.cookieOptions = refreshCookieOptions(config);
   }
@@ -110,6 +110,34 @@ export class AuthController {
   @ApiOperation({ summary: 'Request a phone OTP — sends SMS to the registered number' })
   async loginPhone(@Body() dto: LoginPhoneDto) {
     return this.authService.loginPhone(dto.phoneNumber);
+  }
+
+  @Get('dev/otp')
+  @Public()
+  @ApiOperation({ summary: 'Read a pending OTP for local/demo use only' })
+  async getDemoOtp(
+    @Query('userId') userId?: string,
+    @Query('phoneNumber') phoneNumber?: string,
+    @Query('type') type?: string,
+  ) {
+    const environment = this.config.get<string>('NODE_ENV', 'development');
+    if (environment === 'production') {
+      throw new NotFoundException();
+    }
+    if (type !== 'PHONE') {
+      throw new BadRequestException('type must be PHONE');
+    }
+    if (!userId && !phoneNumber) {
+      throw new BadRequestException('userId or phoneNumber is required');
+    }
+    if (userId) {
+      try {
+        new ParseUUIDPipe({ version: '4' }).transform(userId, { type: 'param', data: 'userId', metatype: String });
+      } catch {
+        throw new BadRequestException('userId must be a UUID');
+      }
+    }
+    return this.authService.getDemoOtp(userId, phoneNumber);
   }
 
   @Post('refresh')

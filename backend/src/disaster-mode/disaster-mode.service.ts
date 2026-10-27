@@ -1,11 +1,20 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { AuditAction } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ActivateSurgeDto } from './dto/activate-surge.dto';
 import { TriageTagDto } from './dto/triage-tag.dto';
 
 @Injectable()
 export class DisasterModeService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(DisasterModeService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly notifications?: NotificationsService,
+  ) {}
 
   async getStatus() {
     const active = await this.prisma.surge_incidents.findFirst({
@@ -16,7 +25,10 @@ export class DisasterModeService {
   }
 
   async activate(dto: ActivateSurgeDto, userId: string, orgId: string) {
-    return this.prisma.surge_incidents.create({
+    // One surge at a time: the banner, triage board and broadcast all read "the" active surge.
+    const active = await this.prisma.surge_incidents.findFirst({ where: { status: 'ACTIVE' }, select: { name: true } });
+    if (active) throw new ConflictException(`Surge mode is already active (${active.name}). Deactivate it first.`);
+    const surge = await this.prisma.surge_incidents.create({
       data: {
         declared_by_id: userId,
         organization_id: orgId,
@@ -28,15 +40,35 @@ export class DisasterModeService {
         status: 'ACTIVE',
       },
     });
+    await this.audit?.log({
+      action: AuditAction.CREATE,
+      actorId: userId,
+      entityType: 'surge_incident',
+      entityId: surge.id,
+      moduleId: 'MOD-52',
+      newValues: { name: surge.name, category: String(surge.category), affectedBarangays: surge.affected_barangays },
+    });
+    return surge;
   }
 
   async deactivate(surgeId: string, _userId: string) {
     const surge = await this.prisma.surge_incidents.findUnique({ where: { id: surgeId } });
     if (!surge) throw new NotFoundException('Surge incident not found');
-    return this.prisma.surge_incidents.update({
+    if (surge.status !== 'ACTIVE') throw new BadRequestException('This surge is not active.');
+    const updated = await this.prisma.surge_incidents.update({
       where: { id: surgeId },
       data: { status: 'INACTIVE', deactivated_at: new Date() },
     });
+    await this.audit?.log({
+      action: AuditAction.UPDATE,
+      actorId: _userId,
+      entityType: 'surge_incident',
+      entityId: surgeId,
+      moduleId: 'MOD-52',
+      oldValues: { status: 'ACTIVE' },
+      newValues: { status: 'INACTIVE' },
+    });
+    return updated;
   }
 
   async linkIncident(surgeId: string, incidentId: string) {
@@ -110,20 +142,48 @@ export class DisasterModeService {
     return membership.organization_id;
   }
 
+  /**
+   * Sends the message to every active responder as an in-app notice (saved, and
+   * pushed live to open apps). Each delivery is independent; one failure never
+   * stops the rest. Returns how many were actually delivered.
+   */
   async broadcast(dto: { surgeId: string; message: string }, userId: string) {
     const surge = await this.prisma.surge_incidents.findUnique({ where: { id: dto.surgeId } });
     if (!surge) throw new NotFoundException('Surge incident not found');
     if (surge.status !== 'ACTIVE') throw new BadRequestException('Surge is not active');
-    const respondersOnline = await this.prisma.user.findMany({
-      where: { role: 'RESPONDER', status: 'ACTIVE' },
+    // `status` tracks identity verification (PENDING_VERIFICATION is normal for
+    // a roster that hasn't done phone verification yet), not on-duty readiness,
+    // so only exclude accounts that can no longer sign in at all — matches the
+    // roster filter responders.service.ts uses elsewhere.
+    const responders = await this.prisma.user.findMany({
+      where: { role: 'RESPONDER', status: { notIn: ['SUSPENDED', 'DEACTIVATED'] } },
       select: { id: true },
     });
-    return {
-      surgeId: dto.surgeId,
-      sentBy: userId,
-      recipientCount: respondersOnline.length,
-      message: dto.message,
-      sentAt: new Date(),
-    };
+    const message = dto.message.trim();
+    const results = await Promise.allSettled(
+      responders.map((r) =>
+        this.notifications!.create({
+          userId: r.id,
+          eventType: 'SURGE_BROADCAST',
+          title: `Surge: ${surge.name}`,
+          body: message,
+          dataPayload: { surgeId: surge.id },
+        }),
+      ),
+    );
+    const delivered = results.filter((r) => r.status === 'fulfilled').length;
+    if (delivered < responders.length) {
+      this.logger.warn(`Surge broadcast reached ${delivered}/${responders.length} responders`);
+    }
+    const sentAt = new Date();
+    await this.audit?.log({
+      action: AuditAction.CREATE,
+      actorId: userId,
+      entityType: 'surge_broadcast',
+      entityId: surge.id,
+      moduleId: 'MOD-52',
+      newValues: { message, recipientCount: responders.length, delivered },
+    });
+    return { surgeId: surge.id, sentBy: userId, recipientCount: responders.length, delivered, message, sentAt };
   }
 }

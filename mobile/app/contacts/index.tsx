@@ -139,12 +139,6 @@ function ContactCard({
       <View style={styles.cardBody}>
         <View style={styles.cardTop}>
           <Text style={styles.contactName}>{contact.contact_name}</Text>
-          {contact.notify_on_alert && (
-            <View style={styles.notifyBadge}>
-              <Ionicons name="notifications" size={11} color="#0D6053" />
-              <Text style={styles.notifyText}>Alert</Text>
-            </View>
-          )}
         </View>
 
         {contact.relationship ? (
@@ -215,16 +209,6 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1 },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
   contactName: { fontSize: 15, fontWeight: '700', color: '#111827', flex: 1 },
-  notifyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: '#E7F6F1',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  notifyText: { fontSize: 11, fontWeight: '700', color: '#0D6053' },
   relationship: { fontSize: 12, color: '#6B7280', marginBottom: 4 },
   phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   phoneText: { fontSize: 13, color: '#374151' },

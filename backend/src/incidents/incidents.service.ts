@@ -17,6 +17,7 @@ import { PriorityService } from './priority/priority.service';
 import { BarangayNotifyService } from '../barangay-coordination/barangay-notify.service';
 import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
 import {
+  AuditAction,
   IncidentStatus,
   IncidentType,
   IncidentPriority,
@@ -31,6 +32,7 @@ import {
 import { Prisma, type Incident } from '@prisma/client';
 import { EmergencyContactNotificationService } from '../emergency-contacts/emergency-contact-notification.service';
 import { REPORTER_SEX_INCLUDE, reporterSexFrom, type ReporterSex } from '../common/utils/reporter-sex';
+import { OpsAlertService } from '../emergency-alerts/ops-alert.service';
 
 /** ICS situation report (incident_command_structures.situation_notes, MOD-36). */
 const ICS_SITUATION_NOTES_MAX = 4000;
@@ -40,6 +42,34 @@ export interface ReporterStanding {
   falseAlerts: number;
   isVerifiedReporter: boolean;
 }
+
+/** Attempts at a fresh public reference when simultaneous reports collide. */
+const REFERENCE_RETRIES = 10;
+
+/** The column(s) behind a unique-constraint error (Prisma P2002), if that's what `err` is. */
+function uniqueViolationTarget(err: unknown): string | null {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return null;
+  const meta = err.meta as {
+    target?: unknown;
+    // With the pg driver adapter the constraint arrives here instead of `target`.
+    driverAdapterError?: { cause?: { constraint?: { index?: string; fields?: string[] } } };
+  } | undefined;
+  const constraint = meta?.driverAdapterError?.cause?.constraint;
+  const parts = [
+    ...(Array.isArray(meta?.target) ? meta.target : meta?.target ? [String(meta.target)] : []),
+    ...(constraint?.fields ?? []),
+    ...(constraint?.index ? [constraint.index] : []),
+  ];
+  return parts.join(',');
+}
+
+/** Intake statuses a report can be merged from as a duplicate (MOD-26). */
+const MERGEABLE_STATUSES: ReadonlySet<IncidentStatus> = new Set([
+  IncidentStatus.SUBMITTED,
+  IncidentStatus.RECEIVED,
+  IncidentStatus.ACKNOWLEDGED,
+  IncidentStatus.ASSESSED,
+]);
 
 @Injectable()
 export class IncidentsService {
@@ -55,6 +85,7 @@ export class IncidentsService {
     private readonly contactNotification: EmergencyContactNotificationService,
     @Optional() private readonly barangayNotify?: BarangayNotifyService,
     @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
+    @Optional() private readonly opsAlert?: OpsAlertService,
   ) {}
 
   async create(dto: CreateIncidentDto, actorId?: string, actorRole?: UserRole): Promise<Incident> {
@@ -94,7 +125,6 @@ export class IncidentsService {
 
     const recommendation = this.priorityService.recommend(category, intakeAnswers);
     const priority = dto.priority ?? recommendation.priority;
-    const reference = await this.generateReference();
 
     // Keep caller estimates as ranges; never turn a range into a fabricated count.
     // Intake answers are also flattened into hazard_flags so older consumers
@@ -108,7 +138,7 @@ export class IncidentsService {
 
     const numberOfPatients = dto.affectedCount === '1' ? 1 : null;
 
-    const incident = await this.prisma.$transaction(async (tx) => {
+    const save = (reference: string) => this.prisma.$transaction(async (tx) => {
       const inc = await tx.incident.create({
         data: {
           public_reference: reference,
@@ -118,7 +148,7 @@ export class IncidentsService {
           description: dto.description ?? null,
           number_of_patients: numberOfPatients,
           client_event_id: dto.idempotencyKey,
-          trigger_method: 'MANUAL_REPORT' as any,
+          trigger_method: dto.triggerMethod ?? 'MANUAL_REPORT',
           hazard_flags: hazardFlags,
         },
       });
@@ -205,6 +235,24 @@ export class IncidentsService {
       return inc;
     });
 
+    // References are "count + 1", so reports saved at the same moment (a mass-casualty
+    // event) can pick the same number. The loser of that race retries with the next
+    // one instead of failing the report; a resend racing its original returns it.
+    let incident: Incident | undefined;
+    for (let attempt = 0; !incident; attempt++) {
+      try {
+        incident = await save(await this.generateReference());
+      } catch (err) {
+        const target = uniqueViolationTarget(err);
+        if (target?.includes('client_event_id')) {
+          const existing = await this.prisma.incident.findFirst({ where: { client_event_id: dto.idempotencyKey } });
+          if (existing) return existing;
+        }
+        if (target?.includes('public_reference') && attempt < REFERENCE_RETRIES) continue;
+        throw err;
+      }
+    }
+
     this.logger.log(`Incident created: ${incident.id} (${incident.public_reference})`);
 
     // Push the new emergency to the Operations Center dashboard in real time
@@ -234,10 +282,29 @@ export class IncidentsService {
       );
     }
 
+    // MOD-17 SMS to MDRRMO operations and the MOD-41 first SLA check. Never throws;
+    // the incident is already saved.
+    void this.opsAlert?.onIncidentSaved(
+      incident,
+      dto.lat !== undefined && dto.lng !== undefined ? { lat: dto.lat, lng: dto.lng } : null,
+    );
+
     // Tag the incident with its barangay. Never throws; the incident is already saved.
     void this.barangayNotify?.notifyForIncident(incident.id);
 
     return incident;
+  }
+
+  /** 404 for an unknown incident; 403 unless `userId` is the incident's reporter. */
+  async assertReporter(incidentId: string, userId: string): Promise<void> {
+    const reporter = await this.prisma.incidentReporter.findUnique({
+      where: { incident_id: incidentId },
+      select: { user_id: true },
+    });
+    if (!reporter) throw new NotFoundException(`Incident ${incidentId} not found`);
+    if (reporter.user_id !== userId) {
+      throw new ForbiddenException('Only the person who reported this incident can attach photos or videos to it.');
+    }
   }
 
   async findById(id: string): Promise<Incident> {
@@ -460,31 +527,41 @@ export class IncidentsService {
     this.statusService.validateTransition(currentStatus, newStatus);
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const result = await tx.incident.update({
-        where: { id },
-        data: {
-          status: newStatus as any,
-          ...(newStatus === IncidentStatus.ACKNOWLEDGED && { acknowledged_at: new Date() }),
-          ...(newStatus === IncidentStatus.ASSESSED && { assessed_at: new Date() }),
-          ...(newStatus === IncidentStatus.DISPATCHED && { dispatched_at: new Date() }),
-          ...(newStatus === IncidentStatus.EN_ROUTE && { en_route_at: new Date() }),
-          ...(newStatus === IncidentStatus.ON_SCENE && { on_scene_at: new Date() }),
-          ...(newStatus === IncidentStatus.RESOLVED && { resolved_at: new Date() }),
-          ...(newStatus === IncidentStatus.CLOSED && { closed_at: new Date() }),
-        },
+      const result = await this.statusService.recordTransition(tx, {
+        incidentId: id,
+        from: currentStatus,
+        to: newStatus,
+        actorId,
+        notes: reason ?? null,
       });
 
-      await tx.incidentEvent.create({
-        data: {
-          incident_id: id,
-          from_status: incident.status as any,
-          to_status: newStatus as any,
-          triggered_by_id: actorId,
-          notes: reason ?? null,
-        },
-      });
+      // The drawer's "Confirm false alert" comes through here: record it like the
+      // Triage button does, so analytics counts every false alert (MOD-08 / MOD-50).
+      if (newStatus === IncidentStatus.FALSE_ALERT) {
+        await tx.false_alerts.create({
+          data: {
+            incident_id: id,
+            classified_by_id: actorId,
+            false_alert_type: 'MISIDENTIFIED',
+            notes: reason ?? null,
+          },
+        });
+      }
 
       return result;
+    });
+
+    // MOD-15 / Rule 11: every status change is attributable. Insert-only; an audit
+    // failure never undoes the transition.
+    void this.audit.log({
+      action: AuditAction.STATUS_CHANGE,
+      actorId,
+      entityType: 'Incident',
+      entityId: id,
+      moduleId: 'MOD-15',
+      incidentId: id,
+      oldValues: { status: currentStatus },
+      newValues: { status: newStatus, ...(reason ? { reason } : {}) },
     });
 
     // Fan the status change out to the ops dashboard + the citizen's incident room
@@ -594,6 +671,60 @@ export class IncidentsService {
     });
   }
 
+  /**
+   * A dispatcher's manual call that a piece of submitted evidence isn't
+   * credible — attachment-level only, never touches the incident's own status
+   * or lifecycle. The reporter gets a warning notification; this is advisory
+   * record-keeping, not an automated decision (the AI review that may have
+   * flagged it never rejects anything on its own).
+   */
+  async rejectAttachment(
+    incidentId: string,
+    attachmentId: string,
+    actorId: string,
+    notes?: string,
+  ) {
+    const attachment = await this.prisma.incidentAttachment.findFirst({
+      where: { id: attachmentId, incident_id: incidentId },
+    });
+    if (!attachment) {
+      throw new NotFoundException('Attachment not found.');
+    }
+    if (attachment.rejected_at) {
+      return attachment;
+    }
+
+    const updated = await this.prisma.incidentAttachment.update({
+      where: { id: attachmentId },
+      data: {
+        rejected_at: new Date(),
+        rejected_by_id: actorId,
+        rejection_notes: notes ?? null,
+      },
+    });
+
+    void this.audit.log({
+      action: AuditAction.UPDATE,
+      actorId,
+      entityType: 'IncidentAttachment',
+      entityId: attachmentId,
+      moduleId: 'MOD-10',
+      incidentId,
+      oldValues: { rejected_at: null },
+      newValues: { rejected_at: updated.rejected_at, notes },
+    });
+
+    try {
+      this.realtime.incidentUpdated(incidentId, { change: 'attachment_rejected', attachmentId });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for attachment rejection: ${String(err)}`);
+    }
+
+    void this.statusNotifier?.notifyReporterEvidenceRejected(incidentId, notes);
+
+    return updated;
+  }
+
   // ---- Events & timeline (MOD-15 / MOD-42) ----
 
   async listEvents(incidentId: string) {
@@ -649,6 +780,9 @@ export class IncidentsService {
   async markFalseAlert(id: string, actorId: string, notes?: string) {
     const incident = await this.findById(id);
     const previousStatus = incident.status as unknown as IncidentStatus;
+    // Same rule as every other status change: e.g. a CLOSED or already
+    // FALSE_ALERT incident can't be classified again (no second false_alerts row).
+    this.statusService.validateTransition(previousStatus, IncidentStatus.FALSE_ALERT);
     const updated = await this.prisma.$transaction(async (tx) => {
       const result = await tx.incident.update({
         where: { id },
@@ -689,51 +823,34 @@ export class IncidentsService {
       this.logger.warn(`Realtime emit failed for false-alert status change: ${String(err)}`);
     }
 
+    void this.audit.log({
+      action: AuditAction.STATUS_CHANGE,
+      actorId,
+      entityType: 'Incident',
+      entityId: id,
+      moduleId: 'MOD-08',
+      incidentId: id,
+      oldValues: { status: previousStatus },
+      newValues: { status: IncidentStatus.FALSE_ALERT, ...(notes ? { notes } : {}) },
+    });
+
     void this.barangayNotify?.closeNoticesForIncident(id);
     this.notifyReporterOfStatus(id, IncidentStatus.FALSE_ALERT);
 
     return updated;
   }
 
+  /**
+   * POST /incidents/:id/duplicate. A duplicate always names the incident it repeats,
+   * so it takes the merge path (link, checks and audit row); there is no unlinked flag.
+   */
   async markDuplicate(id: string, actorId: string, masterIncidentId?: string) {
-    // When a master is named, use the full advisory-merge path (sets the
-    // duplicate_of_id link + audits). Otherwise just flag the status.
-    if (masterIncidentId) {
-      return this.mergeDuplicate(id, masterIncidentId, actorId);
+    if (!masterIncidentId) {
+      throw new BadRequestException('Name the incident this one duplicates (masterIncidentId).');
     }
-
-    const incident = await this.findById(id);
-    const previousStatus = incident.status as unknown as IncidentStatus;
-    const updated = await this.prisma.incident.update({
-      where: { id },
-      data: { status: IncidentStatus.DUPLICATE as any },
-    });
-    await this.prisma.incidentEvent.create({
-      data: {
-        incident_id: id,
-        from_status: incident.status as any,
-        to_status: IncidentStatus.DUPLICATE as any,
-        triggered_by_id: actorId,
-      },
-    });
-
-    try {
-      this.realtime.notifyIncidentStatusChanged({
-        incidentId: id,
-        previousStatus,
-        newStatus: IncidentStatus.DUPLICATE,
-        changedAt: new Date().toISOString(),
-        changedBy: actorId,
-      });
-    } catch (err) {
-      this.logger.warn(`Realtime emit failed for duplicate status change: ${String(err)}`);
-    }
-
-    void this.barangayNotify?.closeNoticesForIncident(id);
-    this.notifyReporterOfStatus(id, IncidentStatus.DUPLICATE);
-
-    return updated;
+    return this.mergeDuplicate(id, masterIncidentId, actorId);
   }
+
 
   /**
    * MOD-26 — merge an incident as a confirmed DUPLICATE of a master incident.
@@ -754,6 +871,15 @@ export class IncidentsService {
     const master = await this.prisma.incident.findUnique({ where: { id: masterIncidentId } });
     if (!master) {
       throw new NotFoundException(`Master incident ${masterIncidentId} not found`);
+    }
+    // Only a report still in intake can be folded into another (the Triage queue,
+    // SUBMITTED → ASSESSED); never one already dispatched or finished.
+    if (!MERGEABLE_STATUSES.has(incident.status as unknown as IncidentStatus)) {
+      throw new BadRequestException(`A ${incident.status} incident can no longer be merged as a duplicate.`);
+    }
+    // No chains: the master must be a real incident, not itself a duplicate.
+    if ((master.status as unknown as IncidentStatus) === IncidentStatus.DUPLICATE) {
+      throw new BadRequestException(`${master.public_reference} is itself a duplicate; merge into its master instead.`);
     }
 
     const previousStatus = incident.status as unknown as IncidentStatus;
@@ -944,44 +1070,6 @@ export class IncidentsService {
     return this.prisma.on_scene_assessments.findMany({
       where: { incident_id: id },
       orderBy: { assessed_at: 'desc' },
-    });
-  }
-
-  async createAssessment(
-    id: string,
-    dto: Record<string, unknown>,
-    userId: string,
-  ) {
-    await this.findById(id);
-    return this.prisma.on_scene_assessments.create({
-      data: {
-        incident_id: id,
-        assessed_by_id: userId,
-        assessment_notes: (dto['assessmentNotes'] as string) ?? null,
-        triage_tag: (dto['triageTag'] as string) ?? null,
-      },
-    });
-  }
-
-  async updateAssessment(
-    assessmentId: string,
-    dto: Record<string, unknown>,
-    _userId: string,
-  ) {
-    const assessment = await this.prisma.on_scene_assessments.findUnique({
-      where: { id: assessmentId },
-    });
-    if (!assessment) throw new NotFoundException('Assessment not found');
-    return this.prisma.on_scene_assessments.update({
-      where: { id: assessmentId },
-      data: {
-        ...(dto['assessmentNotes'] !== undefined && {
-          assessment_notes: dto['assessmentNotes'] as string,
-        }),
-        ...(dto['triageTag'] !== undefined && {
-          triage_tag: dto['triageTag'] as string,
-        }),
-      },
     });
   }
 

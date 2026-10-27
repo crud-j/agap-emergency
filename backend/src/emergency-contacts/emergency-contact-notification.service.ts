@@ -15,7 +15,7 @@ export class EmergencyContactNotificationService {
   ) {}
 
   /**
-   * MOD-16: Fire-and-forget. Resolves the reporter's active notify_on_alert
+   * MOD-16: Fire-and-forget. Resolves the reporter's active emergency
    * contacts and queues one SMS per contact via Textbee. Never throws —
    * a failure here must never affect the incident record (Reliability Rule).
    */

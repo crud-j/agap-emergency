@@ -39,6 +39,7 @@ export const severityMeta = (s: string) => SEVERITY_META[s] ?? SEVERITY_META['IN
 
 export const STATUS_META: Record<string, { label: string; variant: BadgeVariant }> = {
   DRAFT:      { label: 'Draft',      variant: 'muted' },
+  PENDING_APPROVAL: { label: 'Pending approval', variant: 'blue' },
   SCHEDULED:  { label: 'Scheduled',  variant: 'amber' },
   PUBLISHED:  { label: 'Published',  variant: 'green' },
   CANCELLED:  { label: 'Cancelled',  variant: 'red' },

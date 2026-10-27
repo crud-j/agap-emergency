@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
@@ -6,6 +7,8 @@ import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
+import { BLOCKED_ACCOUNT_STATUSES } from '../auth/account-status';
+import type { NotificationJobData } from '../jobs/processors/notification.processor';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 import { SmsSubscribeDto } from './dto/sms-subscribe.dto';
@@ -46,6 +49,17 @@ const SOURCE_REQUIRED_CATEGORIES = new Set<announcement_category>([
 /** Shape returned to the public / citizen app — no internal IDs or storage keys. */
 export type PublicAnnouncement = ReturnType<AnnouncementsService['toPublic']>;
 
+/** Relations flattened to display names in publisher and approver lists. */
+const PUBLISHER_NAMES = {
+  users: { select: { full_name: true } },
+  users_announcements_approved_by_idTousers: { select: { full_name: true } },
+  users_announcements_approval_requested_by_idTousers: { select: { full_name: true } },
+} satisfies Prisma.AnnouncementInclude;
+
+type AnnouncementWithNames = Prisma.AnnouncementGetPayload<{ include: typeof PUBLISHER_NAMES }>;
+
+const NEEDS_APPROVAL_MESSAGE ='CRITICAL advisories need MDRRMO approval. Submit for approval instead.';
+
 @Injectable()
 export class AnnouncementsService {
   private readonly logger = new Logger(AnnouncementsService.name);
@@ -54,9 +68,42 @@ export class AnnouncementsService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
     @InjectQueue(QUEUE_NAMES.PUSH_NOTIFICATIONS) private readonly pushQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue: Queue,
   ) {}
+
+  // ─── Approval policy (ROLE_DASHBOARDS_PLAN.md Phase 7) ───────────────────────
+
+  /** ANNOUNCEMENT_APPROVAL_REQUIRED: CRITICAL advisories wait for an MDRRMO Supervisor. */
+  criticalNeedsApproval(): boolean {
+    return this.config.get<string>('ANNOUNCEMENT_APPROVAL_REQUIRED') === 'true';
+  }
+
+  needsApproval(a: Pick<Announcement, 'severity'>): boolean {
+    return this.criticalNeedsApproval() && a.severity === 'CRITICAL';
+  }
+
+  /** Publisher responses carry the decision, so the console never reads the flag itself. */
+  private withPolicy<T extends Pick<Announcement, 'severity'>>(a: T): T & { requiresApproval: boolean } {
+    return { ...a, requiresApproval: this.needsApproval(a) };
+  }
+
+  /** Flatten the relations to display names; the row's own fields are unchanged. */
+  private withNames({
+    users,
+    users_announcements_approved_by_idTousers: approver,
+    users_announcements_approval_requested_by_idTousers: requester,
+    ...a
+  }: AnnouncementWithNames) {
+    return this.withPolicy({
+      ...a,
+      publisherName: users.full_name,
+      approverName: approver?.full_name ?? null,
+      requestedByName: requester?.full_name ?? null,
+    });
+  }
 
   toPublic(a: Announcement) {
     return {
@@ -99,6 +146,8 @@ export class AnnouncementsService {
     status?: string;
     category?: string;
     severity?: string;
+    /** Drafts a Supervisor sent back with a note (Phase 7). */
+    returned?: boolean;
     page?: number;
     perPage?: number;
   }) {
@@ -109,6 +158,10 @@ export class AnnouncementsService {
     const where: Prisma.AnnouncementWhereInput = {};
     const statuses = enumList(filters.status, announcement_status);
     if (statuses.length) where.status = { in: statuses };
+    if (filters.returned) {
+      where.status = 'DRAFT';
+      where.review_note = { not: null };
+    }
     const severities = enumList(filters.severity, announcement_severity);
     if (severities.length) where.severity = { in: severities };
     if (filters.category && Object.values(announcement_category).includes(filters.category as announcement_category)) {
@@ -121,20 +174,12 @@ export class AnnouncementsService {
         orderBy: { created_at: 'desc' },
         skip,
         take: perPage,
-        include: {
-          users: { select: { full_name: true } },
-          users_announcements_approved_by_idTousers: { select: { full_name: true } },
-        },
+        include: PUBLISHER_NAMES,
       }),
       this.prisma.announcement.count({ where }),
     ]);
 
-    // Flatten the relations to two display names; the row's own fields are unchanged.
-    const data = rows.map(({ users, users_announcements_approved_by_idTousers: approver, ...a }) => ({
-      ...a,
-      publisherName: users.full_name,
-      approverName: approver?.full_name ?? null,
-    }));
+    const data = rows.map((r) => this.withNames(r));
 
     return {
       data,
@@ -188,13 +233,39 @@ export class AnnouncementsService {
     return announcement;
   }
 
-  /** Storage key for the image, enforcing the same visibility rule as the record. */
-  async getImageKey(id: string, opts: { publicOnly: boolean }): Promise<string> {
+  async findForPublisher(id: string) {
+    return this.withPolicy(await this.findById(id));
+  }
+
+  /** Supervisor queue: submissions awaiting a decision, oldest first. */
+  async findPendingApproval() {
+    const rows = await this.prisma.announcement.findMany({
+      where: { status: 'PENDING_APPROVAL' },
+      orderBy: { approval_requested_at: 'asc' },
+      take: 100,
+      include: PUBLISHER_NAMES,
+    });
+    return rows.map((r) => this.withNames(r));
+  }
+
+  /**
+   * Storage key for the image, enforcing the same visibility rule as the record.
+   * `statuses` narrows it further (a Supervisor sees images of submissions only).
+   */
+  async getImageKey(
+    id: string,
+    opts: { publicOnly: boolean; statuses?: announcement_status[] },
+  ): Promise<string> {
     const a = await this.prisma.announcement.findUnique({
       where: { id },
       select: { status: true, image_storage_key: true },
     });
-    if (!a || !a.image_storage_key || (opts.publicOnly && !PUBLIC_STATUSES.includes(a.status))) {
+    if (
+      !a ||
+      !a.image_storage_key ||
+      (opts.publicOnly && !PUBLIC_STATUSES.includes(a.status)) ||
+      (opts.statuses && !opts.statuses.includes(a.status))
+    ) {
       throw new NotFoundException('Image not found');
     }
     return a.image_storage_key;
@@ -254,7 +325,7 @@ export class AnnouncementsService {
       moduleId: 'MOD-53',
       newValues: { title: created.title, category: created.category, templateKey: created.template_key },
     });
-    return created;
+    return this.withPolicy(created);
   }
 
   async update(id: string, dto: UpdateAnnouncementDto, userId: string) {
@@ -282,7 +353,7 @@ export class AnnouncementsService {
       entityId: id,
       moduleId: 'MOD-53',
     });
-    return updated;
+    return this.withPolicy(updated);
   }
 
   /** Server-side gate before anything is approved for release. */
@@ -312,6 +383,12 @@ export class AnnouncementsService {
     if (existing.status !== 'DRAFT' && existing.status !== 'SCHEDULED') {
       throw new BadRequestException(`A ${existing.status.toLowerCase()} announcement cannot be published.`);
     }
+    // A Supervisor-approved scheduled advisory may go out early: its text is locked
+    // while scheduled, so the approval still covers it, and the approver is kept.
+    const supervisorApproved = existing.status === 'SCHEDULED' && !!existing.approval_requested_at;
+    if (this.needsApproval(existing) && !supervisorApproved) {
+      throw new BadRequestException(NEEDS_APPROVAL_MESSAGE);
+    }
     this.assertPublishable(existing);
     const now = new Date();
     const { count } = await this.prisma.announcement.updateMany({
@@ -319,8 +396,7 @@ export class AnnouncementsService {
       data: {
         status: 'PUBLISHED',
         published_at: now,
-        approved_by_id: userId,
-        approved_at: now,
+        ...(!supervisorApproved && { approved_by_id: userId, approved_at: now }),
       },
     });
     if (count === 0) throw new BadRequestException('Announcement was already published.');
@@ -413,6 +489,7 @@ export class AnnouncementsService {
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only draft announcements can be scheduled.');
     }
+    if (this.needsApproval(existing)) throw new BadRequestException(NEEDS_APPROVAL_MESSAGE);
     const when = new Date(scheduledAt);
     if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) {
       throw new BadRequestException('Scheduled time must be in the future.');
@@ -434,11 +511,21 @@ export class AnnouncementsService {
     return scheduled;
   }
 
-  /** Return a scheduled announcement to draft so it can be edited. */
+  /**
+   * Return a scheduled announcement to draft so it can be edited. Any approval,
+   * including a Supervisor's, is void: an edited CRITICAL advisory is resubmitted.
+   */
   async unschedule(id: string, userId: string) {
     const { count } = await this.prisma.announcement.updateMany({
       where: { id, status: 'SCHEDULED' },
-      data: { status: 'DRAFT', scheduled_at: null, approved_by_id: null, approved_at: null },
+      data: {
+        status: 'DRAFT',
+        scheduled_at: null,
+        approved_by_id: null,
+        approved_at: null,
+        approval_requested_at: null,
+        approval_requested_by_id: null,
+      },
     });
     if (count === 0) throw new BadRequestException('Only scheduled announcements can be returned to draft.');
     await this.audit.log({
@@ -450,6 +537,155 @@ export class AnnouncementsService {
       newValues: { status: 'DRAFT' },
     });
     return this.findById(id);
+  }
+
+  // ─── Approval workflow (Phase 7) ────────────────────────────────────────────
+
+  /** DRAFT → PENDING_APPROVAL. `scheduledAt` is the release time once approved. */
+  async submitForApproval(id: string, userId: string, scheduledAt?: string) {
+    const existing = await this.findById(id);
+    if (existing.status !== 'DRAFT') {
+      throw new BadRequestException('Only draft announcements can be submitted for approval.');
+    }
+    if (!this.needsApproval(existing)) {
+      throw new BadRequestException('This announcement does not need MDRRMO approval. Publish it directly.');
+    }
+    let when: Date | null = null;
+    if (scheduledAt) {
+      when = new Date(scheduledAt);
+      if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) {
+        throw new BadRequestException('Scheduled time must be in the future.');
+      }
+    }
+    this.assertPublishable(existing);
+    const { count } = await this.prisma.announcement.updateMany({
+      where: { id, status: 'DRAFT' },
+      data: {
+        status: 'PENDING_APPROVAL',
+        // A time saved earlier in the draft is not a request; only this call's is.
+        scheduled_at: when,
+        approval_requested_at: new Date(),
+        approval_requested_by_id: userId,
+        review_note: null,
+      },
+    });
+    if (count === 0) throw new BadRequestException('Announcement was already submitted.');
+    await this.audit.log({
+      action: 'STATUS_CHANGE',
+      actorId: userId,
+      entityType: 'Announcement',
+      entityId: id,
+      moduleId: 'MOD-53',
+      oldValues: { status: 'DRAFT' },
+      newValues: { status: 'PENDING_APPROVAL', scheduledAt: when?.toISOString() ?? null },
+    });
+    await this.notifySupervisors(existing);
+    return this.findForPublisher(id);
+  }
+
+  /** PENDING_APPROVAL → DRAFT, by the officer, so the text can be edited again. */
+  async withdrawSubmission(id: string, userId: string) {
+    const { count } = await this.prisma.announcement.updateMany({
+      where: { id, status: 'PENDING_APPROVAL' },
+      data: { status: 'DRAFT', approval_requested_at: null, approval_requested_by_id: null },
+    });
+    if (count === 0) throw new BadRequestException('Only advisories awaiting approval can be withdrawn.');
+    await this.audit.log({
+      action: 'STATUS_CHANGE',
+      actorId: userId,
+      entityType: 'Announcement',
+      entityId: id,
+      moduleId: 'MOD-53',
+      oldValues: { status: 'PENDING_APPROVAL' },
+      newValues: { status: 'DRAFT', reason: 'withdrawn' },
+    });
+    return this.findForPublisher(id);
+  }
+
+  /**
+   * PENDING_APPROVAL → PUBLISHED, or → SCHEDULED when the requested time is still
+   * ahead. Guarded like publish(): two Supervisors approving at once fan out once.
+   */
+  async approve(id: string, supervisorId: string) {
+    const existing = await this.findById(id);
+    if (existing.status !== 'PENDING_APPROVAL') {
+      throw new BadRequestException('Only advisories awaiting approval can be approved.');
+    }
+    if (existing.approval_requested_by_id === supervisorId) {
+      throw new ForbiddenException('You submitted this advisory. Another Supervisor must approve it.');
+    }
+    this.assertPublishable(existing);
+    const now = new Date();
+    const later = !!existing.scheduled_at && existing.scheduled_at.getTime() > now.getTime();
+    const { count } = await this.prisma.announcement.updateMany({
+      where: { id, status: 'PENDING_APPROVAL' },
+      data: later
+        ? { status: 'SCHEDULED', approved_by_id: supervisorId, approved_at: now }
+        : { status: 'PUBLISHED', published_at: now, approved_by_id: supervisorId, approved_at: now },
+    });
+    if (count === 0) throw new BadRequestException('This advisory was already approved or returned.');
+
+    if (!later) return this.afterPublish(id, supervisorId);
+    await this.audit.log({
+      action: 'STATUS_CHANGE',
+      actorId: supervisorId,
+      entityType: 'Announcement',
+      entityId: id,
+      moduleId: 'MOD-53',
+      oldValues: { status: 'PENDING_APPROVAL' },
+      newValues: { status: 'SCHEDULED', scheduledAt: existing.scheduled_at!.toISOString(), approvedBy: supervisorId },
+    });
+    return this.findById(id);
+  }
+
+  /** PENDING_APPROVAL → DRAFT with the Supervisor's reason, shown to the officer. */
+  async returnToDraft(id: string, note: string, supervisorId: string) {
+    const trimmed = note.trim();
+    if (trimmed.length < 10) {
+      throw new BadRequestException('Say what must change (at least 10 characters).');
+    }
+    const { count } = await this.prisma.announcement.updateMany({
+      where: { id, status: 'PENDING_APPROVAL' },
+      data: { status: 'DRAFT', review_note: trimmed },
+    });
+    if (count === 0) throw new BadRequestException('This advisory was already approved or returned.');
+    await this.audit.log({
+      action: 'STATUS_CHANGE',
+      actorId: supervisorId,
+      entityType: 'Announcement',
+      entityId: id,
+      moduleId: 'MOD-53',
+      oldValues: { status: 'PENDING_APPROVAL' },
+      newValues: { status: 'DRAFT', reviewNote: trimmed },
+    });
+    return this.findById(id);
+  }
+
+  /**
+   * Best-effort push to Supervisors who can sign in (not `status = ACTIVE`: staff
+   * stay PENDING_VERIFICATION). No Dispatcher fallback — they cannot approve. The
+   * console's Approvals page is the reliable signal; a failure here never blocks.
+   */
+  private async notifySupervisors(a: Announcement) {
+    try {
+      const supervisors = await this.prisma.user.findMany({
+        where: { role: 'SUPERVISOR', status: { notIn: [...BLOCKED_ACCOUNT_STATUSES] as any[] } },
+        select: { id: true },
+      });
+      await Promise.allSettled(
+        supervisors.map((s) =>
+          this.notificationQueue.add('announcement-approval', {
+            userId: s.id,
+            channel: 'PUSH',
+            title: 'Advisory awaiting approval',
+            body: `CRITICAL: ${a.title.slice(0, 100)}`,
+            data: { announcementId: a.id, type: 'ANNOUNCEMENT_APPROVAL' },
+          } satisfies NotificationJobData),
+        ),
+      );
+    } catch (err) {
+      this.logger.error(`Approval notification failed for announcement ${a.id}: ${String(err)}`);
+    }
   }
 
   /**

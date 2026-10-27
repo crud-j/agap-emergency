@@ -80,6 +80,8 @@ describe('role-access', () => {
     expect(canOpen(ROLE.DISPATCHER, '/resources/requests')).toBe(false);
     expect(canOpen(ROLE.ORG_ADMIN, '/organizations')).toBe(true);
     expect(canOpen(ROLE.ORG_ADMIN, '/operations/fleet')).toBe(true);
+    // Hospital organizations register their own hospitals (pending MDRRMO review).
+    expect(canOpen(ROLE.ORG_ADMIN, '/hospitals')).toBe(true);
     expect(canOpen(undefined, '/dashboard')).toBe(false);
     expect(canOpen(ROLE.SYS_ADMIN, '/no-such-page')).toBe(false);
   });
@@ -97,6 +99,13 @@ describe('role-access', () => {
     expect(landingForRole(ROLE.DISPATCHER)).toBe('/operations/dispatch');
   });
 
+  it('only the Supervisor opens CRITICAL advisory approvals (Phase 7)', () => {
+    expect(canOpen(ROLE.SUPERVISOR, '/operations/approvals')).toBe(true);
+    for (const role of [ROLE.PUBLISHER, ROLE.SYS_ADMIN, ROLE.DISPATCHER, ROLE.ORG_ADMIN]) {
+      expect(canOpen(role, '/operations/approvals')).toBe(false);
+    }
+  });
+
   it('sidebars match the agreed spec', () => {
     expect(labels(ROLE.DISPATCHER)).toEqual([
       'Dashboard', 'Incident Queue', 'Live Map', 'Triage', 'Dispatch',
@@ -104,7 +113,7 @@ describe('role-access', () => {
     ]);
     expect(labels(ROLE.PUBLISHER)).toEqual(['Dashboard', 'Announcements', 'Publication History']);
     expect(labels(ROLE.ORG_ADMIN)).toEqual([
-      'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Barangay Directory',
+      'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Hospitals & Facilities', 'Barangay Directory',
     ]);
     expect(labels(ROLE.HOSPITAL_USER)).toEqual(['Hospitals & Facilities']);
     expect(showsSidebar(ROLE.HOSPITAL_USER)).toBe(false);
@@ -115,11 +124,12 @@ describe('role-access', () => {
       'Command / ICS', 'Multi-Agency', 'Surge Mode',
       'Fleet & Units', 'Hospitals & Facilities',
       'Analytics', 'Risk Map',
+      'Approvals',
       'Incident History',
     ]);
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
       'Dashboard', 'Organizations', 'Fleet & Units', 'Hospitals & Facilities',
-      'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'Audit Log',
+      'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'Risk Areas', 'Audit Log',
       'Security Events', 'Integrations', 'Configuration',
     ]);
   });

@@ -10,6 +10,7 @@ import { RespondersService } from '@backend/responders/responders.service';
 import { PrismaService } from '@backend/common/prisma/prisma.service';
 import { RealtimeService } from '@backend/realtime/realtime.service';
 import { AuditService } from '@backend/audit/audit.service';
+import { IncidentStatusService } from '@backend/incidents/incident-status/incident-status.service';
 import { ResponderAvailability } from '@agap/shared';
 import { createMockPrisma } from './helpers/prisma.mock';
 
@@ -59,6 +60,7 @@ describe('RespondersService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RespondersService,
+        IncidentStatusService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RealtimeService, useValue: mockRealtime },
         { provide: AuditService, useValue: mockAudit },

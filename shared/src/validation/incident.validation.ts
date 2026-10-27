@@ -12,6 +12,7 @@ export const GuestReporterSchema = z.object({
 
 export const CreateIncidentSchema = z.object({
   type: z.nativeEnum(IncidentType),
+  triggerMethod: z.enum(['SOS_BUTTON', 'SHAKE_GESTURE', 'MANUAL_REPORT']).optional(),
   description: z.string().max(1000).optional(),
   priority: z.nativeEnum(IncidentPriority).optional(),
   lat: z.number().min(-90).max(90).optional(),

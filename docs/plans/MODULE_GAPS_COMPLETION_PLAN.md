@@ -1,6 +1,6 @@
 # Plan: Close the Module Gaps Before the Report Check-Up
 
-> **Status (2026-10-22):** Not started. Planned after the module review in [../100%ModulesFunctionalities+AdditionalModules.md](../100%ModulesFunctionalities+AdditionalModules.md).
+> **Status (2026-10-23):** All five phases built; typecheck clean; backend 48 suites / 763 tests, frontend 60, mobile 8. **Manual walkthroughs ("Done when") still to do** before each report is signed. Each phase has a status note below. Planned after the module review in [../100%ModulesFunctionalities+AdditionalModules.md](../100%ModulesFunctionalities+AdditionalModules.md).
 > **How to use:** build one phase at a time. Each phase ends with a **Done when** checklist that must pass before the module's report is signed. The phases don't depend on each other, so they can be split between members.
 > **Modules:** MOD-07 (Justine), MOD-50 (Arjar), MOD-38 and MOD-40 (Aldrin), MOD-51 (Jhobert).
 > **Out of scope:** MOD-19 Offline Queue, which is eliminated (see [Decision: MOD-19](#decision-mod-19-is-eliminated)).
@@ -83,6 +83,12 @@ The 2026-10-22 review found five modules whose backend works but which fail the 
 - [ ] No countdown appears with the setting off, on other screens, with the app in the background, or while an incident is active.
 - [ ] The chip shows the real setting, and tapping it toggles.
 
+### Phase 1 status (2026-10-23)
+
+**Built.** `shakeToAlert` setting (store, Accessibility toggle, home chip), `useShakeToAlert` (home focused + foreground + setting on + no active incident), `ShakeCountdown` (5 s, haptics, Cancel / Send now), `startSOS('SHAKE_GESTURE')`, `triggerMethod` on the payload, DTO (`@IsIn` the three phone values) and service (`dto.triggerMethod ?? 'MANUAL_REPORT'`), trigger shown in the drawer Overview. The setting is device-only (not synced to the account).
+
+**Open.** Step 7 tests are not written (DTO values, hook start conditions). The countdown text is English only; it is not yet in `translations.ts`.
+
 ---
 
 ## Phase 2 — MOD-50 Analytics: response times and SLA from incidents
@@ -123,6 +129,14 @@ The 2026-10-22 review found five modules whose backend works but which fail the 
 - [ ] Changing the range changes the numbers; an empty range shows "No data", not 0%.
 - [ ] The volume and false-alert charts still render.
 
+### Phase 2 status (2026-10-23)
+
+**Built.** `getResponseTimes` and `getSlaCompliance` read `incidents` (same response shape; null, never 0, when nothing is measured); the SLA threshold comes from the most specific active `sla_policies` row, falling back to 120 / 300 s. `from`/`to` on all five endpoints (default last 30 days; bad or reversed dates → 400). 7 / 30 / 90-day selector; "No data" instead of 0%.
+
+**Fixed in review.** The page rebuilt the range on every render, so the query keys changed each render and the page kept refetching. The range is now memoized per selection.
+
+**Open.** Step 5 tests (`backend/test/analytics/`) are not written. A category-only and a priority-only policy currently rank equally. The false-alert rate counts `false_alerts` rows, not distinct incidents.
+
 ---
 
 ## Phase 3 — MOD-38 "Refer to hospital"
@@ -161,6 +175,19 @@ The 2026-10-22 review found five modules whose backend works but which fail the 
 - [ ] Signed in as the hospital user, the referral appears within 20 seconds. Acknowledge, then Arrived, both update the drawer.
 - [ ] A second referral to the same hospital while the first is pending is refused with a clear message.
 - [ ] The audit viewer shows the referral creation.
+
+### Phase 3 status (2026-10-23)
+
+**Built.** `CreateReferralDto` now carries `incidentId` and is validated; the service checks hospital, incident (not terminal), dispatch and patient ownership, refuses a second pending referral (409), audits (`MOD-38`, `facility_referral`) and sends an in-app notification to the hospital organization's members. The incident's referrals are listed at `GET /v1/hospitals/referrals/incident/:incidentId` (not under `/incidents`). Drawer: **Refer to hospital** (Dispatcher, Supervisor; DISPATCHED → TRANSPORTING) and a Referrals list.
+
+**Fixed in review (access).** The older referral routes only required a sign-in, so any account could read pre-arrival notes or mark arrival.
+- Reading referrals: Dispatcher, Supervisor, Responder, Hospital User. A hospital user only sees hospitals whose organization they belong to.
+- Acknowledge: Hospital User (own hospital). Arrived: Hospital User (own hospital), Dispatcher, Supervisor. A second arrival is refused.
+- Acknowledge and arrival now write audit rows and refresh the drawer.
+- The Hospitals page no longer loads referrals for the System Administrator, and shows **Acknowledge** to hospital users only.
+- Tests: `backend/test/hospitals/referrals.spec.ts` (DTO, terminal incidents, 409, audit, hospital scope, route roles).
+
+**Open.** No success toast. The pending-duplicate check has no unique index behind it.
 
 ---
 
@@ -203,6 +230,16 @@ The 2026-10-22 review found five modules whose backend works but which fail the 
 - [ ] The dispatcher changes the destination, and the responder's screen shows the new hospital after it refreshes.
 - [ ] The reporter still gets exactly one "Transporting" push.
 
+### Phase 4 status (2026-10-23)
+
+**Built.** Call order as planned (status first, then `POST /transport`; a failed transport call keeps TRANSPORTING and shows "Destination not saved, tap to retry"). `DestinationPicker` (Decide later first, distance sort, search), destination / est. arrival / **Arrived at hospital** on the assignment screen, drawer Transport section with **Change destination**, socket refresh on `incident.transporting` and `incident.facility_arrival`. Backend: second open transport → 409, inactive destination → 400, crew check for responders, `UpdateTransportDto`, audit on arrival and update. Responders may set the destination after "Decide later" (crew only, before arrival).
+
+**Fixed in review.**
+- The assignment screen used every transport on the incident. With several units it could show another crew's hospital, or fail with 403. It now uses only this dispatch's transports.
+- After arrival, **Change destination** stayed visible and opened a second transport. After arrival the card now shows the arrival time only.
+
+**Open.** Mobile tests (call order) are not written. A destination change made by another dispatcher sends `incident.updated`, which does not refresh the drawer's transport list (the 20 s refresh or reopening the drawer does).
+
 ---
 
 ## Phase 5 — MOD-51 Risk-area management dialog
@@ -238,10 +275,29 @@ The 2026-10-22 review found five modules whose backend works but which fail the 
 - [ ] Edit its level; deactivate it; delete a test area. Each change shows immediately and appears in the audit viewer.
 - [ ] Signed in as a Supervisor or Dispatcher: no add, edit or delete controls; the page still shows the map and the list.
 
+### Phase 5 status (2026-10-23)
+
+**Data review.**
+- **Role conflict:** since role dashboards Phase 5b, the System Administrator cannot open `/operations/risk`, and `GET /areas`, `/heatmap` and `/map-points` refuse it. "From the Risk page" was no longer possible without undoing 5b. **Decision (Jhobert, 2026-10-23):** manage risk areas on a new **Administration → Risk Areas** page; open only `GET /areas` to the System Administrator.
+- **The dev `risk_areas` table is empty**, so "boundary stays as seeded" has nothing to keep; every area starts without a boundary. Nothing references `risk_areas` (no foreign keys), so delete is safe.
+- `updated_at` has no `@updatedAt`, so updates never moved it. The service now sets it.
+- `flood_threshold_meters` is a Prisma `Decimal` and reaches the browser as a string (`"11.50"`). The frontend type now says so and converts it.
+- **Barangay spelling:** the database says **Tambubong**; `frontend/features/announcements/templates.ts` says *Tambobong*. The dialog uses the database list (`GET /barangays/contacts`), and the backend checks the name against `geo_regions` and stores the official spelling. The announcement constant is not changed here.
+
+**Built.**
+- `backend/src/risk-intelligence/dto/risk-area.dto.ts` (`CreateRiskAreaDto`, `UpdateRiskAreaDto`); the controller uses them, so the global `ValidationPipe` now rejects bad levels, types, thresholds and unknown fields.
+- Service: barangay checked against `geo_regions` (empty clears it), audit rows on create, update and delete (`moduleId: 'MOD-51'`, entity `risk_area`, old and new values; a delete keeps what was removed).
+- Frontend: `createRiskArea`/`updateRiskArea`/`deleteRiskArea` and hooks that refresh the areas, flood zones and heatmap; `components/admin/RiskAreasTab.tsx` and `/administration/risk-areas` with the add/edit dialog (flood threshold only for FLOOD, with the 11.50 m hint; Active switch on edit) and a remove dialog that offers **Deactivate** first and **Delete** second; a "Risk Areas" sidebar link for the System Administrator.
+- Risk page: still read-only for everyone; it now shows **active** areas only, so a deactivated area disappears from the map and the "Other Risk Areas" list.
+
+**Verified.** `backend/test/risk-intelligence/risk-areas.spec.ts` (13 tests: unknown level, negative and >30 m thresholds, unknown type and fields rejected; only the System Administrator may write; it gets the list but not the heatmap; audit rows; barangay check). Backend 47 suites / 742 tests; frontend 60 tests; both typechecks clean.
+
+**Done when, adjusted.** Read "Signed in as the System Administrator" as **Administration → Risk Areas**, and check the result on the Risk page as a Supervisor.
+
 ---
 
 ## After all phases
 
-- [ ] Update [../100%ModulesFunctionalities+AdditionalModules.md](../100%ModulesFunctionalities+AdditionalModules.md): move each finished module to ✅ and update its "What works" text.
+- [x] Update [../100%ModulesFunctionalities+AdditionalModules.md](../100%ModulesFunctionalities+AdditionalModules.md): move each finished module to ✅ and update its "What works" text. Done 2026-10-23, marked "walkthrough pending" until each **Done when** list passes.
 - [ ] Each owner updates their report's TO-BE inputs, steps and outputs to match, takes screenshots, and asks the leader to sign.
 - [ ] Commit each phase on its own (for example `feat(mobile): shake-to-alert with countdown (MOD-07)`).

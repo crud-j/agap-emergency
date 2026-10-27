@@ -30,6 +30,7 @@ export interface IntakeDraft {
 interface IncidentDraft {
   idempotencyKey: string | null;
   isGuestReport: boolean;
+  triggerMethod: 'SOS_BUTTON' | 'SHAKE_GESTURE' | 'MANUAL_REPORT';
   type: IncidentType | null;
   description: string | null;
   location: LocationData | null;
@@ -49,7 +50,7 @@ interface IncidentState {
   draft: IncidentDraft;
   activeIncidentId: string | null;
 
-  startSOS: () => void;
+  startSOS: (triggerMethod?: 'SOS_BUTTON' | 'SHAKE_GESTURE') => void;
   beginGuestReport: () => void;
   setIncidentType: (type: IncidentType) => void;
   setPatientIsReporter: (isReporter: boolean) => void;
@@ -73,6 +74,7 @@ interface IncidentState {
 const DEFAULT_DRAFT: IncidentDraft = {
   idempotencyKey: null,
   isGuestReport: false,
+  triggerMethod: 'MANUAL_REPORT',
   type: null,
   description: null,
   location: null,
@@ -91,11 +93,12 @@ export const useIncidentStore = create<IncidentState>((set) => ({
   draft: { ...DEFAULT_DRAFT },
   activeIncidentId: null,
 
-  startSOS: () =>
+  startSOS: (triggerMethod = 'SOS_BUTTON') =>
     set(() => ({
       draft: {
         ...DEFAULT_DRAFT,
         idempotencyKey: generateUUID(),
+        triggerMethod,
       },
     })),
 

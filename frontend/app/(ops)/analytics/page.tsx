@@ -1,6 +1,6 @@
 'use client';
 
-import { type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, PieChart, Pie, Legend,
@@ -8,6 +8,7 @@ import {
 import { Activity, AlertTriangle, CheckCircle2, Clock, TrendingUp, XCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, StatCard, Skeleton, EmptyState } from '@/components/ui';
 import { useVolume, useSlaCompliance, useFalseAlertRate, useResponseTimes } from '@/features/analytics/hooks';
+import type { AnalyticsRange } from '@/features/analytics/api';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 
@@ -72,7 +73,10 @@ function ChartTooltip({ active, payload, label }: {
 
 // ─── SLA Gauge ───────────────────────────────────────────────────────────────
 
-function SlaGauge({ pct, label }: { pct: number; label: string }): JSX.Element {
+function SlaGauge({ pct, label }: { pct: number | null; label: string }): JSX.Element {
+  if (pct == null) {
+    return <div className="flex h-[148px] flex-col items-center justify-center gap-1 text-center text-xs text-agap-textSub">No data<span>{label}</span></div>;
+  }
   const color = pct >= 90 ? '#0D6053' : pct >= 70 ? '#D97706' : '#D44858';
   const gaugeData = [
     { value: pct, fill: color },
@@ -111,10 +115,20 @@ function SlaGauge({ pct, label }: { pct: number; label: string }): JSX.Element {
  * from live backend aggregates. Palette maps to AGAP pearl/green tokens.
  */
 export default function AnalyticsPage(): JSX.Element {
-  const volumeQ = useVolume();
-  const slaQ = useSlaCompliance();
-  const falseQ = useFalseAlertRate();
-  const rtQ = useResponseTimes();
+  const [days, setDays] = useState(30);
+  // Fixed per selection: a range rebuilt on every render changes the query keys
+  // each time, so every response would trigger another request.
+  const range = useMemo<AnalyticsRange>(() => {
+    const now = Date.now();
+    return {
+      from: new Date(now - days * 24 * 60 * 60 * 1000).toISOString(),
+      to: new Date(now).toISOString(),
+    };
+  }, [days]);
+  const volumeQ = useVolume(range);
+  const slaQ = useSlaCompliance(range);
+  const falseQ = useFalseAlertRate(range);
+  const rtQ = useResponseTimes(range);
 
   const volume = volumeQ.data;
   const sla = slaQ.data;
@@ -157,7 +171,17 @@ export default function AnalyticsPage(): JSX.Element {
         </p>
       </div>
 
-      {/* KPI tiles */}
+      {/* Range selector + KPI tiles */}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div />
+        <div className="flex rounded-lg border border-slate-200 bg-white p-1">
+          {[7, 30, 90].map((option) => (
+            <button key={option} type="button" onClick={() => setDays(option)} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${days === option ? 'bg-agap-green text-white' : 'text-agap-textSub'}`}>
+              {option}d
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard
           label="Total Incidents"
@@ -170,22 +194,22 @@ export default function AnalyticsPage(): JSX.Element {
           label="False Alerts"
           value={loading ? '—' : (falseRate?.falseAlerts ?? 0)}
           icon={<AlertTriangle size={18} />}
-          variant={falseRate && falseRate.ratePct > 20 ? 'warning' : 'default'}
+          variant={falseRate?.ratePct != null && falseRate.ratePct > 20 ? 'warning' : 'default'}
           loading={falseQ.isLoading}
-          trendLabel={falseRate ? `${falseRate.ratePct}% rate` : undefined}
+          trendLabel={falseRate?.ratePct == null ? undefined : `${falseRate.ratePct}% rate`}
         />
         <StatCard
           label="Ack SLA"
-          value={loading ? '—' : `${sla?.acknowledgeCompliancePct ?? 0}%`}
+          value={loading ? '—' : sla?.acknowledgeCompliancePct == null ? 'No data' : `${sla.acknowledgeCompliancePct}%`}
           icon={<CheckCircle2 size={18} />}
-          variant={sla && sla.acknowledgeCompliancePct < 70 ? 'critical' : sla && sla.acknowledgeCompliancePct < 90 ? 'warning' : 'success'}
+          variant={sla?.acknowledgeCompliancePct != null && sla.acknowledgeCompliancePct < 70 ? 'critical' : sla?.acknowledgeCompliancePct != null && sla.acknowledgeCompliancePct < 90 ? 'warning' : 'success'}
           loading={slaQ.isLoading}
         />
         <StatCard
           label="Dispatch SLA"
-          value={loading ? '—' : `${sla?.dispatchCompliancePct ?? 0}%`}
+          value={loading ? '—' : sla?.dispatchCompliancePct == null ? 'No data' : `${sla.dispatchCompliancePct}%`}
           icon={<Clock size={18} />}
-          variant={sla && sla.dispatchCompliancePct < 70 ? 'critical' : sla && sla.dispatchCompliancePct < 90 ? 'warning' : 'success'}
+          variant={sla?.dispatchCompliancePct != null && sla.dispatchCompliancePct < 70 ? 'critical' : sla?.dispatchCompliancePct != null && sla.dispatchCompliancePct < 90 ? 'warning' : 'success'}
           loading={slaQ.isLoading}
         />
       </div>

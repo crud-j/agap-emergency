@@ -18,6 +18,9 @@ import {
   type IncidentListParams,
   type SubmitAssessmentBody,
   type CreateResolutionBody,
+  fetchIncidentTransports,
+  updateIncidentTransport,
+  rejectAttachment,
 } from './api';
 
 export function useIncidents(params?: IncidentListParams, opts?: { enabled?: boolean }) {
@@ -72,6 +75,13 @@ export function useAcknowledgeIncident() {
 
 export function useAssessIncident() {
   return useIncidentMutation<string>(assessIncident, (id) => id);
+}
+
+export function useRejectAttachment() {
+  return useIncidentMutation<{ incidentId: string; attachmentId: string; notes?: string }>(
+    ({ incidentId, attachmentId, notes }) => rejectAttachment(incidentId, attachmentId, notes),
+    ({ incidentId }) => incidentId,
+  );
 }
 
 export function useCloseIncident() {
@@ -136,3 +146,26 @@ export function useSubmitAssessment() {
   });
 }
 
+export function useIncidentTransports(id: string | null) {
+  return useQuery({
+    queryKey: ['incident-transports', id],
+    queryFn: () => fetchIncidentTransports(id!),
+    enabled: !!id,
+    refetchInterval: 20_000,
+  });
+}
+
+export function useUpdateIncidentTransport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ incidentId, transportId, body }: {
+      incidentId: string;
+      transportId: string;
+      body: { destinationId: string; estimatedArrivalAt?: string; changeReason?: string };
+    }) => updateIncidentTransport(incidentId, transportId, body),
+    onSuccess: (_data, { incidentId }) => {
+      qc.invalidateQueries({ queryKey: ['incident-transports', incidentId] });
+      qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+    },
+  });
+}

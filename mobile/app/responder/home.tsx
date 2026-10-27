@@ -11,6 +11,7 @@ import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
 import { useNetworkStatus } from '@/src/hooks/useNetworkStatus';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { AvailabilityControl } from '@/src/components/responder/availability-control';
+import { SurgeBroadcastCard } from '@/src/components/responder/SurgeBroadcastCard';
 import { AgapLogo } from '@/src/components/brand/AgapLogo';
 
 type GpsState = 'checking' | 'granted' | 'denied';
@@ -211,6 +212,9 @@ export default function HomeScreen() {
           <Text style={styles.pageTitleText}>Home</Text>
           <Text style={styles.pageTitleSub}>Stay ready. Respond. Make a difference.</Text>
         </View>
+
+        {/* ── Surge broadcasts (MOD-52) ─────────────────────────────────── */}
+        <SurgeBroadcastCard />
 
         {/* ── Bocaue coverage map ───────────────────────────────────────── */}
         <TouchableOpacity

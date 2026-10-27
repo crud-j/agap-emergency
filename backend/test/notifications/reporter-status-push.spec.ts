@@ -379,6 +379,7 @@ describe('RespondersService.updateStatus → reporter notifier', () => {
       prisma as any,
       realtime as any,
       { log: jest.fn() } as any,
+      new IncidentStatusService(),
       notifier as any,
     );
     return { service, notifier };

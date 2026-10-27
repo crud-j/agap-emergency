@@ -20,6 +20,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { AddCrewDto, ReassignDispatchDto } from './dto/dispatch-actions.dto';
 
 @ApiTags('dispatch')
 @ApiBearerAuth()
@@ -87,17 +88,6 @@ export class DispatchController {
     return this.dispatchService.submitTriage({ ...dto, incidentId }, req.user.id);
   }
 
-  @Post('duplicates/:incidentId/merge')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
-  @ApiOperation({ summary: 'Merge an incident into a master as duplicate' })
-  async mergeDuplicates(
-    @Param('incidentId', ParseUUIDPipe) incidentId: string,
-    @Body() body: { masterIncidentId: string },
-  ) {
-    return this.dispatchService.mergeDuplicates(incidentId, body.masterIncidentId);
-  }
-
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get a dispatch' })
@@ -127,7 +117,7 @@ export class DispatchController {
   @ApiOperation({ summary: 'Reassign a dispatch to another resource' })
   async reassign(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { resourceId: string },
+    @Body() body: ReassignDispatchDto,
     @Request() req: any,
   ) {
     return this.dispatchService.reassign(id, body.resourceId, req.user.id);
@@ -139,7 +129,7 @@ export class DispatchController {
   @ApiOperation({ summary: 'Add crew to a dispatch' })
   async addCrew(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { userId: string },
+    @Body() body: AddCrewDto,
   ) {
     return this.dispatchService.addCrew(id, body.userId);
   }
@@ -156,58 +146,6 @@ export class DispatchController {
     return { message: 'Crew removed' };
   }
 
-  // ---- Transport lifecycle (MOD-40) ----
-
-  @Post(':id/transport')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER)
-  @ApiOperation({ summary: 'Start patient transport to facility (MOD-40)' })
-  async startTransport(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { destinationId?: string; patientId?: string },
-    @Request() req: any,
-  ) {
-    return this.dispatchService.startTransport(id, body, req.user.id);
-  }
-
-  @Get(':id/transport')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Get transport record for dispatch (MOD-40)' })
-  async getTransport(@Param('id', ParseUUIDPipe) id: string) {
-    return this.dispatchService.getTransport(id);
-  }
-
-  @Patch(':id/transport/destination')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER)
-  @ApiOperation({ summary: 'Change transport destination (MOD-40)' })
-  async changeTransportDestination(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { destinationId: string; reason?: string },
-    @Request() req: any,
-  ) {
-    return this.dispatchService.changeTransportDestination(id, body, req.user.id);
-  }
-
-  @Post(':id/transport/arrived')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER)
-  @ApiOperation({ summary: 'Mark arrived at destination facility (MOD-40)' })
-  async markTransportArrived(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Request() req: any,
-  ) {
-    return this.dispatchService.markTransportArrived(id, req.user.id);
-  }
-
-  @Post(':id/transport/handover')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER)
-  @ApiOperation({ summary: 'Complete patient handover at facility (MOD-40)' })
-  async completePatientHandover(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Request() req: any,
-  ) {
-    return this.dispatchService.completePatientHandover(id, req.user.id);
-  }
+  // Transport (MOD-40) lives on /incidents/:id/transport, and duplicate merging on
+  // /incidents/:id/merge: one path each, with their checks and audit rows.
 }

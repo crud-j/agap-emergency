@@ -63,15 +63,9 @@ export class EtaRefreshProcessor extends WorkerHost {
       }
 
       const etaSeconds = route.durationSeconds;
-      const estimatedAt = new Date(Date.now() + etaSeconds * 1000);
 
-      // Update TransportRecord if one exists for this dispatch (dispatches has no ETA field)
-      await this.prisma.transportRecord.updateMany({
-        where: { dispatch_id: dispatchId, handover_completed_at: null },
-        data: { estimated_arrival_at: estimatedAt },
-      });
-
-      // Always emit via WebSocket regardless of DB update outcome
+      // This is the route to the scene, so it is not written to transport_records.
+      // Prompt 07 writes estimated_arrival_at only for the TO_FACILITY leg.
       this.realtime.notifyEtaUpdated(incidentId, {
         dispatchId,
         etaSeconds,

@@ -112,7 +112,7 @@ export class NotificationProcessor extends WorkerHost {
     if (!data.userId) return;
     try {
       const contacts = await this.prisma.emergencyContact.findMany({
-        where: { user_id: data.userId, notify_on_alert: true, is_active: true },
+        where: { user_id: data.userId, is_active: true },
       });
 
       for (const contact of contacts) {

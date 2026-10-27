@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { CreateRiskAreaDto, UpdateRiskAreaDto } from './dto/risk-area.dto';
 
 @Injectable()
 export class RiskIntelligenceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async getHeatmap() {
     // Placeholder — real PostGIS density is a later step.
@@ -82,58 +87,103 @@ export class RiskIntelligenceService {
     return this.prisma.risk_areas.findMany({ orderBy: { name: 'asc' } });
   }
 
-  async createArea(dto: {
-    name: string;
-    riskType: string;
-    riskLevel?: string;
-    barangay?: string;
-    floodThresholdMeters?: number;
-    description?: string;
-  }) {
-    return this.prisma.risk_areas.create({
+  async createArea(dto: CreateRiskAreaDto, actorId: string) {
+    const barangay = await this.resolveBarangay(dto.barangay);
+    const area = await this.prisma.risk_areas.create({
       data: {
-        name: dto.name,
-        risk_type: dto.riskType as any,
-        risk_level: dto.riskLevel ?? 'MODERATE',
-        barangay: dto.barangay ?? null,
+        name: dto.name.trim(),
+        risk_type: dto.riskType,
+        risk_level: dto.riskLevel,
+        barangay,
         flood_threshold_meters: dto.floodThresholdMeters ?? null,
-        description: dto.description ?? null,
+        description: dto.description?.trim() || null,
       },
     });
+    await this.audit.log({
+      action: 'CREATE',
+      actorId,
+      entityType: 'risk_area',
+      entityId: area.id,
+      moduleId: 'MOD-51',
+      newValues: this.auditValues(area),
+    });
+    return area;
   }
 
-  async updateArea(
-    id: string,
-    dto: {
-      name?: string;
-      riskLevel?: string;
-      barangay?: string;
-      floodThresholdMeters?: number;
-      description?: string;
-      isActive?: boolean;
-    },
-  ) {
+  async updateArea(id: string, dto: UpdateRiskAreaDto, actorId: string) {
     const area = await this.prisma.risk_areas.findUnique({ where: { id } });
     if (!area) throw new NotFoundException('Risk area not found');
-    return this.prisma.risk_areas.update({
+    const barangay = dto.barangay !== undefined ? await this.resolveBarangay(dto.barangay) : undefined;
+    const updated = await this.prisma.risk_areas.update({
       where: { id },
       data: {
-        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.name !== undefined && { name: dto.name.trim() }),
+        ...(dto.riskType !== undefined && { risk_type: dto.riskType }),
         ...(dto.riskLevel !== undefined && { risk_level: dto.riskLevel }),
-        ...(dto.barangay !== undefined && { barangay: dto.barangay }),
-        ...(dto.floodThresholdMeters !== undefined && {
-          flood_threshold_meters: dto.floodThresholdMeters,
-        }),
-        ...(dto.description !== undefined && { description: dto.description }),
+        ...(barangay !== undefined && { barangay }),
+        // null clears the threshold (e.g. an area no longer tied to the river level)
+        ...(dto.floodThresholdMeters !== undefined && { flood_threshold_meters: dto.floodThresholdMeters }),
+        ...(dto.description !== undefined && { description: dto.description?.trim() || null }),
         ...(dto.isActive !== undefined && { is_active: dto.isActive }),
+        // The column has no @updatedAt, so it never moved before.
+        updated_at: new Date(),
       },
     });
+    await this.audit.log({
+      action: 'UPDATE',
+      actorId,
+      entityType: 'risk_area',
+      entityId: id,
+      moduleId: 'MOD-51',
+      oldValues: this.auditValues(area),
+      newValues: this.auditValues(updated),
+    });
+    return updated;
   }
 
-  async deleteArea(id: string) {
+  async deleteArea(id: string, actorId: string) {
     const area = await this.prisma.risk_areas.findUnique({ where: { id } });
     if (!area) throw new NotFoundException('Risk area not found');
     await this.prisma.risk_areas.delete({ where: { id } });
+    // The audit row keeps what was deleted: nothing else references risk areas.
+    await this.audit.log({
+      action: 'DELETE',
+      actorId,
+      entityType: 'risk_area',
+      entityId: id,
+      moduleId: 'MOD-51',
+      oldValues: this.auditValues(area),
+    });
+  }
+
+  /** Empty means "no barangay"; anything else must be one of Bocaue's 19 (geo_regions). */
+  private async resolveBarangay(name: string | null | undefined): Promise<string | null> {
+    const trimmed = name?.trim();
+    if (!trimmed) return null;
+    const region = await this.prisma.geo_regions.findFirst({
+      where: { region_type: 'barangay', name: { equals: trimmed, mode: 'insensitive' } },
+      select: { name: true },
+    });
+    if (!region) throw new BadRequestException(`"${trimmed}" is not a Bocaue barangay.`);
+    return region.name;
+  }
+
+  private auditValues(a: {
+    name: string;
+    risk_type: string;
+    risk_level: string;
+    barangay: string | null;
+    flood_threshold_meters: unknown;
+    is_active: boolean;
+  }) {
+    return {
+      name: a.name,
+      riskType: a.risk_type,
+      riskLevel: a.risk_level,
+      barangay: a.barangay,
+      floodThresholdMeters: a.flood_threshold_meters === null ? null : Number(a.flood_threshold_meters),
+      isActive: a.is_active,
+    };
   }
 
   async getPatterns() {

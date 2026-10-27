@@ -105,9 +105,9 @@ export class LocationsController {
   @Get('tracking/:incidentId/eta')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Estimated time of arrival (labeled estimate)' })
-  async eta(@Param('incidentId', ParseUUIDPipe) incidentId: string) {
-    return this.locationsService.getEta(incidentId);
+  @ApiOperation({ summary: 'Estimated time of arrival (labeled estimate). Staff, the reporter or assigned crew only.' })
+  async eta(@Param('incidentId', ParseUUIDPipe) incidentId: string, @Request() req: any) {
+    return this.locationsService.getEta(incidentId, { id: req.user.id, role: req.user.role });
   }
 
   @Get('tracking/:incidentId/responders')

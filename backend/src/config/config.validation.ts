@@ -53,6 +53,13 @@ class EnvironmentVariables {
   @IsOptional()
   MFA_ENCRYPTION_KEY?: string;
 
+  // MEDICAL_ENCRYPTION_KEY: 32 random bytes, base64 — seals medical profile fields at
+  // rest (MOD-03 / MOD-48). Separate from MFA_ENCRYPTION_KEY. Required in production;
+  // without it a medical profile cannot be saved (dispatch is never affected).
+  @IsString()
+  @IsOptional()
+  MEDICAL_ENCRYPTION_KEY?: string;
+
   // 'true' = staff roles without a second factor must enroll at next sign-in. Leave
   // 'false' during the enrollment window: enrollment is offered but skippable.
   @IsString()
@@ -136,6 +143,12 @@ class EnvironmentVariables {
   @IsOptional()
   BARANGAY_SMS_INBOUND_MODE?: string;
 
+  // MOD-53 (ROLE_DASHBOARDS_PLAN.md Phase 7). 'true' = a CRITICAL advisory needs an
+  // MDRRMO Supervisor's approval before release. Default off: publishing as before.
+  @IsString()
+  @IsOptional()
+  ANNOUNCEMENT_APPROVAL_REQUIRED?: string;
+
   // Public base URL of the web app (no trailing slash), e.g. https://agap.example.ph.
   // Barangays save <PUBLIC_APP_URL>/b once and type the access code from the alert SMS.
   // Never sent in an SMS (carriers drop texts with web addresses); informational for the
@@ -174,6 +187,17 @@ class EnvironmentVariables {
   @IsOptional()
   MAP_GEOCODER_URL: string = 'https://nominatim.openstreetmap.org';
 
+  // Tier 2 evidence review (MOD-10/MOD-25) — an advisory AI plausibility check on
+  // submitted photos, run async after upload. Never blocks upload or dispatch.
+  // Unset = the check is skipped entirely; Tier 1 provenance scoring still runs.
+  @IsString()
+  @IsOptional()
+  OPENAI_API_KEY: string = '';
+
+  @IsString()
+  @IsOptional()
+  OPENAI_EVIDENCE_REVIEW_MODEL: string = 'gpt-4o-mini';
+
   @IsString()
   @IsOptional()
   MAP_STYLE_URL: string = '';
@@ -192,6 +216,10 @@ export function validateConfig(config: Record<string, unknown>) {
 
   // Fail fast at boot rather than at the first dispatcher's sign-in.
   const mfaKey = parseEncryptionKey(validatedConfig.MFA_ENCRYPTION_KEY);
+  const medicalKey = parseEncryptionKey(validatedConfig.MEDICAL_ENCRYPTION_KEY, 'MEDICAL_ENCRYPTION_KEY');
+  if (validatedConfig.NODE_ENV === Environment.Production && !medicalKey) {
+    throw new Error('Configuration validation failed: MEDICAL_ENCRYPTION_KEY is required in production');
+  }
   if (validatedConfig.AUTH_MFA_ENFORCED === 'true' && !mfaKey) {
     throw new Error('Configuration validation failed: AUTH_MFA_ENFORCED=true requires MFA_ENCRYPTION_KEY');
   }

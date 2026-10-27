@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { GrantPermissionDto } from './dto/grant-permission.dto';
 
 @ApiTags('administration')
 @ApiBearerAuth()
@@ -39,7 +40,7 @@ export class PermissionsController {
   @Post('roles/:role')
   @Roles(UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Grant a permission to a role' })
-  async grant(@Param('role') role: UserRole, @Body() body: { permissionId: string }) {
+  async grant(@Param('role') role: UserRole, @Body() body: GrantPermissionDto) {
     return this.permissionsService.grantToRole(role, body.permissionId);
   }
 

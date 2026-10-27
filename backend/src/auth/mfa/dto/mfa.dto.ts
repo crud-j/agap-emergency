@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsRecordId } from '../../../common/decorators/is-record-id.decorator';
 
 /** Held in memory by the browser between the password step and the second step. */
 const MFA_TOKEN_MAX = 2048;
@@ -31,7 +32,7 @@ export class MfaVerifyDto extends MfaTokenDto {
 
 export class MfaPasskeyCompleteDto extends MfaTokenDto {
   @ApiProperty()
-  @IsUUID()
+  @IsRecordId()
   challengeId!: string;
 
   @ApiProperty({ description: 'Raw AuthenticationResponseJSON from the browser WebAuthn API' })

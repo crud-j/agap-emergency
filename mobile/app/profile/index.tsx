@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking, Platform,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking, Platform, Switch,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,6 +32,7 @@ export default function ProfileScreen() {
   const t = useTranslations();
   const { user, accessToken, logout } = useAuthStore();
   const language = useAccessibilityStore((s) => s.language);
+  const shakeToAlert = useAccessibilityStore((s) => s.shakeToAlert);
   const setPreferences = useAccessibilityStore((s) => s.setPreferences);
 
   const completeness = user?.profile_completeness ?? 0;
@@ -66,6 +67,10 @@ export default function ProfileScreen() {
       // Best-effort server sync (MOD-04). Never blocks the UI.
       try { await updateUserPreferences({ preferredLanguage: next }, accessToken); } catch { /* offline-safe */ }
     }
+  }
+
+  async function handleShakeToAlertChange(value: boolean) {
+    await setPreferences({ shakeToAlert: value });
   }
 
   function call911() {
@@ -191,6 +196,13 @@ export default function ProfileScreen() {
           <View style={styles.group}>
             <MenuRow icon="language-outline" label={t.profile.language} value={LANG_LABEL[language]} onPress={toggleLanguage} />
             <MenuRow icon="accessibility-outline" label={t.profile.accessibility} sub={t.profile.accessibilitySub} onPress={() => router.push('/profile/accessibility')} />
+            <SettingRow
+              icon="phone-portrait-outline"
+              label={t.onboarding4.shakeToAlert.title}
+              sub={t.onboarding4.shakeToAlert.subtitle}
+              value={shakeToAlert}
+              onChange={handleShakeToAlertChange}
+            />
             <MenuRow icon="notifications-outline" label={t.profile.notifications} sub={t.profile.notificationsSub} onPress={() => router.push('/notifications')} />
             <MenuRow icon="medical-outline" label={t.profile.firstAid} sub={t.profile.firstAidSub} last onPress={() => router.push('/first-aid')} />
           </View>
@@ -279,6 +291,38 @@ function MenuRow({
   );
 }
 
+function SettingRow({
+  icon, label, sub, value, onChange,
+}: {
+  icon: IconName;
+  label: string;
+  sub: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <View style={[styles.menuRow, styles.menuRowDivider]}>
+      <View style={styles.menuIconWrap}>
+        <Ionicons name={icon} size={20} color="#0D6053" />
+      </View>
+      <View style={styles.menuTextWrap}>
+        <Text style={styles.menuLabel}>{label}</Text>
+        <Text style={styles.menuSub}>{sub}</Text>
+      </View>
+      <Switch
+        style={styles.settingSwitch}
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: '#D7DEDB', true: '#8CC5B3' }}
+        thumbColor={value ? '#0D6053' : '#FFFFFF'}
+        accessibilityRole="switch"
+        accessibilityLabel={label}
+        accessibilityState={{ checked: value }}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F3F6F5' },
   scroll: { paddingHorizontal: 20, paddingTop: 8 },
@@ -336,7 +380,8 @@ const styles = StyleSheet.create({
   sensitiveDot: { position: 'absolute', top: -3, right: -3, width: 16, height: 16, borderRadius: 8, backgroundColor: '#B45309', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#FFFFFF' },
   menuTextWrap: { flex: 1 },
   menuLabel: { fontSize: 14, fontWeight: '700', color: '#1F302A' },
-  menuSub: { fontSize: 11, color: '#7C8983', marginTop: 3 },
+  menuSub: { fontSize: 11, color: '#7C8983', marginTop: 3, lineHeight: 15 },
+  settingSwitch: { transform: [{ scaleX: 0.88 }, { scaleY: 0.88 }], marginLeft: 8 },
   menuValue: { fontSize: 12, color: '#60736B', fontWeight: '700', marginRight: 7 },
 
   signOutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 13, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F0D8D5', marginBottom: 18 },

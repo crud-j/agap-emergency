@@ -38,18 +38,28 @@ const ACTION_OPTIONS = [
   'SYSTEM',
 ] as const;
 
-const ENTITY_TYPES = [
-  'ALL',
-  'Incident',
-  'Dispatch',
-  'Resource',
-  'Responder',
-  'User',
-  'Organization',
-  'Announcement',
-  'Hospital',
-  'AuditLog',
-] as const;
+/** Entity types the backend writes (matched case-insensitively), with readable labels. */
+const ENTITY_TYPES: readonly { value: string; label: string }[] = [
+  { value: 'ALL', label: 'Any entity' },
+  { value: 'incident', label: 'Incident' },
+  { value: 'dispatch', label: 'Dispatch' },
+  { value: 'transport_record', label: 'Transport' },
+  { value: 'facility_referral', label: 'Hospital referral' },
+  { value: 'on_scene_assessment', label: 'On-scene assessment' },
+  { value: 'incident_handover', label: 'Handover' },
+  { value: 'incident_agency_participant', label: 'Participating agency' },
+  { value: 'incident_command_structure', label: 'ICS' },
+  { value: 'ics_assignment', label: 'ICS position' },
+  { value: 'incident_barangay_notice', label: 'Barangay notice' },
+  { value: 'resource', label: 'Response unit' },
+  { value: 'resource_request', label: 'Mutual-aid request' },
+  { value: 'RESPONDER_AVAILABILITY', label: 'Responder availability' },
+  { value: 'user', label: 'User' },
+  { value: 'webauthn_credential', label: 'Passkey' },
+  { value: 'barangay_contact', label: 'Barangay contact' },
+  { value: 'risk_area', label: 'Risk area' },
+  { value: 'Announcement', label: 'Announcement' },
+];
 
 const PER_PAGE = 50;
 
@@ -349,8 +359,8 @@ export default function AuditPage(): JSX.Element {
               </SelectTrigger>
               <SelectContent>
                 {ENTITY_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t === 'ALL' ? 'Any entity' : t}
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label}
                   </SelectItem>
                 ))}
               </SelectContent>

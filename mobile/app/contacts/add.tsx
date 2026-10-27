@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Switch,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -24,7 +23,6 @@ export default function AddContactScreen() {
   const [relationship, setRelationship] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [notifyOnAlert, setNotifyOnAlert] = useState(true);
   const [error, setError] = useState('');
 
   const mutation = useMutation({
@@ -46,7 +44,6 @@ export default function AddContactScreen() {
       relationship: relationship.trim() || undefined,
       phoneNumber: phone.trim(),
       email: email.trim() || undefined,
-      notifyOnAlert,
     });
   }
 
@@ -108,21 +105,6 @@ export default function AddContactScreen() {
             />
           </Field>
 
-          <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.toggleLabel}>Send SMS alert on emergency</Text>
-              <Text style={styles.toggleDesc}>
-                This contact will receive an SMS when you report an incident.
-              </Text>
-            </View>
-            <Switch
-              value={notifyOnAlert}
-              onValueChange={setNotifyOnAlert}
-              trackColor={{ true: '#0D6053', false: '#D1D5DB' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-
           {error ? (
             <View style={styles.errorBox}>
               <Text style={styles.errorText}>{error}</Text>
@@ -172,19 +154,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#111827',
   },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    gap: 12,
-  },
-  toggleLabel: { fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 2 },
-  toggleDesc: { fontSize: 12, color: '#6B7280', lineHeight: 17 },
   errorBox: {
     backgroundColor: '#FEF2F2',
     borderRadius: 10,

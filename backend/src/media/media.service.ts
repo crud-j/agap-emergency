@@ -20,10 +20,16 @@ import { randomUUID } from 'crypto';
 import { extname, join, resolve, sep } from 'path';
 import { mkdir, writeFile, readFile } from 'fs/promises';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
+import { EvidenceAiReviewService } from './evidence-ai-review.service';
 
 export const MULTER_MEMORY_STORAGE = memoryStorage();
 
-const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4']);
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg', 'image/png', 'image/webp',
+  'video/mp4', 'video/quicktime', // quicktime = .mov, what iOS records by default
+]);
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'qt', 'm4v']);
 const ANNOUNCEMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_SIZE = 10_485_760; // 10 MB — photos
 /** Videos: 60 s of 720p from the AGAP camera is ~19 MB. Also the multer limit. */
@@ -131,6 +137,8 @@ export class MediaService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly realtime: RealtimeService,
+    private readonly aiReview: EvidenceAiReviewService,
   ) {
     this.endpoint = this.config.get<string>('STORAGE_ENDPOINT', 'http://localhost:9000');
     this.bucket = this.config.get<string>('STORAGE_BUCKET', 'agap-media');
@@ -139,13 +147,12 @@ export class MediaService {
     this.publicUrl = this.config.get<string>('PUBLIC_STORAGE_URL', this.endpoint);
     // When object storage is down, incident evidence is kept on local disk rather
     // than lost — a dispatcher seeing the photo matters more than where it lives.
-    // On by default outside production; set STORAGE_LOCAL_FALLBACK=false to disable.
+    // On by default in every environment, including production: a misconfigured
+    // or unreachable bucket must degrade to local disk, not silently drop
+    // emergency evidence. Set STORAGE_LOCAL_FALLBACK=false to disable.
     this.localDir = resolve(this.config.get<string>('LOCAL_UPLOAD_DIR', 'uploads'));
     const fallbackFlag = this.config.get<string>('STORAGE_LOCAL_FALLBACK');
-    this.localFallback =
-      fallbackFlag != null
-        ? fallbackFlag === 'true'
-        : this.config.get<string>('NODE_ENV') !== 'production';
+    this.localFallback = fallbackFlag !== 'false';
 
     this.s3 = new S3Client({
       endpoint: this.endpoint,
@@ -199,7 +206,12 @@ export class MediaService {
       );
     }
 
-    const isVideo = file.mimetype.startsWith('video/');
+    // Don't rely solely on the client-declared mimetype for the size tier — a
+    // mislabeled video (e.g. an unrecognized extension on the sender's end)
+    // should still get the video ceiling rather than being silently rejected
+    // under the much smaller photo limit.
+    const declaredExt = extname(file.originalname).replace('.', '').toLowerCase();
+    const isVideo = file.mimetype.startsWith('video/') || VIDEO_EXTENSIONS.has(declaredExt);
     const maxSize = isVideo ? MAX_VIDEO_UPLOAD_BYTES : MAX_FILE_SIZE;
     if (file.size > maxSize) {
       throw new BadRequestException(
@@ -291,7 +303,47 @@ export class MediaService {
       `Uploaded attachment ${attachment.id} for incident ${incidentId} ` +
       `(authenticity ${score ?? 'n/a'}${flags.length ? `, flags: ${flags.join(',')}` : ''})`,
     );
+
+    // Tier 2 AI plausibility review — fire-and-forget, images only (the vision
+    // model takes a still frame, not video). Never awaited: must not add OpenAI's
+    // latency to the upload response, and must never affect it either way.
+    if (file.mimetype.startsWith('image/')) {
+      void this.runEvidenceAiReview(attachment.id, incidentId, file.buffer, file.mimetype);
+    }
+
     return attachment;
+  }
+
+  private async runEvidenceAiReview(
+    attachmentId: string,
+    incidentId: string,
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<void> {
+    if (!this.aiReview.enabled) return;
+    const result = await this.aiReview.review(buffer, mimeType);
+    if (!result) return;
+
+    try {
+      await this.prisma.incidentAttachment.update({
+        where: { id: attachmentId },
+        data: {
+          ai_review_label: result.label,
+          ai_review_reason: result.reason,
+          ai_review_checked_at: new Date(),
+        },
+      });
+      this.logger.log(`Evidence AI review for attachment ${attachmentId}: ${result.label} — ${result.reason}`);
+
+      // Best-effort — the dashboard also picks this up on its own next poll/refetch.
+      this.realtime.incidentUpdated(incidentId, {
+        change: 'attachment_ai_reviewed',
+        attachmentId,
+        aiReviewLabel: result.label,
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to persist evidence AI review for attachment ${attachmentId}: ${String(err)}`);
+    }
   }
 
   /**

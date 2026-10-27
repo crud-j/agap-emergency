@@ -1,18 +1,10 @@
-import {
-  IsArray,
-  IsIn,
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Max,
-  MaxLength,
-  Min,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsRecordId } from '../../../common/decorators/is-record-id.decorator';
+
+/** START triage colours (MOD-37 / MOD-52). */
+export const TRIAGE_COLORS = ['RED', 'YELLOW', 'GREEN', 'BLACK'] as const;
 
 // Mirror the Prisma enums (no shared enum exists for these yet).
 export const CONSCIOUSNESS_STATES = ['CONSCIOUS', 'UNCONSCIOUS', 'ALTERED', 'UNKNOWN'] as const;
@@ -76,17 +68,16 @@ export class SubmitAssessmentDto {
 
   @ApiPropertyOptional({ description: 'START/triage colour tag, e.g. RED/YELLOW/GREEN/BLACK' })
   @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  triageTag?: string;
+  @IsIn(TRIAGE_COLORS)
+  triageTag?: (typeof TRIAGE_COLORS)[number];
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsUUID()
+  @IsRecordId()
   patientId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsUUID()
+  @IsRecordId()
   dispatchId?: string;
 }

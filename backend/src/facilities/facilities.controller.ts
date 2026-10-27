@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { CreateFacilityDto, FacilityStatusDto } from './dto/facility-status.dto';
 
 @ApiTags('facilities')
 @ApiBearerAuth()
@@ -40,15 +41,7 @@ export class FacilitiesController {
   @Roles(UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'Create a facility' })
   async create(
-    @Body()
-    dto: {
-      name: string;
-      facilityType: string;
-      barangay?: string;
-      municipality?: string;
-      contactNumber?: string;
-      isEvacuationCenter?: boolean;
-    },
+    @Body() dto: CreateFacilityDto,
   ) {
     return this.facilitiesService.create(dto);
   }
@@ -58,7 +51,7 @@ export class FacilitiesController {
   @ApiOperation({ summary: 'Update facility receiving status/capacity' })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: { receivingStatus?: string; capacityAvailable?: number },
+    @Body() dto: FacilityStatusDto,
   ) {
     return this.facilitiesService.updateStatus(id, dto);
   }

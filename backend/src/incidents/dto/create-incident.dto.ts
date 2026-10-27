@@ -4,7 +4,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  IsUUID,
+  
   IsBoolean,
   IsInt,
   IsIn,
@@ -22,7 +22,8 @@ import {
   ReporterType,
   ReporterStatus,
   LANDMARK_MAX_LENGTH,
-} from '@agap/shared';
+} from '@agap/shared';
+import { IsRecordId } from '../../common/decorators/is-record-id.decorator';
 
 export class ReporterDto {
   @ApiProperty({ enum: ReporterType })
@@ -102,6 +103,11 @@ export class CreateIncidentDto {
   @IsEnum(IncidentType)
   type: IncidentType;
 
+  @ApiPropertyOptional({ enum: ['SOS_BUTTON', 'SHAKE_GESTURE', 'MANUAL_REPORT'] })
+  @IsOptional()
+  @IsIn(['SOS_BUTTON', 'SHAKE_GESTURE', 'MANUAL_REPORT'])
+  triggerMethod?: 'SOS_BUTTON' | 'SHAKE_GESTURE' | 'MANUAL_REPORT';
+
   @ApiPropertyOptional({ enum: IncidentPriority })
   @IsOptional()
   @IsEnum(IncidentPriority)
@@ -130,7 +136,7 @@ export class CreateIncidentDto {
   address?: string;
 
   @ApiProperty({ description: 'UUID idempotency key for duplicate prevention' })
-  @IsUUID()
+  @IsRecordId()
   idempotencyKey: string;
 
   @ApiPropertyOptional()

@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import {
   Activity, AlarmClock, AlertOctagon, ArrowRight, ArrowRightLeft, CheckCircle2, Clock,
-  Hourglass, MapPinOff, Navigation, Truck, UserX, Users, Ban,
+  Hourglass, MapPinOff, Navigation, ShieldCheck, Truck, UserX, Users, Ban,
 } from 'lucide-react';
 import { SLA_ACKNOWLEDGEMENT_MINUTES, SLA_DISPATCH_MINUTES } from '@agap/shared';
 import { Badge, Skeleton, StatCard, StatusChip, PriorityBadge } from '@/components/ui';
@@ -18,6 +18,7 @@ import {
   useActivity, useExceptions, useOversightSummary, usePendingHandovers, useWorkload,
 } from '@/features/oversight/hooks';
 import { useEscalations } from '@/features/escalations/hooks';
+import { usePendingApprovals } from '@/features/announcements/hooks';
 import { useIncidentLocations, useLiveResponders } from '@/features/map/hooks';
 import { ACTIVE_STATUSES, formatDurationSec, timeAgo, titleCase } from '@/lib/incident-format';
 import { useWsState } from '@/lib/use-ws-state';
@@ -82,10 +83,12 @@ export function SupervisorDashboard(): JSX.Element {
   const handoversQ = usePendingHandovers();
   const activityQ = useActivity();
   const escalationsQ = useEscalations();
+  const approvalsQ = usePendingApprovals();
   const { data: incidentLocations } = useIncidentLocations();
   const { data: responders } = useLiveResponders();
 
   const summary = summaryQ.data;
+  const pendingApprovals = approvalsQ.data?.length ?? 0;
   const stale = !!summary && now - summaryQ.dataUpdatedAt > STALE_AFTER_MS;
 
   const openEscalations = useMemo(
@@ -119,6 +122,22 @@ export function SupervisorDashboard(): JSX.Element {
       </div>
 
       <DashboardBanners />
+
+      {pendingApprovals > 0 && (
+        <Link
+          href="/operations/approvals"
+          className="flex items-center gap-3 rounded-xl border border-[rgba(37,99,235,0.25)] bg-agap-infoSoft px-4 py-3 text-sm text-agap-textMain hover:bg-agap-infoSoft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green/40"
+        >
+          <ShieldCheck size={17} className="shrink-0 text-agap-info" aria-hidden />
+          <span className="flex-1">
+            <span className="font-semibold">
+              {pendingApprovals} CRITICAL {pendingApprovals === 1 ? 'advisory awaits' : 'advisories await'} your approval.
+            </span>{' '}
+            Nothing reaches residents until a Supervisor approves it.
+          </span>
+          <span className="flex items-center gap-1 text-[12px] font-semibold text-agap-info">Review <ArrowRight size={13} /></span>
+        </Link>
+      )}
 
       {(stale || (summaryQ.isError && !summary)) && (
         <div role="status" className="rounded-xl border border-[rgba(217,119,6,0.25)] bg-agap-amberSoft px-4 py-2.5 text-sm text-agap-textMid">

@@ -4,9 +4,12 @@ import { SubmitAssessmentDto } from '../../src/incidents/assessment/dto/submit-a
 describe('AssessmentService.submit (MOD-37)', () => {
   const txCreate = jest.fn();
   const txIncidentUpdate = jest.fn();
+  const txTriageCreate = jest.fn();
 
   const prisma = {
     incident: { findUnique: jest.fn() },
+    dispatches: { findFirst: jest.fn() },
+    surge_incidents: { findFirst: jest.fn() },
     $transaction: jest.fn(),
   };
   const realtime = { assessmentUpdated: jest.fn() };
@@ -19,6 +22,10 @@ describe('AssessmentService.submit (MOD-37)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.incident.findUnique.mockResolvedValue({ id: 'inc-1', number_of_patients: 1 });
+    // The responder is on an active crew for the incident; no surge is active.
+    prisma.dispatches.findFirst.mockResolvedValue({ id: 'disp-1' });
+    prisma.surge_incidents.findFirst.mockResolvedValue(null);
+    txTriageCreate.mockResolvedValue({});
     txCreate.mockImplementation((args: any) =>
       Promise.resolve({
         id: 'asm-1',
@@ -32,8 +39,33 @@ describe('AssessmentService.submit (MOD-37)', () => {
       fn({
         on_scene_assessments: { create: txCreate },
         incident: { update: txIncidentUpdate },
+        triage_tags: { create: txTriageCreate },
       }),
     );
+  });
+
+  it('refuses a responder who is not on an active crew for the incident', async () => {
+    prisma.dispatches.findFirst.mockResolvedValue(null);
+    await expect(makeService().submit('inc-1', {}, 'resp-9')).rejects.toThrow(/not on an active crew/);
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
+  it('files the START tag on the active surge and links the incident (MOD-52)', async () => {
+    prisma.surge_incidents.findFirst.mockResolvedValue({ id: 'surge-1' });
+    await makeService().submit('inc-1', { triageTag: 'RED', patientId: undefined }, 'resp-1');
+    expect(txTriageCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ surge_id: 'surge-1', incident_id: 'inc-1', triage_color: 'RED', tagged_by_id: 'resp-1' }),
+    });
+    expect(txIncidentUpdate).toHaveBeenCalledWith({
+      where: { id: 'inc-1' },
+      data: { surge_incident_id: 'surge-1', is_surge_incident: true },
+    });
+  });
+
+  it('keeps the tag on the assessment only when no surge is active', async () => {
+    await makeService().submit('inc-1', { triageTag: 'GREEN' }, 'resp-1');
+    expect(txTriageCreate).not.toHaveBeenCalled();
+    expect(txCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ triage_tag: 'GREEN' }) });
   });
 
   it('persists a full assessment and maps vitals to columns', async () => {

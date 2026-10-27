@@ -1,6 +1,6 @@
 # Plan: Role Dashboards and Separation of Duties
 
-> **Status (2026-10-22):** Phases 1–6 built (signed-in walkthroughs pending); Phase 7 not started. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
+> **Status (2026-10-22):** Phases 1–7 built (signed-in walkthroughs pending). Phase 7's flag `ANNOUNCEMENT_APPROVAL_REQUIRED` is off by default. Phase 0 decisions use their defaults. Spec agreed: [AGAP_Role_Rules_and_Dashboard_Content.md](../AGAP_Role_Rules_and_Dashboard_Content.md), including its §0 navigation rules and page-name table. Sidebars reviewed against [dashboards-mockups/](../dashboards-mockups/) on 2026-10-22: the mockups are layout and style only; the spec decides content.
 > **How to use:** build one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts. Phase 0 is decisions only.
 > **Modules:** MOD-21 (ops dashboard), MOD-41 (escalation), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration), MOD-50 (analytics), MOD-52 (surge), MOD-53 (announcements).
 
@@ -791,6 +791,40 @@ No change. Public endpoints filter by released statuses, `announcement.published
   4. The Supervisor approves.
   5. The citizen app shows it, and SMS subscribers receive it once.
 - [ ] With the flag off, the same CRITICAL advisory publishes directly.
+
+### Phase 7 status (2026-10-22)
+
+**Data review.**
+- `approved_by_id`/`approved_at` are already written by `publish()` and `schedule()`: today the publisher who clicks Publish *is* the approver. Phase 7 keeps that for everything except CRITICAL-with-flag, where the Supervisor is written instead.
+- `releaseDueScheduled()` uses `approved_by_id` as the audit actor, so an approved-then-scheduled advisory is now attributed to the Supervisor with no change to the scheduler.
+- Image upload (`media.service.ts`) is already DRAFT-only, so a pending submission is locked without new code. `update()` is DRAFT-only too.
+- Supervisors work in the web console and normally have no FCM token, so the "notify Supervisors" push in §7.3 usually reaches nobody. The console signal (polled list + dashboard banner) is the one that works.
+- A draft can already carry `scheduled_at` from `create()`. Approving it as-is would have scheduled a time the officer never submitted.
+
+**Built.**
+- Migrations `20261023000000_announcement_pending_approval` and `20261023000100_announcement_approval_fields`, schema, `ANNOUNCEMENT_APPROVAL_REQUIRED` in `config.validation.ts` and `.env.example`.
+- Service: `submitForApproval`, `withdrawSubmission`, `approve` (guarded `updateMany`, refuses the requester, reuses `afterPublish()`), `returnToDraft` (note ≥ 10 characters), `findPendingApproval`; `publish()`/`schedule()` refuse CRITICAL with the flag on; publisher responses carry `requiresApproval`, and lists carry `requestedByName`.
+- Controller: `POST :id/submit|withdraw|approve|return`, `GET approvals`, `GET policy`, `GET approvals/:id/image`, all declared before `GET :id`.
+- Shared `AnnouncementStatus` now matches the database; `shared` rebuilt.
+- Frontend: compose's primary button becomes **Submit for MDRRMO approval**; Announcements page gets **Pending approval** and **Returned** filters, a "Returned by MDRRMO" note, Withdraw, and a `?tab=` deep link; new `/operations/approvals` (Supervisor) with preview, Approve and Return; "Approvals" under Broadcast; Supervisor dashboard banner; LGU dashboard pending/returned counts.
+
+**Deviations from the spec.**
+1. **`GET /announcements/policy`** (Publisher, System Administrator, Supervisor) returns `{ criticalNeedsApproval }`. Compose changes severity before a draft exists, so a per-row `requiresApproval` alone can't drive its button. The console still never reads the env var.
+2. **`GET /announcements/approvals/:id/image`** (Supervisor, `PENDING_APPROVAL` only), so the review preview shows the image without opening the publisher image route to the Supervisor.
+3. **Early release of an approved scheduled advisory is allowed.** `publish()` on a `SCHEDULED` item that went through approval succeeds and keeps the Supervisor as approver (the text is locked while scheduled). The spec would have forced unschedule → resubmit during an emergency.
+4. **`unschedule()` clears `approval_requested_at/by`** as well as the approval, so an edited CRITICAL advisory must be resubmitted.
+5. **`submit` refuses when no approval is needed** (flag off, or not CRITICAL), and a submission without `scheduledAt` clears any time saved earlier in the draft.
+6. **Supervisor push:** recipients are Supervisors who can sign in (not `status = ACTIVE`, see finding #1 in the 5b handoff), with **no Dispatcher fallback** (they can't approve). Push failure never blocks the submission. The Approvals list polls every 60 s.
+7. `GET /announcements/publisher/all?returned=true` lists drafts with a `review_note`.
+
+**Verified.**
+- Migrations applied with `migrate deploy` on the dev database (enum value, three columns, FK present; existing rows untouched). **Not** on a copy: `CREATE DATABASE … TEMPLATE "AGAP"` was refused because another session held the database, and there is no `pg_dump`/Docker on this machine.
+- `prisma generate` clean; backend, frontend and mobile typechecks clean.
+- `backend/test/announcements/approval.spec.ts`: 23 tests covering every §7.6 case plus early release, unschedule voiding approval, the stale `scheduled_at`, push failure, role metadata and route order. Backend 46 suites, 719 tests (`auth-phase3` timed out once under load and passes on its own); frontend 60 tests.
+
+**Pending.**
+- The signed-in **Done when** walkthrough above, with the flag on and then off.
+- MDRRMO to decide whether to switch the flag on, and whether a Supervisor needs a "publish now" for a CRITICAL advisory they wrote themselves (today the Supervisor can't compose).
 
 ---
 

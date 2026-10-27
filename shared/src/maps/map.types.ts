@@ -25,6 +25,11 @@ export interface LatLng {
   lng: number;
 }
 
+/** The only place API coordinates become GeoJSON order. */
+export function toLngLat(p: { latitude: number; longitude: number }): [number, number] {
+  return [p.longitude, p.latitude];
+}
+
 /** Normalised reverse-geocoding result (MOD-12). */
 export interface ReverseGeocodeResult {
   formattedAddress: string | null;
@@ -42,6 +47,30 @@ export interface RouteResult {
   isEstimate: true;
   /** Decoded route polyline as [lng, lat] pairs, for drawing an in-app route line. */
   geometry?: Array<[number, number]>;
+}
+
+/** Which stretch of a dispatch the unit is on (MOD-40/43): scene, hospital, or arrived. */
+export type TransportLeg = 'TO_SCENE' | 'TO_FACILITY' | 'AT_FACILITY';
+
+/** A transport destination as clients draw it. Coordinates are null until the hospital has a location. */
+export interface TransportDestinationView {
+  kind: 'FACILITY';
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  locationVerified: boolean;
+}
+
+/** A server-computed route for one leg. ETA is always an estimate (Rule 13). */
+export interface RouteSnapshot {
+  /** [lng, lat] pairs (GeoJSON order). */
+  geometry: [number, number][];
+  distanceMeters: number | null;
+  durationSeconds: number | null;
+  isEstimate: true;
+  calculatedAt: string;
+  /** True when the route could not be refreshed and this is the last known one. */
+  stale: boolean;
 }
 
 /** Options for building a non-interactive static map image (e.g. SOS confirm). */

@@ -2,16 +2,16 @@
 
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import {
   Siren, Truck, MapPin, Users, Sparkles, CheckCircle2, ExternalLink,
-  Clock, Activity, Search, X, Navigation, UserCheck, ChevronDown, ChevronUp,
+  Search, X, Navigation, UserCheck, ChevronDown, ChevronUp,
   Wifi,
 } from 'lucide-react';
 import {
   Button, PriorityBadge, StatusChip, Badge, Skeleton,
 } from '@/components/ui';
 import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
-import { IncidentDetailDrawer } from '@/components/incidents/IncidentDetailDrawer';
 import { useWsState } from '@/lib/use-ws-state';
 import {
   useDispatchQueue, useDispatchRecommendations, useAvailableUnits, useCreateDispatch,
@@ -91,7 +91,6 @@ export default function DispatchPage(): JSX.Element {
   const { data: responders } = useLiveResponders();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [search, setSearch] = useState('');
   // Assigned-unit tracking (WP5): follow camera + fit requests for the map.
   const [followUnit, setFollowUnit] = useState(false);
@@ -180,7 +179,7 @@ export default function DispatchPage(): JSX.Element {
   }, [recQuery.data]);
 
   return (
-    <div className="relative h-[calc(100vh-6.5rem)] min-h-[560px] overflow-hidden rounded-xl border border-agap-track/40 shadow-panel">
+    <div className="relative h-[calc(100vh-6.5rem)] min-h-[560px] overflow-hidden rounded-2xl border border-agap-track/40 bg-agap-surface shadow-panel">
       {/* ── Full-bleed map ────────────────────────────────────────────────── */}
       <div className="absolute inset-0">
         <IncidentMapView
@@ -199,21 +198,21 @@ export default function DispatchPage(): JSX.Element {
       </div>
 
       {/* ── Top-right: connection + live indicator ─────────────────────── */}
-      <div className="pointer-events-none absolute right-3 top-3 z-[1000]">
-        <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-white/95 px-2 py-1 shadow-card backdrop-blur-sm border border-agap-track/30">
+      <div className="pointer-events-none absolute right-4 top-4 z-[1000]">
+        <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/70 bg-white/95 px-3 py-1.5 shadow-card backdrop-blur-sm">
           <Wifi size={12} className={wsState === 'connected' ? 'text-agap-green' : 'text-agap-textSub'} />
           <ConnectionIndicator state={wsState} />
         </div>
       </div>
 
       {/* ── Left column: stats + queue + selected detail ──────────────── */}
-      <div className="absolute left-3 top-3 z-[1000] flex max-h-[calc(100%-1.5rem)] w-[370px] max-w-[calc(100%-1.5rem)] flex-col gap-2.5">
+      <div className="absolute left-4 top-4 z-[1000] flex max-h-[calc(100%-2rem)] w-[min(460px,calc(100%-2rem))] flex-col gap-3">
 
         {/* Stats + search + queue */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-panel border border-agap-track/30">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/80 bg-white/95 shadow-[0_14px_38px_rgba(15,35,55,0.16)] backdrop-blur-sm">
 
           {/* Stats row */}
-          <div className="grid grid-cols-4 gap-px bg-agap-track/20 border-b border-agap-track/30">
+          <div className="grid grid-cols-4 gap-2 border-b border-agap-track/20 bg-white p-3">
             <StatCard value={criticalCount} label="Critical"  tone="danger" pulse={criticalCount > 0} />
             <StatCard value={awaitingCount} label="Awaiting"  tone="amber" />
             <StatCard value={activeCount}   label="Active"    tone="info" />
@@ -221,13 +220,17 @@ export default function DispatchPage(): JSX.Element {
           </div>
 
           {/* Search */}
-          <div className="px-3 py-2.5 border-b border-agap-track/20">
-            <div className="flex items-center gap-2 rounded-lg bg-agap-surface px-3 py-2 border border-agap-track/30">
+          <div className="border-b border-agap-track/20 px-5 py-4">
+            <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.16em] text-agap-textSub">
+              Find an incident
+            </label>
+            <div className="flex items-center gap-2.5 rounded-xl border border-agap-track/40 bg-agap-surface px-3.5 py-3 transition-colors focus-within:border-agap-green/50 focus-within:bg-white focus-within:ring-2 focus-within:ring-agap-green/10">
               <Search size={13} className="shrink-0 text-agap-textSub" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Reference, barangay, or type…"
+                aria-label="Search dispatch queue"
                 className="w-full bg-transparent text-[13px] text-agap-textMain placeholder:text-agap-textSub focus:outline-none font-sans"
               />
               {search && (
@@ -239,19 +242,24 @@ export default function DispatchPage(): JSX.Element {
           </div>
 
           {/* Queue header */}
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-[11px] font-semibold uppercase tracking-widest text-agap-textSub">
-              Awaiting Dispatch
-            </span>
+          <div className="flex items-center justify-between px-5 py-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-[13px] font-bold text-agap-textMain">Dispatch queue</p>
+                <span className="h-1.5 w-1.5 rounded-full bg-agap-green" />
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-agap-green">Live</span>
+              </div>
+              <p className="mt-1 text-[11px] text-agap-textSub">Incidents ready for review</p>
+            </div>
             {queue.length > 0 && (
-              <span className="rounded-full bg-agap-amberSoft px-2 py-0.5 text-[10px] font-bold text-agap-amber tabular-nums">
+              <span className="rounded-full bg-agap-amberSoft px-2.5 py-1 text-[10px] font-bold text-agap-amber tabular-nums">
                 {queue.length}
               </span>
             )}
           </div>
 
           {/* Queue list */}
-          <div className="min-h-0 max-h-[32vh] overflow-y-auto scrollbar-thin">
+          <div className="min-h-0 max-h-[min(28vh,280px)] overflow-y-auto border-t border-agap-track/10 scrollbar-thin">
             {isLoading ? (
               <div className="space-y-1.5 p-3">
                 {Array.from({ length: 4 }).map((_, i) => (
@@ -278,10 +286,9 @@ export default function DispatchPage(): JSX.Element {
 
         {/* Selected incident detail */}
         {selectedId && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white shadow-panel border border-agap-track/30 animate-slide-up">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/80 bg-white/95 shadow-[0_14px_38px_rgba(15,35,55,0.16)] backdrop-blur-sm animate-slide-up">
             <DispatchDetail
               incidentId={selectedId}
-              onOpenFullDetail={() => setDrawerOpen(true)}
               onClose={() => setSelectedId(null)}
               onDispatched={() => setSelectedId(null)}
               trackedDispatchId={tracked.dispatchId}
@@ -332,7 +339,6 @@ export default function DispatchPage(): JSX.Element {
         </div>
       ) : null}
 
-      <IncidentDetailDrawer incidentId={selectedId} open={drawerOpen} onOpenChange={setDrawerOpen} />
     </div>
   );
 }
@@ -368,21 +374,22 @@ function StatCard({
   tone: 'danger' | 'amber' | 'info' | 'green';
   pulse?: boolean;
 }): JSX.Element {
-  const tones: Record<string, { num: string; label: string; bg: string }> = {
-    danger: { num: 'text-red-600',     label: 'text-red-400',    bg: 'bg-white' },
-    amber:  { num: 'text-amber-600',   label: 'text-amber-400',  bg: 'bg-white' },
-    info:   { num: 'text-blue-600',    label: 'text-blue-400',   bg: 'bg-white' },
-    green:  { num: 'text-agap-green',  label: 'text-agap-green/60', bg: 'bg-white' },
+  const tones: Record<string, { num: string; label: string; dot: string; bg: string }> = {
+    danger: { num: 'text-red-600',     label: 'text-red-500',       dot: 'bg-red-500',     bg: 'bg-red-50/70' },
+    amber:  { num: 'text-amber-600',   label: 'text-amber-600',     dot: 'bg-amber-500',   bg: 'bg-amber-50/70' },
+    info:   { num: 'text-blue-600',    label: 'text-blue-600',      dot: 'bg-blue-500',    bg: 'bg-blue-50/70' },
+    green:  { num: 'text-agap-green',  label: 'text-agap-green',    dot: 'bg-agap-green',  bg: 'bg-agap-greenSoft/70' },
   };
   const t = tones[tone] ?? tones['green']!;
   return (
-    <div className={`flex flex-col items-center justify-center gap-0.5 ${t.bg} px-1 py-3`}>
+    <div className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl border border-agap-track/15 px-1.5 py-3 ${t.bg}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${t.dot} ${pulse ? 'animate-incident-pulse' : ''}`} />
       <span
-        className={`font-mono text-[22px] font-bold leading-none tabular-nums ${t.num} ${pulse ? 'animate-incident-pulse' : ''}`}
+        className={`font-mono text-[21px] font-bold leading-none tabular-nums ${t.num}`}
       >
         {value}
       </span>
-      <span className={`text-[9px] font-semibold uppercase tracking-widest ${t.label}`}>
+      <span className={`text-[9px] font-bold uppercase tracking-[0.12em] ${t.label}`}>
         {label}
       </span>
     </div>
@@ -405,10 +412,10 @@ function QueueRow({
   return (
     <button
       onClick={onSelect}
-      className={`flex w-full items-center gap-2.5 border-b border-agap-track/15 px-3 py-2.5 text-left transition-all duration-150 ${strip} ${
+      className={`flex w-full items-center gap-3 border-b border-agap-track/15 px-5 py-3.5 text-left transition-all duration-150 ${strip} ${
         selected
-          ? 'bg-agap-greenSoft'
-          : 'hover:bg-agap-surface'
+          ? 'bg-agap-greenSoft/80'
+          : 'hover:bg-agap-surface/80'
       }`}
     >
       <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
@@ -418,8 +425,8 @@ function QueueRow({
       </span>
 
       <div className="min-w-0 flex-1">
-        <p className="font-mono text-[12px] font-semibold text-agap-textMain">{incident.public_reference}</p>
-        <p className="truncate text-[11px] text-agap-textSub">
+        <p className="font-mono text-[12px] font-bold text-agap-textMain">{incident.public_reference}</p>
+        <p className="mt-0.5 truncate text-[11px] text-agap-textSub">
           {incident.incident_locations?.barangay ?? titleCase(incident.category)}
           {' · '}
           {timeAgo(incident.submitted_at)}
@@ -517,11 +524,10 @@ function RoutePoints({
 // ─── Detail + recommendation panel ──────────────────────────────────────────
 
 function DispatchDetail({
-  incidentId, onOpenFullDetail, onClose, onDispatched,
+  incidentId, onClose, onDispatched,
   trackedDispatchId, followUnit, onToggleFollow, onFit,
 }: {
   incidentId: string;
-  onOpenFullDetail: () => void;
   onClose: () => void;
   onDispatched: () => void;
   trackedDispatchId: string | null;
@@ -558,7 +564,7 @@ function DispatchDetail({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-start gap-3 border-b border-agap-track/25 px-4 py-3">
+      <div className="flex items-start gap-3 border-b border-agap-track/25 bg-white px-5 py-4">
         <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
           incident.priority === 'CRITICAL' ? 'bg-red-50 text-red-600'
           : incident.priority === 'HIGH'   ? 'bg-orange-50 text-orange-600'
@@ -567,7 +573,7 @@ function DispatchDetail({
           <Icon size={18} />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-[14px] font-bold text-agap-textMain leading-tight">{titleCase(incident.category)}</h2>
+          <h2 className="text-[15px] font-bold text-agap-textMain leading-tight">{titleCase(incident.category)}</h2>
           <p className="font-mono text-[11px] text-agap-textSub mt-0.5">{incident.public_reference}</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <PriorityBadge priority={incident.priority} />
@@ -575,15 +581,15 @@ function DispatchDetail({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <button
-            onClick={onOpenFullDetail}
+          <Link
+            href={`/operations/dispatch/${incident.id}`}
             title="Open full incident details"
             aria-label="Open full incident details"
             className="inline-flex items-center gap-1 rounded-md border border-agap-track/50 px-2 py-1.5 text-[11px] font-semibold text-agap-textMid transition-all hover:border-agap-green/40 hover:bg-agap-greenSoft hover:text-agap-green"
           >
             <ExternalLink size={13} />
             Details
-          </button>
+          </Link>
           <button
             onClick={onClose}
             title="Close"
@@ -595,18 +601,18 @@ function DispatchDetail({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-0 border-b border-agap-track/25 px-4">
+      <div className="flex gap-1 border-b border-agap-track/25 bg-white px-5">
         <TabButton active={tab === 'dispatch'} onClick={() => setTab('dispatch')}>Dispatch</TabButton>
         <TabButton active={tab === 'route'}    onClick={() => setTab('route')}>Location & Route</TabButton>
       </div>
 
       {/* Stepper */}
-      <div className="px-4 pt-3 pb-1">
+      <div className="border-b border-agap-track/10 bg-white px-5 pb-3 pt-4">
         <LifecycleStepper status={incident.status} />
       </div>
 
       {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 scrollbar-thin">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-agap-surface/30 p-5 scrollbar-thin">
         {tab === 'route' ? (
           <div className="space-y-3">
             <RoutePoints
@@ -659,7 +665,7 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`-mb-px border-b-2 px-1 mr-4 py-2.5 text-[12px] font-semibold transition-colors ${
+      className={`-mb-px border-b-2 px-1 mr-5 py-3 text-[12px] font-semibold transition-colors ${
         active
           ? 'border-agap-green text-agap-green'
           : 'border-transparent text-agap-textSub hover:text-agap-textMain'

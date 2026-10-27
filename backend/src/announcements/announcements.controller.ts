@@ -22,12 +22,14 @@ import { AnnouncementsService } from './announcements.service';
 import { MediaService, MULTER_MEMORY_STORAGE } from '../media/media.service';
 import { CancelAnnouncementDto, CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
+import { ReturnAnnouncementDto, SubmitAnnouncementDto } from './dto/approval.dto';
 import { SmsSubscribeDto } from './dto/sms-subscribe.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { ScheduleAnnouncementDto, SupersedeAnnouncementDto, UnsubscribeDto } from './dto/announcement-actions.dto';
 
 @ApiTags('announcements')
 @Controller({ path: 'announcements', version: '1' })
@@ -81,7 +83,7 @@ export class AnnouncementsController {
   @Public()
   @Throttle({ burst: { ttl: 1000, limit: 5 }, sustained: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'Unsubscribe from SMS announcements' })
-  async unsubscribe(@Body() body: { phoneNumber: string }) {
+  async unsubscribe(@Body() body: UnsubscribeDto) {
     return this.announcementsService.unsubscribe(body.phoneNumber);
   }
 
@@ -96,11 +98,13 @@ export class AnnouncementsController {
     @Query('page') page?: string,
     @Query('perPage') perPage?: string,
     @Query('severity') severity?: string,
+    @Query('returned') returned?: string,
   ) {
     return this.announcementsService.findAllForPublisher({
       ...(status && { status }),
       ...(category && { category }),
       ...(severity && { severity }),
+      ...(returned === 'true' && { returned: true }),
       ...(page !== undefined && { page: +page }),
       ...(perPage !== undefined && { perPage: +perPage }),
     });
@@ -112,7 +116,43 @@ export class AnnouncementsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get any announcement, including drafts (publisher view)' })
   async findForPublisher(@Param('id', ParseUUIDPipe) id: string) {
-    return this.announcementsService.findById(id);
+    return this.announcementsService.findForPublisher(id);
+  }
+
+  @Get('policy')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ANNOUNCEMENTS_PUBLISHER, UserRole.SYSTEM_ADMINISTRATOR, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Whether CRITICAL advisories need MDRRMO approval (Phase 7)' })
+  policy() {
+    return { criticalNeedsApproval: this.announcementsService.criticalNeedsApproval() };
+  }
+
+  // Declared before `:id`, whose ParseUUIDPipe would reject "approvals" with a 400.
+  @Get('approvals')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'CRITICAL advisories awaiting MDRRMO approval, oldest first' })
+  async approvals() {
+    return this.announcementsService.findPendingApproval();
+  }
+
+  @Get('approvals/:id/image')
+  @SkipThrottle()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Image of an advisory awaiting approval (Supervisor review)' })
+  async approvalImage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const key = await this.announcementsService.getImageKey(id, {
+      publicOnly: false,
+      statuses: ['PENDING_APPROVAL'],
+    });
+    return this.streamImage(key, res, 'private, no-store');
   }
 
   @Get('publisher/:id/image')
@@ -187,10 +227,54 @@ export class AnnouncementsController {
   @ApiOperation({ summary: 'Approve and schedule an announcement' })
   async schedule(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { scheduledAt: string },
+    @Body() body: ScheduleAnnouncementDto,
     @Request() req: any,
   ) {
     return this.announcementsService.schedule(id, body.scheduledAt, req.user.id);
+  }
+
+  @Post(':id/submit')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ANNOUNCEMENTS_PUBLISHER, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Submit a CRITICAL draft for MDRRMO approval' })
+  async submit(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitAnnouncementDto,
+    @Request() req: any,
+  ) {
+    return this.announcementsService.submitForApproval(id, req.user.id, dto.scheduledAt);
+  }
+
+  @Post(':id/withdraw')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ANNOUNCEMENTS_PUBLISHER, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Withdraw a submission back to draft' })
+  async withdraw(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.announcementsService.withdrawSubmission(id, req.user.id);
+  }
+
+  @Post(':id/approve')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Approve a CRITICAL advisory: publish now or at its requested time' })
+  async approve(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.announcementsService.approve(id, req.user.id);
+  }
+
+  @Post(':id/return')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Return a submission to draft with a note' })
+  async returnToDraft(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReturnAnnouncementDto,
+    @Request() req: any,
+  ) {
+    return this.announcementsService.returnToDraft(id, dto.note, req.user.id);
   }
 
   @Post(':id/unschedule')
@@ -245,7 +329,7 @@ export class AnnouncementsController {
   @ApiOperation({ summary: 'Supersede an announcement' })
   async supersede(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { newAnnouncementId: string },
+    @Body() body: SupersedeAnnouncementDto,
     @Request() req: any,
   ) {
     return this.announcementsService.supersede(id, body.newAnnouncementId, req.user.id);

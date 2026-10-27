@@ -7,19 +7,23 @@ import {
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateMedicalProfileDto } from './dto/create-medical-profile.dto';
 import { UpdateMedicalProfileDto } from './dto/update-medical-profile.dto';
+import { MedicalCryptoService } from './medical-crypto.service';
 
 const CONSENT_TYPE = 'MEDICAL_PROFILE';
 
 @Injectable()
 export class MedicalProfilesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly crypto: MedicalCryptoService,
+  ) {}
 
   async findMine(userId: string) {
     const profile = await this.prisma.medicalProfile.findUnique({
       where: { user_id: userId },
     });
     if (!profile) throw new NotFoundException('No medical profile found');
-    return profile;
+    return this.crypto.openProfile(profile);
   }
 
   async create(userId: string, dto: CreateMedicalProfileDto) {
@@ -38,38 +42,43 @@ export class MedicalProfilesService {
     });
     if (existing) throw new BadRequestException('Medical profile already exists');
 
-    return this.prisma.medicalProfile.create({
+    const created = await this.prisma.medicalProfile.create({
       data: {
         user_id: userId,
         consent_record_id: consent.id,
-        blood_type: dto.bloodType ?? null,
-        allergies: dto.allergies ?? [],
-        current_medications: dto.currentMedications ?? [],
-        medical_conditions: dto.medicalConditions ?? [],
-        disabilities: dto.disabilities ?? [],
-        responder_notes: dto.responderNotes ?? null,
+        ...this.crypto.sealFields(userId, {
+          blood_type: dto.bloodType ?? null,
+          allergies: dto.allergies ?? [],
+          current_medications: dto.currentMedications ?? [],
+          medical_conditions: dto.medicalConditions ?? [],
+          disabilities: dto.disabilities ?? [],
+          responder_notes: dto.responderNotes ?? null,
+        }),
       },
     });
+    return this.crypto.openProfile(created);
   }
 
   async update(userId: string, dto: UpdateMedicalProfileDto) {
-    await this.findMine(userId);
-    return this.prisma.medicalProfile.update({
+    const current = await this.findMine(userId);
+    const updated = await this.prisma.medicalProfile.update({
       where: { user_id: userId },
       data: {
-        ...(dto.bloodType !== undefined && { blood_type: dto.bloodType }),
-        ...(dto.allergies !== undefined && { allergies: dto.allergies }),
-        ...(dto.currentMedications !== undefined && {
-          current_medications: dto.currentMedications,
+        // Re-seal every field, so a profile saved before encryption is fully sealed
+        // by its first edit, not only the fields that changed.
+        ...this.crypto.sealFields(userId, {
+          blood_type: dto.bloodType !== undefined ? dto.bloodType : current.blood_type,
+          allergies: dto.allergies ?? current.allergies,
+          current_medications: dto.currentMedications ?? current.current_medications,
+          medical_conditions: dto.medicalConditions ?? current.medical_conditions,
+          disabilities: dto.disabilities ?? current.disabilities,
+          responder_notes: dto.responderNotes !== undefined ? dto.responderNotes : current.responder_notes,
         }),
-        ...(dto.medicalConditions !== undefined && {
-          medical_conditions: dto.medicalConditions,
-        }),
-        ...(dto.disabilities !== undefined && { disabilities: dto.disabilities }),
-        ...(dto.responderNotes !== undefined && { responder_notes: dto.responderNotes }),
         last_reviewed_at: new Date(),
+        updated_at: new Date(),
       },
     });
+    return this.crypto.openProfile(updated);
   }
 
   async deleteMine(userId: string) {
@@ -111,6 +120,6 @@ export class MedicalProfilesService {
       },
     });
 
-    return profile;
+    return this.crypto.openProfile(profile);
   }
 }

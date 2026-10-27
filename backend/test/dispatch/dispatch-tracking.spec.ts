@@ -1,5 +1,6 @@
 import { RespondersService } from '../../src/responders/responders.service';
 import { DispatchService } from '../../src/dispatch/dispatch.service';
+import { IncidentStatusService } from '../../src/incidents/incident-status/incident-status.service';
 
 const dispatchRow = { id: 'dispatch-1', incident_id: 'inc-1', resource_id: 'res-1' };
 
@@ -21,12 +22,22 @@ function respondersSetup() {
     location_history: { create: jest.fn().mockResolvedValue({ id: 'loc-1', recorded_at: new Date('2026-10-18T00:00:00Z') }) },
   };
   const realtime = { dispatchUpdated: jest.fn(), notifyResponderLocationUpdated: jest.fn() };
-  const service = new RespondersService(prisma as any, realtime as any, {} as any);
-  return { service, prisma, realtime };
+  const audit = { log: jest.fn().mockResolvedValue(undefined) };
+  const service = new RespondersService(prisma as any, realtime as any, audit as any, new IncidentStatusService());
+  return { service, prisma, realtime, audit };
 }
 
 describe('WP5 backend support for the dispatch dashboard', () => {
   describe('dispatch.updated on crew response', () => {
+    it('audits the acceptance (MOD-32)', async () => {
+      const { service, audit } = respondersSetup();
+      await service.acceptAssignment('dispatch-1', 'resp-1');
+      expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'STATUS_CHANGE', actorId: 'resp-1', entityType: 'dispatch', entityId: 'dispatch-1',
+        moduleId: 'MOD-32', newValues: { status: 'ACCEPTED' },
+      }));
+    });
+
     it('emits after the crew accepts, so the dashboard leaves "Awaiting crew acceptance"', async () => {
       const { service, realtime } = respondersSetup();
 

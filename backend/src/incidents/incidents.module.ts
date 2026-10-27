@@ -15,6 +15,7 @@ import { AuditModule } from '../audit/audit.module';
 import { EmergencyContactsModule } from '../emergency-contacts/emergency-contacts.module';
 import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { EmergencyAlertsModule } from '../emergency-alerts/emergency-alerts.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
@@ -27,6 +28,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     EmergencyContactsModule,
     BarangayCoordinationModule,
     NotificationsModule,
+    EmergencyAlertsModule,
   ],
   controllers: [IncidentsController],
   providers: [

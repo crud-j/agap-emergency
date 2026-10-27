@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { AuditService } from '../../audit/audit.service';
@@ -25,6 +25,24 @@ export class AssessmentService {
   async submit(incidentId: string, dto: SubmitAssessmentDto, responderId: string) {
     const incident = await this.prisma.incident.findUnique({ where: { id: incidentId } });
     if (!incident) throw new NotFoundException(`Incident ${incidentId} not found`);
+    // Only a crew member of an active dispatch on this incident assesses its patients.
+    const crewed = await this.prisma.dispatches.findFirst({
+      where: {
+        incident_id: incidentId,
+        dispatch_crew: { some: { user_id: responderId } },
+        status: { in: ['PENDING', 'SENT', 'ACCEPTED'] as any[] },
+      },
+      select: { id: true },
+    });
+    if (!crewed) throw new ForbiddenException('You are not on an active crew for this incident.');
+    // During a surge the START tag also goes on the surge's triage board (MOD-52).
+    const surge = dto.triageTag
+      ? await this.prisma.surge_incidents.findFirst({
+          where: { status: 'ACTIVE' },
+          orderBy: { activated_at: 'desc' },
+          select: { id: true },
+        })
+      : null;
 
     const v = dto.vitals ?? {};
 
@@ -51,6 +69,22 @@ export class AssessmentService {
         },
       });
 
+      if (surge && dto.triageTag) {
+        await tx.triage_tags.create({
+          data: {
+            surge_id: surge.id,
+            incident_id: incidentId,
+            patient_id: dto.patientId ?? null,
+            triage_color: dto.triageTag,
+            triage_notes: dto.notes ?? null,
+            tagged_by_id: responderId,
+          },
+        });
+        await tx.incident.update({
+          where: { id: incidentId },
+          data: { surge_incident_id: surge.id, is_surge_incident: true },
+        });
+      }
       // number_of_patients lives on the incident record, not the assessment.
       if (dto.numberOfPatients != null) {
         await tx.incident.update({
@@ -75,6 +109,7 @@ export class AssessmentService {
           consciousnessState: assessment.consciousness_state,
           breathingStatus: assessment.breathing_status,
           numberOfPatients: dto.numberOfPatients ?? incident.number_of_patients,
+          ...(dto.triageTag && { triageTag: dto.triageTag, surgeId: surge?.id ?? null }),
         },
       });
     } catch (err) {

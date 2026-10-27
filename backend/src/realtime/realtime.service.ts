@@ -8,6 +8,7 @@ import {
   ANNOUNCEMENT_EVENTS,
   NOTIFICATION_EVENTS,
   BARANGAY_EVENTS,
+  RESOURCE_EVENTS,
   IncidentStatus,
 } from '@agap/shared';
 import type {
@@ -24,25 +25,12 @@ import type {
   AnnouncementPublishedPayload,
   NotificationCreatedPayload,
   BarangayNoticeUpdatedPayload,
+  ResourceStatusChangedPayload,
+  IncidentTransportingPayload,
+  IncidentFacilityArrivalPayload,
+  IncidentTransportUpdatedPayload,
+  ResponderRouteUpdatedPayload,
 } from '@agap/shared';
-
-// MOD-40 transport payloads defined locally to avoid requiring a shared rebuild.
-interface IncidentTransportingPayload {
-  incidentId: string;
-  transportId: string;
-  dispatchId: string;
-  destinationId: string | null;
-  destinationName: string | null;
-  patientId: string | null;
-  transportStartedAt: string;
-}
-
-interface IncidentFacilityArrivalPayload {
-  incidentId: string;
-  transportId: string;
-  destinationId: string | null;
-  arrivedAt: string;
-}
 
 /**
  * Lifecycle statuses that also fan out a dedicated event in addition to the
@@ -168,17 +156,66 @@ export class RealtimeService {
 
   // ── MOD-40 Transport ───────────────────────────────────────────────────────
 
+  /**
+   * Full payload to ops. The incident room (which includes the reporter) gets a
+   * status-only copy: no patient, no destination (Correction C18).
+   */
   incidentTransporting(payload: IncidentTransportingPayload): void {
+    const { incidentId, transportId, dispatchId, transportStartedAt } = payload;
+    const statusOnly: IncidentTransportingPayload = { incidentId, transportId, dispatchId, transportStartedAt };
     this.safe('incidentTransporting', () => {
       this.gateway.emitToOps(INCIDENT_EVENTS.TRANSPORTING, payload);
-      this.gateway.emitToIncident(INCIDENT_EVENTS.TRANSPORTING, payload.incidentId, payload);
+      this.gateway.emitToIncident(INCIDENT_EVENTS.TRANSPORTING, incidentId, statusOnly);
     });
   }
 
+  /** Full payload to ops; the incident-room copy has no destinationId (C18). */
   facilityArrival(payload: IncidentFacilityArrivalPayload): void {
+    const { destinationId: _destinationId, ...statusOnly } = payload;
     this.safe('facilityArrival', () => {
       this.gateway.emitToOps(INCIDENT_EVENTS.FACILITY_ARRIVAL, payload);
-      this.gateway.emitToIncident(INCIDENT_EVENTS.FACILITY_ARRIVAL, payload.incidentId, payload);
+      this.gateway.emitToIncident(INCIDENT_EVENTS.FACILITY_ARRIVAL, payload.incidentId, statusOnly);
+    });
+  }
+
+  /**
+   * A transport's destination changed. Full payload to ops; each named user
+   * (crew, and a crew-confirmed reporter-patient, C17) gets it without
+   * `destination.id`. NEVER the incident room: a destination only exists on the
+   * hospital leg (C18).
+   */
+  transportUpdated(payload: IncidentTransportUpdatedPayload, userIds: string[]): void {
+    const forUsers: IncidentTransportUpdatedPayload = {
+      ...payload,
+      destination: payload.destination ? withoutId(payload.destination) : null,
+    };
+    this.safe('transportUpdated', () => {
+      this.gateway.emitToOps(INCIDENT_EVENTS.TRANSPORT_UPDATED, payload);
+      for (const userId of new Set(userIds)) {
+        this.gateway.emitToUser(INCIDENT_EVENTS.TRANSPORT_UPDATED, userId, forUsers);
+      }
+    });
+  }
+
+  /**
+   * The route for the unit's current leg. Ops always gets it. Callers pass
+   * `incidentRoom: true` ONLY for leg TO_SCENE; on TO_FACILITY / AT_FACILITY the
+   * route, position and destination go to ops plus `userIds` (crew and a
+   * crew-confirmed reporter-patient, filled by Prompt 09) and never to the
+   * incident room (C6/C17/C18).
+   */
+  routeUpdated(
+    payload: ResponderRouteUpdatedPayload,
+    audience: { incidentRoom: boolean; userIds: string[] },
+  ): void {
+    this.safe('routeUpdated', () => {
+      this.gateway.emitToOps(RESPONDER_EVENTS.ROUTE_UPDATED, payload);
+      if (audience.incidentRoom) {
+        this.gateway.emitToIncident(RESPONDER_EVENTS.ROUTE_UPDATED, payload.incidentId, payload);
+      }
+      for (const userId of new Set(audience.userIds)) {
+        this.gateway.emitToUser(RESPONDER_EVENTS.ROUTE_UPDATED, userId, payload);
+      }
     });
   }
 
@@ -245,6 +282,13 @@ export class RealtimeService {
       if (incidentId) {
         this.gateway.emitToIncident(RESPONDER_EVENTS.STATUS_CHANGED, incidentId, { incidentId, ...payload });
       }
+    });
+  }
+
+  /** MOD-28 — a unit's status changed; keeps every open fleet board current. Ops room only. */
+  resourceStatusChanged(payload: ResourceStatusChangedPayload): void {
+    this.safe('resourceStatusChanged', () => {
+      this.gateway.emitToOps(RESOURCE_EVENTS.STATUS_CHANGED, payload);
     });
   }
 
@@ -327,4 +371,9 @@ export class RealtimeService {
       this.logger.error(`Realtime emit failed (${label}): ${String(err)}`);
     }
   }
+}
+
+function withoutId<T extends { id?: string }>(value: T): Omit<T, 'id'> {
+  const { id: _id, ...rest } = value;
+  return rest;
 }

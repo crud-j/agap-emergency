@@ -169,13 +169,13 @@ export default function LoginScreen() {
     setIsLoading(true);
     try {
       await loginWithPhone(mobileNumber.trim());
-      router.push({ pathname: '/auth/verify-otp', params: { mode: 'login', phone: mobileNumber.trim() } });
-    } catch (e: any) {
-      const status = typeof e?.status === 'number' ? e.status : undefined;
-      setApiError(status === undefined ? t.login.errorNetwork : t.common.error);
+    } catch {
+      // Same rationale as forgot-password: the backend never reveals whether this
+      // number is registered, so a failed request must not block the OTP screen either.
     } finally {
       setIsLoading(false);
     }
+    router.push({ pathname: '/auth/verify-otp', params: { mode: 'login', phone: mobileNumber.trim() } });
   }
 
   return (

@@ -302,6 +302,9 @@ export default function PrivacyScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.logType}>{entry.data_type.replace(/_/g, ' ')}</Text>
                 {entry.purpose ? <Text style={styles.logPurpose}>{entry.purpose}</Text> : null}
+                {entry.accessor_role ? (
+                  <Text style={styles.logPurpose}>By: {entry.accessor_role.replace(/_/g, ' ').toLowerCase()}</Text>
+                ) : null}
                 <Text style={styles.logTime}>{new Date(entry.accessed_at).toLocaleString()}</Text>
               </View>
             </View>

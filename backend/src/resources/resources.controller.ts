@@ -21,6 +21,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { RequestDecisionDto, RespondRequestDto } from './dto/request-decision.dto';
+import { UpdateResourceDto } from './dto/update-resource.dto';
 
 @ApiTags('resources')
 @ApiBearerAuth()
@@ -86,7 +88,7 @@ export class ResourcesController {
   @ApiOperation({ summary: 'Approve a resource request — providing org accepts and fulfills (MOD-35)' })
   async approveRequest(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { notes?: string },
+    @Body() body: RequestDecisionDto,
     @Request() req: any,
   ) {
     const providingOrgId = await this.resourcesService.resolveOrgForUser(req.user.id);
@@ -98,7 +100,7 @@ export class ResourcesController {
   @ApiOperation({ summary: 'Deny a resource request (MOD-35)' })
   async denyRequest(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { notes?: string },
+    @Body() body: RequestDecisionDto,
     @Request() req: any,
   ) {
     return this.resourcesService.respondToRequest(id, false, body.notes, req.user.id);
@@ -118,7 +120,7 @@ export class ResourcesController {
   @ApiOperation({ summary: 'Respond to a resource request (deprecated — use /requests/:id/approve or /deny)' })
   async respondToRequestLegacy(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { accept: boolean; notes?: string },
+    @Body() body: RespondRequestDto,
     @Request() req: any,
   ) {
     // Accepting makes the actor's organization the provider, as on /requests/:id/approve.
@@ -145,14 +147,15 @@ export class ResourcesController {
   @ApiOperation({ summary: 'Update a resource' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: Partial<CreateResourceDto>,
+    @Body() dto: UpdateResourceDto,
     @Request() req: any,
   ) {
     return this.resourcesService.update(id, dto, req.user);
   }
 
   @Patch(':id/status')
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER)
+  // Fleet board only. Responders set their own availability on /responders/me/availability.
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Update resource status' })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,

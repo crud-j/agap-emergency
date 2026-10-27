@@ -39,6 +39,8 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/operations/command', roles: [SUPERVISOR] },
   { prefix: '/operations/surge', roles: [SUPERVISOR] },
   { prefix: '/operations/risk', roles: [SUPERVISOR] },
+  // CRITICAL advisories awaiting MDRRMO approval (Phase 7).
+  { prefix: '/operations/approvals', roles: [SUPERVISOR] },
   { prefix: '/analytics', roles: [SUPERVISOR] },
 
   // Fleet & Units. The System and Org Administrators see only its Registry tab.
@@ -47,7 +49,8 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/resources', roles: [DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
   // Mutual-aid requests to answer for the Org Administrator's organization.
   { prefix: '/resources/requests', roles: [ORG_ADMIN] },
-  { prefix: '/hospitals', roles: [HOSPITAL_USER, DISPATCHER, SUPERVISOR, SYS_ADMIN] },
+  // Org Administrators of hospital organizations register their own hospitals (MOD-39).
+  { prefix: '/hospitals', roles: [HOSPITAL_USER, DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
 
   // Public announcements are readable by every console role (the dashboard's
   // critical-advisory banner links here); composing needs a publishing role.
@@ -139,7 +142,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/organizations', label: 'Organizations', roles: [ORG_ADMIN, SYS_ADMIN] },
       { href: '/operations/fleet', label: 'Fleet & Units', roles: [DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
       { href: '/resources/requests', label: 'Requests', roles: [ORG_ADMIN] },
-      { href: '/hospitals', label: 'Hospitals & Facilities', roles: [HOSPITAL_USER, DISPATCHER, SUPERVISOR, SYS_ADMIN] },
+      { href: '/hospitals', label: 'Hospitals & Facilities', roles: [HOSPITAL_USER, DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
     ],
   },
   {
@@ -154,6 +157,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/announcements', label: 'Announcements', roles: [PUBLISHER] },
       { href: '/announcements/history', label: 'Publication History', roles: [PUBLISHER] },
+      // The LGU account gets no new link: "Pending approval" is a filter on its page.
+      { href: '/operations/approvals', label: 'Approvals', roles: [SUPERVISOR] },
     ],
   },
   {
@@ -168,6 +173,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/administration/users', label: 'Users & Accounts', roles: [SYS_ADMIN] },
       { href: '/administration/permissions', label: 'Roles & Permissions', roles: [SYS_ADMIN] },
       { href: '/administration/barangays', label: 'Barangay Directory', roles: [ORG_ADMIN, SYS_ADMIN] },
+      // MOD-51 reference data; the Risk page itself stays Supervisor-only (Phase 5b).
+      { href: '/administration/risk-areas', label: 'Risk Areas', roles: [SYS_ADMIN] },
       { href: '/audit', label: 'Audit Log', roles: [SYS_ADMIN] },
       { href: '/administration/security', label: 'Security Events', roles: [SYS_ADMIN] },
       { href: '/administration/integrations', label: 'Integrations', roles: [SYS_ADMIN] },

@@ -236,11 +236,12 @@ pnpm --filter @agap/mobile android
 
 # iOS simulator (macOS only)
 pnpm --filter @agap/mobile ios
-cloudflared tunnel --url http://127.0.0.1:3000
+# Backend tunnel
+ngrok http 3000 --domain=await-endearing-prevail.ngrok-free.dev
+# Expo dev client
 npx expo start --dev-client --tunnel --clear
-ngrok http 3000 --domain=unexecutorial-phantasmagorian-sena.ngrok-free.dev
 ~/.config/agap-object-storage/start-garage
-curl -H "ngrok-skip-browser-warning: 1" https://benevolent-semirhythmically-tova.ngrok-free.dev/.well-known/assetlinks.json
+curl -H "ngrok-skip-browser-warning: 1" https://await-endearing-prevail.ngrok-free.dev/.well-known/assetlinks.json
 
 # All dispatchers: password back to AgapDev2026!, forced change at next login
 pnpm dev:reset-dispatcher
@@ -250,6 +251,10 @@ pnpm dev:reset-dispatcher --mfa
 
 # Just one dispatcher
 pnpm dev:reset-dispatcher dispatcher1@mdrrmo.bocaue.gov.ph --mfa
+
+
+node "C:\Users\Zionne\AppData\Local\Temp\claude\c--Users-Zionne-Music-agap-emergency\f4c4d684-af85-437f-a61b-a59d42d84835\scratchpad\reset-password.js" announcements@lgu.bocaue.gov.ph
+
 
 
 $token = (curl.exe -s -X POST http://localhost:3000/v1/auth/login -H "Content-Type: application/json" -d '{\"identifier\":\"citizen@demo.agap\",\"password\":\"AgapDev2026!\"}' | ConvertFrom-Json).accessToken; curl.exe -X GET http://localhost:3000/v1/incidents/mine -H "Authorization: Bearer $token"

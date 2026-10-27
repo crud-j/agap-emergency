@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type JSX } from 'react';
 import {
-  Building2, Plus, Search, HeartPulse, Droplet, BedDouble, Phone, Check, Ambulance,
+  Building2, Plus, Search, HeartPulse, Droplet, BedDouble, Phone, Check, Ambulance, MapPin, X,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,
@@ -10,17 +10,26 @@ import {
   EmptyState, Skeleton,
   type Column,
 } from '@/components/ui';
-import { useAuthUser, hasRole } from '@/lib/use-auth';
+import { useAuthUser, hasRole, type AuthUser } from '@/lib/use-auth';
 import { titleCase, timeAgo } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 import {
   useHospitals,
   useHospitalReferrals,
   useCreateHospital,
+  useSetHospitalLocation,
+  useVerifyHospitalLocation,
   useAcknowledgeReferral,
   useMarkReferralArrived,
 } from '@/features/hospitals/hooks';
+import { useOrganization } from '@/features/organizations/hooks';
 import type { Hospital, HospitalReferral, CreateHospitalBody } from '@/features/hospitals/api';
+import {
+  EMPTY_COORDINATES, canReviewLocation, coordinateText, describeHospitalError, formatCoordinates,
+  hasCoordinates, locationStatusBadge, readCoordinates,
+  type CoordinateText, type HospitalErrorView,
+} from '@/features/hospitals/location';
+import { HospitalLocationPicker } from '@/components/hospitals/HospitalLocationPicker';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -46,21 +55,52 @@ function locationLabel(h: Hospital): string {
 // ─── Create dialog ───────────────────────────────────────────────────────────
 
 const EMPTY: CreateHospitalBody = {
-  name: '', barangay: '', municipality: '', contactNumber: '', emergencyContact: '',
+  name: '', barangay: '', address: '', municipality: '', province: 'Bulacan', contactNumber: '', emergencyContact: '',
   hasEmergencyRoom: false, hasIcu: false, bloodBank: false,
 };
 
-function CreateHospitalDialog({ open, onOpenChange }: {
+const REVIEW_NOTICE = 'Will be reviewed by MDRRMO before ambulances can select it.';
+
+/** The location error plus, for a swapped pair, the one-click fix. */
+function LocationError({ error, onUseSuggested }: {
+  error: HospitalErrorView;
+  onUseSuggested: (next: CoordinateText) => void;
+}): JSX.Element {
+  const { suggested } = error;
+  return (
+    <div className="space-y-2 rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger" role="alert">
+      <p>{error.message}</p>
+      {suggested && (
+        <Button variant="secondary" size="sm" type="button"
+          onClick={() => onUseSuggested(coordinateText(suggested.latitude, suggested.longitude))}>
+          Use suggested coordinates
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * System Administrator: any hospital (location saved as Verified). Org Administrator:
+ * only for their own HOSPITAL organization, saved as Pending review.
+ */
+function CreateHospitalDialog({ open, onOpenChange, ownOrg }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  /** Set for an Org Administrator: the only organization they may create for. */
+  ownOrg: { id: string; name: string } | null;
 }): JSX.Element {
   const [form, setForm] = useState<CreateHospitalBody>(EMPTY);
-  const [error, setError] = useState<string | null>(null);
+  const [coords, setCoords] = useState<CoordinateText>(EMPTY_COORDINATES);
+  const [organizationId, setOrganizationId] = useState('');
+  const [error, setError] = useState<HospitalErrorView | null>(null);
+  const [wasOpen, setWasOpen] = useState(open);
   const create = useCreateHospital();
 
-  function handleOpen(next: boolean) {
-    if (next) { setForm(EMPTY); setError(null); }
-    onOpenChange(next);
+  // Start empty each time the page opens the dialog (it opens through `open`, not onOpenChange).
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) { setForm(EMPTY); setCoords(EMPTY_COORDINATES); setOrganizationId(ownOrg?.id ?? ''); setError(null); }
   }
 
   function set<K extends keyof CreateHospitalBody>(key: K, value: CreateHospitalBody[K]) {
@@ -70,12 +110,19 @@ function CreateHospitalDialog({ open, onOpenChange }: {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!form.name.trim()) { setError('Name is required.'); return; }
+    if (!form.name.trim()) { setError({ message: 'Name is required.' }); return; }
+    if (ownOrg && !organizationId) { setError({ message: 'Choose your organization.' }); return; }
+    const location = readCoordinates(coords);
+    if (!location.ok) { setError({ message: location.error }); return; }
     try {
       await create.mutateAsync({
         name: form.name.trim(),
         ...(form.barangay?.trim()        && { barangay: form.barangay.trim() }),
+        ...(form.address?.trim()         && { address: form.address.trim() }),
         ...(form.municipality?.trim()    && { municipality: form.municipality.trim() }),
+        ...(form.province?.trim()        && { province: form.province.trim() }),
+        ...(ownOrg && { organizationId }),
+        ...(location.point && { location: { ...location.point, source: 'manual' as const } }),
         ...(form.contactNumber?.trim()   && { contactNumber: form.contactNumber.trim() }),
         ...(form.emergencyContact?.trim() && { emergencyContact: form.emergencyContact.trim() }),
         hasEmergencyRoom: !!form.hasEmergencyRoom,
@@ -84,37 +131,64 @@ function CreateHospitalDialog({ open, onOpenChange }: {
       });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setError(describeHospitalError(err));
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogContent className="max-w-lg">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Hospital</DialogTitle>
-          <DialogDescription>Register a receiving facility in the hospital registry.</DialogDescription>
+          <DialogDescription>
+            {ownOrg ? REVIEW_NOTICE : 'Register a receiving facility in the hospital registry.'}
+          </DialogDescription>
         </DialogHeader>
 
         <form id="hospital-form" onSubmit={(e) => void handleSubmit(e)} className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-agap-textMain">
+            <label htmlFor="hospital-name" className="text-sm font-medium text-agap-textMain">
               Name <span className="text-agap-danger">*</span>
             </label>
-            <input value={form.name} onChange={(e) => set('name', e.target.value)}
+            <input id="hospital-name" value={form.name} onChange={(e) => set('name', e.target.value)}
               placeholder="e.g. Bocaue District Hospital" className={inputCls} />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          {ownOrg && (
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-agap-textMain">Barangay</label>
-              <input value={form.barangay} onChange={(e) => set('barangay', e.target.value)} className={inputCls} />
+              <label htmlFor="hospital-org" className="text-sm font-medium text-agap-textMain">
+                Organization <span className="text-agap-danger">*</span>
+              </label>
+              <select id="hospital-org" value={organizationId} onChange={(e) => setOrganizationId(e.target.value)}
+                className={inputCls}>
+                <option value="">Choose your organization…</option>
+                <option value={ownOrg.id}>{ownOrg.name}</option>
+              </select>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label htmlFor="hospital-address" className="text-sm font-medium text-agap-textMain">Address</label>
+            <input id="hospital-address" value={form.address} onChange={(e) => set('address', e.target.value)}
+              placeholder="Street, landmark" className={inputCls} />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <label htmlFor="hospital-barangay" className="text-sm font-medium text-agap-textMain">Barangay</label>
+              <input id="hospital-barangay" value={form.barangay} onChange={(e) => set('barangay', e.target.value)} className={inputCls} />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-agap-textMain">Municipality</label>
-              <input value={form.municipality} onChange={(e) => set('municipality', e.target.value)} className={inputCls} />
+              <label htmlFor="hospital-municipality" className="text-sm font-medium text-agap-textMain">Municipality</label>
+              <input id="hospital-municipality" value={form.municipality} onChange={(e) => set('municipality', e.target.value)} className={inputCls} />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="hospital-province" className="text-sm font-medium text-agap-textMain">Province</label>
+              <input id="hospital-province" value={form.province} onChange={(e) => set('province', e.target.value)} className={inputCls} />
             </div>
           </div>
+
+          <HospitalLocationPicker value={coords} onChange={setCoords} />
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -142,9 +216,7 @@ function CreateHospitalDialog({ open, onOpenChange }: {
             ))}
           </div>
 
-          {error && (
-            <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger">{error}</p>
-          )}
+          {error && <LocationError error={error} onUseSuggested={setCoords} />}
         </form>
 
         <DialogFooter>
@@ -156,9 +228,196 @@ function CreateHospitalDialog({ open, onOpenChange }: {
   );
 }
 
+// ─── Location dialogs ────────────────────────────────────────────────────────
+
+function SetLocationDialog({ hospital, onClose, needsReview }: {
+  hospital: Hospital | null;
+  onClose: () => void;
+  /** Org Administrator: the new location waits for MDRRMO review. */
+  needsReview: boolean;
+}): JSX.Element {
+  const [coords, setCoords] = useState<CoordinateText>(EMPTY_COORDINATES);
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<HospitalErrorView | null>(null);
+  const [openedFor, setOpenedFor] = useState<string | null>(null);
+  const setLocation = useSetHospitalLocation();
+
+  // Prefill each time the dialog opens for a hospital.
+  if (hospital && openedFor !== hospital.id) {
+    setOpenedFor(hospital.id);
+    setCoords(coordinateText(hospital.latitude, hospital.longitude));
+    setReason('');
+    setError(null);
+  }
+  if (!hospital && openedFor !== null) setOpenedFor(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!hospital) return;
+    setError(null);
+    const location = readCoordinates(coords);
+    if (!location.ok) { setError({ message: location.error }); return; }
+    if (!location.point) { setError({ message: 'Enter the latitude and longitude, or click the map.' }); return; }
+    try {
+      await setLocation.mutateAsync({
+        id: hospital.id,
+        body: { ...location.point, source: 'manual', ...(reason.trim() && { reason: reason.trim() }) },
+      });
+      onClose();
+    } catch (err) {
+      setError(describeHospitalError(err));
+    }
+  }
+
+  return (
+    <Dialog open={!!hospital} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Set location</DialogTitle>
+          <DialogDescription>
+            {hospital?.name}. {needsReview ? REVIEW_NOTICE : 'Saved as Verified.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        <form id="hospital-location-form" onSubmit={(e) => void handleSubmit(e)} className="space-y-4 py-2">
+          <HospitalLocationPicker value={coords} onChange={setCoords}
+            verified={hospital?.location_status === 'VERIFIED'} />
+          <div className="space-y-1.5">
+            <label htmlFor="location-reason" className="text-sm font-medium text-agap-textMain">
+              Reason <span className="font-normal text-agap-textSub">(optional)</span>
+            </label>
+            <input id="location-reason" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Moved pin to the ER entrance" className={inputCls} />
+          </div>
+          {error && <LocationError error={error} onUseSuggested={setCoords} />}
+        </form>
+
+        <DialogFooter>
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={setLocation.isPending}>Cancel</Button>
+          <Button variant="primary" size="sm" form="hospital-location-form" type="submit" loading={setLocation.isPending}>
+            Save location
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReviewLocationDialog({ review, onClose }: {
+  review: { hospital: Hospital; decision: 'VERIFIED' | 'REJECTED' } | null;
+  onClose: () => void;
+}): JSX.Element {
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [openedFor, setOpenedFor] = useState<string | null>(null);
+  const verify = useVerifyHospitalLocation();
+  const verifying = review?.decision === 'VERIFIED';
+
+  // A note typed for one decision must never be sent with the next one (it goes to the audit log).
+  const reviewKey = review ? `${review.hospital.id}:${review.decision}` : null;
+  if (reviewKey !== openedFor) {
+    setOpenedFor(reviewKey);
+    setNote('');
+    setError(null);
+  }
+
+  async function handleConfirm() {
+    if (!review) return;
+    setError(null);
+    try {
+      await verify.mutateAsync({
+        id: review.hospital.id,
+        body: { decision: review.decision, ...(note.trim() && { note: note.trim() }) },
+      });
+      onClose();
+    } catch (err) {
+      setError(describeHospitalError(err).message);
+    }
+  }
+
+  return (
+    <Dialog open={!!review} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{verifying ? 'Verify location' : 'Reject location'}</DialogTitle>
+          <DialogDescription>
+            {review?.hospital.name}
+            {review && hasCoordinates(review.hospital) && ` · ${formatCoordinates(review.hospital.latitude, review.hospital.longitude)}`}
+            {verifying
+              ? '. Ambulance crews can then select it as a destination.'
+              : '. It stays hidden from ambulance crews until a new location is set and verified.'}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5 py-2">
+          <label htmlFor="review-note" className="text-sm font-medium text-agap-textMain">
+            Note <span className="font-normal text-agap-textSub">(optional)</span>
+          </label>
+          <input id="review-note" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} className={inputCls} />
+          {error && <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger" role="alert">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={verify.isPending}>Cancel</Button>
+          <Button variant={verifying ? 'primary' : 'danger'} size="sm" loading={verify.isPending}
+            onClick={() => void handleConfirm()}>
+            {verifying ? 'Verify' : 'Reject'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Location status, coordinates and the actions this user may take on them. */
+function LocationPanel({ hospital, canSet, canReview, onSet, onReview }: {
+  hospital: Hospital;
+  canSet: boolean;
+  canReview: boolean;
+  onSet: () => void;
+  onReview: (decision: 'VERIFIED' | 'REJECTED') => void;
+}): JSX.Element {
+  const badge = locationStatusBadge(hospital.location_status);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-agap-surface px-4 py-3">
+      <div className="min-w-0 space-y-0.5">
+        <div className="flex items-center gap-2">
+          <MapPin size={14} className="text-agap-textSub" aria-hidden />
+          <span className="text-sm font-semibold text-agap-textMain">Location</span>
+          <Badge variant={badge.variant}>{badge.label}</Badge>
+        </div>
+        <p className="text-xs text-agap-textSub">
+          {hasCoordinates(hospital)
+            ? <span className="font-mono tabular-nums">{formatCoordinates(hospital.latitude, hospital.longitude)}</span>
+            : 'No coordinates yet: ambulances cannot be routed here.'}
+          {hospital.location_source && ` · ${hospital.location_source}`}
+          {hospital.last_verified_at && ` · verified ${timeAgo(hospital.last_verified_at)}`}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {canSet && (
+          <Button variant="secondary" size="sm" onClick={onSet}>
+            <MapPin size={13} className="mr-1" /> Set location
+          </Button>
+        )}
+        {canReview && canReviewLocation(hospital) && (
+          <>
+            {hasCoordinates(hospital) && (
+              <Button variant="primary" size="sm" onClick={() => onReview('VERIFIED')}>
+                <Check size={13} className="mr-1" /> Verify
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => onReview('REJECTED')}>
+              <X size={13} className="mr-1" /> Reject
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Referral queue (right panel) ────────────────────────────────────────────
 
-function ReferralQueue({ hospital }: { hospital: Hospital }): JSX.Element {
+function ReferralQueue({ hospital, canAcknowledge }: { hospital: Hospital; canAcknowledge: boolean }): JSX.Element {
   const { data: referrals, isLoading, isError, refetch } = useHospitalReferrals(hospital.id);
   const acknowledge = useAcknowledgeReferral();
   const arrived = useMarkReferralArrived();
@@ -207,7 +466,7 @@ function ReferralQueue({ hospital }: { hospital: Hospital }): JSX.Element {
         }
         return (
           <div className="flex justify-end gap-2">
-            {r.acknowledgment_status !== 'ACKNOWLEDGED' && (
+            {canAcknowledge && r.acknowledgment_status !== 'ACKNOWLEDGED' && (
               <Button variant="secondary" size="sm"
                 loading={acknowledge.isPending && acknowledge.variables === r.id}
                 onClick={() => acknowledge.mutate(r.id)}>
@@ -282,14 +541,45 @@ function Capability({ icon: Icon, label }: { icon: typeof HeartPulse; label: str
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
+/**
+ * Who may do what with hospital locations. Mirrors the backend roles; the API
+ * still checks organization membership.
+ */
+function useHospitalPermissions(user: AuthUser | null) {
+  const isOrgAdmin = hasRole(user, 'ORG_ADMINISTRATOR');
+  const orgQuery = useOrganization(isOrgAdmin ? user?.orgId ?? null : null);
+  const org = orgQuery.data;
+  // An Org Administrator of a hospital organization may create for it. If the
+  // organization cannot be looked up, show the button and let the API decide.
+  const orgAdminMayCreate = isOrgAdmin && !orgQuery.isLoading && (!org || org.organization_type === 'HOSPITAL');
+  const isReviewer = hasRole(user, 'SYSTEM_ADMINISTRATOR', 'SUPERVISOR');
+  return {
+    isOrgAdmin,
+    canCreate: hasRole(user, 'SYSTEM_ADMINISTRATOR') || orgAdminMayCreate,
+    ownOrg: isOrgAdmin && user?.orgId
+      ? { id: user.orgId, name: org?.name ?? user.orgName ?? 'My organization' }
+      : null,
+    isReviewer,
+    seesUnreviewed: isReviewer || isOrgAdmin,
+    canSetLocation: (h: Hospital) => isReviewer || (isOrgAdmin && !!h.organization_id && h.organization_id === user?.orgId),
+  };
+}
+
 export default function HospitalCoordinationPage(): JSX.Element {
   const user = useAuthUser();
-  const canCreate = hasRole(user, 'SYSTEM_ADMINISTRATOR');
+  const perms = useHospitalPermissions(user);
+  // Matches the backend referral readers; the System Administrator manages facilities only.
+  const canViewReferrals = hasRole(user, 'HOSPITAL_USER', 'DISPATCHER', 'SUPERVISOR');
 
-  const { data: hospitals, isLoading, isError, refetch } = useHospitals();
+  const { data: hospitals, isLoading, isError, refetch } = useHospitals({
+    includeUnreviewed: perms.seesUnreviewed,
+    enabled: !!user,
+  });
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [locationFor, setLocationFor] = useState<Hospital | null>(null);
+  const [review, setReview] = useState<{ hospital: Hospital; decision: 'VERIFIED' | 'REJECTED' } | null>(null);
 
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -315,7 +605,7 @@ export default function HospitalCoordinationPage(): JSX.Element {
             {isLoading ? 'Loading…' : `${list.length} receiving facilit${list.length === 1 ? 'y' : 'ies'}`}
           </p>
         </div>
-        {canCreate && (
+        {perms.canCreate && (
           <Button variant="primary" size="md" onClick={() => setDialogOpen(true)}>
             <Plus size={16} className="mr-1.5" /> Add Hospital
           </Button>
@@ -353,6 +643,7 @@ export default function HospitalCoordinationPage(): JSX.Element {
               <ul className="space-y-2">
                 {list.map((h) => {
                   const active = selected?.id === h.id;
+                  const badge = locationStatusBadge(h.location_status);
                   return (
                     <li key={h.id}>
                       <button
@@ -370,10 +661,18 @@ export default function HospitalCoordinationPage(): JSX.Element {
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-semibold text-agap-textMain">{h.name}</p>
                           <p className="truncate text-xs text-agap-textSub">{locationLabel(h)}</p>
+                          {hasCoordinates(h) && (
+                            <p className="truncate font-mono text-[11px] tabular-nums text-agap-textSub">
+                              {formatCoordinates(h.latitude, h.longitude)}
+                            </p>
+                          )}
                         </div>
-                        <Badge variant={receivingVariant(h.receiving_status)}>
-                          {titleCase(h.receiving_status)}
-                        </Badge>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <Badge variant={receivingVariant(h.receiving_status)}>
+                            {titleCase(h.receiving_status)}
+                          </Badge>
+                          <Badge variant={badge.variant}>{badge.label}</Badge>
+                        </div>
                       </button>
                     </li>
                   );
@@ -383,9 +682,24 @@ export default function HospitalCoordinationPage(): JSX.Element {
           </div>
 
           {/* Detail */}
-          <div className="rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white p-5 shadow-tile">
-            {selected ? (
-              <ReferralQueue hospital={selected} />
+          <div className="space-y-4 rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white p-5 shadow-tile">
+            {selected && (
+              <LocationPanel
+                hospital={selected}
+                canSet={perms.canSetLocation(selected)}
+                canReview={perms.isReviewer}
+                onSet={() => setLocationFor(selected)}
+                onReview={(decision) => setReview({ hospital: selected, decision })}
+              />
+            )}
+            {selected && !canViewReferrals ? (
+              <EmptyState
+                icon={Ambulance}
+                title={selected.name}
+                description="Referrals carry patient details and are visible to MDRRMO and hospital staff only."
+              />
+            ) : selected ? (
+              <ReferralQueue hospital={selected} canAcknowledge={hasRole(user, 'HOSPITAL_USER')} />
             ) : (
               <EmptyState
                 icon={Ambulance}
@@ -397,7 +711,9 @@ export default function HospitalCoordinationPage(): JSX.Element {
         </div>
       )}
 
-      <CreateHospitalDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+      <CreateHospitalDialog open={dialogOpen} onOpenChange={setDialogOpen} ownOrg={perms.ownOrg} />
+      <SetLocationDialog hospital={locationFor} onClose={() => setLocationFor(null)} needsReview={perms.isOrgAdmin} />
+      <ReviewLocationDialog review={review} onClose={() => setReview(null)} />
     </div>
   );
 }

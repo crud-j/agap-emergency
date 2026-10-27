@@ -3,6 +3,7 @@ import {
   PrismaClient,
   dispatch_status,
   facility_receiving_status,
+  facility_location_status,
   facility_type,
   incident_category,
   incident_priority,
@@ -375,6 +376,39 @@ async function main() {
       is_evacuation_center: true,
       elevation_masl: 11.8,
       is_active: true,
+    },
+  });
+
+  // Coordinates cross-checked against OSM way 1290448946 (~7 m); ER entrance still to be field-verified before production.
+  await prisma.facility.upsert({
+    where: { id: '00000000-0000-0000-0002-000000000006' },
+    update: {
+      latitude: 14.79679,
+      longitude: 120.94358,
+      location_status: facility_location_status.VERIFIED,
+      location_source: 'manual+osm-crosscheck',
+      location_source_ref: 'osm:way:1290448946',
+      location_confidence: 0.95,
+      last_verified_at: new Date('2026-10-25T00:00:00Z'),
+    },
+    create: {
+      id: '00000000-0000-0000-0002-000000000006',
+      name: 'DOH — Joni Villanueva General Hospital',
+      facility_type: facility_type.HOSPITAL,
+      barangay: 'Igulot',
+      municipality: 'Bocaue',
+      province: 'Bulacan',
+      address: 'North Luzon Expressway, Igulot, Bocaue, Bulacan 3018',
+      receiving_status: facility_receiving_status.OPEN,
+      has_emergency_room: true,
+      is_active: true,
+      latitude: 14.79679,
+      longitude: 120.94358,
+      location_status: facility_location_status.VERIFIED,
+      location_source: 'manual+osm-crosscheck',
+      location_source_ref: 'osm:way:1290448946',
+      location_confidence: 0.95,
+      last_verified_at: new Date('2026-10-25T00:00:00Z'),
     },
   });
 

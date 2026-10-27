@@ -7,6 +7,7 @@ import { PrismaService } from '../../src/common/prisma/prisma.service';
 import { RealtimeService } from '../../src/realtime/realtime.service';
 import { AuditService } from '../../src/audit/audit.service';
 import { EmergencyContactNotificationService } from '../../src/emergency-contacts/emergency-contact-notification.service';
+import { OpsAlertService } from '../../src/emergency-alerts/ops-alert.service';
 import {
   IncidentType,
   IncidentStatus,
@@ -59,6 +60,8 @@ function mockIncident(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const mockOpsAlert = { onIncidentSaved: jest.fn().mockResolvedValue(undefined) };
+
 describe('IncidentsService', () => {
   let service: IncidentsService;
 
@@ -74,6 +77,7 @@ describe('IncidentsService', () => {
         { provide: RealtimeService, useValue: { notifyIncidentCreated: jest.fn() } },
         { provide: AuditService, useValue: { log: jest.fn() } },
         { provide: EmergencyContactNotificationService, useValue: { notifyContactsOfIncident: jest.fn() } },
+        { provide: OpsAlertService, useValue: mockOpsAlert },
       ],
     }).compile();
 
@@ -133,6 +137,32 @@ describe('IncidentsService', () => {
 
       expect(result).toEqual(existing);
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      // A resend never repeats the MDRRMO SMS or the SLA check.
+      expect(mockOpsAlert.onIncidentSaved).not.toHaveBeenCalled();
+    });
+
+    it('queues the MDRRMO SMS and the first SLA check after the incident is saved (MOD-17, MOD-41)', async () => {
+      const order: string[] = [];
+      mockPrisma.$transaction.mockImplementation(async (fn: (tx: any) => unknown) => {
+        const result = await fn(makeTx());
+        order.push('saved');
+        return result;
+      });
+      mockOpsAlert.onIncidentSaved.mockImplementation(async () => { order.push('ops-alert'); });
+
+      const incident = await service.create(
+        { type: IncidentType.FIRE, idempotencyKey: uuidv4(), lat: 14.7963, lng: 120.9272 },
+        'user-id-123',
+        UserRole.CITIZEN,
+      );
+
+      expect(mockOpsAlert.onIncidentSaved).toHaveBeenCalledWith(incident, { lat: 14.7963, lng: 120.9272 });
+      expect(order).toEqual(['saved', 'ops-alert']);
+    });
+
+    it('sends the ops alert without coordinates when the report has no GPS', async () => {
+      await service.create({ type: IncidentType.FIRE, idempotencyKey: uuidv4() }, 'user-id-123', UserRole.CITIZEN);
+      expect(mockOpsAlert.onIncidentSaved).toHaveBeenCalledWith(expect.anything(), null);
     });
 
     it('creates a registered incident without location (GPS is best-effort)', async () => {

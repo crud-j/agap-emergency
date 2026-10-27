@@ -245,11 +245,32 @@ function DeactivateDialog({ surgeId, onClose }: { surgeId: string; onClose: () =
 function BroadcastDialog({ surgeId, onClose }: { surgeId: string; onClose: () => void }): JSX.Element {
   const broadcast = useSurgeBroadcast();
   const [message, setMessage] = useState('');
+  const result = broadcast.data as { delivered?: number; recipientCount?: number } | undefined;
 
   function submit(e: FormEvent) {
     e.preventDefault();
     if (!message.trim()) return;
-    broadcast.mutate({ surgeId, message: message.trim() }, { onSuccess: onClose });
+    broadcast.mutate({ surgeId, message: message.trim() });
+  }
+
+  if (broadcast.isSuccess) {
+    return (
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Megaphone size={16} className="text-agap-amber" />
+            Broadcast sent
+          </DialogTitle>
+          <DialogDescription>
+            Delivered to {result?.delivered ?? 0} of {result?.recipientCount ?? 0} active responder
+            {result?.recipientCount === 1 ? '' : 's'}. It shows on their AGAP home screen.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="primary" onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    );
   }
 
   return (
@@ -260,7 +281,7 @@ function BroadcastDialog({ surgeId, onClose }: { surgeId: string; onClose: () =>
           Broadcast to Responders
         </DialogTitle>
         <DialogDescription>
-          Message will be delivered to all online RESPONDER accounts.
+          Sent to every active responder account as a notice on their AGAP home screen.
         </DialogDescription>
       </DialogHeader>
       <form onSubmit={submit} className="mt-2 space-y-3">
@@ -270,6 +291,7 @@ function BroadcastDialog({ surgeId, onClose }: { surgeId: string; onClose: () =>
           rows={3}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
+          maxLength={1000}
           required
         />
         {broadcast.isError && (

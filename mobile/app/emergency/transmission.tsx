@@ -321,6 +321,7 @@ export default function TransmissionScreen() {
 
     const payload: CreateIncidentInput = {
       type: draft.type,
+      triggerMethod: draft.triggerMethod,
       idempotencyKey: draft.idempotencyKey,
       description: draft.description ?? undefined,
       lat: draft.location?.lat,
@@ -357,20 +358,33 @@ export default function TransmissionScreen() {
         setMediaState('guest');
       } else if (hasMedia && accessToken) {
         setMediaState('uploading');
-        const uploads = [
-          ...draft.photoUris.map((uri, i) =>
-            uploadIncidentPhoto(
+        const uploads: { label: string; promise: Promise<void> }[] = [
+          ...draft.photoUris.map((uri, i) => ({
+            label: `photo[${i}]`,
+            promise: uploadIncidentPhoto(
               result.id, uri, accessToken,
               i === 0 ? draft.photoCaptureMeta ?? undefined : undefined,
             ),
-          ),
+          })),
           ...(draft.videoUri
-            ? [uploadIncidentVideo(result.id, draft.videoUri, accessToken, draft.photoCaptureMeta ?? undefined)]
+            ? [{
+                label: 'video',
+                promise: uploadIncidentVideo(result.id, draft.videoUri, accessToken, draft.photoCaptureMeta ?? undefined),
+              }]
             : []),
         ];
-        Promise.allSettled(uploads).then((results) => {
-          const failed = results.filter((r) => r.status === 'rejected');
-          failed.forEach((r) => console.warn('[transmission] media upload failed:', (r as PromiseRejectedResult).reason));
+        Promise.allSettled(uploads.map((u) => u.promise)).then((results) => {
+          const failed = results
+            .map((r, i) => ({ r, label: uploads[i].label }))
+            .filter((x) => x.r.status === 'rejected');
+          failed.forEach(({ r, label }) => {
+            const reason = (r as PromiseRejectedResult).reason;
+            // NetworkError wraps the real fetch exception in `.cause` — log it too,
+            // since "No connection to server" alone collapses timeouts, dropped
+            // connections, and TLS failures into one indistinguishable message.
+            const cause = reason instanceof Error ? (reason as Error & { cause?: unknown }).cause : undefined;
+            console.warn(`[transmission] media upload failed (${label}):`, reason, cause ? { cause } : '');
+          });
           setMediaState(failed.length === 0 ? 'sent' : 'failed');
           // The screen may already have moved to live tracking — an Alert
           // survives navigation, so the citizen always learns the outcome.

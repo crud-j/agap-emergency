@@ -14,6 +14,7 @@ export const en = {
     textSize: { title: 'Text Size', subtitle: 'Adjust the size of text and labels.' },
     highContrast: { title: 'High Contrast', subtitle: 'Increases contrast for better readability.' },
     reducedMotion: { title: 'Reduced Motion', subtitle: 'Minimizes animations and motion effects.' },
+    shakeToAlert: { title: 'Shake to Alert', subtitle: 'Shake your phone to start an emergency alert.' },
   },
   login: {
     heading: 'Welcome back',
@@ -427,6 +428,7 @@ export const fil: typeof en = {
     textSize: { title: 'Laki ng Teksto', subtitle: 'I-adjust ang laki ng teksto at mga label.' },
     highContrast: { title: 'Mataas na Contrast', subtitle: 'Pinapataas ang contrast para sa mas madaling pagbabasa.' },
     reducedMotion: { title: 'Pinababa ang Galaw', subtitle: 'Pinipigilan ang mga animation at motion.' },
+    shakeToAlert: { title: 'Shake para sa Alerto', subtitle: 'I-shake ang telepono para magsimula ng emergency alert.' },
   },
   login: {
     heading: 'Maligayang pagbabalik',

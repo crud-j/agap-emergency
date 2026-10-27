@@ -22,6 +22,7 @@ import { UserRole } from '@agap/shared';
 import { AdminUserActionDto } from './dto/admin-user-action.dto';
 import { RequireRecentAuth } from '../common/decorators/recent-auth.decorator';
 import { RecentAuthGuard } from '../common/guards/recent-auth.guard';
+import { ChangeRoleDto, ConfigValueDto } from './dto/admin-requests.dto';
 
 @ApiTags('administration')
 @ApiBearerAuth()
@@ -108,7 +109,7 @@ export class AdministrationController {
   @ApiOperation({ summary: 'Change a user role' })
   async changeRole(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { role: string },
+    @Body() body: ChangeRoleDto,
     @Request() req: any,
   ) {
     return this.administrationService.changeRole(id, body.role, req.user.id);
@@ -145,7 +146,7 @@ export class AdministrationController {
   @ApiOperation({ summary: 'Upsert a system configuration value' })
   async upsertConfig(
     @Param('key') key: string,
-    @Body() body: { value: unknown },
+    @Body() body: ConfigValueDto,
     @Request() req: any,
   ) {
     return this.administrationService.upsertConfig(key, body.value, req.user.id);

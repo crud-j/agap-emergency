@@ -26,6 +26,7 @@ export class SessionRevocationService implements OnModuleDestroy {
   private readonly logger = new Logger(SessionRevocationService.name);
   private readonly redis: Redis;
   private readonly ttlSeconds: number;
+  private redisWarningLogged = false;
   /**
    * In-process notification so the WebSocket gateway can drop open sockets of a
    * revoked session immediately. AGAP is a single-instance modular monolith; a
@@ -39,8 +40,15 @@ export class SessionRevocationService implements OnModuleDestroy {
       // Fail fast instead of queueing commands while disconnected.
       enableOfflineQueue: false,
       maxRetriesPerRequest: 1,
+      // Revocation checks fail open by design when Redis is unavailable.
+      // Avoid reconnecting every two seconds and flooding the backend logs.
+      retryStrategy: () => null,
     });
-    this.redis.on('error', (err) => this.logger.warn(`Redis unavailable for session revocation: ${err.message}`));
+    this.redis.on('error', (err) => {
+      if (this.redisWarningLogged) return;
+      this.redisWarningLogged = true;
+      this.logger.warn(`Redis unavailable for session revocation; using database fallback: ${err.message}`);
+    });
     void this.redis.connect().catch(() => undefined);
     this.ttlSeconds = parseDurationSeconds(config.get<string>('JWT_EXPIRES_IN', '15m'));
   }

@@ -345,7 +345,9 @@ export class LocationsService {
     return Array.from(latest.values());
   }
 
-  async getEta(incidentId: string) {
+  async getEta(incidentId: string, actor: ParticipantActor) {
+    // Same rule as the live positions: staff, the reporter or assigned crew.
+    await this.participants.assertParticipant(actor, incidentId);
     try {
       const incidentLoc = await this.prisma.incident_locations.findFirst({
         where: { incident_id: incidentId },

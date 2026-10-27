@@ -174,6 +174,50 @@ export class IncidentStatusNotifier {
   }
 
   /**
+   * Warns the reporter that a dispatcher rejected a piece of evidence they
+   * submitted (MOD-10). Attachment-level only — the incident itself is
+   * unaffected, so this is not keyed by IncidentStatus like notifyReporter.
+   */
+  async notifyReporterEvidenceRejected(incidentId: string, notes?: string): Promise<void> {
+    try {
+      const incident = await this.prisma.incident.findUnique({
+        where: { id: incidentId },
+        select: { public_reference: true, incident_reporters: { select: { user_id: true } } },
+      });
+      const userId = incident?.incident_reporters?.user_id;
+      if (!incident || !userId) return;
+
+      const publicReference = incident.public_reference;
+      const type = 'EVIDENCE_REJECTED';
+      const title = 'Evidence flagged';
+      const body =
+        `A photo or video you submitted for ${publicReference} could not be verified and was rejected by MDRRMO. ` +
+        `Submitting false evidence may affect your reporting standing.`;
+      const data = { incidentId, publicReference, type, ...(notes ? { notes } : {}) };
+
+      await this.notifications.create({
+        userId,
+        eventType: type,
+        title,
+        body,
+        channel: 'PUSH',
+        incidentId,
+        dataPayload: data,
+      });
+
+      await this.notificationQueue.add(
+        'incident-status-push',
+        { userId, channel: 'PUSH', title, body, data, androidChannelId: INCIDENT_UPDATES_CHANNEL },
+        { jobId: `evidence-rejected:${incidentId}:${Date.now()}` },
+      );
+    } catch (err) {
+      this.logger.error(
+        `Evidence-rejected notification failed for incidentId=${incidentId}: ${String(err)}. Incident unaffected.`,
+      );
+    }
+  }
+
+  /**
    * Tells the dispatcher who assigned the unit about a responder's progress, in the
    * console's notification bell (the web console has no device push).
    */
