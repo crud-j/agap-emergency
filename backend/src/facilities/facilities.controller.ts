@@ -7,6 +7,7 @@ import {
   Body,
   UseGuards,
   ParseUUIDPipe,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FacilitiesService } from './facilities.service';
@@ -15,6 +16,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
 import { CreateFacilityDto, FacilityStatusDto } from './dto/facility-status.dto';
+import type { OrgActor } from '../organizations/org-scope';
 
 @ApiTags('facilities')
 @ApiBearerAuth()
@@ -46,13 +48,15 @@ export class FacilitiesController {
     return this.facilitiesService.create(dto);
   }
 
+  /** Hospital users report only for their own organization's facilities (checked in the service). */
   @Patch(':id/status')
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.HOSPITAL_USER)
   @ApiOperation({ summary: 'Update facility receiving status/capacity' })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: FacilityStatusDto,
+    @Request() req: { user: OrgActor },
   ) {
-    return this.facilitiesService.updateStatus(id, dto);
+    return this.facilitiesService.updateStatus(id, dto, req.user);
   }
 }

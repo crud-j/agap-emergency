@@ -22,13 +22,14 @@ import {
   useSetHospitalActive,
   useAcknowledgeReferral,
   useMarkReferralArrived,
+  useUpdateFacilityStatus,
 } from '@/features/hospitals/hooks';
 import { useOrganization } from '@/features/organizations/hooks';
 import type { Hospital, HospitalReferral, CreateHospitalBody, ResolvedCandidate } from '@/features/hospitals/api';
 import {
   EMPTY_COORDINATES, canReviewLocation, coordinateText, describeHospitalError, formatCoordinates,
   hasCoordinates, isPinOnCandidate, locationForSave, locationStatusBadge, readCoordinates, receivingStatusBadge,
-  scorePercent, type CoordinateText, type HospitalErrorView,
+  receivingStatusAge, RECEIVING_STATUS_BADGE, scorePercent, type CoordinateText, type HospitalErrorView,
 } from '@/features/hospitals/location';
 import { HospitalLocationPicker } from '@/components/hospitals/HospitalLocationPicker';
 import { HospitalLocationFinder } from '@/components/hospitals/HospitalLocationFinder';
@@ -526,6 +527,112 @@ function ActivePanel({ hospital, canChange, onChange }: {
   );
 }
 
+/**
+ * Receiving status (C8): what was reported, how long ago, and the report button for
+ * hospital users (own organization) and dispatchers. A report older than 12 h is ranked
+ * as Unknown in the referral dialog; the stored value stays until someone reports again.
+ */
+function ReceivingStatusPanel({ hospital, canReport, onReport }: {
+  hospital: Hospital;
+  canReport: boolean;
+  onReport: () => void;
+}): JSX.Element {
+  const badge = receivingStatusBadge(hospital.receiving_status);
+  const age = receivingStatusAge(hospital.receiving_status_updated_at);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-agap-surface px-4 py-3">
+      <div className="min-w-0 space-y-0.5">
+        <div className="flex items-center gap-2">
+          <BedDouble size={14} className="text-agap-textSub" aria-hidden />
+          <span className="text-sm font-semibold text-agap-textMain">Receiving</span>
+          <Badge variant={badge.variant}>{badge.label}</Badge>
+          {hospital.capacity_available != null && (
+            <span className="text-xs text-agap-textMid tabular-nums">
+              {hospital.capacity_available}{hospital.capacity_total != null ? `/${hospital.capacity_total}` : ''} beds
+            </span>
+          )}
+        </div>
+        <p className={cn('text-xs', age.stale ? 'font-semibold text-amber-700' : 'text-agap-textSub')}>
+          {age.label}
+          {age.stale && ' · dispatch treats it as unknown until it is confirmed'}
+        </p>
+      </div>
+      {canReport && (
+        <Button variant={age.stale ? 'primary' : 'secondary'} size="sm" onClick={onReport}>
+          <Check size={13} className="mr-1" /> Update status
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function ReceivingStatusDialog({ hospital, onClose }: {
+  hospital: Hospital | null;
+  onClose: () => void;
+}): JSX.Element {
+  const [status, setStatus] = useState('OPEN');
+  const [beds, setBeds] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [openedFor, setOpenedFor] = useState<string | null>(null);
+  const update = useUpdateFacilityStatus();
+
+  if ((hospital?.id ?? null) !== openedFor) {
+    setOpenedFor(hospital?.id ?? null);
+    setStatus(hospital?.receiving_status ?? 'OPEN');
+    setBeds(hospital?.capacity_available != null ? String(hospital.capacity_available) : '');
+    setError(null);
+  }
+
+  async function handleSave() {
+    if (!hospital) return;
+    setError(null);
+    try {
+      await update.mutateAsync({
+        id: hospital.id,
+        body: { receivingStatus: status, ...(beds.trim() !== '' && { capacityAvailable: Number(beds) }) },
+      });
+      onClose();
+    } catch (err) {
+      setError(describeHospitalError(err).message);
+    }
+  }
+
+  return (
+    <Dialog open={!!hospital} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Receiving status · {hospital?.name}</DialogTitle>
+          <DialogDescription>
+            Dispatchers see this when they choose where to refer a patient. Saving confirms it even if nothing changed.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="space-y-1.5">
+            <label htmlFor="receiving-status" className="text-sm font-medium text-agap-textMain">Status</label>
+            <select id="receiving-status" value={status} onChange={(e) => setStatus(e.target.value)} className={inputCls}>
+              {Object.entries(RECEIVING_STATUS_BADGE).map(([value, { label }]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="receiving-beds" className="text-sm font-medium text-agap-textMain">
+              Beds available <span className="font-normal text-agap-textSub">(optional)</span>
+            </label>
+            <input id="receiving-beds" value={beds} inputMode="numeric" maxLength={5}
+              onChange={(e) => setBeds(e.target.value.replace(/\D/g, ''))} placeholder="e.g. 4" className={inputCls} />
+          </div>
+          {error && <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger" role="alert">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={update.isPending}>Cancel</Button>
+          <Button variant="primary" size="sm" loading={update.isPending} onClick={() => void handleSave()}>Save status</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Location status, coordinates and the actions this user may take on them. */
 function LocationPanel({ hospital, canSet, canReview, onSet, onReview }: {
   hospital: Hospital;
@@ -721,6 +828,10 @@ function useHospitalPermissions(user: AuthUser | null) {
     isReviewer,
     seesUnreviewed: isReviewer || isOrgAdmin,
     canSetLocation: (h: Hospital) => isReviewer || (isOrgAdmin && !!h.organization_id && h.organization_id === user?.orgId),
+    // C8: PATCH /facilities/:id/status. Hospital users report for their own organization only.
+    canReportStatus: (h: Hospital) =>
+      hasRole(user, 'DISPATCHER', 'SUPERVISOR')
+      || (hasRole(user, 'HOSPITAL_USER') && !!h.organization_id && h.organization_id === user?.orgId),
   };
 }
 
@@ -742,6 +853,7 @@ export default function HospitalCoordinationPage(): JSX.Element {
   const [locationFor, setLocationFor] = useState<Hospital | null>(null);
   const [review, setReview] = useState<{ hospital: Hospital; decision: 'VERIFIED' | 'REJECTED' } | null>(null);
   const [activeFor, setActiveFor] = useState<Hospital | null>(null);
+  const [statusFor, setStatusFor] = useState<Hospital | null>(null);
 
   const all = useMemo(() => hospitals ?? [], [hospitals]);
   const counts = useMemo(() => ({
@@ -861,6 +973,14 @@ export default function HospitalCoordinationPage(): JSX.Element {
                           <Badge variant={receivingStatusBadge(h.receiving_status).variant}>
                             {receivingStatusBadge(h.receiving_status).label}
                           </Badge>
+                          {(() => {
+                            const age = receivingStatusAge(h.receiving_status_updated_at);
+                            return (
+                              <span className={cn('text-[11px] tabular-nums', age.stale ? 'font-semibold text-amber-700' : 'text-agap-textSub')}>
+                                {age.label}
+                              </span>
+                            );
+                          })()}
                           <Badge variant={badge.variant}>{badge.label}</Badge>
                           {!h.is_active && <Badge variant="red">Deactivated</Badge>}
                         </div>
@@ -895,6 +1015,10 @@ export default function HospitalCoordinationPage(): JSX.Element {
                 onReview={(decision) => setReview({ hospital: selected, decision })}
               />
             )}
+            {selected && selected.is_active && (
+              <ReceivingStatusPanel hospital={selected} canReport={perms.canReportStatus(selected)}
+                onReport={() => setStatusFor(selected)} />
+            )}
             {selected && (perms.isReviewer || !selected.is_active) && (
               <ActivePanel hospital={selected} canChange={perms.isReviewer} onChange={() => setActiveFor(selected)} />
             )}
@@ -923,6 +1047,7 @@ export default function HospitalCoordinationPage(): JSX.Element {
         visibleHospitals={all} onOpenRegistered={openHospital} />
       <ReviewLocationDialog review={review} onClose={() => setReview(null)} />
       <ActiveStatusDialog hospital={activeFor} onClose={() => setActiveFor(null)} />
+      <ReceivingStatusDialog hospital={statusFor} onClose={() => setStatusFor(null)} />
     </div>
   );
 }

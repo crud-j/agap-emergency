@@ -7,10 +7,11 @@ import { IncidentsModule } from '../incidents/incidents.module';
 import { MapsModule } from '../locations/maps/maps.module';
 import { HospitalNameAssistService } from './location-resolution/hospital-name-assist.service';
 import { HospitalLocationResolverService } from './location-resolution/hospital-location-resolver.service';
+import { RegistryFreshnessService } from './registry-freshness.service';
 
 @Module({
   controllers: [HospitalsController],
-  providers: [HospitalsService, HospitalNameAssistService, HospitalLocationResolverService],
+  providers: [HospitalsService, HospitalNameAssistService, HospitalLocationResolverService, RegistryFreshnessService],
   imports: [AuditModule, NotificationsModule, IncidentsModule, MapsModule],
   exports: [HospitalsService],
 })

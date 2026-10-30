@@ -1,4 +1,4 @@
-import { haversineMeters } from '@agap/shared';
+import { RECEIVING_STATUS_STALE_HOURS, haversineMeters } from '@agap/shared';
 import { ApiError } from '@/lib/api';
 import type { BadgeVariant } from '@/components/ui/badge';
 import type {
@@ -31,6 +31,22 @@ export const RECEIVING_STATUS_BADGE: Record<string, { label: string; variant: Ba
 
 export function receivingStatusBadge(status: string | null | undefined): { label: string; variant: BadgeVariant } {
   return RECEIVING_STATUS_BADGE[status ?? 'UNKNOWN'] ?? RECEIVING_STATUS_BADGE.UNKNOWN!;
+}
+
+/**
+ * How fresh a facility's receiving status is (C8). Over RECEIVING_STATUS_STALE_HOURS the
+ * referral ranking scores it as Unknown; the stored value is still what was reported.
+ */
+export function receivingStatusAge(
+  updatedAt: string | null | undefined,
+  now = Date.now(),
+): { label: string; stale: boolean } {
+  if (!updatedAt) return { label: 'Never reported', stale: true };
+  const ageMs = now - new Date(updatedAt).getTime();
+  const hours = Math.max(0, Math.floor(ageMs / 3_600_000));
+  const label = hours < 1 ? 'Updated within the hour' : hours < 48 ? `Updated ${hours} h ago` : `Updated ${Math.floor(hours / 24)} days ago`;
+  // Same rule as the backend's scoreFacility: stale only past the limit.
+  return { label, stale: ageMs > RECEIVING_STATUS_STALE_HOURS * 3_600_000 };
 }
 
 /** The backend's FACILITY_AT_CAPACITY rule: a full or closed hospital warns, never blocks. */

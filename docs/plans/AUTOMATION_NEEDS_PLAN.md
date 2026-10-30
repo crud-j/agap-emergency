@@ -1,6 +1,6 @@
 # Plan: List C Automation (C1–C8, incl. A1)
 
-> **Status:** Phase 1 implemented and reviewed 2026-10-30 (no defects; device checks pending). Phase 2 implemented and reviewed 2026-10-30 (same-session review, 1 fix; independent review, 2 fixes; walkthroughs pending). Phase 3 implemented and reviewed 2026-10-30 (review: 3 fixes; live eval and walkthroughs pending; free-tier key, so AI stays off for real texts). Phase 4 not started.
+> **Status:** Phase 1 implemented and reviewed 2026-10-30 (no defects; device checks pending). Phase 2 implemented and reviewed 2026-10-30 (same-session review, 1 fix; independent review, 2 fixes; walkthroughs pending). Phase 3 implemented and reviewed 2026-10-30 (review: 3 fixes; live eval and walkthroughs pending; free-tier key, so AI stays off for real texts). Phase 4 implemented 2026-10-30 (C6 and C8, plus a hospital-user status report; C5 deferred; not yet reviewed; walkthroughs pending).
 > **LLM provider (changed 2026-10-30):** Phase 3 uses **Google Gemini** (`GEMINI_API_KEY`, already in `backend/.env`), not OpenAI. The existing OpenAI features (evidence review, hospital name assist) keep `OPENAI_API_KEY` and are not touched. See [Phase 3 → Provider](#provider-gemini-changed-2026-10-30).
 > **Run it:** paste the phase's prompt from [AUTOMATION_NEEDS_PROMPTS.md](AUTOMATION_NEEDS_PROMPTS.md) into a fresh session, then run its review prompt (Prompt R). Or use `/automation-plan <1-4>`; `/automation-plan status` shows progress. That file's **Corrections** table (K1–K11) overrides this plan where they differ.
 > **Sources:** [AGAP_Automation_and_LLM_Modernization_Roadmap.md](../AGAP_Automation_and_LLM_Modernization_Roadmap.md) §2.3 and §4 (what and why), [AI_ASSIST_PLAN.md](AI_ASSIST_PLAN.md) Phases 1–2 (C4 detail). **Where this plan and those docs differ, this plan wins**: it was checked against the code on 2026-10-30. The roadmap §5 code sketches are written for OpenAI (`responses.parse`, `zodTextFormat`, `store: false`); use them for structure only and follow this plan's Gemini section for the provider calls.
@@ -317,11 +317,11 @@ Decided by the user on 2026-10-30. This replaces every OpenAI detail in AI_ASSIS
   - monthly digest.
 
 **Done when:**
-- [ ] The tests pass and the full suite is green.
-- [ ] A unit with no GPS for 11 min shows the badge and drops in recommendations with a reason, and its status is unchanged.
-- [ ] The referral dialog shows ranked hospitals with reasons.
-- [ ] A facility untouched for 7 h triggers one notice to its hospital users.
-- [ ] 100% doc updated: MOD-28, MOD-38 and MOD-39 rows, walkthrough pending.
+- [x] The tests pass and the full suite is green. *(C6 and C8 tests; C5 has none: deferred.)*
+- [ ] A unit with no GPS for 11 min shows the badge and drops in recommendations with a reason, and its status is unchanged. *(**C5 deferred, 2026-10-30, the user's decision:** idle units send no GPS at all. See the Phase 4 log.)*
+- [ ] The referral dialog shows ranked hospitals with reasons. *(Built; the ranking ran on the dev database in a rolled-back transaction. The dialog itself is a walkthrough.)*
+- [x] A facility untouched for 7 h triggers one notice to its hospital users. *(Checked on the dev database in a rolled-back transaction: 1 notice, none on the second run, status unchanged.)*
+- [x] 100% doc updated: MOD-28 (C5 deferred), MOD-38 and MOD-39 rows, walkthrough pending.
 
 ---
 
@@ -334,7 +334,7 @@ Fill in one row when a phase ends. Put details and deviations below the table, u
 | 1 | 2026-10-30 | Done and reviewed (no defects). Backend 1227/1227, mobile 98/98, e2e 1/1; migration applied | Opt-out wired into `BarangayCallbackModule` (where `BarangayReplyService` lives), not `BarangayCoordinationModule`; poller spec's "off" cases also set `SMS_OPT_OUT_ENABLED=false`; boot checked on the already-running watch-mode backend | Push on a backgrounded responder phone; STOP from a real phone; Unsubscribe button on a phone |
 | 2 | 2026-10-30 | Done and reviewed twice: same-session review (1 fix: DRAFT excluded) and independent review (2 fixes: assessment-filed triage tags now live; hidden prefilled barangay chip). Backend 1227 → 1264/1264 (79 suites), frontend 134/134, mobile typecheck clean, e2e 1/1; 2 migrations applied | Barangay match also uses the polygon-matched barangay notice; boundary-less risk areas cover their barangay; recently dismissed proposals aren't re-proposed; `GET river-level` added; `surge_settings` has a UUID id + `singleton`; proposals have `updated_at` | Surge banner walkthrough (the detector itself ran on the dev database in a rolled-back transaction); two-browser tag check, including a tag filed from the responder app's assessment; approve a proposal in the UI; MDRRMO threshold values |
 | 3 | 2026-10-30 | Done and reviewed (3 fixes: a help-request reading is never superseded, supersede + insert in one transaction; one `NOTICE_INCLUDE`; a misplaced doc comment). Backend 1264 → 1360/1360 (79 → 84 suites), frontend 134/134, mobile 98/98, e2e 1/1; migration applied | `@google/genai` pinned to 2.30.0 (a 2-week-old release), not the day-old 2.32.0; SDK types via a type-only import + runtime `require` of its CommonJS build; `BarangayCallbackService` exported from `BarangayCallbackModule` (where it lives), which AiAssistModule imports; `reportBySms` opts also carry `actorRole`; the English reading is cut at 120, not rejected; a newer reading supersedes open older ones | Live eval with the real Gemini key (free tier, synthetic fixtures only); confirm `gemini-3.8-flash` and its thinking level; bad-key check; drawer walkthrough; paid-tier key + DPO sign-off before any real barangay text |
-| 4 | | | | Fleet badge and referral ranking walkthrough |
+| 4 | 2026-10-30 | Done and reviewed 2026-10-31 (1 fix: the 6-h reminder dedup no longer slips to 7 h): C6 and C8; **C5 deferred** (no idle-unit GPS exists). Backend 1360 → 1406/1406 (84 → 87 suites), frontend 134 → 140/140, mobile 98/98, e2e 1/1; migration applied | Hospital users can now report receiving status (the user's decision: nobody could before); a status report stamps the time even when it confirms the same status; distance via `haversineMeters` from VERIFIED hospital locations only; `RECEIVING_STATUS_STALE_HOURS` in `shared`; monthly digest at 08:00 Manila time | Referral dialog and Hospitals page walkthrough; a hospital user reporting status; C5 needs a design decision (unit crew roster + on-duty ping, DPO if it carries location) |
 
 ### Phase 1 — 2026-10-30
 
@@ -786,3 +786,170 @@ Reviewed the Phase 3 files listed above (`git diff` on the changed files, plus t
 - **O10. Two older copies of `NOTICE_INCLUDE`** remain, in `barangay-notify.service.ts` and `barangay-reply.service.ts`. They predate Phase 3; they could import the exported constant.
 - **O11. A kept backup reading is cleared only by Accept or Dismiss.** If the barangay sends the exact `BACKUP` code, the card stays until a dispatcher acts on it. That's intended: the dispatcher should see it.
 - **O12. A dismiss isn't broadcast** (already noted in the build notes).
+
+### Phase 4 — 2026-10-30
+
+Run in the session that reviewed Phase 3 and saw it committed (`2acafa5`), at the user's request. Baseline: backend 1360/1360 (84 suites), green.
+
+**Two plan gaps found in preflight, decided by the user (2026-10-30)**
+- **C5 deferred.** Idle `AVAILABLE` units never send GPS. Both `location_history` writers (`LocationsService.trackResponder`, `RespondersService.pushLocation`) store `user_id` only, never `resource_id`, and only for a responder crewed on an active dispatch (`useResponderLocationShare` runs only then). Units have no standing crew list either (`dispatch_crew` is per dispatch). The dev database has 32 `location_history` rows, 0 with a `resource_id`. The roadmap §4.5 query would mark every available unit "No signal" all the time.
+  - **What C5 needs first:** a unit crew roster (which responders staff which unit while on duty) and a periodic on-duty ping from the responder app. A ping that carries location is tracking idle staff, which needs the DPO.
+  - Nothing for C5 was built: no `unit-heartbeat.service.ts`, no `resource.heartbeat_stale` event, no ranking change, no `UNIT_STALE_AFTER_MIN`.
+- **C8 gained a hospital-user status report.** Nobody could keep receiving status fresh: `PATCH /v1/facilities/:id/status` (the only writer of `receiving_status`) allowed Dispatcher and Supervisor only, and no web or mobile screen called it, so every value was seed data. The hourly reminder would have asked hospital users to do something they couldn't. CLAUDE.md lists "update receiving status" as a Hospital User power, so the route now allows Hospital Users for their own organization's facilities, and the Hospitals page has an **Update status** control.
+
+**Built**
+- **C8, data.** Migration `20261030160000_facility_receiving_status_at`: `facilities.receiving_status_updated_at timestamptz`, backfilled from `updated_at`. `schema.prisma` updated.
+- **C8, status report** (`FacilitiesService.updateStatus`, `facilities.controller.ts`).
+  - Roles: Dispatcher, Supervisor, Hospital User. A Hospital User must hold an active membership in the facility's organization (`activeMemberOrgIds`); a facility with no organization is refused for them. Dispatchers and Supervisors report for any facility, as before.
+  - A report with `receivingStatus` sets `receiving_status_updated_at`; a beds-only report doesn't. It also sets `updated_at`, which this route never did.
+  - Audited (`facility`, `MOD-39`, old and new values). `FacilitiesModule` imports `AuditModule` (K7).
+- **C8, jobs** (`backend/src/hospitals/registry-freshness.service.ts`, provided by `HospitalsModule`, which already imported `NotificationsModule`).
+  - Hourly (`0 * * * *`): active facilities with an organization whose status is older than 6 h or was never reported. One IN_APP `HOSPITAL_STATUS_STALE` notice to each Hospital User who can sign in and is an active member of that organization. Deduped per facility per 6 h with a JSON path filter on `data_payload.facilityId`. The body names the facility and the age only.
+  - Monthly (`0 8 1 * *`, `timeZone: 'Asia/Manila'`): one `REGISTRY_REVIEW_DUE` notice per Org Administrator (`activeMemberOrgIds`) listing their organizations' active facilities whose `last_verified_at` is null or older than 90 days, and active resources whose `updated_at` is older than 90 days (K4). Up to 5 names of each kind, then a count.
+  - Each facility and each admin has its own `try/catch`, and the run has an outer one. The jobs never write a facility or a resource.
+  - The `@Cron` methods (`hourly`, `monthly`) take no arguments and call `remindStaleStatuses(now)` / `sendRegistryDigests(now)`, so the cron library's arguments never reach them (Phase 2 O2 avoided).
+- **C6** (`backend/src/hospitals/referral-ranking.ts`, pure).
+  - `needFor(incident)`: ER for `CRITICAL`/`HIGH` or `MEDICAL`/`ROAD_ACCIDENT`/`FIRE`/`INDUSTRIAL`; ICU for `CRITICAL`.
+  - `scoreFacility(f, need, km, now)`: roadmap §4.6 (`CLOSED` −80, `AT_CAPACITY` −50, `UNKNOWN` −10, no ER when needed −40, ICU when needed +15, 0 beds −30), plus `EMERGENCY_ONLY` −20 only for a non-emergency need. A status reported more than `RECEIVING_STATUS_STALE_HOURS` (12) ago, or never, is scored as `UNKNOWN` with the reason `Status last updated <n> h ago` / `Receiving status never reported`. An unknown distance scores as 15 km.
+  - `HospitalsService.recommendations`: the hospitals the dispatcher's referral list shows (active, reviewed), facility columns only, distance by `haversineMeters` from a `VERIFIED` hospital location (like `findNearby`). No incident location → no distance and the reason `Incident location unknown`; an unverified hospital location → `Hospital location not verified`. Sorted by score, then distance, then name; top 10.
+  - `GET /v1/hospitals/recommendations?incidentId=` (Dispatcher, Supervisor; `RecommendationsQueryDto` with `@IsUUID`), declared before `@Get(':id')`.
+- **Shared:** `RECEIVING_STATUS_STALE_HOURS` in a new `shared/src/constants/facility.constants.ts` (`.ts` only), exported from the constants index; shared rebuilt (K2). The backend ranking and the web age label both use it.
+- **Web.**
+  - The **Refer to hospital** dialog lists up to 5 suggested hospitals first (effective status badge, distance, reasons). A click selects one; the full list stays below ("Or choose any hospital"), and the dispatcher sends.
+  - Hospitals page: a **Receiving** panel (status, beds, "Updated <n> h ago", amber with "dispatch treats it as unknown until it is confirmed" after 12 h) with **Update status** (a status + optional beds dialog) for Dispatchers, Supervisors and the facility's own Hospital Users (`organization_id === user.orgId`, like `canSetLocation`). Each list row shows the age too.
+  - `NotificationBell`: `HOSPITAL_STATUS_STALE` and `REGISTRY_REVIEW_DUE` open `/hospitals`, from the list and from the toast (K3).
+  - `features/hospitals`: `HospitalRecommendation`, `fetchHospitalRecommendations`, `updateFacilityStatus`, `useHospitalRecommendations`, `useUpdateFacilityStatus`, `receivingStatusAge`.
+
+**Files**
+- New:
+  - `backend/prisma/migrations/20261030160000_facility_receiving_status_at/`
+  - `backend/src/hospitals/{referral-ranking.ts,registry-freshness.service.ts,dto/recommendations-query.dto.ts}`
+  - `shared/src/constants/facility.constants.ts`
+  - `backend/test/hospitals/{referral-ranking,registry-freshness,facility-status}.spec.ts`
+- Changed:
+  - `backend/prisma/schema.prisma`, `backend/src/facilities/{facilities.service.ts,facilities.controller.ts,facilities.module.ts}`, `backend/src/hospitals/{hospitals.service.ts,hospitals.controller.ts,hospitals.module.ts}`
+  - `shared/src/constants/index.ts`
+  - `frontend/features/hospitals/{api.ts,hooks.ts,location.ts}`, `frontend/app/(ops)/hospitals/page.tsx`, `frontend/components/incidents/IncidentDetailDrawer.tsx`, `frontend/components/layout/NotificationBell.tsx`, `frontend/__tests__/hospital-location.spec.ts` (6 cases added)
+  - `docs/100%ModulesFunctionalities+AdditionalModules.md` (MOD-28, MOD-38, MOD-39 rows; summary)
+
+**Migration:** applied with `prisma migrate deploy` to the dev database; `prisma generate` run; `migrate status` up to date (28). The E2E scratch database was 5 migrations behind (Phases 1–4; its earlier runs never touched those tables), so `pnpm test:e2e:db` (migrate + idempotent seed of `E2E_DATABASE_URL` only) was run before the e2e test.
+
+**Tests:** backend 1360 → 1406/1406 (84 → 87 suites). Frontend 134 → 140/140. Mobile 98/98, and the mobile typecheck (both re-run because `shared` changed). E2E 1/1. Typecheck clean in backend, frontend and mobile.
+- `referral-ranking.spec.ts`:
+  - `needFor`;
+  - every status, ER, ICU, beds and `EMERGENCY_ONLY` case;
+  - stale at 13 h, fresh at 11 h, never reported;
+  - unknown and capped distance;
+  - the service: order, scores, reasons, unknown incident location, unverified hospital, top 10, 404, facility columns only;
+  - **a real Nest HTTP app** proving `GET /v1/hospitals/recommendations` reaches the ranking and not `:id` (and returns its own 400s), plus the roles.
+- `registry-freshness.spec.ts`:
+  - the stale-facility filter;
+  - recipients scoped to the facility's organization, the role and the sign-in rule;
+  - body and payload, and the never-reported wording;
+  - the 6-h dedup; no recipients → nobody;
+  - one facility's failure is isolated; a failed run returns 0;
+  - the monthly filters (facilities by `last_verified_at`, resources by `updated_at`), body, the 5-name cap, and the no-org and nothing-due cases;
+  - the cron times and time zone;
+  - no facility or resource write anywhere.
+- `facility-status.spec.ts`:
+  - a hospital user's own facility (stamped, audited);
+  - a re-confirmation is stamped; beds-only isn't;
+  - another organization's facility and an org-less facility are refused, with nothing written;
+  - dispatchers skip the membership check;
+  - the roles.
+
+**Live checks** (dev database, one interactive transaction, always rolled back; 0 rows kept):
+- Hourly: with every facility fresh except Bocaue General Hospital at 7 h, the first run created 1 notice (to the 1 hospital user of its organization), the second run 0, and the stored status was unchanged. The body read "Bocaue General Hospital: the receiving status was last updated 7 h ago. …".
+- Monthly: 0 notices, which is correct. The only Org Administrator belongs to MDRRMO, which has no facilities, and its 3 units were updated 7 days ago.
+- Ranking for the newest incident: Joni Villanueva (98, open, 1.2 km), Bocaue General Hospital (70, location not verified), Dr. Yanga's (48, status unknown, no ER).
+
+**Duplication inventory:** every Phase 4 artifact was **missing**: `unit-heartbeat`, `heartbeat_stale`, `fleet:stale`, `UNIT_STALE_AFTER_MIN`, `referral-ranking`, `scoreFacility`, `needFor`, `registry-freshness`, `HOSPITAL_STATUS_STALE`, `receiving_status_updated_at`, the route. `recommendations` existed only as the unrelated `GET /v1/dispatch/recommendations`. Reused: `haversineMeters`, `reviewVisibility` (the referral list's visibility), `activeMemberOrgIds`, `BLOCKED_ACCOUNT_STATUSES` (the `findEscalationRecipients` sign-in rule), `NotificationsService` via `NotificationsModule`, `AuditService` via `AuditModule`, the Phase 2 JSON path dedup pattern, `receivingStatusBadge` / `RECEIVING_STATUS_BADGE`, `describeHospitalError`, and the existing `PATCH /facilities/:id/status` route (extended, not duplicated).
+
+**Self-checks:**
+- `grep -nE "resources\.update|receiving_status:"` on `registry-freshness.service.ts`: nothing. (`unit-heartbeat.service.ts` doesn't exist: C5 deferred.)
+- `heartbeat_stale`: not defined (C5 deferred). `ScheduleModule.forRoot`: 1.
+- `HOSPITAL_STATUS_STALE`, `REGISTRY_REVIEW_DUE` and `RECEIVING_STATUS_STALE_HOURS` each have one definition (the bell compares the event types as strings, like `SURGE_RECOMMENDED`).
+- No new distance function. No module provides another module's service.
+- Secrets grep (word-boundary pattern): 0.
+- Privacy: notices carry facility and unit names and an age (public registry data). The ranking reads facility columns plus the incident's category, priority and location only.
+- Guardrails: the jobs write only notifications, the ranking picks nothing, and a status changes only through a person's report.
+
+**Boot:** the watch-mode backend wasn't running (port 3000 didn't answer), and a second instance wasn't started (shared Redis, queued SMS). The e2e test boots the real `AppModule` from the current source, `RegistryFreshnessService` and the new route included, with only the outward-facing processors stubbed, so DI resolves.
+
+**Deviations**
+- **C5 not built** (above).
+- **A hospital-user status report was added** to C8 (above). It extends the one existing writer instead of adding a route.
+- **A report stamps the time even when the status is unchanged.** The prompt's trap said "only when receiving_status actually changes". Read literally, a hospital that confirms "still Open" would keep getting the 6-h reminder and be ranked Unknown after 12 h, which defeats C8. The stamp is set by a status *report* only, never by any other write (name, location, activation, seed).
+- **Distance only from a `VERIFIED` hospital location**, the same rule as `findNearby`; the others get "Hospital location not verified".
+- **`EMERGENCY_ONLY` costs 20 for a non-emergency need** (the roadmap only says there is no penalty for an emergency referral).
+- **The monthly digest runs at 08:00 Manila time** (`timeZone`), not in the server's zone (see Phase 2 O5).
+- **Recipients from the organization's side:** the hourly reminder finds Hospital Users through `organization_memberships` (`is_active`), the same rule as `activeMemberOrgIds` asked the other way round.
+- **`RECEIVING_STATUS_STALE_HOURS` lives in `shared`**, so the web age label and the backend ranking use one value.
+
+**Noticed, not changed**
+- The seeded "Bocaue General Hospital" has no verified location, so the ranking can't measure its distance.
+- A freshly seeded database has `receiving_status_updated_at` null on every facility (the seed only creates rows), so they read "Never reported" until someone reports. That's accurate.
+- `user.orgId` is the user's first active membership. A Hospital User in two hospital organizations sees **Update status** only on the first one's facilities, though the API accepts both.
+- The facilities `findAll`/`findById` routes still return raw Prisma rows (Decimals as strings), unlike the hospitals routes.
+
+**Needs a person / device**
+- Referral dialog walkthrough: suggested hospitals come first with reasons; picking one and sending works; the full list still works.
+- Hospitals page as a Hospital User: **Update status** shows on their own hospital (not on others), the age resets, and the reminder stops for 6 h.
+- The hourly notice arrives in the bell and opens `/hospitals`.
+- **C5:** a design decision on a unit crew roster and an on-duty ping (and the DPO, if the ping carries location) before it can be planned again.
+
+### Review — 2026-10-31 (Prompt R, Phase 4)
+
+Reviewed the Phase 4 files listed above (`git diff` on the changed files, plus the new untracked files) in a fresh session that didn't build Phase 4. C5 was deferred, so it has nothing to review.
+
+**Result: 1 defect fixed and 1 stray edit undone; 4 low items left open.**
+
+**Fixed**
+- **R4. The 6-h reminder actually went out every 7 h.** The dedup lookback was the same 6 h as the staleness cutoff, measured from the start of each hourly run. A notice is written a moment after its run starts, so on the run exactly 6 h later it was still inside the window, and the next reminder slipped to the following hour. A hospital that ignored the first reminder got the second one about 14 h after its last report instead of 12 h.
+  - Fix (`registry-freshness.service.ts:22`, `:95`): a separate `STATUS_REMINDER_DEDUP_MS`, 5 minutes short of 6 h. It's used only by the dedup lookup; the staleness cutoff is still 6 h. `remindFacility` no longer takes the cutoff.
+  - `test/hospitals/registry-freshness.spec.ts`: the dedup test now asserts the 5-minute-shorter window. No assertion was removed.
+- **A stray whitespace change in `schema.prisma`.** The `capacity_total` line had lost one space of alignment. It's restored, so the schema diff is now just the new column and its comment.
+
+**Checked, with evidence**
+- **a. Steps and Done-when.**
+  - C8 step 1: the migration adds `receiving_status_updated_at TIMESTAMPTZ(6)` and backfills it from `updated_at`, matching `schema.prisma`.
+  - Writers: `grep -rn "receiving_status"` finds one writer of `receiving_status` outside the seed, `FacilitiesService.updateStatus`, which stamps the time (`facilities.service.ts:74`). The seed creates rows only.
+  - C8 step 2: hourly `0 * * * *` (`:46`). Recipients are Hospital Users who can sign in and are active members of the facility's organization (`:108`). The JSON path dedup is per facility (`:96`). Monthly `0 8 1 * *` runs on Manila time (`:52`), scoped by `activeMemberOrgIds`, with resources by `updated_at` (K4).
+  - C8 step 3: a stale or never-reported status scores as `UNKNOWN`, with its age as the reason (`referral-ranking.ts:61`). The Hospitals page shows the same age from `RECEIVING_STATUS_STALE_HOURS`.
+  - C6: `needFor` and `scoreFacility` follow roadmap §4.6. The enum values match `@agap/shared` (`IncidentPriority`, `IncidentType`) and `RECEIVING_STATUSES`. The route is declared at `hospitals.controller.ts:76`, before `@Get(':id')` at `:111`, and a real Nest HTTP test proves it. The service reads active, reviewed hospitals only (`hospitals.service.ts:105`) and measures distance from a verified location only (`:114`, the `findNearby` rule, by `haversineMeters`, K8). It returns the top 10 (`:143`).
+  - Web: the Referral dialog shows up to 5 suggestions, and a click only selects one (the dispatcher still sends). The full `Select` stays below. `NotificationBell` routes both new event types to `/hospitals` from the list and from the toast (K3). `role-access.ts` lets Hospital Users and Org Administrators open `/hospitals`. `toFacilityView` passes `receiving_status_updated_at` through to the page.
+  - The ticked Done-when boxes are true. The two unticked ones are C5 (deferred) and the dialog walkthrough.
+- **b. Bugs.**
+  - `incident_locations` is a 1:1 relation (`incident_locations?`), so `at?.latitude` is right.
+  - A Hospital User with no organization on the facility is refused before any write. Dispatchers and Supervisors skip the membership check.
+  - The cron methods take no arguments (the Phase 2 O2 trap is avoided).
+  - Each facility and each admin has its own `try/catch`, inside an outer one. `Promise.allSettled` per recipient.
+  - Timing: fixed in R4.
+- **c. Duplication.**
+  - `ScheduleModule.forRoot`: 1.
+  - `HOSPITAL_STATUS_STALE` and `REGISTRY_REVIEW_DUE` are each defined once (the bell compares strings, like `SURGE_RECOMMENDED`). `RECEIVING_STATUS_STALE_HOURS` is defined once, in `shared`.
+  - No new distance function. `PATCH /facilities/:id/status` was extended, not duplicated.
+  - `FacilitiesModule` imports `AuditModule`, and `HospitalsModule` already imported `NotificationsModule` (K7). Neither provides another module's service.
+  - C5 artifacts (`heartbeat_stale`, `fleet:stale`, `unit-heartbeat`): none exist, as recorded.
+- **d. Guardrails and privacy.**
+  - `grep -nE "resources\.update|receiving_status:" registry-freshness.service.ts`: nothing. The jobs write notifications only.
+  - The ranking picks nothing, and a status changes only through a person's report, which is audited (`facilities.service.ts:82`, `MOD-39`, old and new values).
+  - Notices carry facility or unit names, IDs and an age (registry data). The ranking reads the incident's category, priority and location only, never patient data.
+  - Secrets grep (word-boundary pattern): 0.
+- **e. Tests.**
+  - The three specs assert the Prisma filters, the recipients, bodies, payloads, scores and reasons, the audit contents, refusals with nothing written, the cron metadata, and the route over real HTTP.
+  - The only existing frontend test file changed gained 6 cases. No test was weakened.
+
+**Verification (§0 D):**
+- Shared is unchanged by the review, so no rebuild.
+- Typecheck clean in backend and frontend. `prisma validate` passes.
+- Backend 1406/1406 (87 suites). Frontend 140/140. Mobile 98/98. E2E 1/1.
+- `prisma migrate status`: up to date (28).
+- Jest printed "A worker process has failed to exit gracefully" after an otherwise green run. It doesn't name a suite and wasn't traced; the one Phase 4 spec that opens a server (the route test) closes it in `afterAll`.
+- Boot: a second backend wasn't started (it shares Redis and queued SMS with the user's watch-mode instance). The e2e test boots the real `AppModule` from the current source, so DI resolves. The fix changes no module wiring.
+
+**Left open (low; not fixed)**
+- **O13. An empty status report is accepted.** `PATCH /facilities/:id/status` with `{}` passes validation (both fields are optional). It bumps `updated_at` and writes an audit row with empty new values, but doesn't stamp the receiving status. It's harmless, but a `400` would be cleaner.
+- **O14. An unmeasured distance scores as 15 km.** A hospital with an unverified location (or any hospital when the incident has no location) ranks above a verified one farther than 15 km, all else equal. The reason "Hospital location not verified" or "Incident location unknown" is shown, so the dispatcher can see why. Not measured against the real registry.
+- **O15. The monthly digest opens `/hospitals`.** The units it lists are managed on the fleet and resources pages, which the page doesn't link to.
+- **O16. The hourly reminder runs through the night**, every 6 h, for any stale hospital. This is intended (receiving status matters at night too), but hospitals may want quiet hours.

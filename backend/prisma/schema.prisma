@@ -375,6 +375,8 @@ model Facility {
   contact_number          String?                   @db.VarChar(20)
   emergency_contact       String?                   @db.VarChar(20)
   receiving_status        facility_receiving_status @default(UNKNOWN)
+  /// C8: set only when a receiving status is reported (PATCH /v1/facilities/:id/status).
+  receiving_status_updated_at DateTime?             @db.Timestamptz(6)
   capacity_total          Int?                      @db.SmallInt
   capacity_available      Int?                      @db.SmallInt
   has_emergency_room      Boolean?                  @default(false)

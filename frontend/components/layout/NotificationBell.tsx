@@ -69,6 +69,9 @@ function NotifRow({
     } else if (notif.event_type === 'SURGE_RECOMMENDED') {
       // MOD-52: the surge page shows the recommendation with its Activate button.
       router.push('/operations/surge');
+    } else if (notif.event_type === 'HOSPITAL_STATUS_STALE' || notif.event_type === 'REGISTRY_REVIEW_DUE') {
+      // MOD-39 (C8): the Hospitals page has the receiving status and the registry rows.
+      router.push('/hospitals');
     }
   }
 
@@ -135,6 +138,7 @@ export function NotificationBell() {
       });
       if (n.incidentId) toastLinks.current.set(id, incidentLink(n.incidentId));
       else if (n.type === 'SURGE_RECOMMENDED') toastLinks.current.set(id, '/operations/surge');
+      else if (n.type === 'HOSPITAL_STATUS_STALE' || n.type === 'REGISTRY_REVIEW_DUE') toastLinks.current.set(id, '/hospitals');
     });
   }, [toast]);
 

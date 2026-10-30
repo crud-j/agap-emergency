@@ -34,7 +34,7 @@ import {
   fetchAttachmentBlob, type IncidentDetail, type IncidentAttachment, type IncidentEvent, type IncidentTransport,
 } from '@/features/incidents/api';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
-import { useHospitals, useIncidentReferrals, useCreateReferral } from '@/features/hospitals/hooks';
+import { useHospitals, useIncidentReferrals, useCreateReferral, useHospitalRecommendations } from '@/features/hospitals/hooks';
 import type { Hospital } from '@/features/hospitals/api';
 import { isAtCapacity, receivingStatusBadge } from '@/features/hospitals/location';
 import { useIncidentAudit } from '@/features/audit/hooks';
@@ -595,6 +595,8 @@ function ReferralDialog({
   incident, open, onOpenChange,
 }: { incident: IncidentDetail; open: boolean; onOpenChange: (open: boolean) => void }): JSX.Element {
   const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
+  // C6: a ranking with reasons, loaded when the dialog opens. The dispatcher still picks.
+  const { data: ranked = [] } = useHospitalRecommendations(incident.id, { enabled: open });
   const create = useCreateReferral();
   const [hospitalId, setHospitalId] = useState('');
   const [dispatchId, setDispatchId] = useState(incident.dispatches[0]?.id ?? 'none');
@@ -637,8 +639,40 @@ function ReferralDialog({
             <DialogDescription>Send the receiving facility the incident details. Do not include patient names in notes.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            {ranked.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-bold uppercase tracking-wide text-agap-textSub">Suggested for this incident</p>
+                <ul className="max-h-56 space-y-1.5 overflow-y-auto">
+                  {ranked.slice(0, 5).map((r) => {
+                    const badge = receivingStatusBadge(r.effectiveStatus);
+                    return (
+                      <li key={r.id}>
+                        <button
+                          type="button"
+                          onClick={() => setHospitalId(r.id)}
+                          aria-pressed={hospitalId === r.id}
+                          className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                            hospitalId === r.id ? 'border-agap-green bg-agap-greenSoft/40' : 'border-slate-200 hover:bg-agap-surface'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate font-semibold text-agap-textMain">{r.name}</span>
+                            <Badge variant={badge.variant}>{badge.label}</Badge>
+                          </span>
+                          <span className="block text-xs text-agap-textSub">
+                            {r.distanceLabel}
+                            {r.reasons.length > 0 && <> · {r.reasons.join(' · ')}</>}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="text-[11px] text-agap-textSub">Ranked by straight-line distance, receiving status and ER. You choose the hospital.</p>
+              </div>
+            )}
             <Select value={hospitalId} onValueChange={setHospitalId}>
-              <SelectTrigger><SelectValue placeholder={hospitalsLoading ? 'Loading hospitals…' : 'Select hospital'} /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder={hospitalsLoading ? 'Loading hospitals…' : ranked.length > 0 ? 'Or choose any hospital' : 'Select hospital'} /></SelectTrigger>
               <SelectContent>{hospitals.map((hospital: Hospital) => <SelectItem key={hospital.id} value={hospital.id}>{hospital.name}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={dispatchId} onValueChange={setDispatchId}>

@@ -18,6 +18,8 @@ export interface Hospital {
   contact_number: string | null;
   emergency_contact: string | null;
   receiving_status: string;
+  /** When a receiving status was last reported (C8); null when it never was. */
+  receiving_status_updated_at: string | null;
   capacity_total: number | null;
   capacity_available: number | null;
   has_emergency_room: boolean | null;
@@ -171,6 +173,40 @@ export function fetchNearbyHospitals(lat: number, lng: number): Promise<Hospital
 
 export function fetchHospital(id: string): Promise<Hospital> {
   return api.get(`/hospitals/${id}`, getToken());
+}
+
+/** One ranked hospital for a referral (C6). A ranking only: the dispatcher picks. */
+export interface HospitalRecommendation {
+  id: string;
+  name: string;
+  receivingStatus: string;
+  /** The status the score used: a report older than 12 h counts as UNKNOWN. */
+  effectiveStatus: string;
+  statusAgeHours: number | null;
+  hasEmergencyRoom: boolean;
+  hasIcu: boolean;
+  capacityAvailable: number | null;
+  capacityTotal: number | null;
+  score: number;
+  reasons: string[];
+  distanceMeters: number | null;
+  distanceLabel: string;
+}
+
+/** GET /hospitals/recommendations?incidentId= (Dispatcher, Supervisor). Best first, at most 10. */
+export function fetchHospitalRecommendations(incidentId: string): Promise<HospitalRecommendation[]> {
+  return api.get(`/hospitals/recommendations?incidentId=${incidentId}`, getToken());
+}
+
+/** A receiving status / beds report (C8): what PATCH /facilities/:id/status takes. */
+export interface FacilityStatusBody {
+  receivingStatus?: string;
+  capacityAvailable?: number;
+}
+
+/** Dispatcher/Supervisor for any facility; a Hospital User for their own organization's. */
+export function updateFacilityStatus(id: string, body: FacilityStatusBody): Promise<unknown> {
+  return api.patch(`/facilities/${id}/status`, body, getToken());
 }
 
 export function fetchReferralsForHospital(hospitalId: string): Promise<HospitalReferral[]> {

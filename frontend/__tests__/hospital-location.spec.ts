@@ -7,6 +7,7 @@ import {
   locationStatusBadge,
   parseCoordinate,
   readCoordinates,
+  receivingStatusAge,
   roundCoordinate,
 } from '@/features/hospitals/location';
 
@@ -122,6 +123,22 @@ describe('hospital location (MOD-39)', () => {
         latitude: point?.latitude ?? null,
         longitude: point?.longitude ?? null,
       })).toBe(expected);
+    });
+  });
+
+  // C8: the age shown next to the receiving status; past 12 h the ranking treats it as unknown.
+  describe('receiving status age', () => {
+    const NOW = Date.parse('2026-10-30T12:00:00Z');
+    const ago = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
+    it.each([
+      [null, 'Never reported', true],
+      [ago(0.5), 'Updated within the hour', false],
+      [ago(7), 'Updated 7 h ago', false],
+      [ago(12), 'Updated 12 h ago', false],
+      [ago(12.1), 'Updated 12 h ago', true],
+      [ago(72), 'Updated 3 days ago', true],
+    ])('%s → %s (stale %s)', (updatedAt, label, stale) => {
+      expect(receivingStatusAge(updatedAt, NOW)).toEqual({ label, stale });
     });
   });
 });

@@ -13,12 +13,16 @@ import { CreateReferralDto } from './dto/create-referral.dto';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TransportService } from '../incidents/transport/transport.service';
-import { AuditAction, IncidentStatus, UserRole, isCoordinateInServiceArea, looksSwapped } from '@agap/shared';
+import { AuditAction, IncidentStatus, UserRole, haversineMeters, isCoordinateInServiceArea, looksSwapped } from '@agap/shared';
 import { activeMemberOrgIds, assertCanManageOrg } from '../organizations/org-scope';
 import { UNREVIEWED_STATUSES } from './destination-rules';
 import { toFacilityView } from './facility-view';
+import { needFor, scoreFacility } from './referral-ranking';
 
 const LOCATION_REVIEWERS: string[] = [UserRole.SYSTEM_ADMINISTRATOR, UserRole.SUPERVISOR];
+
+/** C6: how many ranked hospitals the referral dialog shows. */
+const RECOMMENDATION_LIMIT = 10;
 
 @Injectable()
 export class HospitalsService {
@@ -79,6 +83,64 @@ export class HospitalsService {
       distanceMeters: Math.round(Number(row.distance_meters)),
       distanceKind: 'STRAIGHT_LINE' as const,
     }));
+  }
+
+  /**
+   * C6: active hospitals ranked for an incident's referral, best first, with reasons. Only
+   * hospitals the dispatcher's referral list shows, and only facility data (no patient
+   * data). Distance is straight-line from a VERIFIED hospital location, as in findNearby.
+   * The dispatcher still picks (CLAUDE.md rule 8).
+   */
+  async recommendations(incidentId: string, actor: ReferralActor, now = new Date()) {
+    const incident = await this.prisma.incident.findUnique({
+      where: { id: incidentId },
+      select: { category: true, priority: true, incident_locations: { select: { latitude: true, longitude: true } } },
+    });
+    if (!incident) throw new NotFoundException('Incident not found');
+    const need = needFor(incident);
+    const at = incident.incident_locations;
+    const origin = at?.latitude != null && at.longitude != null ? { lat: Number(at.latitude), lng: Number(at.longitude) } : null;
+
+    const facilities = await this.prisma.facility.findMany({
+      where: { facility_type: 'HOSPITAL', is_active: true, ...(await this.reviewVisibility(actor, false)) },
+      select: {
+        id: true, name: true, receiving_status: true, receiving_status_updated_at: true,
+        has_emergency_room: true, has_icu: true, capacity_available: true, capacity_total: true,
+        latitude: true, longitude: true, location_status: true,
+      },
+    });
+
+    const ranked = facilities.map((f) => {
+      const located = f.location_status === 'VERIFIED' && f.latitude != null && f.longitude != null;
+      const meters = origin && located
+        ? haversineMeters(origin.lat, origin.lng, Number(f.latitude), Number(f.longitude))
+        : null;
+      const result = scoreFacility(f, need, meters === null ? null : meters / 1000, now);
+      const reasons = [...result.reasons];
+      if (!origin) reasons.push('Incident location unknown');
+      else if (!located) reasons.push('Hospital location not verified');
+      return {
+        id: f.id,
+        name: f.name,
+        receivingStatus: f.receiving_status,
+        effectiveStatus: result.effectiveStatus,
+        statusAgeHours: result.statusAgeHours,
+        hasEmergencyRoom: !!f.has_emergency_room,
+        hasIcu: !!f.has_icu,
+        capacityAvailable: f.capacity_available,
+        capacityTotal: f.capacity_total,
+        score: result.score,
+        reasons,
+        distanceMeters: meters === null ? null : Math.round(meters),
+        distanceLabel: result.distanceLabel,
+      };
+    });
+
+    ranked.sort((a, b) =>
+      b.score - a.score
+      || (a.distanceMeters ?? Infinity) - (b.distanceMeters ?? Infinity)
+      || a.name.localeCompare(b.name));
+    return ranked.slice(0, RECOMMENDATION_LIMIT);
   }
 
   async findById(id: string) {

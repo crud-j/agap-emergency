@@ -17,7 +17,10 @@ import {
   verifyHospitalLocation,
   resolveHospitalLocation,
   setHospitalActive,
+  fetchHospitalRecommendations,
+  updateFacilityStatus,
   type CreateHospitalBody,
+  type FacilityStatusBody,
   type CreateReferralBody,
   type ResolveLocationBody,
   type SetHospitalActiveBody,
@@ -63,6 +66,30 @@ export function useHospital(id: string | null) {
     queryKey: ['hospital', id],
     queryFn: () => fetchHospital(id!),
     enabled: !!id,
+  });
+}
+
+/** C6: hospitals ranked for the incident's referral, with reasons (the dispatcher picks). */
+export function useHospitalRecommendations(incidentId: string | null, opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['hospital-recommendations', incidentId],
+    queryFn: () => fetchHospitalRecommendations(incidentId!),
+    enabled: !!incidentId && (opts?.enabled ?? true),
+    staleTime: 30_000,
+  });
+}
+
+/** C8: report a receiving status (and beds). Refreshes the registry and the rankings. */
+export function useUpdateFacilityStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: FacilityStatusBody }) => updateFacilityStatus(id, body),
+    onSuccess: (_result, { id }) => {
+      qc.invalidateQueries({ queryKey: ['hospitals'] });
+      qc.invalidateQueries({ queryKey: ['hospital', id] });
+      qc.invalidateQueries({ queryKey: ['facilities'] });
+      qc.invalidateQueries({ queryKey: ['hospital-recommendations'] });
+    },
   });
 }
 

@@ -25,6 +25,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
 import { UpdateHospitalDto } from './dto/update-hospital.dto';
 import { NearbyQueryDto } from './dto/nearby-query.dto';
+import { RecommendationsQueryDto } from './dto/recommendations-query.dto';
 import { SetLocationDto } from './dto/set-location.dto';
 import { VerifyLocationDto } from './dto/verify-location.dto';
 import { SetActiveDto } from './dto/set-active.dto';
@@ -66,6 +67,18 @@ export class HospitalsController {
   @ApiOperation({ summary: 'List nearby hospitals' })
   async findNearby(@Query() query: NearbyQueryDto) {
     return this.hospitalsService.findNearby(query.lat, query.lng, query.limit);
+  }
+
+  /**
+   * C6: hospitals ranked for an incident's referral, with reasons. Declared before
+   * `@Get(':id')`, which would otherwise take "recommendations" as a hospital ID.
+   */
+  @Get('recommendations')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Hospitals ranked for an incident referral (the dispatcher picks)' })
+  async recommendations(@Query() query: RecommendationsQueryDto, @Request() req: { user: ReferralActor }) {
+    return this.hospitalsService.recommendations(query.incidentId, req.user);
   }
 
   @Get('referrals/:refId')
