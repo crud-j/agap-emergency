@@ -19,6 +19,8 @@ import { AnalyticsProcessor } from './processors/analytics.processor';
 import { AnalyticsCronService } from './analytics-cron.service';
 import { EtaRefreshProcessor } from './processors/eta-refresh.processor';
 import { AnnouncementPushProcessor } from './processors/announcement-push.processor';
+import { AiAssistModule } from '../ai-assist/ai-assist.module';
+import { AiAssistProcessor } from './processors/ai-assist.processor';
 
 @Module({
   imports: [
@@ -31,6 +33,7 @@ import { AnnouncementPushProcessor } from './processors/announcement-push.proces
     MapsModule,
     AnalyticsModule,
     BarangayCoordinationModule,
+    AiAssistModule,
     ScheduleModule.forRoot(),
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }),
@@ -41,6 +44,7 @@ import { AnnouncementPushProcessor } from './processors/announcement-push.proces
     BullModule.registerQueue({ name: QUEUE_NAMES.LOCATION_PROCESSING }),
     BullModule.registerQueue({ name: QUEUE_NAMES.ANALYTICS_AGGREGATION }),
     BullModule.registerQueue({ name: QUEUE_NAMES.AUDIT_PROCESSING }),
+    BullModule.registerQueue({ name: QUEUE_NAMES.AI_ASSIST }),
   ],
   providers: [
     NotificationProcessor,
@@ -51,6 +55,7 @@ import { AnnouncementPushProcessor } from './processors/announcement-push.proces
     AnalyticsCronService,
     EtaRefreshProcessor,
     AnnouncementPushProcessor,
+    AiAssistProcessor,
   ],
 })
 export class JobsModule {}

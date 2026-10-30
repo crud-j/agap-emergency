@@ -14,6 +14,13 @@ export interface CallbackActor {
   role: string;
 }
 
+/** Set when a dispatcher accepted an AI reading of a free-text SMS reply (AI Assist). */
+export interface SmsReportOptions {
+  actorId?: string;
+  actorRole?: string;
+  aiSuggestionId?: string;
+}
+
 /** The incident has no barangay notice, or the contact is not one of its barangay's. */
 export class BarangayCallbackNotFoundError extends Error {}
 
@@ -140,23 +147,27 @@ export class BarangayCallbackService {
   /**
    * A barangay SMS reply (Phase 5) that BarangayReplyService has already matched to this
    * open notice. Recorded exactly like a status-page tap. Never changes incident status.
+   * `opts` is set when a dispatcher accepted an AI reading of a free-text reply (AI Assist):
+   * the report is then recorded under that dispatcher, with the suggestion ID.
    */
-  async reportBySms(notice: LinkedNotice, status: BarangayLinkStatus): Promise<void> {
+  async reportBySms(notice: LinkedNotice, status: BarangayLinkStatus, opts?: SmsReportOptions): Promise<void> {
     if (notice.closed_at !== null) throw new BarangayCallbackRefusedError('This case is closed.');
-    if (!(await this.applyBarangayReport(notice, status, 'SMS_REPLY'))) {
+    if (!(await this.applyBarangayReport(notice, status, 'SMS_REPLY', opts))) {
       throw new BarangayCallbackNotFoundError('Incident not found');
     }
   }
 
   /**
    * Records a report the barangay sent itself (status page or SMS reply): no logged-in
-   * user. Repeating the current status is a no-op, so a mistaken report is corrected by
-   * sending the right one. False when the incident no longer exists.
+   * user, unless a dispatcher accepted an AI reading of the reply (`opts`). Repeating the
+   * current status is a no-op, so a mistaken report is corrected by sending the right one.
+   * False when the incident no longer exists.
    */
   private async applyBarangayReport(
     notice: LinkedNotice,
     status: BarangayLinkStatus,
     source: 'LINK' | 'SMS_REPLY',
+    opts?: SmsReportOptions,
   ): Promise<boolean> {
     const incident = await this.prisma.incident.findUnique({
       where: { id: notice.incident_id },
@@ -171,22 +182,25 @@ export class BarangayCallbackService {
         last_report: status,
         last_report_source: source,
         last_report_at: new Date(),
-        last_report_by_user_id: null,
+        last_report_by_user_id: opts?.actorId ?? null,
       },
     });
+    const actor = opts?.actorId ? { id: opts.actorId, role: opts.actorRole ?? null } : null;
     await this.timeline(
       notice.incident_id,
-      null,
-      `Brgy ${notice.barangay.name} via ${source === 'LINK' ? 'link' : 'SMS reply'}: ${OUTCOME_LABEL[status]}.`,
+      actor,
+      `Brgy ${notice.barangay.name} via ${source === 'LINK' ? 'link' : 'SMS reply'}: ${OUTCOME_LABEL[status]}.` +
+        (opts?.aiSuggestionId ? ' (AI reading of a free-text reply, accepted by the dispatcher)' : ''),
     );
     await this.audit.log({
       action: AuditAction.UPDATE,
+      ...(opts?.actorId && { actorId: opts.actorId }),
       entityType: 'incident_barangay_notice',
       entityId: notice.id,
       moduleId: 'MOD-34',
       incidentId: notice.incident_id,
       oldValues: { last_report: notice.last_report },
-      newValues: { last_report: status, source },
+      newValues: { last_report: status, source, ...(opts?.aiSuggestionId && { aiSuggestionId: opts.aiSuggestionId }) },
     });
     if (status === 'NEEDS_BACKUP') await this.escalate(notice.incident_id, notice.barangay.name, incident, undefined);
     await this.notify.emitUpdated(notice.id);
@@ -333,7 +347,11 @@ export class BarangayCallbackService {
   }
 
   /** Same pattern as DispatchService.submitTriage: from = to = current status, with notes. */
-  private async timeline(incidentId: string, actor: CallbackActor | null, notes: string): Promise<void> {
+  private async timeline(
+    incidentId: string,
+    actor: { id: string; role: string | null } | null,
+    notes: string,
+  ): Promise<void> {
     const incident = await this.prisma.incident.findUnique({
       where: { id: incidentId },
       select: { status: true },

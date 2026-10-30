@@ -8,6 +8,8 @@ export const QUEUE_NAMES = {
   LOCATION_PROCESSING: 'location-processing',
   ANALYTICS_AGGREGATION: 'analytics-aggregation',
   AUDIT_PROCESSING: 'audit-processing',
+  /** AI Assist (AI_ASSIST_PLAN): one job per suggestion, e.g. `reply-<inboundId>`. */
+  AI_ASSIST: 'ai-assist',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

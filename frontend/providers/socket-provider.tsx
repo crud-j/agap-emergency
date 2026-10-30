@@ -20,6 +20,7 @@ import type {
   IncidentTransportUpdatedPayload,
   SurgeRecommendedPayload,
   SurgeTriageTagUpdatedPayload,
+  AiSuggestionCreatedPayload,
 } from '@agap/shared';
 import type { IncidentListItem, IncidentTransport } from '@/features/incidents/api';
 import type { LatestUnitPosition, LiveResponderPosition } from '@/features/map/api';
@@ -142,9 +143,20 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           qc.invalidateQueries({ queryKey: ['incident-barangay', incidentId] });
           qc.invalidateQueries({ queryKey: ['incident', incidentId] });
           qc.invalidateQueries({ queryKey: ['incidents'] });
+          // An accepted AI suggestion lands here too: drop its card on every screen.
+          qc.invalidateQueries({ queryKey: ['ai-suggestions', incidentId] });
         });
       },
     );
+
+    // ─── ai.suggestion_created (AI Assist, C4) ───────────────────────────────
+    // A free-text barangay reply was read: the drawer's Barangay tab shows the card.
+    const offAiSuggestion = onIncidentEvent<AiSuggestionCreatedPayload>('ai.suggestion_created', ({ incidentId }) => {
+      if (!incidentId) return;
+      startTransition(() => {
+        qc.invalidateQueries({ queryKey: ['ai-suggestions', incidentId] });
+      });
+    });
 
     // ─── surge.* (MOD-52) ────────────────────────────────────────────────────
     // A recommendation also writes each Supervisor's in-app notice: refresh it so the
@@ -430,6 +442,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       offStatus();
       offCreated();
       offBarangay();
+      offAiSuggestion();
       offSurgeRecommended();
       offTriageTag();
       offUpdated();

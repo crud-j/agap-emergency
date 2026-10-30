@@ -144,7 +144,7 @@ describe('BarangayReplyService: STOP before barangay handling', () => {
       barangay_contacts: {
         findMany: jest.fn(async ({ where }: any) => (contacts[where.phone_e164] ?? []).map((barangay_id) => ({ barangay_id }))),
       },
-      incident_barangay_notices: { findFirst: jest.fn().mockResolvedValue(null) },
+      incident_barangay_notices: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     };
     const config: any = { get: jest.fn((k: string) => env[k]) };
     const links: any = { lettersMatch: jest.fn() };
@@ -176,6 +176,7 @@ describe('BarangayReplyService: STOP before barangay handling', () => {
     expect(stored(b.prisma)).toMatchObject({ outcome: 'OPT_OUT', notice_id: null, parsed_command: null, from_phone_e164: SUBSCRIBER });
     expect(parse).not.toHaveBeenCalled();
     expect(b.prisma.incident_barangay_notices.findFirst).not.toHaveBeenCalled();
+    expect(b.prisma.incident_barangay_notices.findMany).not.toHaveBeenCalled();
     expect(b.callbacks.reportBySms).not.toHaveBeenCalled();
     expect(b.notify.emitUpdated).not.toHaveBeenCalled();
     // The confirmation comes from optOutBySms; no barangay auto-reply on top.

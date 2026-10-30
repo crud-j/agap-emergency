@@ -1,6 +1,6 @@
 # Plan: AI Assist (Gemini) for the Incident Drawer
 
-> **Status:** Not started (planned 2026-10-21; scope reviewed 2026-10-29; provider changed to Gemini 2026-10-30).
+> **Status:** Phases 1–2 built 2026-10-30 through AUTOMATION_NEEDS_PLAN Phase 3 (off by default; live eval and walkthrough pending; free-tier key, so no real texts yet). Phase 3 not started. (Planned 2026-10-21; scope reviewed 2026-10-29; provider changed to Gemini 2026-10-30.)
 > **Provider change (2026-10-30):** the LLM is **Google Gemini** via `GEMINI_API_KEY` (in `backend/.env`), not OpenAI. Exact SDK, call shape and error codes are in [AUTOMATION_NEEDS_PLAN.md → Phase 3 → Provider](AUTOMATION_NEEDS_PLAN.md#provider-gemini-changed-2026-10-30). The existing OpenAI features (evidence review, hospital name assist) are separate and keep `OPENAI_API_KEY`.
 > **Scope review (2026-10-29):** [AGAP_Automation_and_LLM_Modernization_Roadmap.md](../AGAP_Automation_and_LLM_Modernization_Roadmap.md) sorted all 52 modules. Its result for this plan:
 > - **Phase 2** (barangay replies) is a real gap and is now the priority (roadmap item **C4**). Its precondition is met.
@@ -63,7 +63,8 @@ These come from the CLAUDE.md architectural rules:
 - [ ] **Account / tier.** The `GEMINI_API_KEY` must belong to a Google Cloud project for AGAP with **billing enabled (paid tier)** before any real incident or barangay text is sent. On the **free tier**, Google may use prompts and responses to improve its products, and human reviewers may read them. On the paid tier they aren't used for that. The free tier is fine for the synthetic eval fixtures only. Set a budget alert on the Cloud project. Budgets only alert, so `AI_ASSIST_DAILY_LIMIT` is the hard cap.
   - **2026-10-30: the current key is free tier.** Until it's paid tier, the AI runs only on the synthetic fixtures and demo texts from the team's own phones. Never on a real incident or a real barangay's reply. This box stays unticked until the key is paid tier.
 - [x] **Model (2026-10-30):** `gemini-3.8-flash`, chosen by the user. It's a Flash-class model with JSON output and a response schema. It's the exact ID in `GEMINI_MODEL`: never a preview model or a `-latest` alias (CLAUDE.md: no unbounded `latest`). Before the live eval, confirm the ID is in Google's model list as a stable model.
-- [ ] **Reply samples.** Write 30 or more realistic barangay replies in Filipino, English and Taglish, including typos and the reply codes, each with the expected label. Save them as `backend/test/ai-assist/fixtures/barangay-replies.json`. Phase 2 is measured against these.
+- [x] **Reply samples.** Write 30 or more realistic barangay replies in Filipino, English and Taglish, including typos and the reply codes, each with the expected label. Save them as `backend/test/ai-assist/fixtures/barangay-replies.json`. Phase 2 is measured against these.
+  - **2026-10-30:** 46 synthetic replies (5 exact codes, 41 free text, 11 asking for help), drafted and revised at the user's request; the user can still edit labels.
 - [x] **Provider (changed 2026-10-30):** Google Gemini, with `GEMINI_API_KEY` from `backend/.env`. *(Was OpenAI, decided 2026-10-29.)* The evidence review and hospital name assist keep using OpenAI and aren't part of this plan (confirmed by the user 2026-10-30: don't migrate them). `AiClientService` stays the only place that would change if the provider is revisited.
 
 ### Data sent to Gemini
@@ -156,12 +157,13 @@ model ai_suggestions {
 - `POST /v1/incidents/:id/ai-brief/refresh` (Phase 3) queues a fresh brief, at most one per minute.
 
 **Done when:**
-- [ ] With `AI_ASSIST_ENABLED=false`, no job is queued and no Gemini call is made (unit test with a mocked client).
-- [ ] With the flag on and a bad key, incident creation still succeeds and a `FAILED` row is stored (`AUTH`).
-- [ ] A simulated timeout stores `FAILED` with an `error`, and nothing throws. So do a 429 (`RATE_LIMITED`) and a safety block (`BLOCKED`).
-- [ ] `redactForAi` unit tests cover `09171234567`, `+639171234567`, `0917-123-4567`, emails, and leave coordinates out.
-- [ ] Output that fails the Zod schema is stored as `FAILED` and never shown.
-- [ ] The daily limit stops calls when reached.
+*(Built 2026-10-30 through AUTOMATION_NEEDS_PLAN Phase 3; tests in `backend/test/ai-assist/`.)*
+- [x] With `AI_ASSIST_ENABLED=false`, no job is queued and no Gemini call is made (unit test with a mocked client).
+- [x] With the flag on and a bad key, incident creation still succeeds and a `FAILED` row is stored (`AUTH`). *(Unit-tested: incident creation never calls AI Assist, and a bad-key answer stores `FAILED`/`AUTH`. Live check pending.)*
+- [x] A simulated timeout stores `FAILED` with an `error`, and nothing throws. So do a 429 (`RATE_LIMITED`) and a safety block (`BLOCKED`).
+- [x] `redactForAi` unit tests cover `09171234567`, `+639171234567`, `0917-123-4567`, emails, and leave coordinates out.
+- [x] Output that fails the Zod schema is stored as `FAILED` and never shown.
+- [x] The daily limit stops calls when reached.
 
 ---
 
@@ -201,12 +203,13 @@ model ai_suggestions {
 **Evaluation:** `scripts/dev/eval-barangay-replies.js` runs the Phase 0 fixtures against the real Gemini API and prints accuracy, a confusion list, and the count of safety-blocked replies. Replies about injuries or blood can trip Gemini's safety filters; a block is stored as `FAILED`/`BLOCKED` and the raw text still shows.
 
 **Done when:**
+*(Built 2026-10-30 through AUTOMATION_NEEDS_PLAN Phase 3. The eval is left to the user: `node scripts\dev\eval-barangay-replies.js`, free tier, synthetic fixtures only.)*
 - [ ] Eval: **≥ 90%** correct on the fixtures, where `UNCLEAR` counts as correct for genuinely unclear samples, and **0** cases of `NEEDS_BACKUP` read as anything calm. A `BLOCKED` result counts as wrong. If any `NEEDS_BACKUP` fixture is blocked, record it and decide on the model's safety settings before going live.
-- [ ] An exact code (`OTW 4821`) never reaches Gemini (unit test).
-- [ ] A text from an unknown number never reaches Gemini.
-- [ ] Accepting writes the barangay report, the timeline note, and an audit row naming the dispatcher, and the incident status is unchanged.
-- [ ] Dismissing writes an audit row and changes nothing else.
-- [ ] With the AI off, the raw text still shows in the panel and the dispatcher can record the outcome by hand.
+- [x] An exact code (`OTW 4821`) never reaches Gemini (unit test).
+- [x] A text from an unknown number never reaches Gemini.
+- [x] Accepting writes the barangay report, the timeline note, and an audit row naming the dispatcher, and the incident status is unchanged.
+- [x] Dismissing writes an audit row and changes nothing else.
+- [x] With the AI off, the raw text still shows in the panel and the dispatcher can record the outcome by hand. *(The reply is linked to the single open case and read by the existing message log; the drawer walkthrough is pending.)*
 
 ---
 

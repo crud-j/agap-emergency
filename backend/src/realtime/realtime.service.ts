@@ -10,6 +10,7 @@ import {
   BARANGAY_EVENTS,
   RESOURCE_EVENTS,
   SURGE_EVENTS,
+  AI_EVENTS,
   IncidentStatus,
 } from '@agap/shared';
 import type {
@@ -33,6 +34,7 @@ import type {
   ResponderRouteUpdatedPayload,
   SurgeRecommendedPayload,
   SurgeTriageTagUpdatedPayload,
+  AiSuggestionCreatedPayload,
 } from '@agap/shared';
 
 /**
@@ -319,6 +321,15 @@ export class RealtimeService {
   triageTagUpdated(payload: SurgeTriageTagUpdatedPayload): void {
     this.safe('triageTagUpdated', () => {
       this.gateway.emitToOps(SURGE_EVENTS.TRIAGE_TAG_UPDATED, payload);
+    });
+  }
+
+  // ── AI Assist ─────────────────────────────────────────────────────────────
+
+  /** An AI suggestion was stored. Ops room only; IDs and status, the drawer refetches. */
+  aiSuggestionCreated(payload: AiSuggestionCreatedPayload): void {
+    this.safe('aiSuggestionCreated', () => {
+      this.gateway.emitToOps(AI_EVENTS.SUGGESTION_CREATED, payload);
     });
   }
 

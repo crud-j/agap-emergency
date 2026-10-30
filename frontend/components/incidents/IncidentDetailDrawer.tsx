@@ -22,6 +22,7 @@ import {
 } from '@/features/incidents/hooks';
 import { usePriorityRecommendation, useSetIncidentPriority } from '@/features/dispatch/hooks';
 import { useIncidentBarangay } from '@/hooks/useBarangay';
+import { useAiSuggestions } from '@/hooks/useAiAssist';
 import { categoryIcon, formatAffectedCount, titleCase, timeAgo } from '@/lib/incident-format';
 import {
   REPORTER_STATUS_LABELS,
@@ -187,9 +188,13 @@ export function IncidentDetailBody({ incident }: { incident: IncidentDetail }): 
   );
 }
 
-/** True when the barangay needs the dispatcher: asked for backup, or has gone quiet. */
+/**
+ * True when the barangay needs the dispatcher: asked for backup, has gone quiet, or texted
+ * a free-text reply whose AI reading is waiting for review (AI Assist).
+ */
 function useBarangayAttention(incidentId: string): boolean {
   const { data } = useIncidentBarangay(incidentId);
+  const { data: suggestions } = useAiSuggestions(incidentId);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 15_000);
@@ -197,7 +202,8 @@ function useBarangayAttention(incidentId: string): boolean {
   }, []);
   const notice = data?.notice;
   if (!notice || notice.closed_at) return false;
-  return notice.last_report === 'NEEDS_BACKUP' || barangayHasNotReported(notice, now);
+  const pendingAi = (suggestions ?? []).some((s) => s.status === 'PENDING_REVIEW');
+  return notice.last_report === 'NEEDS_BACKUP' || barangayHasNotReported(notice, now) || pendingAi;
 }
 
 function SummaryHeader({ incident }: { incident: IncidentDetail }): JSX.Element {

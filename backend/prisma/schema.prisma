@@ -103,6 +103,8 @@ model User {
   barangay_notice_reports                                                  incident_barangay_notices[]    @relation("BarangayNoticeReporter")
   surge_river_readings                                                     surge_settings[]
   reviewed_risk_area_proposals                                             risk_area_proposals[]
+  requested_ai_suggestions                                                 ai_suggestions[]               @relation("AiSuggestionRequester")
+  reviewed_ai_suggestions                                                  ai_suggestions[]               @relation("AiSuggestionReviewer")
 
   @@index([barangay], map: "idx_users_barangay")
   @@index([created_at(sort: Desc)], map: "idx_users_created_at")
@@ -216,6 +218,7 @@ model Incident {
   created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
   updated_at                   DateTime                       @default(now()) @db.Timestamptz(6)
   duplicate_of_id              String?                        @db.Uuid
+  ai_suggestions               ai_suggestions[]
   alert_triggers               alert_triggers[]
   audit_logs                   AuditLog[]
   dispatches                   dispatches[]
@@ -1256,6 +1259,34 @@ model risk_area_proposals {
   @@index([area_boundary], map: "idx_risk_area_proposals_boundary", type: Gist)
 }
 
+/// AI Assist (AI_ASSIST_PLAN Phase 1; AUTOMATION_NEEDS_PLAN Phase 3, C4): one row per
+/// Gemini call, whatever the outcome. A suggestion a dispatcher accepts or dismisses;
+/// it never changes an incident by itself. `error` holds a short code, never a message.
+model ai_suggestions {
+  id              String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id     String?              @db.Uuid
+  subject_type    String?              @db.VarChar(40)
+  subject_id      String?              @db.Uuid
+  kind            ai_suggestion_kind
+  status          ai_suggestion_status
+  input_hash      String               @db.VarChar(64)
+  output          Json?
+  model           String               @db.VarChar(80)
+  latency_ms      Int?
+  error           String?              @db.VarChar(40)
+  requested_by_id String?              @db.Uuid
+  reviewed_by_id  String?              @db.Uuid
+  reviewed_at     DateTime?            @db.Timestamptz(6)
+  created_at      DateTime             @default(now()) @db.Timestamptz(6)
+  incidents       Incident?            @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  requested_by    User?                @relation("AiSuggestionRequester", fields: [requested_by_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  reviewed_by     User?                @relation("AiSuggestionReviewer", fields: [reviewed_by_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([incident_id, kind, created_at(sort: Desc)], map: "idx_ai_suggestions_incident_kind")
+  @@index([subject_type, subject_id], map: "idx_ai_suggestions_subject")
+  @@index([created_at], map: "idx_ai_suggestions_created")
+}
+
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model role_permissions {
   id            String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
@@ -1994,6 +2025,24 @@ enum risk_area_proposal_status {
   PENDING
   APPROVED
   DISMISSED
+}
+
+enum ai_suggestion_kind {
+  BARANGAY_REPLY
+  CASE_BRIEF
+  HANDOVER_DRAFT
+  CLOSURE_DRAFT
+  ANNOUNCEMENT_DRAFT
+  ANALYTICS_NARRATIVE
+}
+
+enum ai_suggestion_status {
+  PENDING_REVIEW
+  ACCEPTED
+  DISMISSED
+  INFO
+  FAILED
+  SUPERSEDED
 }
 
 enum sync_status {

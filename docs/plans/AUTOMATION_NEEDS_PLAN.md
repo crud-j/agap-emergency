@@ -1,6 +1,6 @@
 # Plan: List C Automation (C1–C8, incl. A1)
 
-> **Status:** Phase 1 implemented and reviewed 2026-10-30 (no defects; device checks pending). Phase 2 implemented and reviewed 2026-10-30 (same-session review, 1 fix; independent review, 2 fixes; walkthroughs pending). Phases 3–4 not started.
+> **Status:** Phase 1 implemented and reviewed 2026-10-30 (no defects; device checks pending). Phase 2 implemented and reviewed 2026-10-30 (same-session review, 1 fix; independent review, 2 fixes; walkthroughs pending). Phase 3 implemented and reviewed 2026-10-30 (review: 3 fixes; live eval and walkthroughs pending; free-tier key, so AI stays off for real texts). Phase 4 not started.
 > **LLM provider (changed 2026-10-30):** Phase 3 uses **Google Gemini** (`GEMINI_API_KEY`, already in `backend/.env`), not OpenAI. The existing OpenAI features (evidence review, hospital name assist) keep `OPENAI_API_KEY` and are not touched. See [Phase 3 → Provider](#provider-gemini-changed-2026-10-30).
 > **Run it:** paste the phase's prompt from [AUTOMATION_NEEDS_PROMPTS.md](AUTOMATION_NEEDS_PROMPTS.md) into a fresh session, then run its review prompt (Prompt R). Or use `/automation-plan <1-4>`; `/automation-plan status` shows progress. That file's **Corrections** table (K1–K11) overrides this plan where they differ.
 > **Sources:** [AGAP_Automation_and_LLM_Modernization_Roadmap.md](../AGAP_Automation_and_LLM_Modernization_Roadmap.md) §2.3 and §4 (what and why), [AI_ASSIST_PLAN.md](AI_ASSIST_PLAN.md) Phases 1–2 (C4 detail). **Where this plan and those docs differ, this plan wins**: it was checked against the code on 2026-10-30. The roadmap §5 code sketches are written for OpenAI (`responses.parse`, `zodTextFormat`, `store: false`); use them for structure only and follow this plan's Gemini section for the provider calls.
@@ -191,7 +191,7 @@ If there's no model answer, leave `GEMINI_MODEL` blank. There is no fallback mod
 
   Record all of this in the progress log.
 - **OpenAI features:** the evidence review and the hospital name assist **stay on OpenAI**. Don't change them or their env vars.
-- **Fixtures:** still to confirm. Ask before using them.
+- **Fixtures (2026-10-30):** drafted (39), then revised at the user's request ("optimize it and fix it, choose what you recommend") to 46: 5 exact codes and 41 free-text replies, with an `acceptable` list for two-way replies and safety cases (prompt injection, a forwarded alert, "can't get out", "done but someone is still on a roof"). The user can still edit labels; the eval re-reads the file.
 
 ### Provider: Gemini (changed 2026-10-30)
 
@@ -256,12 +256,12 @@ Decided by the user on 2026-10-30. This replaces every OpenAI detail in AI_ASSIS
    - with `AI_ASSIST_ENABLED=false`, no job is queued and incident creation and barangay handling are unchanged.
 
 **Done when:**
-- [ ] The tests pass and the full suite is green.
-- [ ] With the flag off: no Gemini client is created, and the unparsed text appears in the drawer for a single-notice barangay.
-- [ ] With the flag on and a bad key: a `FAILED` row (`AUTH`) is stored and nothing else changes.
-- [ ] `@google/genai` is pinned to an exact version and imported only by `ai-client.service.ts`.
-- [ ] The AI plan Phase 1 and Phase 2 checkboxes are ticked, except the live eval, which is left to the user and recorded in the progress log.
-- [ ] 100% doc updated: A1 row (free-text replies shown and AI-read, walkthrough pending, eval pending).
+- [x] The tests pass and the full suite is green.
+- [ ] With the flag off: no Gemini client is created, and the unparsed text appears in the drawer for a single-notice barangay. *(Unit-tested: no client, and the reply is stored with the notice so the existing message log shows it. The drawer check is a walkthrough.)*
+- [ ] With the flag on and a bad key: a `FAILED` row (`AUTH`) is stored and nothing else changes. *(Unit-tested with a mocked 400 "API key not valid" and 401/403. The live check needs the flag on in `backend/.env`.)*
+- [x] `@google/genai` is pinned to an exact version and imported only by `ai-client.service.ts`.
+- [x] The AI plan Phase 1 and Phase 2 checkboxes are ticked, except the live eval, which is left to the user and recorded in the progress log.
+- [x] 100% doc updated: A1 row (free-text replies shown and AI-read, walkthrough pending, eval pending).
 
 ---
 
@@ -333,7 +333,7 @@ Fill in one row when a phase ends. Put details and deviations below the table, u
 |---|---|---|---|---|
 | 1 | 2026-10-30 | Done and reviewed (no defects). Backend 1227/1227, mobile 98/98, e2e 1/1; migration applied | Opt-out wired into `BarangayCallbackModule` (where `BarangayReplyService` lives), not `BarangayCoordinationModule`; poller spec's "off" cases also set `SMS_OPT_OUT_ENABLED=false`; boot checked on the already-running watch-mode backend | Push on a backgrounded responder phone; STOP from a real phone; Unsubscribe button on a phone |
 | 2 | 2026-10-30 | Done and reviewed twice: same-session review (1 fix: DRAFT excluded) and independent review (2 fixes: assessment-filed triage tags now live; hidden prefilled barangay chip). Backend 1227 → 1264/1264 (79 suites), frontend 134/134, mobile typecheck clean, e2e 1/1; 2 migrations applied | Barangay match also uses the polygon-matched barangay notice; boundary-less risk areas cover their barangay; recently dismissed proposals aren't re-proposed; `GET river-level` added; `surge_settings` has a UUID id + `singleton`; proposals have `updated_at` | Surge banner walkthrough (the detector itself ran on the dev database in a rolled-back transaction); two-browser tag check, including a tag filed from the responder app's assessment; approve a proposal in the UI; MDRRMO threshold values |
-| 3 | | | | Live eval with the real Gemini key (free tier, synthetic fixtures only); paid-tier key + DPO note in AI plan Phase 0 before real texts |
+| 3 | 2026-10-30 | Done and reviewed (3 fixes: a help-request reading is never superseded, supersede + insert in one transaction; one `NOTICE_INCLUDE`; a misplaced doc comment). Backend 1264 → 1360/1360 (79 → 84 suites), frontend 134/134, mobile 98/98, e2e 1/1; migration applied | `@google/genai` pinned to 2.30.0 (a 2-week-old release), not the day-old 2.32.0; SDK types via a type-only import + runtime `require` of its CommonJS build; `BarangayCallbackService` exported from `BarangayCallbackModule` (where it lives), which AiAssistModule imports; `reportBySms` opts also carry `actorRole`; the English reading is cut at 120, not rejected; a newer reading supersedes open older ones | Live eval with the real Gemini key (free tier, synthetic fixtures only); confirm `gemini-3.8-flash` and its thinking level; bad-key check; drawer walkthrough; paid-tier key + DPO sign-off before any real barangay text |
 | 4 | | | | Fleet badge and referral ranking walkthrough |
 
 ### Phase 1 — 2026-10-30
@@ -608,3 +608,181 @@ A fresh session that didn't build Phase 2. Scope: the Phase 2 files listed above
 - **O7. Rule counts aren't isolated per rule.** Only the notice step (`recommend`) has its own `try/catch`. If one rule's `incident.count` throws, that tick skips the remaining rules and the river check (the run's outer catch logs it). The first build note ("each rule has its own `try/catch`") overstates this. A count failure is almost always a database outage, which would fail the other rules anyway.
 - **O8. A stale comment.** `RiskIntelligenceService.deleteArea` says "nothing else references risk areas". `risk_area_proposals.risk_area_id` now does, with `ON DELETE SET NULL`, so the delete still works.
 - O1–O5 above still stand. The person/device checks are unchanged, apart from the seeded-burst check now done in a rolled-back transaction.
+
+### Phase 3 — 2026-10-30
+
+Run in the same session as the independent Phase 2 review and the commit `311eb7c` (not a fresh one), at the user's request. Baseline: backend suite green on `311eb7c` (exit 0; the same tree ran 1264/1264 earlier that day).
+
+**Free tier (recorded as the plan requires).** The `GEMINI_API_KEY` is a free-tier key. So:
+- `.env.example` keeps `AI_ASSIST_ENABLED=false`.
+- **Real barangay texts must not go to Gemini until the key is paid tier** and the DPO signs off (AI plan Phase 0). On the free tier Google may use prompts and responses to improve its products, and human reviewers may read them.
+- The eval runs on the synthetic fixtures only. In a demo, turn the flag on only with test texts from the team's own phones, never with a real incident or a real barangay's reply.
+- `RATE_LIMITED` failures under the free tier's per-minute limit are normal, not a bug.
+
+**Built**
+- **Step 1, show unparsed replies.** `BarangayReplyService.decide`: an `UNPARSED` reply from a known sender is linked to the one open notice of the sender's barangays (`singleOpenNotice`, `take: 2`, so zero or several open notices link nothing). The override phone counts every barangay's open notices. The inbound row stores `notice_id`, and `emitUpdated` refreshes the drawer's message log (it already reads by `notice_id`). The outcome stays `UNPARSED`; the auto-reply hint is unchanged.
+- **Step 2, foundation.**
+  - Env: `AI_ASSIST_ENABLED`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `AI_ASSIST_TIMEOUT_MS` (8000), `AI_ASSIST_DAILY_LIMIT` (500), each once in `config.validation.ts` and `.env.example`. Boot check: the flag on with no key or no model refuses to boot.
+  - `@google/genai` **2.30.0**, pinned exactly (`backend/package.json`).
+  - `backend/src/ai-assist/`:
+    - `ai-assist.flags.ts`: `aiAssistEnabled(config)` (K10);
+    - `ai-assist.jobs.ts`: the pure job contract (`reply-<inboundId>`, `BARANGAY_SMS_SUBJECT`);
+    - `ai-client.service.ts`: the only `@google/genai` importer. Client built on first call, `retryOptions.attempts: 1`, an `AbortController` timeout, `responseJsonSchema` + `temperature: 0`, a thinking setting per model generation, JSON parse + Zod check, error codes only. Daily limit per Philippine day; `DAILY_LIMIT` rows don't count;
+    - `redact.ts`: `redactForAi` (roadmap §5.4);
+    - `prompts/barangay-reply.prompt.ts`: the labels (`BARANGAY_LINK_STATUSES` + `UNCLEAR`), Zod schema, hand-written JSON schema and instructions;
+    - `ai-task-runner.service.ts`, `ai-suggestions.service.ts`, `ai-suggestions.controller.ts` and `ai-assist.module.ts`, registered in `app.module.ts`.
+  - Migration `20261030140000_ai_suggestions` (full kind and status enums, 3 indexes, FKs to incidents and users), plus the model in `schema.prisma`.
+  - `AI_ASSIST: 'ai-assist'` in `shared/src/constants/queue.constants.ts` (`.ts` only; shared rebuilt).
+  - `jobs/processors/ai-assist.processor.ts` (concurrency 1), registered with its queue in `jobs.module.ts`.
+  - `shared/src/events/ai.events.ts`: `ai.suggestion_created` (IDs and status only), plus `RealtimeService.aiSuggestionCreated` to the ops room.
+- **Step 3, trigger.** After the row is stored, only `UNPARSED` with a `notice_id` and `aiAssistEnabled` queues `barangay-reply` / `reply-<inboundId>` (`attempts: 1`), inside its own `try/catch`. Exact codes, unknown senders, opt-outs and unlinked replies never queue.
+- **Step 4, runner.**
+  - It sends only `redactForAi(body, 500)` with the instructions and both schemas.
+  - It skips a missing, non-`UNPARSED`, unlinked or closed-case reply, and a reply that already has a row.
+  - `UNCLEAR` or confidence < 0.6 → `INFO`; otherwise → `PENDING_REVIEW`; a failure → `FAILED` with its code.
+  - A new reading supersedes the case's open older ones (`SUPERSEDED`).
+  - It emits `ai.suggestion_created` and never throws.
+- **Step 5, accept and dismiss.**
+  - `reportBySms(notice, status, opts?)`. With `opts`, the report is recorded under the dispatcher: `last_report_by_user_id`, the timeline actor and the audit `actorId`, plus `aiSuggestionId` and a timeline note. Without `opts` nothing changes.
+  - Accept checks before anything is claimed. It's refused for a non-`PENDING_REVIEW` row (`INFO`, `FAILED`, `DISMISSED`, or already accepted) and for a closed notice. It then claims the row, calls `reportBySms` (so `NEEDS_BACKUP` still escalates), releases the claim if that fails, and audits (`ai_suggestion`, `MOD-46`).
+  - Dismiss works on `PENDING_REVIEW` or `INFO` rows and is audited.
+  - Routes, Dispatcher and Supervisor only: `GET /v1/incidents/:id/ai-suggestions`, `POST /v1/ai-suggestions/:sid/accept|dismiss`.
+- **Step 6, fixtures and eval.**
+  - `backend/test/ai-assist/fixtures/barangay-replies.json`: 46 replies (5 exact codes, 41 free text, 11 asking for help, 8 unclear), revised at the user's request.
+  - `scripts/dev/eval-barangay-replies.js` loads the backend's own TypeScript through `ts-node`, so the eval uses the same client, redaction, instructions and schema as the runner. It reads only `GEMINI_API_KEY` and `GEMINI_MODEL` (via `dotenv.parse`), never prints the key, waits 6.5 s between calls, retries a `RATE_LIMITED` call once after 65 s, and exits 1 if accuracy is under 90% or any help request reads as calm.
+  - **Not run against the real API.** Checked offline: the loading path works and the client returns `DISABLED` with the flag off.
+- **Step 7, web.**
+  - `frontend/hooks/useAiAssist.ts` (`useAiSuggestions`, `useAcceptSuggestion`, `useDismissSuggestion`).
+  - An "AI suggestion" card in `BarangayPanel.tsx` under the barangay status: *Barangay texted: "…" · AI reads this as **On scene** · "…"*, with Accept and Dismiss. `INFO` shows the English reading only, with no Accept. It renders nothing without rows.
+  - The Barangay tab's red dot also shows while a suggestion is `PENDING_REVIEW`.
+  - `socket-provider.tsx` handles `ai.suggestion_created`, and `barangay.notice_updated` also refreshes the suggestions, so an accepted card disappears on every screen.
+- **Step 8, tests** (`backend/test/ai-assist/`, `@google/genai` mocked; no test calls Gemini):
+  - `ai-client.spec.ts`: off in 4 ways, with no client built; the call shape; every error code (timeout, 429, 401/403, a bad-key 400, other 4xx/5xx, 3 safety blocks, 5 invalid outputs); the daily limit, including its filter; helpers.
+  - `barangay-reply-prompt.spec.ts`: redaction of the 5 phone forms, emails and coordinates; the JSON schema and Zod enums agree; the fixtures' coverage, that RULE fixtures are parsed by the rule parser, and that AI fixtures never are.
+  - `ai-task-runner.spec.ts`: redacted input only; `PENDING_REVIEW`, `INFO` and `FAILED` per code; the skip cases; idempotency; never throws.
+  - `ai-suggestions.spec.ts`: accept → `reportBySms` with the actor; accept twice, `INFO`, `FAILED`, a race and a closed case are all refused; the claim is released; dismiss; list; roles; `reportBySms` with opts keeps the escalation, and without opts is unchanged.
+  - `barangay-reply-linking.spec.ts`: the single-open-notice rule (one, several, none, two barangays, override); flag off → no job, and barangay handling unchanged; flag on → one `reply-<id>` job; no job for codes, unknown senders, several notices or opt-outs; a queue failure; the boot check.
+
+**Files**
+- New:
+  - `backend/src/ai-assist/{ai-assist.flags.ts,ai-assist.jobs.ts,ai-client.service.ts,redact.ts,ai-task-runner.service.ts,ai-suggestions.service.ts,ai-suggestions.controller.ts,ai-assist.module.ts,prompts/barangay-reply.prompt.ts}`
+  - `backend/src/jobs/processors/ai-assist.processor.ts`
+  - `backend/prisma/migrations/20261030140000_ai_suggestions/`
+  - `shared/src/events/ai.events.ts`
+  - `backend/test/ai-assist/{ai-client,barangay-reply-prompt,ai-task-runner,ai-suggestions,barangay-reply-linking}.spec.ts`
+  - `backend/test/ai-assist/fixtures/barangay-replies.json`
+  - `scripts/dev/eval-barangay-replies.js`
+  - `frontend/hooks/useAiAssist.ts`
+- Changed:
+  - `backend/package.json` and `pnpm-lock.yaml` (`@google/genai`), `pnpm-workspace.yaml` (`'@google/genai': false` under `allowBuilds`)
+  - `.env.example`, `backend/src/config/config.validation.ts`, `backend/prisma/schema.prisma`, `backend/src/app.module.ts`, `backend/src/jobs/jobs.module.ts`, `backend/src/realtime/realtime.service.ts`
+  - `backend/src/barangay-coordination/{barangay-reply.service.ts,barangay-callback.service.ts,barangay-callback.module.ts}`
+  - `shared/src/constants/queue.constants.ts`, `shared/src/events/{index.ts,websocket-event.types.ts}`
+  - `frontend/components/incidents/{BarangayPanel.tsx,IncidentDetailDrawer.tsx}`, `frontend/providers/socket-provider.tsx`
+  - `backend/test/barangay-coordination/barangay-reply.spec.ts` and `backend/test/announcements/sms-opt-out.spec.ts` (mocks only, see Deviations)
+  - `docs/plans/AI_ASSIST_PLAN.md` (checkboxes), `docs/100%ModulesFunctionalities+AdditionalModules.md` (A1 row)
+
+**Migration:** `20261030140000_ai_suggestions` applied with `prisma migrate deploy`; `prisma generate` run. `prisma migrate diff` from the database to the schema prints an empty migration (no drift).
+
+**Tests:** backend 1264 → 1360/1360 (79 → 84 suites). Frontend 134/134, mobile 98/98 (no new tests in either; both re-run because `shared` changed). E2E 1/1. Typecheck clean in backend, frontend and mobile.
+
+**Duplication inventory:** every Phase 3 artifact was **missing**: the `ai-assist/` files, `ai_suggestions` and its enums, `AI_ASSIST`, the `GEMINI_*`/`AI_ASSIST_*` env vars, `@google/genai`, `ai.suggestion_created`, `useAiAssist`, `aiAssistEnabled`, `redactForAi`, the eval script, the fixtures. Reused: `BARANGAY_LINK_STATUSES`, `reportBySms` (extended, not copied) and its NEEDS_BACKUP escalation, the message log's `notice_id` read, `NOTICE_INCLUDE`/`LinkedNotice`, `RealtimeService`, `AuditService`, `parseBarangayReply`, `useBarangay.ts` as the hook pattern, `BARANGAY_REPORT` labels in the card.
+
+**Self-checks:**
+- `from 'openai'`: 2 files (unchanged). `@google/genai`: 1 file (`ai-client.service.ts`), pinned without `^`/`~`.
+- Each new env var is defined once in each config file. `ScheduleModule.forRoot`: 1. `ai.suggestion_created` and `AI_ASSIST` are each defined once.
+- No other module's service is in `AiAssistModule`'s providers.
+- Secrets grep (§0 C pattern): 0. No code logs the key; the eval's one mention is its "set GEMINI_API_KEY" help line.
+- Guardrails: nothing in `ai-assist/` writes an incident, a dispatch or a notice; a report is recorded only on a dispatcher's Accept.
+- Only the redacted reply body goes to Gemini (no incident data, no phone number). The event carries IDs and status only.
+
+**Boot:** no second backend (the user's watch-mode backend holds port 3000 and Redis). It rebuilt every changed file (`dist` newer than `src`, with the final code). `/v1/health` returns 200, and `GET /v1/incidents/:id/ai-suggestions` and `POST /v1/ai-suggestions/:sid/accept` return 401 (mounted and guarded), so DI resolved with `AiAssistModule`. Its console isn't visible.
+
+**Deviations**
+- **SDK version:** 2.30.0 (published 2026-10-15) instead of the current 2.32.0 (published the day before). A release that has been out two weeks is the safer supply-chain choice for the package that holds the API key.
+- **pnpm build gate:** pnpm 12 refused the install because `@google/genai` has an install script. That script is `echo 'preinstall: no-op'` and the package ships `dist/`, so `pnpm-workspace.yaml` lists `'@google/genai': false` under `allowBuilds`, and `pnpm install --frozen-lockfile` passes. The lockfile diff is large (+376/−2780) because pnpm re-keyed existing entries with the `supports-color` peer. A package@version comparison against `HEAD` shows only 3 additions (`@google/genai@2.30.0`, `p-retry@4.6.2`, `@types/retry@0.12.0`) and **no version changes**.
+- **ESM typings:** the SDK is `"type": "module"`, so TypeScript (node16) reads its typings as ESM. `ai-client.service.ts` takes the types through `import type … with { 'resolution-mode': 'import' }` and the class through `require('@google/genai')`, which resolves to its CommonJS build (`dist/node/index.cjs`). It's still the only file naming the package.
+- **K5/K10 in this codebase:** `BarangayCallbackService` and `BarangayReplyService` are provided by `BarangayCallbackModule`, not `BarangayCoordinationModule` (as Phase 1 found). So `BarangayCallbackModule` exports `BarangayCallbackService` and registers the `AI_ASSIST` queue, and `AiAssistModule` imports it (one way; no cycle).
+- **Job contract in its own file** (`ai-assist.jobs.ts`), so the reply service doesn't load the runner or the Gemini SDK.
+- **`reportBySms` opts** also carry `actorRole`, for the timeline's `triggered_by_role`. The timeline helper now accepts a null role.
+- **`english`** over 120 characters is cut, not rejected: failing a correct `NEEDS_BACKUP` read over a long translation would be the wrong trade.
+- **Bad key → `AUTH` also on HTTP 400** when the message names the API key: that is how the Gemini API answers an invalid key. The message is read only to classify, never stored or logged.
+- **Thinking:** `thinkingLevel: MINIMAL` for Gemini 3+ Flash models (LOW for Pro), `thinkingBudget: 0` for 2.5 Flash (128 for Pro), nothing for older models. Not verified against `gemini-3.8-flash`: if the model refuses that level, every call fails as `PROVIDER_ERROR`, which the eval will show.
+- **Superseding:** a new reading for a case marks its open older ones `SUPERSEDED`, so the drawer shows one card.
+- **Dismiss** also clears an `INFO` reading. Accept is refused for an `UNCLEAR` reading (never `PENDING_REVIEW` anyway).
+- **Processor concurrency 1**, not 2: the free-tier per-minute limit.
+- **Daily limit** counts the Philippine day (UTC+8), not the server's local day.
+- **Existing tests:** in `barangay-reply.spec.ts` the notices mock gained `findMany: []`, because the `UNPARSED` path now looks up open notices. In `sms-opt-out.spec.ts` it gained the same, plus a stricter assertion that a subscriber's STOP never calls it. No assertion was removed or loosened. `store()` returns the row (or null) instead of a boolean, so the existing `create` mock (`{}`) still reads as stored.
+
+**Noticed, not changed**
+- `mobile/google-services.json` and `mobile/android/app/google-services.json` (tracked since `d980071`) hold the Firebase Android client API key. That's normal for Firebase apps, but the key should be restricted to the app's package and SHA-1 in the Google Cloud console. It shows up only when the secrets grep includes `*.json`.
+- A dismiss isn't broadcast, so another dispatcher's open drawer drops the card on its next refetch (30-s stale time) or event.
+- The `UNPARSED` auto-reply still asks the barangay for a code, even when the text was linked and is being read by AI. That's helpful while AI is off; it could be softened later.
+- The A1 row still notes that the SMS-reply check is pending because the demo SIM has no load.
+
+**Needs a person / device**
+- **Model:** confirm `gemini-3.8-flash` is in Google's model list as a stable (not preview) model, and put it in `GEMINI_MODEL` in `backend/.env`.
+- **Eval** (free tier, synthetic fixtures only): `node scripts\dev\eval-barangay-replies.js`. About 41 calls, 6.5 s apart (≈ 5 min). Pass: ≥ 90%, and 0 help requests read as calm. If any `NEEDS_BACKUP` fixture comes back `BLOCKED`, record it and decide on safety settings before going live. If every call is `PROVIDER_ERROR`, check the thinking level first.
+- **Bad key:** with `AI_ASSIST_ENABLED=true` and a wrong key (restart the backend), send a free-text reply from a team phone to a single-open-case barangay. Expect one `FAILED`/`AUTH` row, the text in the message log, and nothing else changed.
+- **Drawer walkthrough:**
+  - With the flag off, a free text from a single-case barangay shows under "SMS from the barangay".
+  - With the flag on (team-phone texts only), the card appears with the red dot. Accept updates the status box and timeline; `NEEDS_BACKUP` raises the supervisor escalation; Dismiss hides the card.
+- **Before any real barangay text:** a paid-tier key and the DPO sign-off (AI plan Phase 0). Until then, keep `AI_ASSIST_ENABLED=false` in `backend/.env` outside demos.
+
+### Review — 2026-10-30 (Prompt R, Phase 3)
+
+Reviewed the Phase 3 files listed above (`git diff` on the changed files, plus the new untracked files). It ran in the session that first checked the plan's status, not a session that built Phase 3.
+
+**Result: 3 defects fixed; 4 low items left open.**
+
+**Fixed**
+- **R1. A later reading could hide a request for help.** `AiTaskRunner` marked every open reading of the case `SUPERSEDED` before storing a new one, whatever the new reading was. A barangay that texts "kailangan namin ng bangka" (→ `NEEDS_BACKUP`, `PENDING_REVIEW`) and then "salamat po" (→ `UNCLEAR`, `INFO`) lost the backup card, and the Barangay tab's red dot went with it (it follows `PENDING_REVIEW`). The raw texts still showed in the message log, but nothing flagged them. The supersede also ran before the insert, outside a transaction, so a failed insert left the case with its older cards gone and no new one.
+  - Fix (`ai-task-runner.service.ts`): an `INFO` reading supersedes only older `INFO` rows; a `PENDING_REVIEW` reading supersedes older `PENDING_REVIEW` and `INFO` rows; an open reading whose status is `NEEDS_BACKUP` is never superseded (Prisma JSON path filter on `output.status`). The update and the insert now run in one interactive transaction. The drawer already lists up to 5 open rows, so a kept backup card shows beside the newer one.
+  - Checked on the dev database in a rolled-back transaction: with an open backup reading (`PENDING_REVIEW`), a low-confidence backup reading (`INFO`), an `ON_SCENE` reading and an `UNCLEAR` one, an `INFO` run superseded only the `UNCLEAR` row, and a `PENDING_REVIEW` run superseded only `UNCLEAR` + `ON_SCENE`. Both backup readings stayed open. 0 rows left after the rollback.
+  - `test/ai-assist/ai-task-runner.spec.ts`: the mock gained `$transaction`. The `PENDING_REVIEW` test asserts the transaction and the new filter; the `INFO` tests assert that information supersedes only information and never a backup reading. No assertion was removed.
+- **R2. A fourth copy of `NOTICE_INCLUDE`.** The build notes say it was reused, but `ai-suggestions.service.ts` defined its own. `barangay-link.service.ts` now exports the constant beside `LinkedNotice`, and `ai-suggestions.service.ts` imports it.
+- **R3. A misplaced doc comment.** In `BarangayPanel.tsx`, `SmsReplies`'s comment ("The barangay's own words…") ended up above `AiSuggestionCards`'s comment. It is back above `SmsReplies`.
+
+**Checked, with evidence**
+- **a. Steps and Done-when.**
+  - Step 1: `singleOpenNotice` (`barangay-reply.service.ts`, `take: 2`, override = every barangay); the outcome stays `UNPARSED` and `notice_id` is stored.
+  - Step 2: env vars and the boot check (`config.validation.ts`); `@google/genai` `2.30.0` exact; the `ai-assist/` files; the migration matches `schema.prisma`; `AI_ASSIST` in the `.ts` only; the processor (concurrency 1); the event.
+  - Step 3: queued only for `UNPARSED` + a notice + `aiAssistEnabled`, `reply-<inboundId>`, `attempts: 1`, inside its own `try/catch`.
+  - Step 4: redacted body only; `UNCLEAR` or confidence < 0.6 → `INFO`; failures → `FAILED` + code; the event is sent.
+  - Step 5: `reportBySms(notice, status, opts?)`; accept is refused for non-`PENDING_REVIEW` rows, a closed case or a second time; it claims the row, releases the claim on failure and audits (`ai_suggestion`, `MOD-46`); `NEEDS_BACKUP` still escalates through `applyBarangayReport`.
+  - Steps 6–8: the fixtures, the eval script, the web card, the red dot, the socket handler and the 5 specs are present.
+  - The ticked boxes (plan and AI plan) are true. The two unticked ones still need a person.
+- **b. Bugs.**
+  - The SDK names match the pinned 2.30.0 typings: `ThinkingLevel.MINIMAL` exists, `HttpRetryOptions.attempts: 1` means no retries, and `ApiError.status` is a number (what `classifyAiError` reads).
+  - The timeout aborts the call, and `timedOut` maps both the rejection and a late answer to `TIMEOUT`.
+  - The daily-limit filter keeps `error: null` rows.
+  - The routes sit on their own paths, with no `:id` collision.
+  - The AI routes aren't org-scoped, like the existing barangay routes (Dispatcher and Supervisor see every incident).
+- **c. Duplication.**
+  - `ScheduleModule.forRoot`: 1.
+  - `from 'openai'`: 2 files (unchanged); `@google/genai`: 1 file.
+  - `AI_ASSIST` and `ai.suggestion_created` are each defined once.
+  - Each new env var is defined once in each config file (the extra `config.validation.ts` hits are the boot check reading them).
+  - `AiAssistModule` provides only its own services.
+  - `NOTICE_INCLUDE`: fixed (R2).
+- **d. Guardrails and privacy.**
+  - Nothing in `ai-assist/` writes an incident, a dispatch or a notice; a report is written only on a dispatcher's Accept.
+  - Gemini receives only `redactForAi(body, 500)`. The event carries IDs and status only.
+  - Errors log the class name only. The eval prints the model ID and the synthetic fixtures, never the key.
+  - Secrets grep (word-boundary pattern): 0.
+- **e. Tests.**
+  - The Phase 3 specs assert stored values, error codes, filters, job IDs, audit contents and refusals, not just that a mock was called.
+  - Existing specs only gained `findMany` mocks and one stricter assertion.
+
+**Verification (§0 D):**
+- Shared is unchanged by the review, so no rebuild.
+- Typecheck clean in backend and frontend.
+- Backend 1360/1360 (84 suites; R1 added assertions to existing tests). Frontend 134/134. E2E 1/1.
+- `prisma migrate status`: up to date (27).
+- Boot: the watch-mode backend wasn't running (port 3000 didn't answer), and a second instance wasn't started because it would share Redis and could send queued SMS. The e2e test boots the real `AppModule`, `AiAssistModule` included, from the current source (only the outward-facing processors are stubbed), so DI resolves. The review fixes change no module wiring.
+
+**Left open (low; not fixed)**
+- **O9. `maxOutputTokens: 512` may include thinking tokens.** On a model that counts thinking against the output limit, a long think could end in `MAX_TOKENS` with cut JSON, which is stored as `INVALID_OUTPUT`. It can't be checked offline; if the eval shows `INVALID_OUTPUT`, raise the limit first.
+- **O10. Two older copies of `NOTICE_INCLUDE`** remain, in `barangay-notify.service.ts` and `barangay-reply.service.ts`. They predate Phase 3; they could import the exported constant.
+- **O11. A kept backup reading is cleared only by Accept or Dismiss.** If the barangay sends the exact `BACKUP` code, the card stays until a dispatcher acts on it. That's intended: the dispatcher should see it.
+- **O12. A dismiss isn't broadcast** (already noted in the build notes).

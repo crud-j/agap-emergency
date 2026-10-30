@@ -193,6 +193,8 @@ describe('BarangayReplyService.handleInbound', () => {
       },
       incident_barangay_notices: {
         findFirst: jest.fn().mockResolvedValue(opts.notice === undefined ? open() : opts.notice),
+        // AI Assist (C4): an unparsed reply is linked when its barangay has one open case.
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
     const config: any = { get: jest.fn((k: string) => env[k]) };

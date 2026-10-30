@@ -13,6 +13,8 @@ import { BarangayLinkService, type LinkedNotice } from './barangay-link.service'
 import { BarangayNotifyService } from './barangay-notify.service';
 import { parseBarangayReply, type ParsedBarangayReply } from './barangay-reply.parser';
 import type { BarangayLinkStatus } from './dto/barangay-callback.dto';
+import { aiAssistEnabled } from '../ai-assist/ai-assist.flags';
+import { BARANGAY_REPLY_JOB, barangayReplyJobId, type AiAssistJobData } from '../ai-assist/ai-assist.jobs';
 
 /** One SMS received on the Textbee phone, from the poller or (later) the webhook. */
 export interface InboundSms {
@@ -74,6 +76,7 @@ export class BarangayReplyService {
     private readonly notify: BarangayNotifyService,
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
     private readonly announcements: AnnouncementsService,
+    @InjectQueue(QUEUE_NAMES.AI_ASSIST) private readonly aiQueue: Queue,
   ) {}
 
   repliesEnabled(): boolean {
@@ -117,18 +120,36 @@ export class BarangayReplyService {
     // poll tries again. Re-applying the same status is a no-op, so a race is harmless.
     if (decision.outcome === 'APPLIED') await this.callbacks.reportBySms(decision.notice!, parsed!.status);
 
-    if (!(await this.store(msg, fromE164, parsed, decision.outcome, decision.notice?.id ?? null))) return 'DUPLICATE';
+    const row = await this.store(msg, fromE164, parsed, decision.outcome, decision.notice?.id ?? null);
+    if (!row) return 'DUPLICATE';
 
     this.logger.log(`Barangay SMS ${msg.providerMessageId}: ${decision.outcome}`);
     // The dispatcher's message log reads these rows: refresh it now the row exists.
     if (decision.notice) await this.notify.emitUpdated(decision.notice.id);
+    // AI Assist (C4): only free text linked to one open case is read; an exact code, an
+    // unknown sender, an opt-out or an unlinked reply never reaches Gemini.
+    if (decision.outcome === 'UNPARSED' && decision.notice) await this.queueAiReading(row.id);
     if (decision.knownSender && fromE164) await this.autoReply(fromE164, decision.outcome, parsed);
     return decision.outcome;
   }
 
+  /** Best-effort: the reply is stored and shown either way. Off unless AI Assist is enabled. */
+  private async queueAiReading(inboundId: string): Promise<void> {
+    if (!aiAssistEnabled(this.config)) return;
+    try {
+      await this.aiQueue.add(
+        BARANGAY_REPLY_JOB,
+        { task: 'BARANGAY_REPLY', inboundId } satisfies AiAssistJobData,
+        { jobId: barangayReplyJobId(inboundId), attempts: 1, removeOnComplete: true, removeOnFail: true },
+      );
+    } catch (err) {
+      this.logger.error(`Queueing AI reading of barangay SMS ${inboundId} failed: ${String(err)}`);
+    }
+  }
+
   /**
-   * Stores the inbound row. Returns false when another poll stored the same message first
-   * (unique violation); any other database error throws.
+   * Stores the inbound row and returns it. Null when another poll stored the same message
+   * first (unique violation); any other database error throws.
    */
   private async store(
     msg: InboundSms,
@@ -136,9 +157,9 @@ export class BarangayReplyService {
     parsed: ParsedBarangayReply | null,
     outcome: Exclude<InboundOutcome, 'DUPLICATE'>,
     noticeId: string | null,
-  ): Promise<boolean> {
+  ): Promise<{ id: string } | null> {
     try {
-      await this.prisma.barangay_sms_inbound.create({
+      return await this.prisma.barangay_sms_inbound.create({
         data: {
           provider_message_id: msg.providerMessageId.slice(0, 100),
           from_phone: msg.from.slice(0, 32),
@@ -150,10 +171,10 @@ export class BarangayReplyService {
           notice_id: noticeId,
           outcome,
         },
+        select: { id: true },
       });
-      return true;
     } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return false;
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return null;
       throw err;
     }
   }
@@ -186,7 +207,9 @@ export class BarangayReplyService {
     const { isOverride, contacts } = await this.sender(fromE164);
     if (!isOverride && contacts.length === 0) return { outcome: 'UNKNOWN_SENDER', knownSender: false, ...none };
 
-    if (!parsed) return { outcome: 'UNPARSED', knownSender: true, ...none };
+    // Free text: link it to the case when the sender's barangay has exactly one open one,
+    // so the dispatcher sees it in that case's message log. The outcome stays UNPARSED.
+    if (!parsed) return { outcome: 'UNPARSED', knownSender: true, notice: await this.singleOpenNotice(isOverride, contacts) };
 
     // Open short codes are unique (partial unique index), so this is the only candidate.
     const notice = await this.prisma.incident_barangay_notices.findFirst({
@@ -200,6 +223,26 @@ export class BarangayReplyService {
       return { outcome: 'NOT_NOTIFIED', knownSender: true, ...none };
     }
     return { outcome: 'APPLIED', knownSender: true, notice };
+  }
+
+  /**
+   * The one open notice for the sender's barangays, or null when there are none or several
+   * (then nothing is linked: a free-text reply can't say which case it means). The dev
+   * override phone answers any barangay, so it counts the open notices of all of them.
+   */
+  private async singleOpenNotice(
+    isOverride: boolean,
+    contacts: { barangay_id: string }[],
+  ): Promise<LinkedNotice | null> {
+    const open = await this.prisma.incident_barangay_notices.findMany({
+      where: {
+        closed_at: null,
+        ...(!isOverride && { barangay_id: { in: [...new Set(contacts.map((c) => c.barangay_id))] } }),
+      },
+      include: NOTICE_INCLUDE,
+      take: 2,
+    });
+    return open.length === 1 ? open[0]! : null;
   }
 
   /**

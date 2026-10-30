@@ -16,7 +16,7 @@ const CODE_LETTER_COUNT = 4;
 /** A typed access code once spaces and dashes are removed: `3470KXPM`. */
 const ACCESS_CODE_PATTERN = new RegExp(`^(\\d{4})([A-Z]{${CODE_LETTER_COUNT}})$`);
 
-const NOTICE_INCLUDE = { barangay: { select: { id: true, name: true } } } as const;
+export const NOTICE_INCLUDE = { barangay: { select: { id: true, name: true } } } as const;
 export type LinkedNotice = Prisma.incident_barangay_noticesGetPayload<{ include: typeof NOTICE_INCLUDE }>;
 
 /**

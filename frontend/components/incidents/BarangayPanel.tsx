@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type JSX } from 'react';
 import {
-  AlertTriangle, CheckCircle2, Clock, Landmark, MessageSquare, Pencil, Phone, PhoneCall, RotateCw, X,
+  AlertTriangle, CheckCircle2, Clock, Landmark, MessageSquare, Pencil, Phone, PhoneCall, RotateCw, Sparkles, X,
 } from 'lucide-react';
 import {
   Badge, Button, Skeleton, Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
@@ -13,6 +13,7 @@ import {
   useLogBarangayCall, useRecordBarangayOutcome, useConfirmBarangayHandled,
   type BarangayContact, type BarangayNotice, type BarangayOutcome, type BarangaySmsReply, type BarangaySmsStatus,
 } from '@/hooks/useBarangay';
+import { useAcceptSuggestion, useAiSuggestions, useDismissSuggestion } from '@/hooks/useAiAssist';
 import { titleCase } from '@/lib/incident-format';
 
 const ROLE_LABEL: Record<BarangayContact['role'], string> = {
@@ -151,6 +152,7 @@ export function BarangayPanel({
       {notice && (
         <>
           <ReportStatus notice={notice} now={now} incidentStatus={incidentStatus} />
+          {open && <AiSuggestionCards incidentId={incidentId} />}
           <SmsReplies replies={data.smsReplies ?? []} />
           <SmsDelivery incidentId={incidentId} notice={notice} />
           <Contacts
@@ -265,6 +267,75 @@ function ReportStatus({
             : 'Their update appears here as soon as they send it.'}
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * AI Assist (C4): Gemini's reading of a free-text barangay reply. A suggestion only: Accept
+ * records it as the barangay's SMS report under this dispatcher; nothing changes until then.
+ * Renders nothing when AI Assist is off, has nothing, or the endpoint isn't available.
+ */
+function AiSuggestionCards({ incidentId }: { incidentId: string }): JSX.Element | null {
+  const { data } = useAiSuggestions(incidentId);
+  const accept = useAcceptSuggestion(incidentId);
+  const dismiss = useDismissSuggestion(incidentId);
+  const rows = (data ?? []).filter((s) => s.reading);
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {rows.map((s) => {
+        const reading = s.reading!;
+        const reviewable = s.status === 'PENDING_REVIEW' && reading.status !== 'UNCLEAR';
+        const label = BARANGAY_REPORT[reading.status]?.label ?? 'Unclear';
+        const busy = (accept.isPending && accept.variables === s.id) || (dismiss.isPending && dismiss.variables === s.id);
+        const failed = (accept.isError && accept.variables === s.id) || (dismiss.isError && dismiss.variables === s.id);
+        return (
+          <div
+            key={s.id}
+            className={`rounded-xl border px-3 py-2.5 text-sm ${
+              reviewable && reading.status === 'NEEDS_BACKUP'
+                ? 'border-red-200 bg-red-50/70'
+                : 'border-[rgba(124,58,237,0.25)] bg-violet-50/60'
+            }`}
+          >
+            <div className="mb-1 flex items-center gap-1.5">
+              <Sparkles size={13} className="shrink-0 text-violet-600" aria-hidden />
+              <span className="text-[11px] font-bold uppercase tracking-wide text-violet-700">AI suggestion</span>
+              {s.receivedAt && <span className="ml-auto text-[11px] tabular-nums text-agap-textSub">{clock(s.receivedAt)}</span>}
+            </div>
+            {s.sourceText && (
+              <p className="text-xs text-agap-textMid">
+                Barangay texted: <span className="break-words font-mono text-agap-textMain">“{s.sourceText}”</span>
+              </p>
+            )}
+            <p className="mt-1 text-xs text-agap-textMid">
+              {reviewable ? (
+                <>
+                  AI reads this as <strong className="text-agap-textMain">{label}</strong> · “{reading.english}”
+                </>
+              ) : (
+                <>AI reading: “{reading.english}”</>
+              )}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {reviewable && (
+                <Button size="sm" variant="primary" className="h-7" loading={accept.isPending && accept.variables === s.id}
+                  disabled={busy} onClick={() => accept.mutate(s.id)}>
+                  <CheckCircle2 size={12} /> Accept
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" className="h-7" loading={dismiss.isPending && dismiss.variables === s.id}
+                disabled={busy} onClick={() => dismiss.mutate(s.id)}>
+                <X size={12} /> Dismiss
+              </Button>
+              {!reviewable && <span className="text-[11px] text-agap-textSub">Record the outcome by hand if needed.</span>}
+              {failed && <span className="w-full text-xs text-agap-danger">Could not save. Refresh and try again.</span>}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

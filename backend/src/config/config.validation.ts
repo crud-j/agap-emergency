@@ -224,6 +224,31 @@ class EnvironmentVariables {
   @IsOptional()
   OPENAI_GEOCODE_ASSIST_MODEL?: string;
 
+  // AI Assist (AI_ASSIST_PLAN, AUTOMATION_NEEDS_PLAN Phase 3): Gemini reads free-text
+  // barangay replies and suggests a status a dispatcher accepts. Suggestions only, never
+  // in the emergency path. Off unless 'true'; then GEMINI_API_KEY and GEMINI_MODEL are required.
+  @IsString()
+  @IsOptional()
+  AI_ASSIST_ENABLED?: string;
+
+  @IsString()
+  @IsOptional()
+  GEMINI_API_KEY?: string;
+
+  // An exact, stable model ID (no preview, no "-latest" alias). No fallback.
+  @IsString()
+  @IsOptional()
+  GEMINI_MODEL?: string;
+
+  @IsNumber()
+  @IsOptional()
+  AI_ASSIST_TIMEOUT_MS: number = 8000;
+
+  // Hard cap on calls per day across the system (budgets only alert; this stops calls).
+  @IsNumber()
+  @IsOptional()
+  AI_ASSIST_DAILY_LIMIT: number = 500;
+
   @IsString()
   @IsOptional()
   MAP_STYLE_URL: string = '';
@@ -259,6 +284,13 @@ export function validateConfig(config: Record<string, unknown>) {
       'Configuration validation failed: BARANGAY_ALERTS_ENABLED=true outside production requires ' +
         'BARANGAY_SMS_TEST_OVERRIDE_PHONE (a PH mobile number)',
     );
+  }
+
+  if (
+    validatedConfig.AI_ASSIST_ENABLED === 'true' &&
+    (!validatedConfig.GEMINI_API_KEY?.trim() || !validatedConfig.GEMINI_MODEL?.trim())
+  ) {
+    throw new Error('Configuration validation failed: AI_ASSIST_ENABLED=true requires GEMINI_API_KEY and GEMINI_MODEL');
   }
 
   return validatedConfig;

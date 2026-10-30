@@ -22,9 +22,13 @@ import { BARANGAY_INBOUND_QUEUE, BarangaySmsPollProcessor, BarangaySmsPoller } f
     AnnouncementsModule,
     IncidentsModule,
     BarangayCoordinationModule,
-    BullModule.registerQueue({ name: QUEUE_NAMES.SMS }, { name: BARANGAY_INBOUND_QUEUE }),
+    // AI_ASSIST: an unparsed reply linked to one open case is queued for AI Assist. This
+    // module never imports AiAssistModule (that one imports this one: K10).
+    BullModule.registerQueue({ name: QUEUE_NAMES.SMS }, { name: BARANGAY_INBOUND_QUEUE }, { name: QUEUE_NAMES.AI_ASSIST }),
   ],
   controllers: [BarangayCallbackController, BarangayLinkController],
   providers: [BarangayCallbackService, BarangayReplyService, BarangaySmsPoller, BarangaySmsPollProcessor],
+  // AI Assist's accept records the report through reportBySms (K5).
+  exports: [BarangayCallbackService],
 })
 export class BarangayCallbackModule {}

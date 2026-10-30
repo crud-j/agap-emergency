@@ -31,6 +31,7 @@
   "dependencies": {
     "@agap/shared": "workspace:*",
     "@aws-sdk/client-s3": "^3.1138.0",
+    "@google/genai": "2.30.0",
     "@nestjs/bullmq": "^10.2.0",
     "@nestjs/common": "^10.4.0",
     "@nestjs/config": "^3.2.0",

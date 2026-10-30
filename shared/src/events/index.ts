@@ -7,4 +7,5 @@ export * from './barangay.events';
 export * from './notification.events';
 export * from './resource.events';
 export * from './surge.events';
+export * from './ai.events';
 export * from './websocket-event.types';

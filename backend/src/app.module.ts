@@ -38,6 +38,7 @@ import { ResourcesModule } from './resources/resources.module';
 import { FleetModule } from './fleet/fleet.module';
 import { BarangayCoordinationModule } from './barangay-coordination/barangay-coordination.module';
 import { BarangayCallbackModule } from './barangay-coordination/barangay-callback.module';
+import { AiAssistModule } from './ai-assist/ai-assist.module';
 import { validateConfig } from './config/config.validation';
 
 @Module({
@@ -83,6 +84,7 @@ import { validateConfig } from './config/config.validation';
     FleetModule,
     BarangayCoordinationModule,
     BarangayCallbackModule,
+    AiAssistModule,
     OrganizationsModule,
     HospitalsModule,
     FacilitiesModule,

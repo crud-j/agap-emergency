@@ -6,6 +6,8 @@ packages:
   - "tests"
 allowBuilds:
   '@firebase/util': true
+  # Ships prebuilt (dist/); its only install script is a no-op echo.
+  '@google/genai': false
   '@nestjs/core': true
   '@prisma/client': true
   '@prisma/engines': true
