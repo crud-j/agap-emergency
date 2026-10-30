@@ -35,6 +35,7 @@ interface TextbeeReceived {
  * Phase 5 receiver, polling mode (`BARANGAY_SMS_INBOUND_MODE=poll`, the default): reads the
  * Textbee phone's received SMS every 15 s. Needs no public URL, so it works from a laptop.
  * Where it left off comes from the database, so a restart neither loses nor repeats a reply.
+ * Runs when barangay replies or announcement STOP processing (MOD-53) is on.
  */
 @Injectable()
 export class BarangaySmsPoller implements OnApplicationBootstrap {
@@ -64,7 +65,11 @@ export class BarangaySmsPoller implements OnApplicationBootstrap {
 
   pollingOn(): boolean {
     const mode = this.config.get<string>('BARANGAY_SMS_INBOUND_MODE')?.trim() || 'poll';
-    return this.replies.repliesEnabled() && mode === 'poll' && !!this.config.get<string>('TEXTBEE_API_KEY');
+    return (
+      (this.replies.repliesEnabled() || this.replies.optOutEnabled()) &&
+      mode === 'poll' &&
+      !!this.config.get<string>('TEXTBEE_API_KEY')
+    );
   }
 
   /** One poll. Returns how many messages were handed to the reply service. */

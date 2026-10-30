@@ -28,8 +28,22 @@ function setup() {
   const maps = { route: jest.fn().mockResolvedValue({ durationSeconds: 300 }) };
   const participants = { assertParticipant: jest.fn().mockResolvedValue('reporter') };
   const queue = { add: jest.fn().mockResolvedValue(undefined) };
-  const service = new LocationsService(prisma as any, realtime as any, maps as any, participants as any, queue as any);
-  return { service, prisma, realtime, maps, participants, queue };
+  // Every unit on the scene leg, heading to the incident location (the pre-transport case).
+  const sceneLeg = { leg: 'TO_SCENE', target: { lat: 14.79, lng: 120.92 }, destination: null, transportId: null, incidentId: INCIDENT };
+  const audience = {
+    roomsForDispatch: jest.fn().mockResolvedValue({ incidentRoom: true, userIds: [] }),
+    load: jest.fn(async () => ({
+      reporterUserId: 'reporter-1',
+      dispatches: new Map(
+        ['dispatch-A', 'dispatch-B'].map((id) => [id, { leg: sceneLeg, crewUserIds: [], reporterConfirmedPatient: false }]),
+      ),
+    })),
+  };
+  const routeCache = { get: jest.fn().mockResolvedValue(null) };
+  const service = new LocationsService(
+    prisma as any, realtime as any, maps as any, participants as any, queue as any, audience as any, routeCache as any,
+  );
+  return { service, prisma, realtime, maps, participants, queue, audience, routeCache };
 }
 
 describe('MOD-13 / MOD-43 live tracking (WP3)', () => {
@@ -88,6 +102,47 @@ describe('MOD-13 / MOD-43 live tracking (WP3)', () => {
 
       await expect(service.trackResponder(inBocaue, 'crew-a')).resolves.toMatchObject({ id: 'loc-1' });
       expect(prisma.location_history.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('still enqueues the ETA job when the scene has no GPS (the hospital leg does not need it)', async () => {
+      const { service, prisma, queue } = setup();
+      prisma.dispatches.findFirst.mockResolvedValue({
+        id: 'dispatch-A',
+        resources: null,
+        incidents: { incident_locations: null },
+      });
+
+      await service.trackResponder(inBocaue, 'crew-a');
+
+      const data = queue.add.mock.calls[0][1];
+      expect(data).toEqual({
+        dispatchId: 'dispatch-A',
+        incidentId: INCIDENT,
+        responderLat: inBocaue.latitude,
+        responderLng: inBocaue.longitude,
+        reason: 'fix',
+      });
+    });
+  });
+
+  describe('requestImmediateRefresh (plan §13.2)', () => {
+    it('enqueues with a distinct job id and no dedup, so the throttle cannot swallow it', async () => {
+      const { service, queue } = setup();
+
+      await service.requestImmediateRefresh('dispatch-A', INCIDENT, 'destination_changed');
+
+      const [name, data, opts] = queue.add.mock.calls[0];
+      expect(name).toBe('eta-refresh');
+      expect(data).toEqual({ dispatchId: 'dispatch-A', incidentId: INCIDENT, reason: 'destination_changed' });
+      expect(opts.jobId).toMatch(/^eta-now-dispatch-A-\d+$/);
+      expect(opts.jobId).not.toContain(':');
+      expect(opts.deduplication).toBeUndefined();
+    });
+
+    it('never throws when the queue is down', async () => {
+      const { service, queue } = setup();
+      queue.add.mockRejectedValue(new Error('redis down'));
+      await expect(service.requestImmediateRefresh('dispatch-A', INCIDENT, 'arrived')).resolves.toBeUndefined();
     });
   });
 

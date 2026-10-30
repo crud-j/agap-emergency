@@ -15,19 +15,36 @@ import {
   createReferral,
   setHospitalLocation,
   verifyHospitalLocation,
+  resolveHospitalLocation,
+  setHospitalActive,
   type CreateHospitalBody,
   type CreateReferralBody,
+  type ResolveLocationBody,
+  type SetHospitalActiveBody,
   type SetHospitalLocationBody,
   type VerifyHospitalLocationBody,
 } from './api';
 
-/** Pickers keep the default (reviewed hospitals only); the registry page asks for unreviewed ones too. */
-export function useHospitals(opts?: { includeUnreviewed?: boolean; enabled?: boolean }) {
+/**
+ * Pickers keep the default (active, reviewed hospitals only); the registry page asks for
+ * unreviewed ones too and, for reviewers, deactivated ones.
+ */
+export function useHospitals(opts?: {
+  includeUnreviewed?: boolean;
+  includeInactive?: boolean;
+  enabled?: boolean;
+  staleTime?: number;
+}) {
   const includeUnreviewed = opts?.includeUnreviewed ?? false;
+  const includeInactive = opts?.includeInactive ?? false;
   return useQuery({
-    queryKey: includeUnreviewed ? ['hospitals', 'with-unreviewed'] : ['hospitals'],
-    queryFn: () => fetchHospitals({ includeUnreviewed }),
-    staleTime: 30_000,
+    queryKey: [
+      'hospitals',
+      ...(includeUnreviewed ? ['with-unreviewed'] : []),
+      ...(includeInactive ? ['with-inactive'] : []),
+    ],
+    queryFn: () => fetchHospitals({ includeUnreviewed, includeInactive }),
+    staleTime: opts?.staleTime ?? 30_000,
     enabled: opts?.enabled ?? true,
   });
 }
@@ -123,6 +140,24 @@ export function useVerifyHospitalLocation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: VerifyHospitalLocationBody }) => verifyHospitalLocation(id, body),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: ['hospitals'] });
+      qc.invalidateQueries({ queryKey: ['hospital', id] });
+    },
+  });
+}
+
+/** A mutation, not a query: it runs only when the user clicks "Find location". Nothing is cached here. */
+export function useResolveHospitalLocation() {
+  return useMutation({
+    mutationFn: (body: ResolveLocationBody) => resolveHospitalLocation(body),
+  });
+}
+
+export function useSetHospitalActive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: SetHospitalActiveBody }) => setHospitalActive(id, body),
     onSuccess: (_d, { id }) => {
       qc.invalidateQueries({ queryKey: ['hospitals'] });
       qc.invalidateQueries({ queryKey: ['hospital', id] });

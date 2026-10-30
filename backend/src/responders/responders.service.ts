@@ -13,6 +13,10 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
 import { IncidentStatusService } from '../incidents/incident-status/incident-status.service';
+import { TransportService } from '../incidents/transport/transport.service';
+import { openTransportWhere } from '../incidents/transport/open-transport';
+import { TransportAudienceService } from '../incidents/transport/transport-audience.service';
+import { assertResponderFixInArea } from '../locations/responder-fix-area';
 import { UpdateAssignmentStatusDto } from './dto/update-assignment-status.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { TrackLocationDto } from '../locations/dto/track-location.dto';
@@ -75,6 +79,8 @@ export class RespondersService {
     private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
     private readonly statusService: IncidentStatusService,
+    private readonly transport: TransportService,
+    private readonly audience: TransportAudienceService,
     @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
   ) {}
 
@@ -369,6 +375,21 @@ export class RespondersService {
     dto: UpdateAssignmentStatusDto,
   ) {
     const dispatch = await this.assertCrewMember(dispatchId, userId);
+    // "Start transport" from the phone's outbox may be a retry (plan §19); other steps are not queued.
+    const clientRequestId =
+      STATUS_TO_INCIDENT[dto.status] === IncidentStatus.TRANSPORTING ? dto.clientRequestId : undefined;
+    return this.transport.once(dispatchId, dispatch.incident_id, clientRequestId, () =>
+      this.applyStatus(dispatch, userId, dto, clientRequestId),
+    );
+  }
+
+  private async applyStatus(
+    dispatch: Awaited<ReturnType<RespondersService['assertCrewMember']>>,
+    userId: string,
+    dto: UpdateAssignmentStatusDto,
+    clientRequestId: string | undefined,
+  ) {
+    const dispatchId = dispatch.id;
     const incidentStatus = STATUS_TO_INCIDENT[dto.status];
     if (!incidentStatus) {
       throw new BadRequestException(
@@ -385,8 +406,11 @@ export class RespondersService {
     });
     if (!incident) throw new NotFoundException('Incident not found');
     const currentStatus = incident.status as unknown as IncidentStatus;
+    // TRANSPORTING goes through the one transport entry path, which checks the
+    // status itself (ON_SCENE, or TRANSPORTING for a second unit) under a row lock.
+    const transporting = incidentStatus === IncidentStatus.TRANSPORTING;
     // Same lifecycle rules the dispatcher endpoint enforces (MOD-15).
-    if (!INCIDENT_STATUS_TRANSITIONS[currentStatus]?.includes(incidentStatus)) {
+    if (!transporting && !INCIDENT_STATUS_TRANSITIONS[currentStatus]?.includes(incidentStatus)) {
       throw new ConflictException(
         `Cannot move incident from ${currentStatus} to ${incidentStatus}`,
       );
@@ -397,7 +421,33 @@ export class RespondersService {
 
     // Every active dispatch on the incident ends when it is resolved — the
     // units go back to AVAILABLE so the dashboard can assign them again.
-    const finishedDispatches = await this.prisma.$transaction(async (tx) => {
+    const { finishedDispatches, begun } = await this.prisma.$transaction(async (tx) => {
+      if (transporting) {
+        // The record exists from this tap on, even if the destination picker is cancelled.
+        const begun = await this.transport.beginTransport(tx, {
+          incidentId: dispatch.incident_id,
+          dispatchId,
+          actor: { id: userId, role: 'RESPONDER' },
+          notes: dto.notes ?? null,
+          at: now,
+          ...(clientRequestId && { clientRequestId }),
+        });
+        return { finishedDispatches: [], begun };
+      }
+      if (resolving) {
+        // The crew records arrival first; a dispatcher can still resolve (override).
+        const open = await tx.transportRecord.findFirst({
+          where: openTransportWhere({ dispatch_id: dispatchId }),
+          select: { id: true },
+        });
+        if (open) {
+          throw new ConflictException({
+            code: 'TRANSPORT_OPEN',
+            transportId: open.id,
+            message: 'Record arrival at the hospital before resolving.',
+          });
+        }
+      }
       await this.statusService.recordTransition(tx, {
         incidentId: dispatch.incident_id,
         from: currentStatus,
@@ -408,7 +458,7 @@ export class RespondersService {
         at: now,
       });
 
-      if (!resolving) return [];
+      if (!resolving) return { finishedDispatches: [], begun: null };
 
       const active = await tx.dispatches.findMany({
         where: {
@@ -435,43 +485,50 @@ export class RespondersService {
         },
         data: { status: 'AVAILABLE', current_incident_id: null },
       });
-      return finished;
+      return { finishedDispatches: finished, begun: null };
     });
 
-    void this.audit.log({
-      action: AuditAction.STATUS_CHANGE,
-      actorId: userId,
-      actorRole: 'RESPONDER',
-      entityId: dispatch.incident_id,
-      entityType: 'incident',
-      moduleId: resolving ? 'MOD-45' : 'MOD-32',
-      incidentId: dispatch.incident_id,
-      oldValues: { status: currentStatus },
-      newValues: { status: incidentStatus, dispatchId, ...(dto.notes && { notes: dto.notes }) },
-    });
-
-    // persist → commit → emit (best-effort).
-    try {
-      this.realtime.notifyIncidentStatusChanged({
+    // A second unit starting its own transport leaves the incident TRANSPORTING:
+    // no status change to audit, announce or notify (its transport record is audited).
+    const previousStatus = begun?.previousStatus ?? currentStatus;
+    if (!begun || begun.statusChanged) {
+      void this.audit.log({
+        action: AuditAction.STATUS_CHANGE,
+        actorId: userId,
+        actorRole: 'RESPONDER',
+        entityId: dispatch.incident_id,
+        entityType: 'incident',
+        moduleId: resolving ? 'MOD-45' : 'MOD-32',
         incidentId: dispatch.incident_id,
-        previousStatus: currentStatus,
-        newStatus: incidentStatus,
-        changedAt: now.toISOString(),
-        changedBy: userId,
-        ...(dto.notes ? { reason: dto.notes } : {}),
+        oldValues: { status: previousStatus },
+        newValues: { status: incidentStatus, dispatchId, ...(dto.notes && { notes: dto.notes }) },
       });
-    } catch (err) {
-      this.logger.warn(`Realtime emit failed for status change: ${String(err)}`);
-    }
 
-    // Tell the reporter and the assigning dispatcher after commit; not awaited,
-    // and the notifier never throws.
-    try {
-      void this.statusNotifier?.notifyReporter(dispatch.incident_id, incidentStatus);
-      void this.statusNotifier?.notifyDispatcher(dispatch.incident_id, incidentStatus, dispatchId);
-    } catch (err) {
-      this.logger.warn(`Status notification failed for ${dispatch.incident_id}: ${String(err)}`);
+      // persist → commit → emit (best-effort).
+      try {
+        this.realtime.notifyIncidentStatusChanged({
+          incidentId: dispatch.incident_id,
+          previousStatus,
+          newStatus: incidentStatus,
+          changedAt: now.toISOString(),
+          changedBy: userId,
+          ...(dto.notes ? { reason: dto.notes } : {}),
+        });
+      } catch (err) {
+        this.logger.warn(`Realtime emit failed for status change: ${String(err)}`);
+      }
+
+      // Tell the reporter and the assigning dispatcher after commit; not awaited,
+      // and the notifier never throws.
+      try {
+        void this.statusNotifier?.notifyReporter(dispatch.incident_id, incidentStatus);
+        void this.statusNotifier?.notifyDispatcher(dispatch.incident_id, incidentStatus, dispatchId);
+      } catch (err) {
+        this.logger.warn(`Status notification failed for ${dispatch.incident_id}: ${String(err)}`);
+      }
     }
+    // incident.transporting (status-only in the incident room) and the first hospital route.
+    if (begun) await this.transport.announceTransportBegun(begun);
 
     for (const d of finishedDispatches) {
       // The unit is free again (only units still pinned to this incident were released).
@@ -521,6 +578,8 @@ export class RespondersService {
   }
 
   async pushLocation(dto: TrackLocationDto, userId: string) {
+    await assertResponderFixInArea(this.prisma, { userId, ...dto });
+
     // Object-level auth: the responder must have an active crew role for this
     // incident. Writing location for an unrelated incident is rejected.
     const activeDispatch = await this.prisma.dispatches.findFirst({
@@ -552,18 +611,24 @@ export class RespondersService {
     );
 
     try {
-      // Same contract as LocationsService.trackResponder: dispatch + call sign
-      // so maps can group crew phones per unit; never a name or phone.
-      this.realtime.notifyResponderLocationUpdated(dto.incidentId, {
-        responderId: userId,
-        dispatchId: activeDispatch.id,
-        callSign: activeDispatch.resources?.call_sign ?? null,
-        lat: dto.latitude,
-        lng: dto.longitude,
-        heading: dto.headingDegrees ?? null,
-        speed: dto.speedKmh ?? null,
-        updatedAt: record.recorded_at.toISOString(),
-      });
+      // Same contract and audience as LocationsService.trackResponder: dispatch +
+      // call sign so maps can group crew phones per unit; never a name or phone;
+      // the incident room only on the scene leg.
+      const rooms = await this.audience.roomsForDispatch(dto.incidentId, activeDispatch.id);
+      this.realtime.notifyResponderLocationUpdated(
+        dto.incidentId,
+        {
+          responderId: userId,
+          dispatchId: activeDispatch.id,
+          callSign: activeDispatch.resources?.call_sign ?? null,
+          lat: dto.latitude,
+          lng: dto.longitude,
+          heading: dto.headingDegrees ?? null,
+          speed: dto.speedKmh ?? null,
+          updatedAt: record.recorded_at.toISOString(),
+        },
+        rooms,
+      );
     } catch (err) {
       this.logger.warn(
         `Realtime emit failed for responder location: ${String(err)}`,

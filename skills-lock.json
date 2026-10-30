@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "handoff": {
+      "source": "timharris707/skills",
+      "sourceType": "github",
+      "skillPath": "skills/run/handoff/SKILL.md",
+      "computedHash": "7dff3f9259b4fde471ea6b7e58d49165ca693f2c51ac393a7d9f9db63ade33ca"
+    }
+  }
+}

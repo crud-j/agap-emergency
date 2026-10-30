@@ -1,6 +1,7 @@
 'use client';
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useWsState } from '@/lib/use-ws-state';
 import {
   fetchMapConfig,
   fetchRiskData,
@@ -8,6 +9,7 @@ import {
   fetchIncidentLocations,
   fetchLatestUnitPositions,
   fetchRoute,
+  type LatestUnitPosition,
   type LiveResponderPosition,
 } from './api';
 
@@ -28,12 +30,16 @@ export function useRiskData(periodDays = 30) {
   });
 }
 
+/** REST poll while the socket is down (plan §19); the socket patches the caches otherwise. */
+const DISCONNECTED_POLL_MS = 15_000;
+
 export function useLiveResponders() {
+  const offline = useWsState() === 'offline';
   return useQuery({
     queryKey: ['live-responders'],
     queryFn: fetchLiveResponderPositions,
     staleTime: 10_000,
-    refetchInterval: 30_000,
+    refetchInterval: offline ? DISCONNECTED_POLL_MS : 30_000,
   });
 }
 
@@ -63,21 +69,45 @@ export function usePatchResponderPosition() {
  * Seeds the dispatch card's per-unit ETA and a position for units the ops feed
  * hasn't seen yet; `responder.eta_updated` patches it (see SocketProvider).
  */
-export function useIncidentUnits(incidentId: string | null, enabled = true) {
-  return useQuery({
+function incidentUnitsQuery(incidentId: string | null, enabled: boolean, offline: boolean) {
+  return {
     queryKey: ['incident-units', incidentId],
     queryFn: () => fetchLatestUnitPositions(incidentId!),
     enabled: !!incidentId && enabled,
     staleTime: 15_000,
-    refetchInterval: 60_000,
+    refetchInterval: offline ? DISCONNECTED_POLL_MS : 60_000,
+  };
+}
+
+export function useIncidentUnits(incidentId: string | null, enabled = true) {
+  const offline = useWsState() === 'offline';
+  return useQuery(incidentUnitsQuery(incidentId, enabled, offline));
+}
+
+/**
+ * The same per-incident unit caches for several incidents (ops map): leg, hospital and
+ * server route of every tracked unit. Shares ['incident-units', id] with the dispatch
+ * page, so the socket patches reach both.
+ */
+export function useIncidentsUnits(incidentIds: readonly string[]) {
+  const offline = useWsState() === 'offline';
+  return useQueries({
+    queries: incidentIds.map((id) => incidentUnitsQuery(id, true, offline)),
+    combine: allUnits,
   });
+}
+
+// Module-level so TanStack keeps the combined array stable between renders.
+function allUnits(results: Array<{ data: LatestUnitPosition[] | undefined }>): LatestUnitPosition[] {
+  return results.flatMap((r) => r.data ?? []);
 }
 
 // ~11 m precision: avoids refetching the route on GPS jitter (same as mobile useRouteLine).
 const round4 = (n: number) => n.toFixed(4);
 
 /**
- * Driving route from the tracked unit to the scene (MOD-43). Keyed on rounded
+ * Client-side driving route between two points (MOD-43): the fallback while the
+ * server has not sent a route for the unit's current leg. Keyed on rounded
  * coordinates and refreshed every 20 s. Best-effort: a routing failure just
  * means no line; the markers and the rest of the map still render.
  */

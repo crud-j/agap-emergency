@@ -3,6 +3,7 @@ import { AuditAction } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { ActivateSurgeDto } from './dto/activate-surge.dto';
 import { TriageTagDto } from './dto/triage-tag.dto';
 
@@ -14,6 +15,7 @@ export class DisasterModeService {
     private readonly prisma: PrismaService,
     @Optional() private readonly audit?: AuditService,
     @Optional() private readonly notifications?: NotificationsService,
+    @Optional() private readonly realtime?: RealtimeService,
   ) {}
 
   async getStatus() {
@@ -86,7 +88,7 @@ export class DisasterModeService {
       orderBy: { activated_at: 'desc' },
     });
     if (!surge) throw new BadRequestException('No active surge to tag against');
-    return this.prisma.triage_tags.create({
+    const tag = await this.prisma.triage_tags.create({
       data: {
         surge_id: surge.id,
         patient_id: dto.patientId ?? null,
@@ -96,6 +98,9 @@ export class DisasterModeService {
         tagged_by_id: userId,
       },
     });
+    // Live triage board (best-effort; the tag is already saved).
+    this.realtime?.triageTagUpdated({ surgeId: tag.surge_id, tagId: tag.id });
+    return tag;
   }
 
   async getTriageTags(surgeId: string) {
@@ -108,13 +113,15 @@ export class DisasterModeService {
   async updateTriageTag(tagId: string, dto: Partial<TriageTagDto>, _userId: string) {
     const tag = await this.prisma.triage_tags.findUnique({ where: { id: tagId } });
     if (!tag) throw new NotFoundException('Triage tag not found');
-    return this.prisma.triage_tags.update({
+    const updated = await this.prisma.triage_tags.update({
       where: { id: tagId },
       data: {
         ...(dto.triageColor !== undefined && { triage_color: dto.triageColor }),
         ...(dto.triageNotes !== undefined && { triage_notes: dto.triageNotes }),
       },
     });
+    this.realtime?.triageTagUpdated({ surgeId: updated.surge_id, tagId: updated.id });
+    return updated;
   }
 
   async getAvailableResources() {

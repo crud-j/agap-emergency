@@ -6,6 +6,7 @@ import { validate } from 'class-validator';
 import { v4 as uuidv4 } from 'uuid';
 import { IncidentStatus, UserRole } from '@agap/shared';
 import { HospitalsService } from '../../src/hospitals/hospitals.service';
+import { TransportService } from '../../src/incidents/transport/transport.service';
 import { HospitalsController } from '../../src/hospitals/hospitals.controller';
 import { CreateReferralDto } from '../../src/hospitals/dto/create-referral.dto';
 import { PrismaService } from '../../src/common/prisma/prisma.service';
@@ -50,6 +51,8 @@ const mockPrisma = {
   },
 };
 
+const mockTransport = { notifyFacilityChanged: jest.fn().mockResolvedValue(undefined) };
+
 describe('HospitalsService referrals — MOD-38', () => {
   let service: HospitalsService;
 
@@ -60,6 +63,7 @@ describe('HospitalsService referrals — MOD-38', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAudit },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: TransportService, useValue: mockTransport },
       ],
     }).compile();
     service = module.get(HospitalsService);

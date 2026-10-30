@@ -9,9 +9,14 @@ import {
   UseGuards,
   Request,
   ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { HospitalsService } from './hospitals.service';
+import { Throttle } from '@nestjs/throttler';
+import { HospitalsService, type ReferralActor } from './hospitals.service';
+import { HospitalLocationResolverService } from './location-resolution/hospital-location-resolver.service';
+import { ResolveLocationDto } from './dto/resolve-location.dto';
 import { CreateHospitalDto } from './dto/create-hospital.dto';
 import { CreateReferralDto } from './dto/create-referral.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -22,6 +27,7 @@ import { UpdateHospitalDto } from './dto/update-hospital.dto';
 import { NearbyQueryDto } from './dto/nearby-query.dto';
 import { SetLocationDto } from './dto/set-location.dto';
 import { VerifyLocationDto } from './dto/verify-location.dto';
+import { SetActiveDto } from './dto/set-active.dto';
 
 /**
  * Pre-arrival notes can carry medical detail: never citizens, bystanders or the
@@ -39,13 +45,20 @@ const REFERRAL_READERS = [
 @ApiBearerAuth()
 @Controller({ path: 'hospitals', version: '1' })
 export class HospitalsController {
-  constructor(private readonly hospitalsService: HospitalsService) {}
+  constructor(
+    private readonly hospitalsService: HospitalsService,
+    private readonly locationResolver: HospitalLocationResolverService,
+  ) {}
 
   @Get()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'List hospitals' })
-  async findAll(@Query('includeUnreviewed') includeUnreviewed: string | undefined, @Request() req: any) {
-    return this.hospitalsService.findAll(req.user, includeUnreviewed === 'true');
+  async findAll(
+    @Query('includeUnreviewed') includeUnreviewed: string | undefined,
+    @Query('includeInactive') includeInactive: string | undefined,
+    @Request() req: any,
+  ) {
+    return this.hospitalsService.findAll(req.user, includeUnreviewed === 'true', includeInactive === 'true');
   }
 
   @Get('nearby')
@@ -98,6 +111,21 @@ export class HospitalsController {
     return this.hospitalsService.create(dto, req.user);
   }
 
+  /**
+   * "Find location": scored geocoder candidates for a typed hospital (plan §9, §11).
+   * Runs only on an explicit click (Nominatim policy). The app throttler tracks the
+   * client IP (its global guard runs before JWT), so 10/min is per IP, not per user.
+   */
+  @Post('resolve-location')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SYSTEM_ADMINISTRATOR, UserRole.ORG_ADMINISTRATOR, UserRole.SUPERVISOR)
+  @Throttle({ sustained: { ttl: 60000, limit: 10 } })
+  @ApiOperation({ summary: 'Find candidate coordinates for a hospital' })
+  async resolveLocation(@Body() dto: ResolveLocationDto) {
+    return this.locationResolver.resolve(dto);
+  }
+
   @Patch(':id/location')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SYSTEM_ADMINISTRATOR, UserRole.SUPERVISOR, UserRole.ORG_ADMINISTRATOR)
@@ -120,6 +148,19 @@ export class HospitalsController {
     @Request() req: any,
   ) {
     return this.hospitalsService.verifyLocation(id, dto, req.user);
+  }
+
+  /** Deactivate / reactivate. Open transports continue; their crews and the console are warned. */
+  @Patch(':id/active')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SYSTEM_ADMINISTRATOR, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Deactivate or reactivate a hospital' })
+  async setActive(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetActiveDto,
+    @Request() req: { user: ReferralActor },
+  ) {
+    return this.hospitalsService.setActive(id, dto, req.user);
   }
 
   @Patch(':id')

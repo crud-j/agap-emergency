@@ -3,9 +3,33 @@ import {
   ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { listHospitals, type TransportHospital } from '@/src/services/api/transport.api';
+import {
+  getNearbyHospitals,
+  listHospitals,
+  type FacilityReceivingStatus,
+  type NearbyHospital,
+  type TransportHospital,
+} from '@/src/services/api/transport.api';
+import { buildDestinationList, formatDistance, type DestinationOption } from '@/src/lib/transport-target';
+import { useTranslations } from '@/src/hooks/useAccessibility';
 import { colors, radius } from '@/src/theme/tokens';
 
+const RECEIVING_TONE: Record<FacilityReceivingStatus, { bg: string; fg: string }> = {
+  OPEN: { bg: colors.primarySoft, fg: colors.primary },
+  EMERGENCY_ONLY: { bg: colors.amberSoft, fg: colors.amber },
+  AT_CAPACITY: { bg: colors.dangerSoft, fg: colors.danger },
+  CLOSED: { bg: colors.dangerSoft, fg: colors.danger },
+  UNKNOWN: { bg: colors.surface, fg: colors.textSub },
+};
+
+/**
+ * Destination hospital picker (MOD-39/40, plan §15). Nearest VERIFIED hospitals first,
+ * sorted by the server from the responder's last fix with a straight-line distance;
+ * then the remaining selectable hospitals alphabetically (or all of them when there
+ * is no fix or /hospitals/nearby fails). Each row shows its receiving status and,
+ * when unverified, "Location not verified". "Decide later" keeps the transport open
+ * without a destination.
+ */
 export function DestinationPicker({
   visible, token, position, saveError, onSelect, onClose,
 }: {
@@ -17,89 +41,110 @@ export function DestinationPicker({
   onSelect: (hospitalId?: string) => void;
   onClose: () => void;
 }) {
-  const [hospitals, setHospitals] = useState<TransportHospital[]>([]);
+  const t = useTranslations().transport;
+  const [all, setAll] = useState<TransportHospital[]>([]);
+  const [nearby, setNearby] = useState<NearbyHospital[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The fix when the sheet opened; a moving unit must not reshuffle the list under a finger.
+  const lat = position?.lat;
+  const lng = position?.lng;
   useEffect(() => {
     if (!visible) return;
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    listHospitals(token)
-      .then(setHospitals)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load hospitals.'))
-      .finally(() => setLoading(false));
+    void Promise.allSettled([
+      listHospitals(token),
+      lat != null && lng != null ? getNearbyHospitals(lat, lng, token) : Promise.resolve([]),
+    ]).then(([allResult, nearbyResult]) => {
+      if (cancelled) return;
+      setAll(allResult.status === 'fulfilled' ? allResult.value : []);
+      setNearby(nearbyResult.status === 'fulfilled' ? nearbyResult.value : []);
+      if (allResult.status === 'rejected' && nearbyResult.status === 'rejected') {
+        const reason = allResult.reason;
+        setError(reason instanceof Error && reason.message ? reason.message : t.picker.loadError);
+      }
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Reload when the sheet opens, not on every GPS fix while it is open.
   }, [token, visible]);
 
-  const filtered = useMemo(() => {
-    const distance = (hospital: TransportHospital): number | null => {
-      if (!position || hospital.latitude == null || hospital.longitude == null) return null;
-      const lat = Number(hospital.latitude);
-      const lng = Number(hospital.longitude);
-      const dLat = (lat - position.lat) * Math.PI / 180;
-      const dLng = (lng - position.lng) * Math.PI / 180;
-      const a = Math.sin(dLat / 2) ** 2
-        + Math.cos(position.lat * Math.PI / 180) * Math.cos(lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-      return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    };
-    return hospitals
-      .filter((hospital) => hospital.name.toLowerCase().includes(search.toLowerCase()))
-      .sort((a, b) => {
-        const aDistance = distance(a);
-        const bDistance = distance(b);
-        if (aDistance != null && bDistance != null) return aDistance - bDistance;
-        if (aDistance != null) return -1;
-        if (bDistance != null) return 1;
-        return a.name.localeCompare(b.name);
-      });
-  }, [hospitals, position, search]);
+  const options = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return buildDestinationList(nearby, all).filter((hospital) => hospital.name.toLowerCase().includes(query));
+  }, [all, nearby, search]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <View style={styles.handle} />
-          <Text style={styles.title}>Destination hospital</Text>
-          <Text style={styles.subtitle}>You can set or change this destination later.</Text>
+          <Text style={styles.title}>{t.picker.title}</Text>
+          <Text style={styles.subtitle}>{t.picker.subtitle}</Text>
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search hospitals"
+            placeholder={t.picker.search}
             placeholderTextColor={colors.textSub}
             style={styles.search}
-            accessibilityLabel="Search hospitals"
+            accessibilityLabel={t.picker.search}
           />
           <Pressable style={styles.later} onPress={() => onSelect()} accessibilityRole="button">
             <Ionicons name="time-outline" size={21} color={colors.primary} />
-            <Text style={styles.laterText}>Decide later</Text>
+            <Text style={styles.laterText}>{t.picker.decideLater}</Text>
           </Pressable>
           {saveError ? (
-            <Text style={styles.error} accessibilityRole="alert">
-              Destination not saved: {saveError} Choose again to retry.
-            </Text>
+            <Text style={styles.error} accessibilityRole="alert">{t.picker.saveError(saveError)}</Text>
           ) : null}
           {loading ? <ActivityIndicator color={colors.primary} style={styles.loading} /> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <FlatList
-            data={filtered}
+            data={options}
             keyExtractor={(item) => item.id}
             keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => (
-              <Pressable style={styles.item} onPress={() => onSelect(item.id)}>
-                <Ionicons name="medical-outline" size={21} color={colors.primary} />
-                <View style={styles.itemText}>
-                  <Text style={styles.name}>{item.name}</Text>
-                  {!!item.address && <Text style={styles.address}>{item.address}</Text>}
-                </View>
-              </Pressable>
-            )}
-            ListEmptyComponent={!loading && !error ? <Text style={styles.empty}>No hospitals found.</Text> : null}
+            renderItem={({ item }) => <HospitalRow item={item} onPress={() => onSelect(item.id)} />}
+            ListEmptyComponent={!loading && !error ? <Text style={styles.empty}>{t.picker.empty}</Text> : null}
           />
-          <Pressable style={styles.cancel} onPress={onClose}><Text style={styles.cancelText}>Cancel</Text></Pressable>
+          <Pressable style={styles.cancel} onPress={onClose}>
+            <Text style={styles.cancelText}>{t.cancel}</Text>
+          </Pressable>
         </View>
       </View>
     </Modal>
+  );
+}
+
+function HospitalRow({ item, onPress }: { item: DestinationOption; onPress: () => void }) {
+  const t = useTranslations().transport;
+  const receiving = RECEIVING_TONE[item.receiving_status] ? item.receiving_status : 'UNKNOWN';
+  const tone = RECEIVING_TONE[receiving];
+  return (
+    <Pressable style={styles.item} onPress={onPress} accessibilityRole="button" accessibilityLabel={item.name}>
+      <Ionicons name="medical-outline" size={21} color={colors.primary} />
+      <View style={styles.itemText}>
+        <Text style={styles.name}>{item.name}</Text>
+        {!!item.address && <Text style={styles.address}>{item.address}</Text>}
+        <View style={styles.badges}>
+          {item.distanceMeters != null && (
+            <Text style={styles.distance}>{t.picker.straightLine(formatDistance(item.distanceMeters))}</Text>
+          )}
+          <View style={[styles.badge, { backgroundColor: tone.bg }]}>
+            <Text style={[styles.badgeText, { color: tone.fg }]}>{t.picker.receiving[receiving]}</Text>
+          </View>
+          {item.location_status !== 'VERIFIED' && (
+            <View style={[styles.badge, { backgroundColor: colors.amberSoft }]}>
+              <Text style={[styles.badgeText, { color: colors.amber }]}>{t.picker.notVerified}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -119,6 +164,10 @@ const styles = StyleSheet.create({
   itemText: { flex: 1 },
   name: { color: colors.text, fontWeight: '700' },
   address: { color: colors.textSub, marginTop: 3, fontSize: 12 },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 6 },
+  distance: { color: colors.textMid, fontSize: 12, fontWeight: '600' },
+  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  badgeText: { fontSize: 11, fontWeight: '700' },
   cancel: { alignItems: 'center', paddingVertical: 14 },
   cancelText: { color: colors.textSub, fontWeight: '700' },
 });

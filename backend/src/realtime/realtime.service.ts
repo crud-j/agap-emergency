@@ -9,6 +9,7 @@ import {
   NOTIFICATION_EVENTS,
   BARANGAY_EVENTS,
   RESOURCE_EVENTS,
+  SURGE_EVENTS,
   IncidentStatus,
 } from '@agap/shared';
 import type {
@@ -30,6 +31,8 @@ import type {
   IncidentFacilityArrivalPayload,
   IncidentTransportUpdatedPayload,
   ResponderRouteUpdatedPayload,
+  SurgeRecommendedPayload,
+  SurgeTriageTagUpdatedPayload,
 } from '@agap/shared';
 
 /**
@@ -47,6 +50,16 @@ const STATUS_SPECIFIC_EVENT: Partial<Record<IncidentStatus, AgapEventName>> = {
   [IncidentStatus.CLOSED]: INCIDENT_EVENTS.CLOSED,
   [IncidentStatus.CANCELLED]: INCIDENT_EVENTS.CANCELLED,
 };
+
+/**
+ * Rooms for a leg-sensitive event (position, route, ETA, destination). Built only by
+ * TransportAudienceService: `incidentRoom` is true only on leg TO_SCENE; on the
+ * hospital leg `userIds` holds the crew and a crew-confirmed reporter-patient (C6/C17/C18).
+ */
+export interface RealtimeAudience {
+  incidentRoom: boolean;
+  userIds: string[];
+}
 
 /**
  * Thin façade over AgapGateway. Every method is BEST-EFFORT: a WebSocket failure
@@ -158,23 +171,47 @@ export class RealtimeService {
 
   /**
    * Full payload to ops. The incident room (which includes the reporter) gets a
-   * status-only copy: no patient, no destination (Correction C18).
+   * status-only copy: no patient, no destination (Correction C18). A crew-confirmed
+   * reporter-patient (C17) also gets the status copy plus the destination view in
+   * their own room.
    */
-  incidentTransporting(payload: IncidentTransportingPayload): void {
+  incidentTransporting(payload: IncidentTransportingPayload, confirmedReporterId: string | null = null): void {
     const { incidentId, transportId, dispatchId, transportStartedAt } = payload;
     const statusOnly: IncidentTransportingPayload = { incidentId, transportId, dispatchId, transportStartedAt };
     this.safe('incidentTransporting', () => {
       this.gateway.emitToOps(INCIDENT_EVENTS.TRANSPORTING, payload);
       this.gateway.emitToIncident(INCIDENT_EVENTS.TRANSPORTING, incidentId, statusOnly);
+      if (confirmedReporterId) {
+        this.gateway.emitToUser(INCIDENT_EVENTS.TRANSPORTING, confirmedReporterId, {
+          ...statusOnly,
+          destination: payload.destination ?? null,
+        });
+      }
     });
   }
 
-  /** Full payload to ops; the incident-room copy has no destinationId (C18). */
-  facilityArrival(payload: IncidentFacilityArrivalPayload): void {
-    const { destinationId: _destinationId, ...statusOnly } = payload;
+  /**
+   * Full payload to ops; the incident room gets a status-only copy built field by
+   * field, so a field added later cannot reach it by default (C18). A crew-confirmed
+   * reporter-patient (C17) also gets the status copy plus the destination view.
+   */
+  facilityArrival(payload: IncidentFacilityArrivalPayload, confirmedReporterId: string | null = null): void {
+    const { incidentId, transportId, dispatchId, arrivedAt } = payload;
+    const statusOnly: IncidentFacilityArrivalPayload = {
+      incidentId,
+      transportId,
+      ...(dispatchId !== undefined && { dispatchId }),
+      arrivedAt,
+    };
     this.safe('facilityArrival', () => {
       this.gateway.emitToOps(INCIDENT_EVENTS.FACILITY_ARRIVAL, payload);
       this.gateway.emitToIncident(INCIDENT_EVENTS.FACILITY_ARRIVAL, payload.incidentId, statusOnly);
+      if (confirmedReporterId) {
+        this.gateway.emitToUser(INCIDENT_EVENTS.FACILITY_ARRIVAL, confirmedReporterId, {
+          ...statusOnly,
+          destination: payload.destination ?? null,
+        });
+      }
     });
   }
 
@@ -198,16 +235,11 @@ export class RealtimeService {
   }
 
   /**
-   * The route for the unit's current leg. Ops always gets it. Callers pass
-   * `incidentRoom: true` ONLY for leg TO_SCENE; on TO_FACILITY / AT_FACILITY the
-   * route, position and destination go to ops plus `userIds` (crew and a
-   * crew-confirmed reporter-patient, filled by Prompt 09) and never to the
-   * incident room (C6/C17/C18).
+   * The route for the unit's current leg. Ops always gets it; the incident room
+   * only on TO_SCENE; on TO_FACILITY / AT_FACILITY the crew and a crew-confirmed
+   * reporter-patient through `userIds` (C6/C17/C18).
    */
-  routeUpdated(
-    payload: ResponderRouteUpdatedPayload,
-    audience: { incidentRoom: boolean; userIds: string[] },
-  ): void {
+  routeUpdated(payload: ResponderRouteUpdatedPayload, audience: RealtimeAudience): void {
     this.safe('routeUpdated', () => {
       this.gateway.emitToOps(RESPONDER_EVENTS.ROUTE_UPDATED, payload);
       if (audience.incidentRoom) {
@@ -216,6 +248,17 @@ export class RealtimeService {
       for (const userId of new Set(audience.userIds)) {
         this.gateway.emitToUser(RESPONDER_EVENTS.ROUTE_UPDATED, userId, payload);
       }
+    });
+  }
+
+  /**
+   * The crew withdrew a reporter's confirmation (C17): tell only that reporter to
+   * drop the destination and route they were shown. Ops and the crew are unaffected.
+   */
+  routeWithdrawn(incidentId: string, dispatchId: string, leg: ResponderRouteUpdatedPayload['leg'], userId: string): void {
+    const payload: ResponderRouteUpdatedPayload = { incidentId, dispatchId, leg, destination: null, route: null };
+    this.safe('routeWithdrawn', () => {
+      this.gateway.emitToUser(RESPONDER_EVENTS.ROUTE_UPDATED, userId, payload);
     });
   }
 
@@ -263,16 +306,39 @@ export class RealtimeService {
     });
   }
 
+  // ── Surge (MOD-52) ────────────────────────────────────────────────────────
+
+  /** A surge rule tripped. Ops room only; a Supervisor decides whether to activate. */
+  surgeRecommended(payload: SurgeRecommendedPayload): void {
+    this.safe('surgeRecommended', () => {
+      this.gateway.emitToOps(SURGE_EVENTS.RECOMMENDED, payload);
+    });
+  }
+
+  /** A triage tag was filed or changed, so every open triage board refetches. Ops room only. */
+  triageTagUpdated(payload: SurgeTriageTagUpdatedPayload): void {
+    this.safe('triageTagUpdated', () => {
+      this.gateway.emitToOps(SURGE_EVENTS.TRIAGE_TAG_UPDATED, payload);
+    });
+  }
+
   // ── Responder ─────────────────────────────────────────────────────────────
 
+  /** A unit's position reveals where it is going: the incident room gets it only on TO_SCENE (C6). */
   responderLocation(
     incidentId: string,
     payload: Omit<ResponderLocationUpdatedPayload, 'incidentId'>,
+    audience: RealtimeAudience,
   ): void {
     const envelope: ResponderLocationUpdatedPayload = { incidentId, ...payload };
     this.safe('responderLocation', () => {
       this.gateway.emitToOps(RESPONDER_EVENTS.LOCATION_UPDATED, envelope);
-      this.gateway.emitToIncident(RESPONDER_EVENTS.LOCATION_UPDATED, incidentId, envelope);
+      if (audience.incidentRoom) {
+        this.gateway.emitToIncident(RESPONDER_EVENTS.LOCATION_UPDATED, incidentId, envelope);
+      }
+      for (const userId of new Set(audience.userIds)) {
+        this.gateway.emitToUser(RESPONDER_EVENTS.LOCATION_UPDATED, userId, envelope);
+      }
     });
   }
 
@@ -322,8 +388,9 @@ export class RealtimeService {
   notifyResponderLocationUpdated(
     incidentId: string,
     payload: Omit<ResponderLocationUpdatedPayload, 'incidentId'>,
+    audience: RealtimeAudience,
   ): void {
-    this.responderLocation(incidentId, payload);
+    this.responderLocation(incidentId, payload, audience);
   }
 
   notifyDispatchCreated(
@@ -351,14 +418,25 @@ export class RealtimeService {
     this.escalationCreated(incidentId, payload);
   }
 
+  /**
+   * The ETA to a hospital is not for the shared incident room (C17/C18): on the
+   * hospital leg it goes to ops and `userIds` only. The default (incident room) is
+   * for the scene ETA of TRANSPORT_ROUTING_ENABLED=false.
+   */
   notifyEtaUpdated(
     incidentId: string,
     payload: Omit<ResponderEtaUpdatedPayload, 'incidentId'>,
+    audience: RealtimeAudience = { incidentRoom: true, userIds: [] },
   ): void {
     const envelope: ResponderEtaUpdatedPayload = { incidentId, ...payload };
     this.safe('notifyEtaUpdated', () => {
-      this.gateway.emitToIncident(RESPONDER_EVENTS.ETA_UPDATED, incidentId, envelope);
+      if (audience.incidentRoom) {
+        this.gateway.emitToIncident(RESPONDER_EVENTS.ETA_UPDATED, incidentId, envelope);
+      }
       this.gateway.emitToOps(RESPONDER_EVENTS.ETA_UPDATED, envelope);
+      for (const userId of new Set(audience.userIds)) {
+        this.gateway.emitToUser(RESPONDER_EVENTS.ETA_UPDATED, userId, envelope);
+      }
     });
   }
 

@@ -1102,7 +1102,7 @@ const styles = StyleSheet.create({
      ================================================================ */
 
   statusArea: {
-    minHeight: 34,
+    minHeight: 42,
 
     alignItems: 'center',
     justifyContent: 'center',
@@ -1112,14 +1112,23 @@ const styles = StyleSheet.create({
   },
 
   statusText: {
-    fontSize: 13,
+    fontSize: 15,
 
-    lineHeight: 18,
+    lineHeight: 21,
 
-    fontWeight: '600',
+    fontWeight: '800',
 
-    color: '#8B949E',
+    color: '#29434D',
 
     textAlign: 'center',
+
+    textShadowColor: 'rgba(255,255,255,0.8)',
+
+    textShadowOffset: {
+      width: 0,
+      height: 1,
+    },
+
+    textShadowRadius: 4,
   },
 });

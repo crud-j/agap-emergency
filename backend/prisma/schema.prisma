@@ -60,6 +60,7 @@ model User {
   escalations                                                              Escalation[]
   facility_referrals                                                       facility_referrals[]
   facilities_location_verified                                             Facility[]                     @relation("FacilityLocationVerifiedBy")
+  transport_reporter_patient_confirmations                                 TransportRecord[]              @relation("TransportReporterPatientConfirmedBy")
   false_alerts_false_alerts_classified_by_idTousers                        false_alerts[]                 @relation("false_alerts_classified_by_idTousers")
   false_alerts_false_alerts_user_idTousers                                 false_alerts[]                 @relation("false_alerts_user_idTousers")
   feedback_ratings                                                         feedback_ratings[]
@@ -100,6 +101,8 @@ model User {
   webauthn_challenges                                                      webauthn_challenges[]
   webauthn_credentials                                                     webauthn_credentials[]
   barangay_notice_reports                                                  incident_barangay_notices[]    @relation("BarangayNoticeReporter")
+  surge_river_readings                                                     surge_settings[]
+  reviewed_risk_area_proposals                                             risk_area_proposals[]
 
   @@index([barangay], map: "idx_users_barangay")
   @@index([created_at(sort: Desc)], map: "idx_users_created_at")
@@ -392,23 +395,28 @@ model Facility {
 }
 
 model TransportRecord {
-  id                    String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  incident_id           String             @db.Uuid
-  dispatch_id           String             @db.Uuid
-  patient_id            String?            @db.Uuid
-  destination_id        String?            @db.Uuid
-  transport_started_at  DateTime?          @db.Timestamptz(6)
-  estimated_arrival_at  DateTime?          @db.Timestamptz(6)
-  arrived_at            DateTime?          @db.Timestamptz(6)
-  handover_completed_at DateTime?          @db.Timestamptz(6)
-  destination_changed   Boolean            @default(false)
-  change_reason         String?
-  created_at            DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime           @default(now()) @db.Timestamptz(6)
-  facilities            Facility?          @relation(fields: [destination_id], references: [id], onUpdate: NoAction)
-  dispatches            dispatches         @relation(fields: [dispatch_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  incidents             Incident           @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  incident_patients     incident_patients? @relation(fields: [patient_id], references: [id], onUpdate: NoAction)
+  id                               String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id                      String             @db.Uuid
+  dispatch_id                      String             @db.Uuid
+  patient_id                       String?            @db.Uuid
+  destination_id                   String?            @db.Uuid
+  transport_started_at             DateTime?          @db.Timestamptz(6)
+  estimated_arrival_at             DateTime?          @db.Timestamptz(6)
+  arrived_at                       DateTime?          @db.Timestamptz(6)
+  handover_completed_at            DateTime?          @db.Timestamptz(6)
+  destination_changed              Boolean            @default(false)
+  change_reason                    String?
+  created_at                       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime           @default(now()) @db.Timestamptz(6)
+  /// C17: crew-confirmed that the person carried is the registered reporter. Set and cleared
+  /// together (CHECK in the migration). The reporter's own claim never sets it.
+  reporter_patient_confirmed_at    DateTime?          @db.Timestamptz(6)
+  reporter_patient_confirmed_by_id String?            @db.Uuid
+  reporter_patient_confirmed_by    User?              @relation("TransportReporterPatientConfirmedBy", fields: [reporter_patient_confirmed_by_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  facilities                       Facility?          @relation(fields: [destination_id], references: [id], onUpdate: NoAction)
+  dispatches                       dispatches         @relation(fields: [dispatch_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  incidents                        Incident           @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  incident_patients                incident_patients? @relation(fields: [patient_id], references: [id], onUpdate: NoAction)
 
   @@map("transport_records")
 }
@@ -1219,9 +1227,33 @@ model risk_areas {
   is_active              Boolean                   @default(true)
   created_at             DateTime                  @default(now()) @db.Timestamptz(6)
   updated_at             DateTime                  @default(now()) @db.Timestamptz(6)
+  proposals              risk_area_proposals[]
 
   @@index([area_boundary], map: "idx_risk_areas_boundary", type: Gist)
   @@index([risk_type], map: "idx_risk_areas_type")
+}
+
+/// MOD-51 (AUTOMATION_NEEDS_PLAN Phase 2, C7): a recurring incident cluster proposed as a
+/// risk area. Only a System Administrator's approval creates the risk area. The partial
+/// unique index (one PENDING per type and barangay) lives in the SQL migration.
+model risk_area_proposals {
+  id             String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  risk_type      incident_category
+  barangay       String?                   @db.VarChar(100)
+  incident_count Int
+  area_boundary  Unsupported("geography")?
+  window_days    Int
+  status         risk_area_proposal_status @default(PENDING)
+  reviewed_by_id String?                   @db.Uuid
+  reviewed_at    DateTime?                 @db.Timestamptz(6)
+  risk_area_id   String?                   @db.Uuid
+  created_at     DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime                  @default(now()) @db.Timestamptz(6)
+  reviewed_by    User?                     @relation(fields: [reviewed_by_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  risk_area      risk_areas?               @relation(fields: [risk_area_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([status, created_at(sort: Desc)], map: "idx_risk_area_proposals_status")
+  @@index([area_boundary], map: "idx_risk_area_proposals_boundary", type: Gist)
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -1306,6 +1338,32 @@ model surge_incidents {
   users              User                      @relation(fields: [declared_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   organizations      Organization              @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   triage_tags        triage_tags[]
+}
+
+/// MOD-52 (AUTOMATION_NEEDS_PLAN Phase 2, C2): when recent incidents trip a rule, the
+/// detector tells Supervisors. It never activates surge mode. Seeded defaults, MDRRMO-editable.
+model surge_rules {
+  id             String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  rule_key       String             @unique @db.VarChar(40)
+  window_minutes Int
+  min_incidents  Int
+  category       incident_category?
+  /// geo_regions names; empty = any barangay.
+  barangays      String[]           @default([])
+  is_active      Boolean            @default(true)
+  created_at     DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime           @default(now()) @db.Timestamptz(6)
+}
+
+/// One row (`singleton`): the latest Bocaue River reading a Supervisor entered.
+model surge_settings {
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  singleton         Boolean   @unique @default(true)
+  river_level_m     Decimal?  @db.Decimal(5, 2)
+  river_level_at    DateTime? @db.Timestamptz(6)
+  river_level_by_id String?   @db.Uuid
+  updated_at        DateTime  @default(now()) @db.Timestamptz(6)
+  river_level_by    User?     @relation(fields: [river_level_by_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -1644,6 +1702,7 @@ enum barangay_inbound_outcome {
   NOT_NOTIFIED
   UNPARSED
   DISABLED
+  OPT_OUT
 }
 
 enum announcement_category {
@@ -1929,6 +1988,12 @@ enum surge_status {
   MONITORING
   ACTIVE
   DEACTIVATING
+}
+
+enum risk_area_proposal_status {
+  PENDING
+  APPROVED
+  DISMISSED
 }
 
 enum sync_status {

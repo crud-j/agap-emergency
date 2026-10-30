@@ -7,8 +7,19 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { CaptureLocationDto } from './dto/capture-location.dto';
 import { TrackLocationDto } from './dto/track-location.dto';
 import { MapsService } from './maps/maps.service';
-import { ACTIVE_RESPONSE_INCIDENT_STATUSES, isCoordinateInBocaue, QUEUE_NAMES } from '@agap/shared';
+import {
+  ACTIVE_RESPONSE_INCIDENT_STATUSES,
+  isCoordinateInBocaue,
+  isCoordinateInServiceArea,
+  QUEUE_NAMES,
+} from '@agap/shared';
+import type { RouteSnapshot, TransportDestinationView, TransportLeg } from '@agap/shared';
 import { IncidentParticipantService, type ParticipantActor } from '../realtime/incident-participant.service';
+import type { EtaRefreshJobData, EtaRefreshReason } from '../jobs/processors/eta-refresh.processor';
+import { TransportAudienceService } from '../incidents/transport/transport-audience.service';
+import { RouteCacheService, isRouteFor } from './route-cache.service';
+import { assertResponderFixInArea } from './responder-fix-area';
+import { simplifyLine } from './maps/simplify-line';
 
 /** At most one routing call per dispatch in this window (ETA job dedup TTL). */
 export const ETA_REFRESH_THROTTLE_MS = 15_000;
@@ -31,12 +42,23 @@ function freshestFixFor(fixes: Fix[], incidentId: string, crewIds: string[]): Fi
   return fixes.find((f) => f.incident_id === incidentId && !!f.user_id && crewIds.includes(f.user_id));
 }
 
-/** Reporter-safe unit view: no responder names or phone numbers. */
+const NO_ETA: LatestUnitPosition['eta'] = { seconds: null, isEstimate: true, calculatedAt: null };
+
+/**
+ * Reporter-safe unit view: no responder names or phone numbers, never a patient
+ * field. On the hospital leg a reporter who is not crew-confirmed as the patient
+ * gets position, route and destination null and no ETA (C17).
+ */
 export interface LatestUnitPosition {
   dispatchId: string;
   callSign: string | null;
   unitName: string | null;
   resourceType: string | null;
+  leg: TransportLeg;
+  /** The hospital on TO_FACILITY / AT_FACILITY; null on TO_SCENE. */
+  destination: TransportDestinationView | null;
+  /** The server route for the current leg (same geometry as `responder.route_updated`). */
+  route: RouteSnapshot | null;
   position: {
     lat: number;
     lng: number;
@@ -74,6 +96,8 @@ export class LocationsService {
     private readonly maps: MapsService,
     private readonly participants: IncidentParticipantService,
     @InjectQueue(QUEUE_NAMES.LOCATION_PROCESSING) private readonly locationProcessingQueue: Queue,
+    private readonly audience: TransportAudienceService,
+    private readonly routeCache: RouteCacheService,
   ) {}
 
   private assertBocaueCoordinate(latitude: number, longitude: number): void {
@@ -152,16 +176,18 @@ export class LocationsService {
 
   /**
    * Driving route + ETA between two points for the in-app route line (MOD-43).
+   * Both ends must be in the service area: a hospital may be outside Bocaue (G4).
    * ETA is always a labeled estimate; a routing failure returns nulls.
    */
   getRouteBetween(fromLat: number, fromLng: number, toLat: number, toLng: number) {
-    this.assertBocaueCoordinate(fromLat, fromLng);
-    this.assertBocaueCoordinate(toLat, toLng);
+    if (!isCoordinateInServiceArea(fromLat, fromLng) || !isCoordinateInServiceArea(toLat, toLng)) {
+      throw new BadRequestException('Route points must be within the service area.');
+    }
     return this.maps.route({ lat: fromLat, lng: fromLng }, { lat: toLat, lng: toLng });
   }
 
   async trackResponder(dto: TrackLocationDto, userId: string) {
-    this.assertBocaueCoordinate(dto.latitude, dto.longitude);
+    await assertResponderFixInArea(this.prisma, { userId, ...dto });
 
     // Object-level auth: a responder may only publish a position into an incident
     // they are crewed on, otherwise they could inject a marker into any citizen's
@@ -199,65 +225,97 @@ export class LocationsService {
     this.logger.log(`Responder ${userId} location tracked for incident ${dto.incidentId}`);
 
     try {
-      // Reaches the reporter too: call sign only, never the responder's name/phone.
-      this.realtime.notifyResponderLocationUpdated(dto.incidentId, {
-        responderId: userId,
-        dispatchId: crewed.id,
-        callSign: crewed.resources?.call_sign ?? null,
-        lat: dto.latitude,
-        lng: dto.longitude,
-        heading: dto.headingDegrees ?? null,
-        speed: dto.speedKmh ?? null,
-        updatedAt: record.recorded_at.toISOString(),
-      });
+      // On the scene leg this reaches the reporter too: call sign only, never the
+      // responder's name/phone. On the hospital leg the position would reveal the
+      // destination, so only ops, the crew and a confirmed reporter-patient get it.
+      const rooms = await this.audience.roomsForDispatch(dto.incidentId, crewed.id);
+      this.realtime.notifyResponderLocationUpdated(
+        dto.incidentId,
+        {
+          responderId: userId,
+          dispatchId: crewed.id,
+          callSign: crewed.resources?.call_sign ?? null,
+          lat: dto.latitude,
+          lng: dto.longitude,
+          heading: dto.headingDegrees ?? null,
+          speed: dto.speedKmh ?? null,
+          updatedAt: record.recorded_at.toISOString(),
+        },
+        rooms,
+      );
     } catch (err) {
       this.logger.warn(`Realtime emit failed for location update: ${String(err)}`);
     }
 
     // Enqueue ETA recalculation; failure must never affect location tracking.
     // Throttled per dispatch: a 5 s GPS stream triggers at most one routing call
-    // per ETA_REFRESH_THROTTLE_MS. The processor reads the freshest crew fix at
-    // run time, so a throttled job never routes from a stale point.
+    // per ETA_REFRESH_THROTTLE_MS. The processor reads the freshest crew fix and
+    // resolves the leg (scene or hospital) at run time, so a throttled job never
+    // routes from a stale point or to an old destination. The scene point is sent
+    // only for TRANSPORT_ROUTING_ENABLED=false; a scene without GPS still gets a
+    // job, because the hospital leg does not need it.
     const incidentLoc = crewed.incidents?.incident_locations;
-    if (incidentLoc) {
-      try {
-        await this.locationProcessingQueue.add(
-          'eta-refresh',
-          {
-            dispatchId: crewed.id,
-            incidentId: dto.incidentId,
-            responderLat: dto.latitude,
-            responderLng: dto.longitude,
-            incidentLat: Number(incidentLoc.latitude),
-            incidentLng: Number(incidentLoc.longitude),
-          },
-          {
-            // BullMQ forbids ':' in custom ids.
-            deduplication: { id: `eta-${crewed.id}`, ttl: ETA_REFRESH_THROTTLE_MS },
-            removeOnComplete: true,
-            removeOnFail: true,
-          },
-        );
-      } catch (err) {
-        this.logger.warn(`ETA job enqueue failed for incident ${dto.incidentId}: ${String(err)}`);
-      }
+    const data: EtaRefreshJobData = {
+      dispatchId: crewed.id,
+      incidentId: dto.incidentId,
+      responderLat: dto.latitude,
+      responderLng: dto.longitude,
+      ...(incidentLoc && {
+        incidentLat: Number(incidentLoc.latitude),
+        incidentLng: Number(incidentLoc.longitude),
+      }),
+      reason: 'fix',
+    };
+    try {
+      await this.locationProcessingQueue.add('eta-refresh', data, {
+        // BullMQ forbids ':' in custom ids.
+        deduplication: { id: `eta-${crewed.id}`, ttl: ETA_REFRESH_THROTTLE_MS },
+        removeOnComplete: true,
+        removeOnFail: true,
+      });
+    } catch (err) {
+      this.logger.warn(`ETA job enqueue failed for incident ${dto.incidentId}: ${String(err)}`);
     }
 
     return record;
   }
 
   /**
-   * Latest position + estimated ETA of every unit actively responding to an
-   * incident (G1). Lets a citizen's tracking screen show the ambulance as soon
-   * as it opens, then patch from the socket.
+   * Recompute a dispatch's route now (transport start, destination change, facility
+   * moved, arrival). A distinct job id bypasses the per-dispatch throttle, so the
+   * change shows within seconds. Never throws: a lost refresh only delays the next
+   * route until the crew's next GPS fix.
+   */
+  async requestImmediateRefresh(dispatchId: string, incidentId: string, reason: EtaRefreshReason): Promise<void> {
+    const data: EtaRefreshJobData = { dispatchId, incidentId, reason };
+    try {
+      await this.locationProcessingQueue.add('eta-refresh', data, {
+        jobId: `eta-now-${dispatchId}-${Date.now()}`,
+        removeOnComplete: true,
+        removeOnFail: true,
+      });
+    } catch (err) {
+      this.logger.warn(`Immediate ETA refresh enqueue failed for dispatch ${dispatchId}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Latest position, leg, destination, route and estimated ETA of every unit
+   * actively responding to an incident (G1, G5). The REST seed for the tracking
+   * screens; the socket patches it afterwards.
    *
    * Authorized for staff, the reporter and crew via the same participant rule as
    * the WebSocket room join. The response is safe for the reporter: unit call
-   * sign / name and type only, never a responder's name or phone (Rule 15).
+   * sign / name and type only, never a responder's name or phone (Rule 15), never
+   * a patient field. On TO_FACILITY / AT_FACILITY a reporter who is not crew and
+   * not crew-confirmed as that unit's patient gets no position, route, destination
+   * or ETA (C17), enforced here, not in the client.
    * Crew phones on one unit collapse into one entry per dispatch (freshest fix).
+   * The route comes from the ETA job's cache (C5); only a scene leg with no cached
+   * route is routed inline.
    */
   async getLatestUnitPositions(incidentId: string, actor: ParticipantActor): Promise<LatestUnitPosition[]> {
-    await this.participants.assertParticipant(actor, incidentId);
+    const participation = await this.participants.assertParticipant(actor, incidentId);
 
     const dispatches = await this.prisma.dispatches.findMany({
       where: {
@@ -270,30 +328,59 @@ export class LocationsService {
         id: true,
         resources: { select: { name: true, call_sign: true, resource_type: true } },
         dispatch_crew: { select: { user_id: true } },
-        incidents: { select: { incident_locations: { select: { latitude: true, longitude: true } } } },
       },
     });
     if (dispatches.length === 0) return [];
 
     const crewIds = [...new Set(dispatches.flatMap((d) => d.dispatch_crew.map((c) => c.user_id)))];
-    const fixes = crewIds.length
-      ? await this.prisma.location_history.findMany({
-          where: { incident_id: incidentId, user_id: { in: crewIds } },
-          orderBy: { recorded_at: 'desc' },
-          distinct: ['user_id'],
-          select: FIX_SELECT,
-        })
-      : [];
+    const [fixes, audience] = await Promise.all([
+      crewIds.length
+        ? this.prisma.location_history.findMany({
+            where: { incident_id: incidentId, user_id: { in: crewIds } },
+            orderBy: { recorded_at: 'desc' },
+            distinct: ['user_id'],
+            select: FIX_SELECT,
+          })
+        : Promise.resolve([]),
+      // Uncached: a REST seed must match the database exactly.
+      this.audience.load(incidentId),
+    ]);
+    // A reporter who also crews a unit sees what the crew sees.
+    const reporterOnly = participation === 'reporter' && !crewIds.includes(actor.id);
 
     return Promise.all(
       dispatches.map(async (d): Promise<LatestUnitPosition> => {
-        const fix = freshestFixFor(fixes, incidentId, d.dispatch_crew.map((c) => c.user_id));
-        const incidentLoc = d.incidents?.incident_locations;
-        return {
+        const entry = audience.dispatches.get(d.id);
+        const leg = entry?.leg.leg ?? 'TO_SCENE';
+        const unit = {
           dispatchId: d.id,
           callSign: d.resources?.call_sign ?? null,
           unitName: d.resources?.name ?? null,
           resourceType: d.resources?.resource_type != null ? String(d.resources.resource_type) : null,
+          leg,
+        };
+        const hidden = reporterOnly && (!entry || (leg !== 'TO_SCENE' && !entry.reporterConfirmedPatient));
+        if (hidden) return { ...unit, destination: null, route: null, position: null, eta: NO_ETA };
+
+        const fix = freshestFixFor(fixes, incidentId, d.dispatch_crew.map((c) => c.user_id));
+        const destination = entry?.leg.destination ?? null;
+        const cached = await this.routeCache.get(d.id);
+        let route: RouteSnapshot | null = null;
+        let eta = NO_ETA;
+        if (cached && isRouteFor(cached, leg, destination)) {
+          route = cached.route;
+          eta = { seconds: route.durationSeconds, isEstimate: true, calculatedAt: route.calculatedAt };
+        } else if (leg === 'TO_SCENE' && fix && entry?.leg.target) {
+          // Cache miss on the scene leg: route now. On the hospital leg the next ETA job fills it.
+          ({ route, eta } = await this.routeInline(
+            { lat: Number(fix.latitude), lng: Number(fix.longitude) },
+            entry.leg.target,
+          ));
+        }
+        return {
+          ...unit,
+          destination,
+          route,
           position: fix
             ? {
                 lat: Number(fix.latitude),
@@ -303,29 +390,35 @@ export class LocationsService {
                 updatedAt: fix.recorded_at.toISOString(),
               }
             : null,
-          eta: fix && incidentLoc
-            ? await this.estimateEta(
-                { lat: Number(fix.latitude), lng: Number(fix.longitude) },
-                { lat: Number(incidentLoc.latitude), lng: Number(incidentLoc.longitude) },
-              )
-            : { seconds: null, isEstimate: true, calculatedAt: null },
+          eta,
         };
       }),
     );
   }
 
-  /** Routed ETA; a routing failure yields null and never throws (Rule 13). */
-  private async estimateEta(
+  /** Route + ETA computed now, simplified like the ETA job's; a routing failure yields nulls and never throws (Rule 13). */
+  private async routeInline(
     from: { lat: number; lng: number },
     to: { lat: number; lng: number },
-  ): Promise<LatestUnitPosition['eta']> {
+  ): Promise<{ route: RouteSnapshot | null; eta: LatestUnitPosition['eta'] }> {
     try {
-      const route = await this.maps.route(from, to);
-      const seconds = route.durationSeconds ?? null;
-      return { seconds, isEstimate: true, calculatedAt: seconds ? new Date().toISOString() : null };
+      const result = await this.maps.route(from, to);
+      if (!result.durationSeconds) return { route: null, eta: NO_ETA };
+      const calculatedAt = new Date().toISOString();
+      return {
+        route: {
+          geometry: simplifyLine(result.geometry ?? []),
+          distanceMeters: result.distanceMeters,
+          durationSeconds: result.durationSeconds,
+          isEstimate: true,
+          calculatedAt,
+          stale: false,
+        },
+        eta: { seconds: result.durationSeconds, isEstimate: true, calculatedAt },
+      };
     } catch (err) {
       this.logger.warn(`ETA estimate failed: ${String(err)}`);
-      return { seconds: null, isEstimate: true, calculatedAt: null };
+      return { route: null, eta: NO_ETA };
     }
   }
 

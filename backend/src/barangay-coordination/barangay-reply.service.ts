@@ -6,6 +6,8 @@ import { Prisma } from '@prisma/client';
 import { QUEUE_NAMES, normalizePhPhone } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import type { SmsJobData } from '../jobs/processors/sms.processor';
+import { AnnouncementsService } from '../announcements/announcements.service';
+import { isOptOut } from '../announcements/sms-opt-out';
 import { BarangayCallbackService } from './barangay-callback.service';
 import { BarangayLinkService, type LinkedNotice } from './barangay-link.service';
 import { BarangayNotifyService } from './barangay-notify.service';
@@ -29,7 +31,8 @@ export type InboundOutcome =
   | 'UNKNOWN_CODE'
   | 'NOT_NOTIFIED'
   | 'UNPARSED'
-  | 'DISABLED';
+  | 'DISABLED'
+  | 'OPT_OUT';
 
 const NOTICE_INCLUDE = { barangay: { select: { id: true, name: true } } } as const;
 
@@ -70,10 +73,16 @@ export class BarangayReplyService {
     private readonly callbacks: BarangayCallbackService,
     private readonly notify: BarangayNotifyService,
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
+    private readonly announcements: AnnouncementsService,
   ) {}
 
   repliesEnabled(): boolean {
     return this.config.get<string>('BARANGAY_SMS_REPLIES_ENABLED') === 'true';
+  }
+
+  /** MOD-53: process announcement subscribers' STOP replies. On unless set to 'false'. */
+  optOutEnabled(): boolean {
+    return (this.config.get<string>('SMS_OPT_OUT_ENABLED')?.trim() || 'true') === 'true';
   }
 
   /**
@@ -89,6 +98,18 @@ export class BarangayReplyService {
 
     const phone = normalizePhPhone(msg.from);
     const fromE164 = phone.kind === 'MOBILE' ? phone.e164 : null;
+
+    // MOD-53: an announcement subscriber's STOP, checked before any barangay logic. A
+    // barangay hotline's (or the override phone's) STOP is a barangay reply: today's path.
+    if (fromE164 && this.optOutEnabled() && isOptOut(msg.body) && !(await this.isBarangaySender(fromE164))) {
+      // Throws on a database error, like the rest of this method: the next poll retries.
+      if (await this.announcements.optOutBySms(fromE164)) {
+        if (!(await this.store(msg, fromE164, null, 'OPT_OUT', null))) return 'DUPLICATE';
+        this.logger.log(`SMS ${msg.providerMessageId}: OPT_OUT`);
+        return 'OPT_OUT';
+      }
+    }
+
     const parsed = parseBarangayReply(msg.body);
     const decision = await this.decide(fromE164, parsed);
 
@@ -96,6 +117,26 @@ export class BarangayReplyService {
     // poll tries again. Re-applying the same status is a no-op, so a race is harmless.
     if (decision.outcome === 'APPLIED') await this.callbacks.reportBySms(decision.notice!, parsed!.status);
 
+    if (!(await this.store(msg, fromE164, parsed, decision.outcome, decision.notice?.id ?? null))) return 'DUPLICATE';
+
+    this.logger.log(`Barangay SMS ${msg.providerMessageId}: ${decision.outcome}`);
+    // The dispatcher's message log reads these rows: refresh it now the row exists.
+    if (decision.notice) await this.notify.emitUpdated(decision.notice.id);
+    if (decision.knownSender && fromE164) await this.autoReply(fromE164, decision.outcome, parsed);
+    return decision.outcome;
+  }
+
+  /**
+   * Stores the inbound row. Returns false when another poll stored the same message first
+   * (unique violation); any other database error throws.
+   */
+  private async store(
+    msg: InboundSms,
+    fromE164: string | null,
+    parsed: ParsedBarangayReply | null,
+    outcome: Exclude<InboundOutcome, 'DUPLICATE'>,
+    noticeId: string | null,
+  ): Promise<boolean> {
     try {
       await this.prisma.barangay_sms_inbound.create({
         data: {
@@ -106,27 +147,19 @@ export class BarangayReplyService {
           received_at: msg.receivedAt,
           parsed_command: parsed?.status ?? null,
           parsed_code: parsed?.code ?? null,
-          notice_id: decision.notice?.id ?? null,
-          outcome: decision.outcome,
+          notice_id: noticeId,
+          outcome,
         },
       });
+      return true;
     } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return 'DUPLICATE';
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return false;
       throw err;
     }
-
-    this.logger.log(`Barangay SMS ${msg.providerMessageId}: ${decision.outcome}`);
-    // The dispatcher's message log reads these rows: refresh it now the row exists.
-    if (decision.notice) await this.notify.emitUpdated(decision.notice.id);
-    if (decision.knownSender && fromE164) await this.autoReply(fromE164, decision.outcome, parsed);
-    return decision.outcome;
   }
 
-  /** The checks, in order. The first that fails decides the outcome. */
-  private async decide(fromE164: string | null, parsed: ParsedBarangayReply | null): Promise<Decision> {
-    const none = { notice: null };
-    if (!this.repliesEnabled()) return { outcome: 'DISABLED', knownSender: false, ...none };
-
+  /** The sender's barangays, and whether it is the dev override phone (answers any barangay). */
+  private async sender(fromE164: string | null): Promise<{ isOverride: boolean; contacts: { barangay_id: string }[] }> {
     const production = this.config.get<string>('NODE_ENV') === 'production';
     // Demo rule: every barangay's alert goes to the one override phone outside production,
     // so a reply from it may answer any barangay's case.
@@ -137,6 +170,20 @@ export class BarangayReplyService {
           select: { barangay_id: true },
         })
       : [];
+    return { isOverride, contacts };
+  }
+
+  private async isBarangaySender(fromE164: string): Promise<boolean> {
+    const { isOverride, contacts } = await this.sender(fromE164);
+    return isOverride || contacts.length > 0;
+  }
+
+  /** The checks, in order. The first that fails decides the outcome. */
+  private async decide(fromE164: string | null, parsed: ParsedBarangayReply | null): Promise<Decision> {
+    const none = { notice: null };
+    if (!this.repliesEnabled()) return { outcome: 'DISABLED', knownSender: false, ...none };
+
+    const { isOverride, contacts } = await this.sender(fromE164);
     if (!isOverride && contacts.length === 0) return { outcome: 'UNKNOWN_SENDER', knownSender: false, ...none };
 
     if (!parsed) return { outcome: 'UNPARSED', knownSender: true, ...none };

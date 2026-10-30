@@ -12,21 +12,13 @@ import { useIncidentAgencies, useUpdateIcs } from '@/features/incidents/command-
 import type { IcsStructure } from '@/features/incidents/command';
 import { useIncidentAudit } from '@/features/audit/hooks';
 import { useFacilities } from '@/features/hospitals/hooks';
+import { receivingStatusBadge } from '@/features/hospitals/location';
 import { timeAgo, titleCase } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 
 /** Mirrors ICS_SITUATION_NOTES_MAX in incidents.service.ts. */
 const SITUATION_NOTES_MAX = 4000;
 const COMMAND_LOG_SHOWN = 25;
-
-/** facilities.receiving_status (facility_receiving_status enum). */
-const RECEIVING_VARIANT: Record<string, 'green' | 'amber' | 'red' | 'muted'> = {
-  OPEN: 'green',
-  EMERGENCY_ONLY: 'amber',
-  AT_CAPACITY: 'red',
-  CLOSED: 'red',
-  UNKNOWN: 'muted',
-};
 
 function fmtTs(iso: string): string {
   return new Date(iso).toLocaleString('en-PH', {
@@ -247,7 +239,7 @@ export function HospitalEvacuationPanel(): JSX.Element {
             <span className="ml-auto flex items-center gap-2">
               <span className="text-[12px] text-agap-textMid">{capacity(f)}</span>
               {showStatus && (
-                <Badge variant={RECEIVING_VARIANT[f.receiving_status] ?? 'muted'}>
+                <Badge variant={receivingStatusBadge(f.receiving_status).variant}>
                   {titleCase(f.receiving_status)}
                 </Badge>
               )}

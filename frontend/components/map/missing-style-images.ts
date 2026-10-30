@@ -5,8 +5,13 @@ const installed = new WeakSet<MapLibreMap>();
 
 /**
  * Some configured MapLibre styles reference sprite images (e.g. "exit_2", "pet")
- * that are not in the style's sprite sheet. Resolve them with a transparent 1×1
- * placeholder so the map stays usable without a console warning per icon.
+ * that are not in the style's sprite sheet, and MapTiler Streets uses " " (a space)
+ * as "no icon" on its town labels. Resolve them with a transparent 1×1 placeholder
+ * so the map stays usable without a console warning per icon.
+ *
+ * The placeholder is SDF because every icon in the MapTiler sprite is: a non-SDF
+ * placeholder in the same symbol layer triggers "Cannot mix SDF and non-SDF icons
+ * in one buffer". Transparent SDF data draws nothing.
  *
  * Use as the `<Map ref>` callback: it runs as soon as the map exists, before the
  * style's first tiles ask for icons (an `onLoad` install is too late for those).
@@ -17,8 +22,8 @@ export function resolveMissingStyleImages(ref: MapRef | null): void {
   if (!map || installed.has(map)) return;
   installed.add(map);
   map.setMissingStyleImageResolver((imageId: string) => {
-    // An empty sprite reference cannot be registered as a MapLibre image; ignore it.
-    if (!imageId?.trim() || map.hasImage(imageId)) return;
-    map.addImage(imageId, { width: 1, height: 1, data: new Uint8Array(4) });
+    // MapLibre never asks for "" (it means no icon); " " is a real id and is resolved.
+    if (!imageId || map.hasImage(imageId)) return;
+    map.addImage(imageId, { width: 1, height: 1, data: new Uint8Array(4) }, { sdf: true });
   });
 }

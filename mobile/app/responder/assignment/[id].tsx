@@ -8,6 +8,7 @@ import {
   ScrollView,
   Alert,
   StatusBar,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,17 +25,27 @@ import {
 } from '@/src/services/api/responders.api';
 import { getMapConfig } from '@/src/services/api/locations.api';
 import { useResponderLocationShare } from '@/src/hooks/useResponderLocationShare';
-import { useRouteLine } from '@/src/hooks/useRouteLine';
+import { useTransportRoute } from '@/src/hooks/useTransportRoute';
+import { useTranslations } from '@/src/hooks/useAccessibility';
 import { NavigateButton } from '@/src/components/responder/navigate-button';
+import { OutboxBanner, TransportBanners } from '@/src/components/responder/transport-banners';
+import { useTransportOutbox } from '@/src/hooks/useTransportOutbox';
+import { NetworkError } from '@/src/services/api/http';
+import { newOutboxItem, type OutboxItem } from '@/src/services/offline/transport-outbox';
 import { ResponderHeader } from '@/src/components/responder/responder-header';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 import { categoryIcon, categoryColor, priorityColor, titleCase } from '@/src/lib/incident-visuals';
-import { nextAssignmentActions, shouldShareLocation, type NextAction } from '@/src/lib/assignment-progress';
+import {
+  isTransportOpenError, nextAssignmentActions, shouldShareLocation, type NextAction,
+} from '@/src/lib/assignment-progress';
+import {
+  formatDistance, formatDuration, shouldShowReporterPatientSwitch,
+} from '@/src/lib/transport-target';
 import { colors, cardShadow, radius } from '@/src/theme/tokens';
 import { DestinationPicker } from '@/src/components/responder/DestinationPicker';
 import {
-  listTransports, recordArrival, startTransport, updateTransportDestination, type TransportRecord,
+  confirmReporterPatient, recordArrival, updateTransportDestination, type TransportRecord,
 } from '@/src/services/api/transport.api';
 
 const LiveTrackingMap = React.lazy(() => Promise.resolve({
@@ -57,14 +68,19 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
  *
  * Shows the incident + citizen location on a live map with an in-app route, lets
  * the crew advance the status, and — once the crew has accepted — shares the
- * unit's live location back to the citizen.
+ * unit's live location back to the citizen. During transport the route, camera,
+ * ETA chip and navigation point at the hospital instead of the scene (Prompt 10).
  */
 export default function AssignmentDetailScreen() {
   const { id: dispatchId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const qc = useQueryClient();
   const token = useAuthStore((s) => s.accessToken);
+  const t = useTranslations().transport;
   const [busy, setBusy] = useState(false);
+  const [reporterBusy, setReporterBusy] = useState(false);
+  // FACILITY_AT_CAPACITY from the last destination save (the API's warning).
+  const [capacityWarning, setCapacityWarning] = useState(false);
   const [destinationPickerOpen, setDestinationPickerOpen] = useState(false);
   // The server's reason, shown inside the picker (the card behind it is hidden while it is open).
   const [transportSaveError, setTransportSaveError] = useState<string | null>(null);
@@ -82,13 +98,6 @@ export default function AssignmentDetailScreen() {
     enabled: MAP_AVAILABLE,
     staleTime: 5 * 60 * 1000,
     retry: false,
-  });
-
-  const { data: transports = [], refetch: refetchTransports } = useQuery({
-    queryKey: ['incident-transports', data?.incident_id],
-    queryFn: () => listTransports(data!.incident_id, token!),
-    enabled: !!data?.incident_id && !!token,
-    refetchInterval: 10_000,
   });
 
   const incident = data?.incidents ?? null;
@@ -110,11 +119,6 @@ export default function AssignmentDetailScreen() {
   const shareEnabled = shouldShareLocation(dispatchStatus, incidentStatus);
   // Field progress lives on the incident once the crew has accepted.
   const stage = accepted && incidentStatus ? incidentStatus : dispatchStatus;
-  // Several units can transport from one incident; this screen only handles this crew's dispatch.
-  const ownTransports = transports.filter((transport) => transport.dispatch_id === dispatchId);
-  const activeTransport = ownTransports.find((transport) => !transport.arrived_at) ?? ownTransports[0];
-  const transportArrived = !!activeTransport?.arrived_at;
-
   const share = useResponderLocationShare(data?.incident_id, shareEnabled);
   const myPoint: (LatLngLite & { heading?: number; updatedAt?: string }) | null = share.myPosition
     ? {
@@ -125,15 +129,58 @@ export default function AssignmentDetailScreen() {
       }
     : null;
 
-  const route = useRouteLine(MAP_AVAILABLE ? myPoint : null, MAP_AVAILABLE ? citizenPoint : null);
+  // Several units can transport from one incident; this screen only handles this crew's dispatch.
+  const transport = useTransportRoute({
+    dispatchId,
+    incidentId: data?.incident_id,
+    incidentStatus,
+    scene: citizenPoint,
+    myPoint,
+    enabled: MAP_AVAILABLE && shareEnabled,
+  });
+  const { route, target, refetchTransports } = transport;
+  const activeTransport = transport.myTransport;
+  const transportArrived = !!activeTransport?.arrived_at;
+  const openTransport = activeTransport && !activeTransport.arrived_at ? activeTransport : null;
+  const transporting = incidentStatus === 'TRANSPORTING' && !!openTransport;
+
+  // Plan §19: transport actions tapped offline wait on the phone and are sent in order.
+  const outbox = useTransportOutbox(dispatchId);
+  const waitingOnPhone = outbox.pending.length > 0;
+  // Offline, or behind actions already waiting (they go first): save it on the phone.
+  const mustQueue = !outbox.isOnline || waitingOnPhone;
+
+  async function saveOnPhone(item: OutboxItem) {
+    const result = await outbox.queue(item);
+    if (result === 'FULL') Alert.alert(t.actionFailed, t.outboxFull);
+    else if (result === 'ALREADY_QUEUED') Alert.alert(t.savedOnPhone, t.alreadySaved);
+    else void outbox.flush();
+  }
 
   const styleUrl = mapConfig?.styleUrl ?? MAPLIBRE_DEMO_STYLE;
 
-  const actions = nextAssignmentActions(dispatchStatus, incidentStatus);
+  const actions = nextAssignmentActions(
+    dispatchStatus,
+    incidentStatus,
+    transport.transportsKnown ? (activeTransport ? { open: !activeTransport.arrived_at } : null) : undefined,
+    t,
+  );
   const fieldWorkDone =
     dispatchStatus === 'COMPLETED' || incidentStatus === 'RESOLVED' || incidentStatus === 'CLOSED';
 
   function onActionPress(action: NextAction) {
+    if (action.kind === 'arrive') {
+      const hospital = openTransport?.facilities?.name;
+      Alert.alert(
+        t.arriveConfirmTitle,
+        hospital ? t.arriveConfirmMessage(hospital) : t.arriveConfirmMessageNoHospital,
+        [
+          { text: t.notYet, style: 'cancel' },
+          { text: action.label, onPress: () => void markArrived() },
+        ],
+      );
+      return;
+    }
     if (action.kind === 'status' && action.confirm) {
       Alert.alert(action.confirm.title, action.confirm.message, [
         { text: 'Not yet', style: 'cancel' },
@@ -144,14 +191,31 @@ export default function AssignmentDetailScreen() {
     void runAction(action);
   }
 
+  function openPickerAfterStart() {
+    void refetchTransports();
+    setCapacityWarning(false);
+    setTransportSaveError(null);
+    setDestinationPickerOpen(true);
+  }
+
   async function runAction(action: NextAction) {
-    if (!dispatchId || !token) return;
+    if (!dispatchId || !token || action.kind === 'arrive') return;
+    // "Start transport" is the one status step that may wait on the phone (plan §19).
+    const startItem = action.kind === 'status' && action.status === 'TRANSPORTING' && data?.incident_id
+      ? newOutboxItem({ kind: 'start', incidentId: data.incident_id, dispatchId })
+      : null;
+    if (startItem && mustQueue) {
+      await saveOnPhone(startItem);
+      // The hospital can be chosen now too; it is sent after the start.
+      openPickerAfterStart();
+      return;
+    }
     setBusy(true);
     try {
       if (action.kind === 'accept') {
         await acceptAssignment(dispatchId, token);
       } else {
-        await updateAssignmentStatus(dispatchId, action.status, token);
+        await updateAssignmentStatus(dispatchId, action.status, token, undefined, startItem?.clientRequestId);
       }
       await Promise.all([
         refetch(),
@@ -161,12 +225,24 @@ export default function AssignmentDetailScreen() {
         qc.invalidateQueries({ queryKey: ['responder-me'] }),
       ]);
       if (action.kind === 'status' && action.status === 'TRANSPORTING') {
-        setTransportSaveError(null);
-        setDestinationPickerOpen(true);
+        // The server opened the transport record with the status change; load it for the picker.
+        openPickerAfterStart();
       }
     } catch (err) {
+      if (startItem && err instanceof NetworkError) {
+        // Same clientRequestId: if the first try did reach the server, the resend is recognised.
+        await saveOnPhone(startItem);
+        openPickerAfterStart();
+        return;
+      }
+      if (isTransportOpenError(err)) {
+        // Resolve before arrival (409 TRANSPORT_OPEN): reload so "Arrived at hospital" shows.
+        void refetchTransports();
+        Alert.alert(t.actionFailed, t.resolveBlocked);
+        return;
+      }
       Alert.alert(
-        'Action failed',
+        t.actionFailed,
         err instanceof Error && err.message
           ? err.message
           : 'Could not update the assignment. Please try again.',
@@ -178,28 +254,53 @@ export default function AssignmentDetailScreen() {
   }
 
   async function saveDestination(destinationId?: string) {
-    if (!data?.incident_id || !token) return;
-    // One open transport per dispatch: after "Decide later" (or to change hospitals)
-    // update that record; only start one when none is open.
-    const open = ownTransports.find((transport) => !transport.arrived_at);
-    // Arrival closes this crew's transport; a new one is never opened from here afterwards.
-    if (!open && transportArrived) {
+    if (!data?.incident_id || !token || !dispatchId) return;
+    // "Decide later": the server already opened the transport with TRANSPORTING, so
+    // there is nothing to save; the card shows "Destination not set".
+    if (!destinationId) {
+      setTransportSaveError(null);
       setDestinationPickerOpen(false);
       return;
     }
+    // Set or change the hospital on this crew's open transport (PATCH, never POST start).
+    const isOpen = (record: TransportRecord) => record.dispatch_id === dispatchId && !record.arrived_at;
+    let open = transport.ownTransports.find(isOpen);
+    // A start still waiting on this phone: the destination waits behind it, and the
+    // record it belongs to is looked up when it is sent.
+    const startWaiting = outbox.pending.some((item) => item.kind === 'start');
+    if (!open && !startWaiting) {
+      const fresh = await refetchTransports();
+      open = ((fresh as { data?: TransportRecord[] }).data ?? []).find(isOpen);
+    }
+    if (!open && !startWaiting) {
+      // Arrival closed this crew's transport; nothing is reopened from here.
+      setTransportSaveError(transportArrived ? null : t.transportNotReady);
+      if (transportArrived) setDestinationPickerOpen(false);
+      return;
+    }
+    const item = newOutboxItem({
+      kind: 'destination', incidentId: data.incident_id, dispatchId, transportId: open?.id ?? null, destinationId,
+    });
+    const keepOnPhone = async () => {
+      await saveOnPhone(item);
+      setTransportSaveError(null);
+      setDestinationPickerOpen(false);
+    };
+    if (!open || mustQueue) {
+      await keepOnPhone();
+      return;
+    }
     try {
-      if (open) {
-        if (destinationId) await updateTransportDestination(data.incident_id, open.id, destinationId, token);
-      } else {
-        await startTransport(data.incident_id, {
-          dispatchId,
-          ...(destinationId ? { destinationId } : {}),
-        }, token);
-      }
+      const saved = await updateTransportDestination(data.incident_id, open.id, destinationId, token, item.clientRequestId);
+      setCapacityWarning(!!saved.warnings?.includes('FACILITY_AT_CAPACITY'));
       setTransportSaveError(null);
       setDestinationPickerOpen(false);
       await refetchTransports();
     } catch (err) {
+      if (err instanceof NetworkError) {
+        await keepOnPhone();
+        return;
+      }
       setTransportSaveError(err instanceof Error && err.message ? err.message : 'Destination not saved.');
       // The list may be stale (e.g. a transport opened elsewhere); a retry uses fresh state.
       void refetchTransports();
@@ -207,17 +308,72 @@ export default function AssignmentDetailScreen() {
   }
 
   async function markArrived() {
-    if (!data?.incident_id || !token || !activeTransport) return;
+    if (!data?.incident_id || !token || !openTransport || !dispatchId) return;
+    // The tap time is kept: an arrival sent later from the phone reports when it happened.
+    const item = newOutboxItem({
+      kind: 'arrive', incidentId: data.incident_id, dispatchId, transportId: openTransport.id,
+    });
+    if (mustQueue) {
+      await saveOnPhone(item);
+      return;
+    }
     setBusy(true);
     try {
-      await recordArrival(data.incident_id, activeTransport.id, token);
+      await recordArrival(data.incident_id, openTransport.id, token, { clientRequestId: item.clientRequestId });
+      setCapacityWarning(false);
       await refetchTransports();
     } catch (err) {
-      Alert.alert('Arrival failed', err instanceof Error ? err.message : 'Could not record arrival.');
+      if (err instanceof NetworkError) {
+        await saveOnPhone(item);
+        return;
+      }
+      Alert.alert(t.arrivalFailed, err instanceof Error && err.message ? err.message : t.arrivalFailedBody);
     } finally {
       setBusy(false);
     }
   }
+
+  // C17: only the crew's confirmation can show the reporter the hospital. Turning it
+  // on asks first; turning it off does not.
+  function onReporterSwitch(next: boolean) {
+    if (!openTransport) return;
+    if (next) {
+      Alert.alert(t.reporterConfirmTitle, t.reporterConfirmMessage, [
+        { text: t.cancel, style: 'cancel' },
+        { text: t.reporterConfirm, onPress: () => void setReporterPatient(openTransport, true) },
+      ]);
+      return;
+    }
+    void setReporterPatient(openTransport, false);
+  }
+
+  async function setReporterPatient(record: TransportRecord, confirmed: boolean) {
+    if (!data?.incident_id || !token) return;
+    setReporterBusy(true);
+    try {
+      await confirmReporterPatient(data.incident_id, record.id, confirmed, token);
+      await refetchTransports();
+    } catch (err) {
+      // e.g. 400 for a guest report or 403 while sharing is off: show the API's reason.
+      Alert.alert(t.reporterSwitchFailed, err instanceof Error && err.message ? err.message : t.arrivalFailedBody);
+    } finally {
+      setReporterBusy(false);
+    }
+  }
+
+  // Navigation hand-off: the hospital during an open transport, otherwise the scene.
+  // A hospital whose location is not verified (or missing) is searched by name.
+  const navHospital = transporting ? openTransport?.facilities ?? null : null;
+  const navSearch =
+    navHospital && (target.kind !== 'FACILITY' || !target.verified)
+      ? `${navHospital.name}, ${navHospital.municipality ?? 'Bulacan'}`
+      : null;
+  const etaText =
+    route.durationSeconds == null
+      ? null
+      : target.kind === 'FACILITY' && target.label
+        ? t.etaToHospital(formatDistance(route.distanceMeters), formatDuration(route.durationSeconds), target.label)
+        : t.etaToScene(formatDistance(route.distanceMeters), formatDuration(route.durationSeconds));
 
   function goBack() {
     if (router.canGoBack()) router.back();
@@ -251,7 +407,9 @@ export default function AssignmentDetailScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} size="large" />
         </View>
-      ) : isError || !data ? (
+      ) : !data ? (
+        // Only when nothing was ever loaded: a failed 10 s poll (airplane mode) keeps the
+        // last loaded assignment on screen, so the crew can still act (plan §19).
         <View style={styles.center}>
           <View style={styles.iconWrap}>
             <Ionicons name="cloud-offline-outline" size={32} color={colors.textSub} />
@@ -279,6 +437,9 @@ export default function AssignmentDetailScreen() {
                     incident={citizenPoint}
                     responder={myPoint}
                     routeGeometry={route.geometry}
+                    routeDimmed={route.lastKnown}
+                    destination={transport.destinationMarker}
+                    incidentDimmed={incidentStatus === 'TRANSPORTING' && !!transport.destinationMarker}
                     responderIcon="ambulance"
                     citizenSex={incident?.reporter_sex ?? null}
                     priority={incident?.priority}
@@ -291,12 +452,10 @@ export default function AssignmentDetailScreen() {
             )}
 
             {/* Route ETA chip floating over the map — always an estimate */}
-            {route.durationSeconds != null && (
-              <View style={styles.etaChip}>
+            {etaText != null && (
+              <View style={[styles.etaChip, route.lastKnown && styles.etaChipStale]}>
                 <Ionicons name="time" size={14} color={colors.white} style={{ marginRight: 6 }} />
-                <Text style={styles.etaChipText}>
-                  {formatKm(route.distanceMeters)} • ~{formatMin(route.durationSeconds)} est.
-                </Text>
+                <Text style={styles.etaChipText} numberOfLines={1}>{etaText}</Text>
               </View>
             )}
           </View>
@@ -349,6 +508,16 @@ export default function AssignmentDetailScreen() {
                 </Text>
               </View>
             )}
+            <TransportBanners transporting={transporting} target={target} routeLastKnown={route.lastKnown}
+              destinationDeactivated={transport.destinationDeactivated} />
+            {isError && (
+              <View style={styles.warnRow}>
+                <Ionicons name="cloud-offline" size={14} color={colors.amber} style={{ marginRight: 6 }} />
+                <Text style={styles.warnText}>{t.showingLastLoaded}</Text>
+              </View>
+            )}
+            <OutboxBanner pending={outbox.pending.length} drops={outbox.drops}
+              onSendNow={() => void outbox.flush()} onDismiss={outbox.dismiss} />
 
             {/* Info rows */}
             <InfoRow
@@ -368,24 +537,27 @@ export default function AssignmentDetailScreen() {
               <View style={[styles.card, styles.transportCard]}>
                 <View style={styles.transportHeader}>
                   <Ionicons name="medical" size={18} color={colors.primary} />
-                  <Text style={styles.infoLabel}>Transport destination</Text>
+                  <Text style={styles.infoLabel}>{t.cardTitle}</Text>
                 </View>
                 <Text style={styles.infoValue}>
-                  {activeTransport?.facilities?.name ?? 'Not set'}
+                  {activeTransport?.facilities?.name ?? t.destinationNotSet}
                 </Text>
-                {activeTransport?.estimated_arrival_at && (
+                {!transportArrived && activeTransport?.estimated_arrival_at && (
                   <Text style={styles.infoSub}>
-                    Est. arrival {new Date(activeTransport.estimated_arrival_at).toLocaleTimeString()}
+                    {t.estArrival(new Date(activeTransport.estimated_arrival_at).toLocaleTimeString())}
                   </Text>
+                )}
+                {capacityWarning && !transportArrived && (
+                  <Text style={styles.warnInline}>{t.atCapacity}</Text>
                 )}
                 {!!transportSaveError && (
                   <TouchableOpacity onPress={() => setDestinationPickerOpen(true)} accessibilityRole="button">
-                    <Text style={styles.errorText}>Destination not saved, tap to retry.</Text>
+                    <Text style={styles.errorText}>{t.destinationNotSavedRetry}</Text>
                   </TouchableOpacity>
                 )}
                 {transportArrived ? (
-                  <Text style={styles.infoSub}>
-                    Arrived {new Date(activeTransport!.arrived_at!).toLocaleTimeString()}
+                  <Text style={styles.arrivedText}>
+                    {t.arrivedSummary(new Date(activeTransport!.arrived_at!).toLocaleTimeString())}
                   </Text>
                 ) : (
                   <View style={styles.transportActions}>
@@ -393,29 +565,56 @@ export default function AssignmentDetailScreen() {
                       style={styles.destinationButton}
                       onPress={() => setDestinationPickerOpen(true)}
                       disabled={busy}
+                      accessibilityRole="button"
                     >
                       <Text style={styles.destinationButtonText}>
-                        {activeTransport?.facilities ? 'Change destination' : 'Set destination'}
+                        {activeTransport?.facilities ? t.changeDestination : t.setDestination}
                       </Text>
                     </TouchableOpacity>
-                    {activeTransport && (
-                      <TouchableOpacity style={styles.arrivedButton} onPress={() => void markArrived()} disabled={busy}>
-                        <Text style={styles.arrivedButtonText}>Arrived at hospital</Text>
-                      </TouchableOpacity>
+                  </View>
+                )}
+                {shouldShowReporterPatientSwitch(openTransport) && (
+                  <View style={styles.reporterBlock}>
+                    <View style={styles.reporterRow}>
+                      <Text style={styles.reporterLabel}>{t.reporterSwitch}</Text>
+                      <Switch
+                        value={!!openTransport?.reporter_patient_confirmed_at}
+                        onValueChange={onReporterSwitch}
+                        disabled={reporterBusy}
+                        trackColor={{ true: colors.primary, false: colors.track }}
+                        accessibilityLabel={t.reporterSwitch}
+                      />
+                    </View>
+                    {openTransport?.reporterClaimsPatient && !openTransport.reporter_patient_confirmed_at && (
+                      <Text style={styles.reporterHint}>{t.reporterClaimHint}</Text>
                     )}
                   </View>
                 )}
               </View>
             )}
 
-            <NavigateButton
-              lat={citizenPoint?.lat}
-              lng={citizenPoint?.lng}
-              label={address ?? incident?.public_reference}
-              caption="Voice navigation (Waze / Maps)"
-              variant="secondary"
-              style={{ marginTop: 14 }}
-            />
+            {navHospital ? (
+              <NavigateButton
+                lat={target.kind === 'FACILITY' ? target.point?.lat : null}
+                lng={target.kind === 'FACILITY' ? target.point?.lng : null}
+                label={navHospital.name}
+                caption={t.navigateToHospital(navHospital.name)}
+                title={t.navigateToHospital(navHospital.name)}
+                searchQuery={navSearch}
+                warning={navSearch ? t.navigateSearchWarning : null}
+                variant="secondary"
+                style={{ marginTop: 14 }}
+              />
+            ) : (
+              <NavigateButton
+                lat={citizenPoint?.lat}
+                lng={citizenPoint?.lng}
+                label={address ?? incident?.public_reference}
+                caption={t.navigateToScene}
+                variant="secondary"
+                style={{ marginTop: 14 }}
+              />
+            )}
 
             {/* On-scene patient assessment (MOD-37) — available once engaged.
                 Takes the INCIDENT id, not this screen's dispatch id. */}
@@ -469,10 +668,11 @@ export default function AssignmentDetailScreen() {
                       style={[
                         styles.actionBtn,
                         secondary && styles.actionBtnSecondary,
-                        busy && styles.actionBtnDisabled,
+                        (busy || waitingOnPhone) && styles.actionBtnDisabled,
                       ]}
                       onPress={() => onActionPress(action)}
-                      disabled={busy}
+                      // Nothing overtakes an action waiting on the phone (the banner shows it).
+                      disabled={busy || waitingOnPhone}
                       activeOpacity={0.85}
                       accessibilityRole="button"
                       accessibilityLabel={action.label}
@@ -716,17 +916,6 @@ function HandoverSection({ incidentId, token }: { incidentId: string; token: str
   );
 }
 
-function formatKm(meters: number | null): string {
-  if (meters == null) return '—';
-  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
-}
-
-function formatMin(seconds: number | null): string {
-  if (seconds == null) return '—';
-  const mins = Math.max(1, Math.round(seconds / 60));
-  return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} hr ${mins % 60} min`;
-}
-
 class MapErrorBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -802,7 +991,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7,
     ...cardShadow,
   },
-  etaChipText: { color: colors.white, fontSize: 13, fontWeight: '800' },
+  etaChipStale: { opacity: 0.7 },
+  etaChipText: { color: colors.white, fontSize: 13, fontWeight: '800', flexShrink: 1 },
 
   sheet: { flex: 1 },
 
@@ -852,9 +1042,16 @@ const styles = StyleSheet.create({
   transportActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
   destinationButton: { flex: 1, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, paddingVertical: 10, alignItems: 'center' },
   destinationButtonText: { color: colors.primary, fontWeight: '800', fontSize: 12 },
-  arrivedButton: { flex: 1, backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 10, alignItems: 'center' },
-  arrivedButtonText: { color: colors.white, fontWeight: '800', fontSize: 12 },
+  arrivedText: { color: colors.text, fontSize: 13, fontWeight: '700', marginTop: 8, lineHeight: 18 },
+  warnInline: { color: colors.amber, fontSize: 12, marginTop: 8, lineHeight: 17 },
   errorText: { color: colors.danger, fontSize: 12, marginTop: 8 },
+  reporterBlock: {
+    marginTop: 12, paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
+  },
+  reporterRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reporterLabel: { flex: 1, color: colors.text, fontSize: 13, fontWeight: '600', lineHeight: 18 },
+  reporterHint: { color: colors.textSub, fontSize: 12, marginTop: 6, lineHeight: 17 },
 
   linkRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, padding: 16 },
   linkText: { color: colors.text, fontSize: 15, fontWeight: '700' },

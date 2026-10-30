@@ -132,6 +132,8 @@ export interface ResponderAssignmentsResult {
   isLoading: boolean;
   isRefreshing: boolean;
   isError: boolean;
+  /** A list was loaded at least once; a failed poll (e.g. airplane mode) keeps it. */
+  hasData: boolean;
   isStale: boolean;
   error: Error | null;
   refetch: () => Promise<unknown>;
@@ -158,6 +160,7 @@ export function useResponderAssignments(): ResponderAssignmentsResult {
     isLoading: query.isLoading,
     isRefreshing: query.isFetching && !query.isLoading,
     isError: query.isError,
+    hasData: query.data !== undefined,
     isStale: query.isStale,
     error: query.error,
     refetch: query.refetch,

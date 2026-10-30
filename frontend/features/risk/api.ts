@@ -69,3 +69,35 @@ export function updateRiskArea(id: string, body: RiskAreaChanges): Promise<RiskA
 export function deleteRiskArea(id: string): Promise<{ message: string }> {
   return api.delete(`/risk-intelligence/areas/${id}`, getToken());
 }
+
+// ─── Proposed hotspots (AUTOMATION_NEEDS_PLAN Phase 2, C7) ───────────────────
+
+export interface RiskAreaProposal {
+  id: string;
+  risk_type: string;
+  /** null = the cluster's centre is outside every barangay polygon. */
+  barangay: string | null;
+  incident_count: number;
+  window_days: number;
+  status: 'PENDING' | 'APPROVED' | 'DISMISSED';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApproveProposalInput {
+  name: string;
+  riskLevel: RiskLevel;
+  description?: string;
+}
+
+export function fetchRiskAreaProposals(): Promise<RiskAreaProposal[]> {
+  return api.get('/risk-intelligence/proposals?status=PENDING', getToken());
+}
+
+export function approveRiskAreaProposal(id: string, body: ApproveProposalInput): Promise<{ proposalId: string; riskArea: RiskArea }> {
+  return api.post(`/risk-intelligence/proposals/${id}/approve`, body, getToken());
+}
+
+export function dismissRiskAreaProposal(id: string): Promise<{ proposalId: string; status: 'DISMISSED' }> {
+  return api.post(`/risk-intelligence/proposals/${id}/dismiss`, {}, getToken());
+}

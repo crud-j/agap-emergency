@@ -28,6 +28,12 @@ export async function registerPushToken(
         name: 'Incident updates',
         importance: Notifications.AndroidImportance.HIGH,
       });
+      // Must match ASSIGNMENTS_CHANNEL in backend dispatch/assignment-push.ts. MAX so a
+      // new assignment wakes a backgrounded responder phone.
+      await Notifications.setNotificationChannelAsync('assignments', {
+        name: 'Responder assignments',
+        importance: Notifications.AndroidImportance.MAX,
+      });
     }
 
     const deviceToken = await Notifications.getDevicePushTokenAsync();
@@ -38,6 +44,16 @@ export async function registerPushToken(
     console.warn('Unable to register push notification token', error);
     return false;
   }
+}
+
+/** Dispatch a tapped assignment push points at (data.type 'ASSIGNMENT', data.dispatchId). */
+export function assignmentIdFromNotification(
+  response: Notifications.NotificationResponse | null | undefined,
+): string | null {
+  const data = response?.notification.request.content.data;
+  if (data?.type !== 'ASSIGNMENT') return null;
+  const id = data.dispatchId;
+  return typeof id === 'string' && id ? id : null;
 }
 
 /** Incident a tapped notification points at, if any (data.incidentId from the backend). */

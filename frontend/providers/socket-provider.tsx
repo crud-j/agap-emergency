@@ -14,12 +14,20 @@ import type {
   EscalationPayload,
   ResponderLocationUpdatedPayload,
   ResponderEtaUpdatedPayload,
+  ResponderRouteUpdatedPayload,
   ResponderStatusChangedPayload,
   AnnouncementPublishedPayload,
+  IncidentTransportUpdatedPayload,
+  SurgeRecommendedPayload,
+  SurgeTriageTagUpdatedPayload,
 } from '@agap/shared';
-import type { IncidentListItem } from '@/features/incidents/api';
+import type { IncidentListItem, IncidentTransport } from '@/features/incidents/api';
 import type { LatestUnitPosition, LiveResponderPosition } from '@/features/map/api';
-import { applyEtaUpdate, mergeResponderLocations } from '@/features/map/live-tracking';
+import {
+  applyEtaUpdate, applyRouteUpdate, applyTransportUpdate, mergeResponderLocations, transportUpdateNotices,
+} from '@/features/map/live-tracking';
+import { Toast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/use-toast';
 import type { Resource, FleetItem } from '@/features/resources/api';
 
 interface ResourceStatusChangedPayload {
@@ -42,6 +50,8 @@ interface SocketProviderProps {
  */
 export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
   const qc = useQueryClient();
+  // Live transport notices ("Destination changed: A → B", hospital warnings).
+  const { toasts, toast, dismiss } = useToast();
   // Buffer for responder location updates — flushed at most every 200ms so
   // rapid GPS events don't cause a render per position fix.
   const locBufferRef = useRef<Map<string, ResponderLocationUpdatedPayload>>(new Map());
@@ -135,6 +145,22 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
         });
       },
     );
+
+    // ─── surge.* (MOD-52) ────────────────────────────────────────────────────
+    // A recommendation also writes each Supervisor's in-app notice: refresh it so the
+    // surge page banner and the bell show it. Triage tags: the board refetches live
+    // (its refetchInterval stays as the fallback).
+    const offSurgeRecommended = onIncidentEvent<SurgeRecommendedPayload>('surge.recommended', () => {
+      startTransition(() => {
+        qc.invalidateQueries({ queryKey: ['notifications'] });
+      });
+    });
+    const offTriageTag = onIncidentEvent<SurgeTriageTagUpdatedPayload>('surge.triage_tag_updated', () => {
+      startTransition(() => {
+        qc.invalidateQueries({ queryKey: ['surge-triage'] });
+        qc.invalidateQueries({ queryKey: ['surge-state'] });
+      });
+    });
 
     // ─── incident.created ────────────────────────────────────────────────────
     const offCreated = onIncidentEvent<IncidentCreatedPayload>(
@@ -290,6 +316,43 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       },
     );
 
+    // ─── responder.route_updated (MOD-43) ────────────────────────────────────
+    // The server route for the unit's current leg (scene or hospital). Patched into
+    // the same unit cache, so the map redraws the line and its leg styling live.
+    const offRoute = onIncidentEvent<ResponderRouteUpdatedPayload>(
+      'responder.route_updated',
+      (payload) => {
+        startTransition(() => {
+          qc.setQueryData<LatestUnitPosition[]>(['incident-units', payload.incidentId], (old) =>
+            applyRouteUpdate(old, payload),
+          );
+        });
+      },
+    );
+
+    // ─── incident.transport_updated (MOD-40) ─────────────────────────────────
+    // The destination of a transport changed (or its hospital moved / was
+    // deactivated). The toast reads the old hospital before the cache is patched.
+    const offTransportUpdated = onIncidentEvent<IncidentTransportUpdatedPayload>(
+      'incident.transport_updated',
+      (payload) => {
+        const unitsKey = ['incident-units', payload.incidentId];
+        const notices = transportUpdateNotices(payload, {
+          units: qc.getQueryData<LatestUnitPosition[]>(unitsKey),
+          transports: qc.getQueryData<IncidentTransport[]>(['incident-transports', payload.incidentId]),
+        });
+        for (const notice of notices) {
+          toast({ ...notice, duration: notice.variant === 'warning' ? 10_000 : 6_000 });
+        }
+        startTransition(() => {
+          qc.setQueryData<LatestUnitPosition[]>(unitsKey, (old) => applyTransportUpdate(old, payload));
+          qc.invalidateQueries({ queryKey: ['incident-transports', payload.incidentId] });
+          // The drawer's destination history reads the incident audit trail.
+          qc.invalidateQueries({ queryKey: ['audit-incident', payload.incidentId] });
+        });
+      },
+    );
+
     // ─── dispatch.updated (crew accepted / declined) ─────────────────────────
     const offDispatchUpdated = onIncidentEvent<DispatchUpdatedPayload>(
       'dispatch.updated',
@@ -367,6 +430,8 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       offStatus();
       offCreated();
       offBarangay();
+      offSurgeRecommended();
+      offTriageTag();
       offUpdated();
       offAssessment();
       offDispatchCreated();
@@ -376,6 +441,8 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       offHandover();
       offResponderLoc();
       offEta();
+      offRoute();
+      offTransportUpdated();
       offDispatchUpdated();
       offResponderStatus();
       offAnnouncement();
@@ -389,7 +456,23 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
         seedRefetchTimerRef.current = null;
       }
     };
-  }, [qc, signedIn]);
+  }, [qc, signedIn, toast]);
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {toasts.map((t) => (
+        <Toast
+          key={t.id}
+          title={t.title}
+          {...(t.description && { description: t.description })}
+          {...(t.variant && { variant: t.variant })}
+          {...(t.duration !== undefined && { duration: t.duration })}
+          onOpenChange={(isOpen) => {
+            if (!isOpen) dismiss(t.id);
+          }}
+        />
+      ))}
+    </>
+  );
 }

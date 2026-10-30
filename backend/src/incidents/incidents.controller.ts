@@ -16,6 +16,7 @@ import {
   HttpStatus,
   Res,
   StreamableFile,
+  ForbiddenException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -27,6 +28,7 @@ import { TransportService } from './transport/transport.service';
 import { StartTransportDto } from './transport/dto/start-transport.dto';
 import { RecordArrivalDto } from './transport/dto/record-arrival.dto';
 import { UpdateTransportDto } from './transport/dto/update-transport.dto';
+import { ConfirmReporterPatientDto } from './transport/dto/confirm-reporter-patient.dto';
 import { MediaService, MULTER_MEMORY_STORAGE, MAX_VIDEO_UPLOAD_BYTES } from '../media/media.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { UpdateIncidentStatusDto } from './dto/update-incident-status.dto';
@@ -36,7 +38,7 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole, IncidentStatus } from '@agap/shared';
-import { IncidentParticipantService } from '../realtime/incident-participant.service';
+import { IncidentParticipantService, type IncidentParticipation } from '../realtime/incident-participant.service';
 import {
   ActivateIcsDto, AddAgencyDto, AssignIcsPositionDto, AssignIncidentCommanderDto, FalseAlertDto,
   IncidentFeedbackDto, MarkDuplicateDto, MergeIncidentDto, UpdateIcsDto,
@@ -44,6 +46,9 @@ import {
 import { CreateHandoverDto } from './incident-handover/dto/create-handover.dto';
 import { CreateResolutionDto } from './dto/create-resolution.dto';
 import { RejectAttachmentDto } from './dto/reject-attachment.dto';
+
+/** The authenticated caller, as JwtAuthGuard attaches it. */
+type AuthedRequest = { user: { id: string; role: string } };
 
 @ApiTags('incidents')
 @Controller({ path: 'incidents', version: '1' })
@@ -56,6 +61,27 @@ export class IncidentsController {
     private readonly transportService: TransportService,
     private readonly participants: IncidentParticipantService,
   ) {}
+
+  /**
+   * Object-level access for incident reads (MOD-47/48): the caller must be staff, crew
+   * on a dispatch of this incident, or its registered reporter, and their kind must be
+   * in `allowed`. Anyone else gets 403, whatever the id, so a leaked or guessed id
+   * reveals nothing (e.g. a guest report's id left on a shared phone).
+   */
+  private async requireParticipation(
+    req: AuthedRequest,
+    incidentId: string,
+    allowed: readonly IncidentParticipation[],
+  ): Promise<IncidentParticipation> {
+    const participation = await this.participants.getParticipation(
+      { id: req.user.id, role: req.user.role },
+      incidentId,
+    );
+    if (!participation || !allowed.includes(participation)) {
+      throw new ForbiddenException('You do not have access to this incident');
+    }
+    return participation;
+  }
 
   @Post()
   @UseGuards(OptionalJwtAuthGuard)
@@ -108,14 +134,14 @@ export class IncidentsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get incident by ID' })
   async findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    const participation = await this.requireParticipation(req, id, ['staff', 'crew', 'reporter']);
+    // The reporter (citizen app) gets status, reference and scene only: never patients,
+    // assessments, attachments, contact numbers or dispatch internals (plan §17).
+    if (participation === 'reporter') return this.incidentsService.findReporterView(id);
+
     const { barangay_notices, ...incident } = (await this.incidentsService.findById(id)) as any;
-    // reporter_sex (reporter map icon) is for staff and assigned crew only —
-    // this route is also used by the citizen app, which must never receive it.
-    // The barangay notice (short code, report status) is ops-only for the same reason.
-    const participation = await this.participants.getParticipation(
-      { id: req.user.id, role: req.user.role },
-      id,
-    );
+    // reporter_sex (reporter map icon) is for staff and assigned crew only.
+    // The barangay notice (short code, report status) is ops-only.
     if (participation === 'staff') {
       return {
         ...incident,
@@ -123,10 +149,7 @@ export class IncidentsController {
         reporter_sex: await this.incidentsService.getReporterSex(id),
       };
     }
-    if (participation === 'crew') {
-      return { ...incident, reporter_sex: await this.incidentsService.getReporterSex(id) };
-    }
-    return incident;
+    return { ...incident, reporter_sex: await this.incidentsService.getReporterSex(id) };
   }
 
   @Get(':id/detail')
@@ -259,7 +282,8 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Incident event log' })
-  async listEvents(@Param('id', ParseUUIDPipe) id: string) {
+  async listEvents(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    await this.requireParticipation(req, id, ['staff', 'crew']);
     return this.incidentsService.listEvents(id);
   }
 
@@ -267,7 +291,8 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Citizen-facing timeline' })
-  async timeline(@Param('id', ParseUUIDPipe) id: string) {
+  async timeline(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    await this.requireParticipation(req, id, ['staff', 'crew', 'reporter']);
     return this.incidentsService.getTimeline(id);
   }
 
@@ -366,7 +391,9 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get incident resolution' })
-  async getResolution(@Param('id', ParseUUIDPipe) id: string) {
+  async getResolution(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    // Patient disposition: staff and crew only. The reporter's outcome is in GET :id/detail.
+    await this.requireParticipation(req, id, ['staff', 'crew']);
     return this.incidentsService.getResolution(id);
   }
 
@@ -439,7 +466,9 @@ export class IncidentsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List on-scene assessments' })
-  async listAssessments(@Param('id', ParseUUIDPipe) id: string) {
+  async listAssessments(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    // Medical data (vitals, triage): staff and crew only, never the reporter (plan §17).
+    await this.requireParticipation(req, id, ['staff', 'crew']);
     return this.incidentsService.listAssessments(id);
   }
 
@@ -561,7 +590,10 @@ export class IncidentsController {
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER, UserRole.HOSPITAL_USER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List transport records for an incident (MOD-40). Hospital users see only their own facilities\' transports.' })
-  async listTransports(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+  async listTransports(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    // Patient names and the destination: staff, or crew on this incident. Hospital users
+    // are scoped to their own facilities' transports by the service instead.
+    if (req.user.role !== UserRole.HOSPITAL_USER) await this.requireParticipation(req, id, ['staff', 'crew']);
     return this.transportService.listTransports(id, { id: req.user.id, role: req.user.role });
   }
 
@@ -605,6 +637,23 @@ export class IncidentsController {
     @Request() req: any,
   ) {
     return this.transportService.updateTransport(id, transportId, body, req.user.id, req.user.role);
+  }
+
+  @Patch(':id/transport/:transportId/reporter-patient')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  // Responders only for a dispatch they crew (service checks).
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm (or withdraw) that the person being carried is the registered reporter (MOD-40, C17)' })
+  async confirmReporterIsPatient(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('transportId', ParseUUIDPipe) transportId: string,
+    @Body() dto: ConfirmReporterPatientDto,
+    @Request() req: any,
+  ) {
+    return this.transportService.confirmReporterIsPatient(
+      id, transportId, { id: req.user.id, role: req.user.role }, dto.confirmed,
+    );
   }
 
   // ---- ICS extended ----

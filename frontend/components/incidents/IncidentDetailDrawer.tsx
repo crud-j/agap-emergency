@@ -14,7 +14,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   Tabs, TabsList, TabsTrigger, TabsContent,
-  PriorityBadge, StatusChip, Button, Skeleton, EmptyState, EtaLabel,
+  PriorityBadge, StatusChip, Button, Skeleton, EmptyState, EtaLabel, Badge,
 } from '@/components/ui';
 import {
   useIncident, useUpdateIncidentStatus, useCreateResolution, useCloseIncident, useReporterStanding,
@@ -35,6 +35,9 @@ import {
 import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { useHospitals, useIncidentReferrals, useCreateReferral } from '@/features/hospitals/hooks';
 import type { Hospital } from '@/features/hospitals/api';
+import { isAtCapacity, receivingStatusBadge } from '@/features/hospitals/location';
+import { useIncidentAudit } from '@/features/audit/hooks';
+import { destinationHistory } from '@/features/incidents/transport-history';
 
 /** In-field statuses advanced by the responder app, not the dashboard. */
 const IN_FIELD = ['DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING'];
@@ -343,36 +346,82 @@ function TransportPanel({ incidentId, transports }: { incidentId: string; transp
   const user = useAuthUser();
   const canChange = hasRole(user, 'DISPATCHER', 'SUPERVISOR');
   const [selected, setSelected] = useState<IncidentTransport | null>(null);
+  // FACILITY_AT_CAPACITY returned by the last save (the API warns, never blocks).
+  const [savedWarning, setSavedWarning] = useState<string | null>(null);
+  // The audit trail is read only when a destination was actually changed.
+  const changed = transports.some((t) => t.destination_changed);
+  const { data: audit } = useIncidentAudit(changed ? incidentId : null);
+  const { data: hospitals = [] } = useHospitals({ enabled: changed });
+  const names = new Map(hospitals.map((h) => [h.id, h.name]));
+  for (const t of transports) if (t.facilities) names.set(t.facilities.id, t.facilities.name);
   if (transports.length === 0) return null;
 
   return (
     <Section icon={Activity} title="Transport">
       <div className="space-y-3">
-        {transports.map((transport) => (
-          <div key={transport.id} className="rounded-xl border border-slate-200 bg-white/60 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-agap-textMain">
-                  {transport.facilities?.name ?? 'Destination not set'}
-                </p>
-                <p className="text-xs text-agap-textSub">
-                  Started {transport.transport_started_at ? new Date(transport.transport_started_at).toLocaleString() : '—'}
-                </p>
-                {transport.estimated_arrival_at && (
-                  <p className="text-xs text-agap-textSub">
-                    Est. arrival {new Date(transport.estimated_arrival_at).toLocaleString()}
+        {savedWarning && (
+          <TransportWarning text={savedWarning} />
+        )}
+        {transports.map((transport) => {
+          const facility = transport.facilities;
+          const open = !transport.arrived_at;
+          const history = destinationHistory(transport, audit, names);
+          const warnings = open ? transportWarnings(facility) : [];
+          return (
+            <div key={transport.id} className="rounded-xl border border-slate-200 bg-white/60 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-agap-textMain">
+                    {facility?.name ?? 'Destination not set'}
+                    {facility?.receiving_status && (
+                      <Badge variant={receivingStatusBadge(facility.receiving_status).variant}>
+                        {receivingStatusBadge(facility.receiving_status).label}
+                      </Badge>
+                    )}
                   </p>
+                  <p className="text-xs text-agap-textSub">
+                    Started {transport.transport_started_at ? new Date(transport.transport_started_at).toLocaleString() : '—'}
+                  </p>
+                  {open && transport.estimated_arrival_at && (
+                    <p className="text-xs text-agap-textSub">
+                      Est. arrival {new Date(transport.estimated_arrival_at).toLocaleTimeString()}{' '}
+                      <span className="font-semibold">(estimate, routed)</span>
+                    </p>
+                  )}
+                  <p className="text-xs font-semibold text-agap-textMid">
+                    {transport.arrived_at ? `Arrived ${new Date(transport.arrived_at).toLocaleString()}` : 'En route'}
+                  </p>
+                </div>
+                {canChange && open && (
+                  <Button size="sm" variant="secondary" onClick={() => setSelected(transport)}>Change</Button>
                 )}
-                <p className="text-xs font-semibold text-agap-textMid">
-                  {transport.arrived_at ? `Arrived ${new Date(transport.arrived_at).toLocaleString()}` : 'En route'}
-                </p>
               </div>
-              {canChange && !transport.arrived_at && (
-                <Button size="sm" variant="secondary" onClick={() => setSelected(transport)}>Change</Button>
+              {warnings.map((text) => <TransportWarning key={text} text={text} />)}
+              {(history.length > 0 || transport.destination_changed) && (
+                <div className="mt-2 border-t border-slate-100 pt-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-agap-textSub">Destination changes</p>
+                  {history.length > 0 ? (
+                    <ul className="mt-1 space-y-1">
+                      {history.map((change) => (
+                        <li key={change.at} className="text-xs text-agap-textMid">
+                          <span className="text-agap-textSub">{new Date(change.at).toLocaleTimeString()}</span>{' '}
+                          {change.from ? `${change.from} → ${change.to}` : `Set to ${change.to}`}
+                          {change.actor && <span className="text-agap-textSub"> · {change.actor}</span>}
+                          {change.reason && <span className="block pl-2 italic text-agap-textSub">“{change.reason}”</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    // No audit rows readable: the record still says it changed, and why.
+                    <p className="mt-1 text-xs text-agap-textMid">
+                      Destination was changed{transport.change_reason ? `: “${transport.change_reason}”` : '.'}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {selected && (
         <ChangeTransportDialog
@@ -380,33 +429,74 @@ function TransportPanel({ incidentId, transports }: { incidentId: string; transp
           transport={selected}
           open
           onOpenChange={(open) => { if (!open) setSelected(null); }}
+          onSaved={setSavedWarning}
         />
       )}
     </Section>
   );
 }
 
+/** Warnings for an open transport's hospital; the transport always continues (Reliability Rules). */
+function transportWarnings(facility: IncidentTransport['facilities']): string[] {
+  if (!facility) return [];
+  const out: string[] = [];
+  if (facility.is_active === false) {
+    out.push(`${facility.name} was deactivated. The transport continues; change the destination if the crew needs another hospital.`);
+  }
+  if (isAtCapacity(facility.receiving_status)) {
+    out.push(`${facility.name} reports ${receivingStatusBadge(facility.receiving_status).label.toLowerCase()}. The transport continues; confirm with the hospital or change the destination.`);
+  }
+  if (facility.location_status !== 'VERIFIED' || facility.latitude == null || facility.longitude == null) {
+    out.push('Hospital location not verified: the route and ETA may be off.');
+  }
+  return out;
+}
+
+function TransportWarning({ text }: { text: string }): JSX.Element {
+  return (
+    <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+      <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+      {text}
+    </p>
+  );
+}
+
 function ChangeTransportDialog({
-  incidentId, transport, open, onOpenChange,
+  incidentId, transport, open, onOpenChange, onSaved,
 }: {
   incidentId: string;
   transport: IncidentTransport;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The save's warning sentence (FACILITY_AT_CAPACITY), or null. */
+  onSaved: (warning: string | null) => void;
 }): JSX.Element {
+  // GET /hospitals lists only selectable hospitals (active, not pending review or rejected).
   const { data: hospitals = [] } = useHospitals();
   const update = useUpdateIncidentTransport();
   const [destinationId, setDestinationId] = useState(transport.destination_id ?? '');
   const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const chosen = hospitals.find((h) => h.id === destinationId);
 
   async function submit() {
     if (!destinationId) return;
-    await update.mutateAsync({
-      incidentId,
-      transportId: transport.id,
-      body: { destinationId, ...(reason.trim() ? { changeReason: reason.trim() } : {}) },
-    });
-    onOpenChange(false);
+    setError(null);
+    try {
+      const saved = await update.mutateAsync({
+        incidentId,
+        transportId: transport.id,
+        body: { destinationId, ...(reason.trim() ? { changeReason: reason.trim() } : {}) },
+      });
+      onSaved(
+        saved.warnings?.includes('FACILITY_AT_CAPACITY')
+          ? `Saved. ${chosen?.name ?? 'This hospital'} reports at capacity or closed — the transport continues.`
+          : null,
+      );
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'The destination was not saved. Try again.');
+    }
   }
 
   return (
@@ -420,9 +510,19 @@ function ChangeTransportDialog({
           <Select value={destinationId} onValueChange={setDestinationId}>
             <SelectTrigger><SelectValue placeholder="Select hospital" /></SelectTrigger>
             <SelectContent>
-              {hospitals.map((hospital) => <SelectItem key={hospital.id} value={hospital.id}>{hospital.name}</SelectItem>)}
+              {hospitals.map((hospital) => (
+                <SelectItem key={hospital.id} value={hospital.id}>
+                  {hospital.name} — {receivingStatusBadge(hospital.receiving_status).label}
+                  {hospital.location_status !== 'VERIFIED' ? ' · location not verified' : ''}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
+          {chosen && isAtCapacity(chosen.receiving_status) && (
+            <TransportWarning
+              text={`${chosen.name} reports ${receivingStatusBadge(chosen.receiving_status).label.toLowerCase()}. You can still send the unit there.`}
+            />
+          )}
           <textarea
             value={reason}
             onChange={(event) => setReason(event.target.value)}
@@ -430,6 +530,7 @@ function ChangeTransportDialog({
             placeholder="Optional reason"
             className="min-h-20 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />
+          {error && <p className="text-xs font-semibold text-agap-danger">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={update.isPending}>Cancel</Button>

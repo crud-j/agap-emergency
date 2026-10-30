@@ -243,6 +243,8 @@ npx expo start --dev-client --tunnel --clear
 ~/.config/agap-object-storage/start-garage
 curl -H "ngrok-skip-browser-warning: 1" https://await-endearing-prevail.ngrok-free.dev/.well-known/assetlinks.json
 
+Keep-alive (PowerShell): Start-Process wsl -ArgumentList '-d','Ubuntu','--','sleep','infinity' -WindowStyle Hidden #Redis starts on its own.
+Garage, in its own terminal: wsl -d Ubuntu, then ~/.config/agap-object-storage/start-garage
 # All dispatchers: password back to AgapDev2026!, forced change at next login
 pnpm dev:reset-dispatcher
 

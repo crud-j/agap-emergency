@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { IncidentType, IntakeAnswers, ReporterStatus } from '@agap/shared';
 import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
+import { generateUUID } from '@/src/lib/uuid';
 
 interface LocationData {
   lat: number;
@@ -171,11 +172,3 @@ export const useIncidentStore = create<IncidentState>((set) => ({
 
   setActiveIncidentId: (activeIncidentId) => set({ activeIncidentId }),
 }));
-
-function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}

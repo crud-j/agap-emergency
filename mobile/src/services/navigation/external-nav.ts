@@ -14,6 +14,8 @@ export interface NavTarget {
   lng: number;
   /** Human-readable destination shown in the chooser (e.g. the address). */
   label?: string;
+  /** Chooser title; default "Navigate to scene". */
+  title?: string;
 }
 
 const wazeApp = (t: NavTarget) => `waze://?ll=${t.lat},${t.lng}&navigate=yes`;
@@ -59,6 +61,14 @@ export const openInGoogleMaps = (t: NavTarget) => openFirstAvailable([googleApp(
 export const openInAppleMaps = (t: NavTarget) => openFirstAvailable([appleMaps(t)]);
 
 /**
+ * A hospital whose location is not verified (or missing): let Google Maps search by
+ * name instead of driving to coordinates nobody has checked (plan §15).
+ */
+export function openGoogleMapsSearch(query: string): Promise<boolean> {
+  return openFirstAvailable([`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`]);
+}
+
+/**
  * Lets the responder pick their preferred navigation app, then hands off with
  * driving directions to the incident.
  */
@@ -73,7 +83,7 @@ export function promptNavigation(t: NavTarget): void {
   buttons.push({ text: 'Cancel', style: 'cancel' });
 
   Alert.alert(
-    'Navigate to scene',
+    t.title ?? 'Navigate to scene',
     t.label ?? `${t.lat.toFixed(5)}, ${t.lng.toFixed(5)}`,
     buttons,
     { cancelable: true },

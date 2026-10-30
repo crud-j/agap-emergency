@@ -75,6 +75,14 @@ export function getAnnouncementById(id: string): Promise<Announcement> {
   return apiFetch(`${API_BASE}/v1/announcements/${id}`);
 }
 
+/** MOD-53: stop announcement SMS to this number (same as replying STOP). */
+export async function unsubscribeFromSms(phoneNumber: string): Promise<void> {
+  await apiFetch(`${API_BASE}/v1/announcements/unsubscribe`, {
+    method: 'POST',
+    body: JSON.stringify({ phoneNumber }),
+  });
+}
+
 export async function subscribeToSms(phoneNumber: string, barangayPreference?: string): Promise<void> {
   await apiFetch(`${API_BASE}/v1/announcements/subscribe`, {
     method: 'POST',

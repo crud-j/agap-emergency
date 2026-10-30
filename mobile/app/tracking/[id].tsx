@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -9,6 +9,9 @@ import { getMapConfig } from '@/src/services/api/locations.api';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { useIncidentTracking } from '@/src/hooks/useIncidentTracking';
 import { useRouteLine } from '@/src/hooks/useRouteLine';
+import { useTranslations } from '@/src/hooks/useAccessibility';
+import { formatDuration } from '@/src/lib/transport-target';
+import { MDRRMO_HOTLINE, MDRRMO_HOTLINE_DISPLAY } from '@/src/config/hotlines';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 import { AgapLogo } from '@/src/components/brand/AgapLogo';
@@ -40,12 +43,18 @@ interface IncidentLite {
  * Citizen-facing live incident tracking (MOD-42 / MOD-43). Shows the live status,
  * the responder's ETA, and a map with the incident pin and the ambulance moving
  * toward it, all updated over the WebSocket. ETA is always labeled an estimate.
+ *
+ * Transport (plan §17, C17): the screen renders what the server sent and never
+ * decides visibility itself. Only a reporter the crew confirmed as the patient gets
+ * a destination, and then sees the hospital, the ambulance and the route. Everyone
+ * else sees status only: no unit position, route or hospital name on that leg.
  */
 export default function TrackingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const token = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
+  const t = useTranslations().tracking;
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -74,27 +83,56 @@ export default function TrackingScreen() {
   const loc = incident?.incident_locations ?? null;
   const incidentPoint: LatLngLite | null =
     loc != null ? { lat: Number(loc.latitude), lng: Number(loc.longitude) } : null;
-  const responderPoint: (LatLngLite & { heading?: number; updatedAt?: string }) | null = live.responder
+
+  const view = live.transportView;
+  const transportUnit = live.transportUnit;
+  const hospitalLeg = view !== 'TO_SCENE' && view !== 'COMPLETE';
+  const destinationVisible = view === 'TO_FACILITY_VISIBLE' || view === 'AT_FACILITY_VISIBLE';
+  const hospitalName = destinationVisible ? transportUnit?.destination?.name ?? null : null;
+
+  // On the hospital leg only a confirmed reporter-patient sees the unit; a redacted
+  // view never draws it, even from a position cached before transport started.
+  const unitPosition = hospitalLeg
+    ? destinationVisible
+      ? transportUnit?.position ?? null
+      : null
+    : live.responder
+      ? { ...live.responder, heading: live.responder.heading ?? null }
+      : null;
+  const responderPoint: (LatLngLite & { heading?: number; updatedAt?: string }) | null = unitPosition
     ? {
-        lat: live.responder.lat,
-        lng: live.responder.lng,
-        ...(live.responder.heading != null ? { heading: live.responder.heading } : {}),
-        updatedAt: live.responder.updatedAt,
+        lat: unitPosition.lat,
+        lng: unitPosition.lng,
+        ...(unitPosition.heading != null ? { heading: unitPosition.heading } : {}),
+        updatedAt: unitPosition.updatedAt,
       }
     : null;
+  const destination = transportUnit?.destination;
+  const destinationMarker =
+    destinationVisible && destination && destination.latitude != null && destination.longitude != null
+      ? { lat: destination.latitude, lng: destination.longitude, label: destination.name }
+      : null;
+  const transportEtaSeconds =
+    transportUnit?.eta.seconds ?? transportUnit?.route?.durationSeconds ?? null;
   const citizenSex = user?.sex === 'MALE' || user?.sex === 'FEMALE' ? user.sex : null;
-  const responderSignalLost = live.responder
-    ? isSignalLost(live.responder.updatedAt, now)
+  const responderSignalLost = unitPosition
+    ? isSignalLost(unitPosition.updatedAt, now)
     : false;
-  const responderAgeSeconds = live.responder
-    ? Math.max(0, Math.floor((now - Date.parse(live.responder.updatedAt)) / 1000))
+  const responderAgeSeconds = unitPosition
+    ? Math.max(0, Math.floor((now - Date.parse(unitPosition.updatedAt)) / 1000))
     : null;
 
-  // Draw the responder's route to the scene when both points are known.
-  const route = useRouteLine(
-    MAP_AVAILABLE ? responderPoint : null,
-    MAP_AVAILABLE ? incidentPoint : null,
+  // Draw the responder's route to the scene when both points are known. On the
+  // hospital leg only the server's route is drawn, and only when it was sent.
+  const sceneRoute = useRouteLine(
+    MAP_AVAILABLE && !hospitalLeg ? responderPoint : null,
+    MAP_AVAILABLE && !hospitalLeg ? incidentPoint : null,
   );
+  const routeGeometry = hospitalLeg
+    ? view === 'TO_FACILITY_VISIBLE'
+      ? transportUnit?.route?.geometry ?? null
+      : null
+    : sceneRoute.geometry;
 
   // Use any non-null styleUrl from the backend; fall back to demo only when null.
   // (The provider check was removed — Mapbox styleUrls now correctly return null
@@ -102,7 +140,7 @@ export default function TrackingScreen() {
   const styleUrl = mapConfig?.styleUrl ?? MAPLIBRE_DEMO_STYLE;
 
   const status = live.status ?? incident?.status ?? '—';
-  // Responders are on scene or finished — an arrival estimate no longer applies.
+  // Responders are on scene — an arrival estimate no longer applies. Transport has its own card.
   const arrived = ['ON_SCENE', 'TRANSPORTING', 'ASSISTING'].includes(status);
   const helpComplete = status === 'RESOLVED' || status === 'CLOSED';
 
@@ -153,7 +191,8 @@ export default function TrackingScreen() {
                 styleUrl={styleUrl}
                 incident={incidentPoint}
                 responder={responderPoint}
-                routeGeometry={route.geometry}
+                routeGeometry={routeGeometry}
+                destination={destinationMarker}
                 responderIcon="ambulance"
                 citizenSex={citizenSex}
                 priority={incident?.priority}
@@ -187,6 +226,44 @@ export default function TrackingScreen() {
               </Text>
             </View>
           </View>
+        ) : hospitalLeg ? (
+          <View style={styles.etaCard}>
+            <Ionicons
+              name={view.startsWith('AT_FACILITY') ? 'medical' : 'car-outline'}
+              size={22}
+              color={colors.primary}
+              style={{ marginRight: 12 }}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.etaLabel}>{t.transportLabel}</Text>
+              {view === 'TO_FACILITY_VISIBLE' && hospitalName ? (
+                <>
+                  <Text style={styles.transportValue}>{t.beingTakenTo(hospitalName)}</Text>
+                  <Text style={styles.transportSub}>
+                    {transportEtaSeconds != null ? t.etaEstimate(formatDuration(transportEtaSeconds)) : t.etaPending}
+                  </Text>
+                </>
+              ) : view === 'AT_FACILITY_VISIBLE' && hospitalName ? (
+                <Text style={styles.transportValue}>{t.arrivedAt(hospitalName)}</Text>
+              ) : (
+                <>
+                  <Text style={styles.transportValue}>
+                    {view === 'AT_FACILITY_REDACTED' ? t.arrivedAtHospital : t.takenToHospital}
+                  </Text>
+                  <Text style={styles.transportSub}>{t.contactMdrrmo}</Text>
+                  <TouchableOpacity
+                    style={styles.hotlineBtn}
+                    onPress={() => Linking.openURL(`tel:${MDRRMO_HOTLINE}`).catch(() => undefined)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t.callMdrrmo(MDRRMO_HOTLINE_DISPLAY)}
+                  >
+                    <Ionicons name="call" size={14} color={colors.primary} style={{ marginRight: 6 }} />
+                    <Text style={styles.hotlineText}>{t.callMdrrmo(MDRRMO_HOTLINE_DISPLAY)}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
         ) : arrived ? (
           <View style={styles.etaCard}>
             <Ionicons name="medkit-outline" size={22} color={colors.primary} style={{ marginRight: 12 }} />
@@ -217,7 +294,7 @@ export default function TrackingScreen() {
           </View>
         )}
 
-        {responderPoint ? (
+        {hospitalLeg && !responderPoint ? null : responderPoint ? (
           <View style={[styles.hintRow, responderSignalLost && styles.signalLostRow]}>
             <Ionicons
               name={responderSignalLost ? 'cloud-offline-outline' : 'navigate'}
@@ -318,6 +395,10 @@ const styles = StyleSheet.create({
   },
   etaLabel: { fontSize: 12, color: colors.textSub },
   etaValue: { fontSize: 20, fontWeight: '800', color: colors.text },
+  transportValue: { fontSize: 16, fontWeight: '800', color: colors.text, lineHeight: 22 },
+  transportSub: { fontSize: 13, color: colors.textMid, marginTop: 4 },
+  hotlineBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 8, alignSelf: 'flex-start' },
+  hotlineText: { fontSize: 13, color: colors.primary, fontWeight: '700' },
   estimateTag: { fontSize: 10, color: colors.textSub, fontStyle: 'italic' },
 
   unitRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },

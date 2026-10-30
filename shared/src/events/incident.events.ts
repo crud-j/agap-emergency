@@ -72,9 +72,7 @@ export interface IncidentTransportingPayload {
   dispatchId: string;
   /** Ops copy only. */
   destinationId?: string | null;
-  /** Ops copy only. */
-  destinationName?: string | null;
-  /** Ops copy only. */
+  /** Ops copy and a crew-confirmed reporter-patient's copy (C17) only. Name, numeric coordinates and verified flag. */
   destination?: TransportDestinationView | null;
   /** Ops copy only. Never reaches an incident room or the reporter (§0 rule 5). */
   patientId?: string | null;
@@ -88,6 +86,8 @@ export interface IncidentFacilityArrivalPayload {
   dispatchId?: string;
   /** Ops copy only. */
   destinationId?: string | null;
+  /** Ops copy and a crew-confirmed reporter-patient's copy (C17) only. */
+  destination?: TransportDestinationView | null;
   arrivedAt: string;
 }
 

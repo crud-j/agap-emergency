@@ -3,7 +3,7 @@
 import { useMemo, useState, type JSX } from 'react';
 import { ClipboardCheck, MapPin, Users, Copy, Sparkles, AlertTriangle, ExternalLink } from 'lucide-react';
 import {
-  DUPLICATE_DETECTION_RADIUS_METERS, DUPLICATE_DETECTION_WINDOW_MINUTES,
+  DUPLICATE_DETECTION_RADIUS_METERS, DUPLICATE_DETECTION_WINDOW_MINUTES, haversineMeters,
 } from '@agap/shared';
 import {
   Card, Button, PriorityBadge, StatusChip, Badge, Skeleton, EmptyState,
@@ -39,17 +39,6 @@ function coordsOf(i: IncidentListItem): [number, number] | null {
   const lng = Number(loc.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
   return [lat, lng];
-}
-
-function haversineMeters(a: [number, number], b: [number, number]): number {
-  const R = 6_371_000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b[0] - a[0]);
-  const dLng = toRad(b[1] - a[1]);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 /**
@@ -333,7 +322,7 @@ function DuplicateCandidates({
       .filter((c) => Math.abs(+new Date(c.submitted_at) - anchorTime) <= windowMs)
       .map((c) => {
         const cc = coordsOf(c);
-        const distance = selfCoords && cc ? haversineMeters(selfCoords, cc) : null;
+        const distance = selfCoords && cc ? haversineMeters(selfCoords[0], selfCoords[1], cc[0], cc[1]) : null;
         return { incident: c, distance };
       })
       // If both have coordinates, require proximity; otherwise keep as a weaker

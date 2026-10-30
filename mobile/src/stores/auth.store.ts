@@ -54,6 +54,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   login: async (tokens, user) => {
+    // A guest session or another account signing in must not inherit the previous
+    // session's incident (e.g. a guest report's id on a shared phone). A token
+    // refresh calls login for the same user and keeps it.
+    if (get().user?.id !== user.id) useIncidentStore.getState().reset();
     await Promise.all([
       SecureStore.setItemAsync(KEYS.accessToken, tokens.accessToken),
       SecureStore.setItemAsync(KEYS.refreshToken, tokens.refreshToken),

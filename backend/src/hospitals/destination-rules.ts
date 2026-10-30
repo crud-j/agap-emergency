@@ -1,5 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma, facility_location_status } from '@prisma/client';
+import type { TransportDestinationView } from '@agap/shared';
+import { toTransportDestinationView } from './facility-view';
 
 /** Hidden from the shared directory and never selectable as a transport destination. */
 export const UNREVIEWED_STATUSES: facility_location_status[] = [
@@ -17,6 +19,8 @@ export interface SelectableDestination {
   name: string;
   receiving_status: string;
   warnings: DestinationWarning[];
+  /** What viewers are sent (numeric coordinates, verified flag). */
+  view: TransportDestinationView;
 }
 
 type FacilityReader = { facility: Pick<Prisma.TransactionClient['facility'], 'findUnique'> };
@@ -34,6 +38,7 @@ export async function assertSelectableDestination(
     where: { id: facilityId },
     select: {
       id: true, name: true, is_active: true, facility_type: true, location_status: true, receiving_status: true,
+      latitude: true, longitude: true,
     },
   });
   if (!facility || facility.is_active === false) {
@@ -50,5 +55,6 @@ export async function assertSelectableDestination(
     name: facility.name,
     receiving_status: facility.receiving_status,
     warnings: AT_CAPACITY_RECEIVING_STATUSES.includes(facility.receiving_status) ? ['FACILITY_AT_CAPACITY'] : [],
+    view: toTransportDestinationView(facility),
   };
 }

@@ -168,6 +168,7 @@ describe('incident status closes the barangay notice', () => {
         fn({
           incident: { update: jest.fn().mockResolvedValue({ id: INCIDENT, status: newStatusRow }) },
           incidentEvent: { create: jest.fn() },
+          false_alerts: { create: jest.fn() },
         }),
       ),
     };

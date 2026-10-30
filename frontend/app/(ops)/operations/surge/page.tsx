@@ -3,7 +3,7 @@
 import { useState, type JSX, type FormEvent } from 'react';
 import {
   Siren, ShieldAlert, Users, Truck, Megaphone,
-  CheckCircle2, XCircle, Clock, AlertTriangle, Waves,
+  CheckCircle2, XCircle, Clock, AlertTriangle, Waves, Edit, SlidersHorizontal,
 } from 'lucide-react';
 import {
   Card, CardHeader, CardTitle, Badge, Button, DataTable, Skeleton, EmptyState,
@@ -18,8 +18,16 @@ import {
   useTriageTags,
   useSurgeResources,
   useSurgeBroadcast,
+  useSurgeRules,
+  useUpdateSurgeRule,
+  useRiverLevel,
+  useSetRiverLevel,
+  useSurgeRecommendation,
+  type SurgeRecommendation,
 } from '@/features/surge/hooks';
-import type { TriageTag, SurgeResource } from '@/features/surge/api';
+import type { TriageTag, SurgeResource, SurgeRule, RiverLevel } from '@/features/surge/api';
+import { useMarkRead } from '@/features/notifications/hooks';
+import { useBarangays } from '@/hooks/useBarangay';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -65,13 +73,29 @@ function TriageBadge({ color }: { color: string }): JSX.Element {
 
 // ─── Activate dialog ──────────────────────────────────────────────────────────
 
-function ActivateDialog({ onClose }: { onClose: () => void }): JSX.Element {
+/** Values a surge recommendation prefills; the Supervisor can change all of them. */
+interface ActivatePrefill {
+  name: string;
+  description: string;
+  category: string;
+  barangays: string[];
+  riverLevel: string;
+}
+
+function ActivateDialog({ onClose, initial, onActivated }: {
+  onClose: () => void;
+  initial?: ActivatePrefill;
+  onActivated?: () => void;
+}): JSX.Element {
   const activate = useActivateSurge();
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('FLOOD');
-  const [selectedBarangays, setSelectedBarangays] = useState<string[]>([]);
-  const [riverLevel, setRiverLevel] = useState('');
+  const [name, setName] = useState(initial?.name ?? '');
+  const [description, setDescription] = useState(initial?.description ?? '');
+  const [category, setCategory] = useState(initial?.category ?? 'FLOOD');
+  const [selectedBarangays, setSelectedBarangays] = useState<string[]>(initial?.barangays ?? []);
+  const [riverLevel, setRiverLevel] = useState(initial?.riverLevel ?? '');
+  // A recommendation's barangays are geo_regions names, which this list may not have:
+  // show them as chips too, so they can be seen and removed.
+  const barangayChoices = [...new Set([...BOCAUE_BARANGAYS, ...(initial?.barangays ?? [])])];
 
   function toggleBarangay(b: string) {
     setSelectedBarangays((prev) =>
@@ -90,7 +114,7 @@ function ActivateDialog({ onClose }: { onClose: () => void }): JSX.Element {
         ...(selectedBarangays.length && { affectedBarangays: selectedBarangays }),
         ...(riverLevel && { bocaueRiverLevel: parseFloat(riverLevel) }),
       },
-      { onSuccess: onClose },
+      { onSuccess: () => { onActivated?.(); onClose(); } },
     );
   }
 
@@ -169,7 +193,7 @@ function ActivateDialog({ onClose }: { onClose: () => void }): JSX.Element {
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-agap-textSub">Affected Barangays</label>
           <div className="flex flex-wrap gap-1.5 rounded-xl border border-agap-track bg-agap-surface p-2">
-            {BOCAUE_BARANGAYS.map((b) => (
+            {barangayChoices.map((b) => (
               <button
                 type="button"
                 key={b}
@@ -310,6 +334,281 @@ function BroadcastDialog({ surgeId, onClose }: { surgeId: string; onClose: () =>
   );
 }
 
+// ─── Surge recommendation (AUTOMATION_NEEDS_PLAN Phase 2, C2) ─────────────────
+
+/** The activate form a recommendation opens with. The rule only suggests; the Supervisor edits and decides. */
+function prefillFrom(rec: SurgeRecommendation, river: RiverLevel | undefined): ActivatePrefill {
+  const { data } = rec;
+  const category = data.category ?? 'OTHER';
+  const where = data.barangays.length ? ` — ${data.barangays.join(', ')}` : '';
+  const name =
+    data.ruleKey === 'RIVER_LEVEL'
+      ? 'Bocaue River critical level'
+      : `${data.category ? labelCase(data.category) : 'Incident'} surge${where}`;
+  const level = data.riverLevelM ?? river?.meters ?? null;
+  return {
+    name,
+    description: rec.notification.body,
+    category,
+    barangays: data.barangays,
+    riverLevel: level !== null ? String(level) : '',
+  };
+}
+
+function RecommendationBanner({ rec, onActivate, onDismiss, dismissing }: {
+  rec: SurgeRecommendation;
+  onActivate: () => void;
+  onDismiss: () => void;
+  dismissing: boolean;
+}): JSX.Element {
+  return (
+    <div
+      role="status"
+      className="rounded-2xl border border-[rgba(217,119,6,0.30)] bg-agap-amberSoft p-4 flex flex-wrap items-start gap-3"
+    >
+      <AlertTriangle size={20} className="shrink-0 text-agap-amber mt-0.5" />
+      <div className="min-w-0 flex-1">
+        <p className="font-extrabold text-sm text-agap-textMain">Surge mode recommended</p>
+        <p className="mt-0.5 text-sm text-agap-textMid">{rec.notification.body}</p>
+        <p className="mt-1 text-xs text-agap-textSub">
+          Automatic check · {fmtTs(rec.notification.created_at)} · nothing has been activated
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={onDismiss} loading={dismissing}>Dismiss</Button>
+        <Button variant="danger" size="sm" onClick={onActivate}>
+          <Siren size={14} />
+          Review &amp; activate
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RiverLevelCard({ canEdit }: { canEdit: boolean }): JSX.Element {
+  const river = useRiverLevel();
+  const save = useSetRiverLevel();
+  const [value, setValue] = useState('');
+  const meters = river.data?.meters ?? null;
+  const critical = river.data?.criticalMeters ?? 11.5;
+  const entered = value.trim() ? Number(value) : null;
+  const valid = entered !== null && Number.isFinite(entered) && entered >= 0 && entered <= 30;
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!valid) return;
+    save.mutate(Math.round(entered! * 100) / 100, { onSuccess: () => setValue('') });
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Waves size={15} className="text-agap-info" />
+          Bocaue River Level
+        </CardTitle>
+        <span className="text-xs text-agap-textSub">critical at {critical.toFixed(2)} m</span>
+      </CardHeader>
+      {river.isLoading ? (
+        <Skeleton className="h-10 w-1/2" />
+      ) : (
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <p className={`text-3xl font-extrabold tabular-nums ${meters !== null && meters >= critical ? 'text-agap-danger' : 'text-agap-textMain'}`}>
+              {meters !== null ? `${meters.toFixed(2)} m` : '—'}
+            </p>
+            <p className="text-xs text-agap-textSub">
+              {river.data?.recordedAt ? `Entered ${fmtTs(river.data.recordedAt)}` : 'No reading entered yet'}
+            </p>
+          </div>
+          {canEdit && (
+            <form onSubmit={submit} className="flex items-end gap-2">
+              <div>
+                <label htmlFor="river-level" className="mb-1 block text-xs font-semibold text-agap-textSub">New reading (m)</label>
+                <input
+                  id="river-level"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="30"
+                  inputMode="decimal"
+                  className="w-32 rounded-xl border border-agap-track bg-white px-3 py-2 text-sm text-agap-textMain outline-none focus:border-agap-green focus:ring-1 focus:ring-agap-green"
+                  placeholder="e.g. 11.50"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                />
+              </div>
+              <Button type="submit" variant="primary" size="sm" loading={save.isPending} disabled={!valid}>Save</Button>
+            </form>
+          )}
+        </div>
+      )}
+      {valid && entered! >= critical && (
+        <p className="mt-2 text-xs font-semibold text-agap-danger">
+          ⚠ At or above critical level. Supervisors are told within 5 minutes; surge mode is not activated automatically.
+        </p>
+      )}
+      {save.isError && (
+        <p className="mt-2 text-xs text-agap-danger">{(save.error as Error)?.message ?? 'Could not save the reading.'}</p>
+      )}
+    </Card>
+  );
+}
+
+function RuleDialog({ rule, onClose }: { rule: SurgeRule; onClose: () => void }): JSX.Element {
+  const update = useUpdateSurgeRule();
+  const barangays = useBarangays();
+  const [windowMinutes, setWindowMinutes] = useState(String(rule.window_minutes));
+  const [minIncidents, setMinIncidents] = useState(String(rule.min_incidents));
+  const [selected, setSelected] = useState<string[]>(rule.barangays);
+  const [isActive, setIsActive] = useState(rule.is_active);
+  const win = Number(windowMinutes);
+  const min = Number(minIncidents);
+  const valid = Number.isInteger(win) && win >= 5 && win <= 1440 && Number.isInteger(min) && min >= 1 && min <= 500;
+  const INPUT_CLS =
+    'w-full rounded-xl border border-agap-track bg-white px-3 py-2 text-sm text-agap-textMain outline-none focus:border-agap-green focus:ring-1 focus:ring-agap-green';
+
+  function toggle(b: string) {
+    setSelected((prev) => (prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]));
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!valid) return;
+    update.mutate(
+      { id: rule.id, changes: { windowMinutes: win, minIncidents: min, barangays: selected, isActive } },
+      { onSuccess: onClose },
+    );
+  }
+
+  return (
+    <DialogContent className="max-w-lg">
+      <DialogHeader>
+        <DialogTitle>Edit rule: {labelCase(rule.rule_key)}</DialogTitle>
+        <DialogDescription>
+          {rule.category ? `${labelCase(rule.category)} incidents` : 'All incidents'} · Supervisors are told when the
+          count is reached. Changes are recorded in the audit log.
+        </DialogDescription>
+      </DialogHeader>
+      <form onSubmit={submit} className="mt-2 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label htmlFor="rule-window" className="text-xs font-semibold text-agap-textSub">Window (minutes)</label>
+            <input id="rule-window" type="number" min={5} max={1440} className={INPUT_CLS} value={windowMinutes} onChange={(e) => setWindowMinutes(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="rule-min" className="text-xs font-semibold text-agap-textSub">Incidents needed</label>
+            <input id="rule-min" type="number" min={1} max={500} className={INPUT_CLS} value={minIncidents} onChange={(e) => setMinIncidents(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="text-xs font-semibold text-agap-textSub">Barangays (none selected = any barangay)</span>
+          <div className="flex flex-wrap gap-1.5 rounded-xl border border-agap-track bg-agap-surface p-2">
+            {barangays.isLoading && <Skeleton className="h-6 w-40" />}
+            {(barangays.data ?? []).map((b) => (
+              <button
+                type="button"
+                key={b.id}
+                onClick={() => toggle(b.name)}
+                aria-pressed={selected.includes(b.name)}
+                className={`rounded-lg px-2 py-1 text-xs font-semibold transition-colors ${
+                  selected.includes(b.name)
+                    ? 'bg-agap-green text-white'
+                    : 'bg-white text-agap-textMid border border-agap-track hover:border-agap-green'
+                }`}
+              >
+                {b.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="flex items-center gap-2 text-sm text-agap-textMain">
+          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+          Rule is on
+        </label>
+
+        {!valid && <p className="text-xs text-agap-danger">Window: 5–1440 minutes. Incidents needed: 1–500.</p>}
+        {update.isError && (
+          <p className="text-xs text-agap-danger">{(update.error as Error)?.message ?? 'Could not save the rule.'}</p>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={update.isPending}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={update.isPending} disabled={!valid}>Save rule</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  );
+}
+
+function SurgeRulesCard(): JSX.Element {
+  const rules = useSurgeRules();
+  const [editing, setEditing] = useState<SurgeRule | null>(null);
+  const cols: Column<SurgeRule>[] = [
+    {
+      key: 'rule',
+      header: 'Rule',
+      accessor: (r) => (
+        <div>
+          <p className="text-sm font-semibold text-agap-textMain">{labelCase(r.rule_key)}</p>
+          <p className="text-xs text-agap-textSub">{r.category ? labelCase(r.category) : 'Any category'}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'threshold',
+      header: 'Trips at',
+      accessor: (r) => (
+        <span className="text-xs text-agap-textMid tabular-nums">{r.min_incidents} in {r.window_minutes} min</span>
+      ),
+    },
+    {
+      key: 'barangays',
+      header: 'Barangays',
+      accessor: (r) => (
+        <span className="text-xs text-agap-textMid">{r.barangays.length ? r.barangays.join(', ') : 'Any'}</span>
+      ),
+    },
+    {
+      key: 'active',
+      header: 'Status',
+      accessor: (r) => <Badge variant={r.is_active ? 'green' : 'muted'}>{r.is_active ? 'On' : 'Off'}</Badge>,
+    },
+    {
+      key: 'edit',
+      header: '',
+      accessor: (r) => (
+        <Button size="sm" variant="ghost" onClick={() => setEditing(r)} aria-label={`Edit ${labelCase(r.rule_key)}`}>
+          <Edit size={14} /> Edit
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <SlidersHorizontal size={15} className="text-agap-textSub" />
+          Surge Recommendation Rules
+        </CardTitle>
+        <span className="text-xs text-agap-textSub">checked every 5 min · MDRRMO-editable defaults</span>
+      </CardHeader>
+      {rules.isLoading ? (
+        <Skeleton className="h-24 w-full" />
+      ) : rules.isError ? (
+        <EmptyState icon={XCircle} title="Could not load the rules" description="Refresh to retry." />
+      ) : (
+        <DataTable columns={cols} data={rules.data ?? []} getRowKey={(r) => r.id} />
+      )}
+      <Dialog open={!!editing} onOpenChange={(o) => { if (!o) setEditing(null); }}>
+        {editing && <RuleDialog key={editing.id} rule={editing} onClose={() => setEditing(null)} />}
+      </Dialog>
+    </Card>
+  );
+}
+
 // ─── Triage table ─────────────────────────────────────────────────────────────
 
 const TRIAGE_COLS: Column<TriageTag>[] = [
@@ -380,10 +679,20 @@ export default function SurgePage(): JSX.Element {
   const resourcesQ = useSurgeResources();
 
   const canManage = hasRole(user, 'SUPERVISOR');
+  const recommendation = useSurgeRecommendation();
+  const river = useRiverLevel();
+  const markRead = useMarkRead();
 
   const [showActivate, setShowActivate] = useState(false);
   const [showDeactivate, setShowDeactivate] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
+  // Set when the activate dialog was opened from a recommendation (prefilled).
+  const [fromRecommendation, setFromRecommendation] = useState<SurgeRecommendation | null>(null);
+
+  function openActivate(rec: SurgeRecommendation | null) {
+    setFromRecommendation(rec);
+    setShowActivate(true);
+  }
 
   const triageCounts: Record<string, number> = {};
   for (const tag of triageQ.data ?? []) {
@@ -401,7 +710,7 @@ export default function SurgePage(): JSX.Element {
           </p>
         </div>
         {canManage && !isActive && !surgeQ.isLoading && (
-          <Button variant="danger" onClick={() => setShowActivate(true)}>
+          <Button variant="danger" onClick={() => openActivate(null)}>
             <Siren size={14} />
             Activate Surge Mode
           </Button>
@@ -419,6 +728,16 @@ export default function SurgePage(): JSX.Element {
           </div>
         )}
       </div>
+
+      {/* Surge recommendation (C2): a suggestion only; the Supervisor reviews and activates. */}
+      {canManage && !isActive && !surgeQ.isLoading && recommendation && (
+        <RecommendationBanner
+          rec={recommendation}
+          onActivate={() => openActivate(recommendation)}
+          onDismiss={() => markRead.mutate(recommendation.notification.id)}
+          dismissing={markRead.isPending}
+        />
+      )}
 
       {/* Active surge banner */}
       {isActive && surge && (
@@ -454,7 +773,7 @@ export default function SurgePage(): JSX.Element {
             }
             action={
               canManage ? (
-                <Button variant="danger" onClick={() => setShowActivate(true)}>
+                <Button variant="danger" onClick={() => openActivate(null)}>
                   <Siren size={14} />
                   Activate Surge Mode
                 </Button>
@@ -552,9 +871,22 @@ export default function SurgePage(): JSX.Element {
         </>
       )}
 
+      {/* River reading and the recommendation rules (C2) */}
+      <RiverLevelCard canEdit={canManage} />
+      {canManage && <SurgeRulesCard />}
+
       {/* Dialogs */}
       <Dialog open={showActivate} onOpenChange={setShowActivate}>
-        {showActivate && <ActivateDialog onClose={() => setShowActivate(false)} />}
+        {showActivate && (
+          <ActivateDialog
+            onClose={() => setShowActivate(false)}
+            {...(fromRecommendation && {
+              initial: prefillFrom(fromRecommendation, river.data),
+              // The recommendation was acted on: clear it from the banner and the bell.
+              onActivated: () => markRead.mutate(fromRecommendation.notification.id),
+            })}
+          />
+        )}
       </Dialog>
 
       <Dialog open={showDeactivate} onOpenChange={setShowDeactivate}>

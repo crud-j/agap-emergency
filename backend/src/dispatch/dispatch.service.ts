@@ -16,6 +16,12 @@ import { IncidentStatusNotifier } from '../notifications/incident-status-notifie
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
 import {
+  ASSIGNMENT_PUSH_JOB,
+  ASSIGNMENT_PUSH_OPTS,
+  assignmentPush,
+  assignmentPushJobId,
+} from './assignment-push';
+import {
   AuditAction,
   IncidentStatus,
   QUEUE_NAMES,
@@ -204,6 +210,22 @@ export class DispatchService {
       this.logger.warn(`Realtime emit failed for dispatch create: ${String(err)}`);
     }
 
+    // MOD-18 / MOD-32: wake every crew phone. A failed push never affects the dispatch.
+    try {
+      const crew = await this.prisma.dispatch_crew.findMany({
+        where: { dispatch_id: dispatch.id },
+        select: { user_id: true },
+      });
+      await this.queueAssignmentPushes(
+        crew.map((c) => ({
+          data: assignmentPush('ASSIGNMENT', incident, dispatch.id, c.user_id),
+          jobId: assignmentPushJobId('ASSIGNMENT', dispatch.id, c.user_id),
+        })),
+      );
+    } catch (err) {
+      this.logger.error(`Responder push enqueue failed: ${String(err)}. Dispatch unaffected.`);
+    }
+
     // "Help is on the way" to the reporter: feed row + push, deduplicated per status.
     void this.statusNotifier?.notifyReporter(incident.id, IncidentStatus.DISPATCHED);
 
@@ -251,6 +273,18 @@ export class DispatchService {
       this.logger.warn(`Realtime emit failed for dispatch cancel: ${String(err)}`);
     }
 
+    // Tell the crew to stand down. Best-effort: the cancellation is already stored.
+    try {
+      await this.queueAssignmentPushes(
+        (dispatch.dispatch_crew ?? []).map((c) => ({
+          data: assignmentPush('ASSIGNMENT_CANCELLED', dispatch.incidents, id, c.user_id),
+          jobId: assignmentPushJobId('ASSIGNMENT_CANCELLED', id, c.user_id),
+        })),
+      );
+    } catch (err) {
+      this.logger.error(`Responder cancel push enqueue failed: ${String(err)}. Dispatch unaffected.`);
+    }
+
     void this.audit.log({
       action: AuditAction.UPDATE,
       actorId: _userId,
@@ -278,7 +312,7 @@ export class DispatchService {
   }
 
   async addCrew(dispatchId: string, userId: string, actorId?: string) {
-    await this.findById(dispatchId);
+    const dispatch = await this.findById(dispatchId);
 
     const crew = await this.prisma.$transaction(async (tx) => {
       // Lock the responder's availability row before adding to crew.
@@ -311,7 +345,30 @@ export class DispatchService {
       moduleId: 'MOD-31',
       newValues: { addedCrewUserId: userId },
     });
+
+    // Push the added responder only. Timestamped jobId: removed and re-added crew get it again.
+    try {
+      await this.queueAssignmentPushes([
+        {
+          data: assignmentPush('ASSIGNMENT', dispatch.incidents, dispatchId, userId),
+          jobId: `${assignmentPushJobId('ASSIGNMENT', dispatchId, userId)}-${Date.now()}`,
+        },
+      ]);
+    } catch (err) {
+      this.logger.error(`Responder push enqueue failed: ${String(err)}. Crew change unaffected.`);
+    }
     return crew;
+  }
+
+  /** One PUSH job per crew member on the notifications queue (NotificationProcessor.sendPush). */
+  private async queueAssignmentPushes(
+    jobs: Array<{ data: ReturnType<typeof assignmentPush>; jobId: string }>,
+  ): Promise<void> {
+    await Promise.all(
+      jobs.map((j) =>
+        this.notificationQueue.add(ASSIGNMENT_PUSH_JOB, j.data, { ...ASSIGNMENT_PUSH_OPTS, jobId: j.jobId }),
+      ),
+    );
   }
 
   async removeCrew(dispatchId: string, crewUserId: string, actorId?: string) {

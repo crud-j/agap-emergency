@@ -19,6 +19,13 @@ export function isCoordinateInServiceArea(
   );
 }
 
+/** [west, south, east, north] of the service area: the map bounds while a transport leaves Bocaue. */
+export const FACILITY_SERVICE_AREA_BOUNDS: [number, number, number, number] = (() => {
+  const lngs = FACILITY_SERVICE_AREA.map(([lng]) => lng);
+  const lats = FACILITY_SERVICE_AREA.map(([, lat]) => lat);
+  return [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)];
+})();
+
 /** True when the pair is outside the service area but would be inside with lat/lng swapped. */
 export function looksSwapped(latitude: number, longitude: number): boolean {
   return (

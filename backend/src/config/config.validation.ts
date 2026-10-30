@@ -143,6 +143,12 @@ class EnvironmentVariables {
   @IsOptional()
   BARANGAY_SMS_INBOUND_MODE?: string;
 
+  // MOD-53: process announcement subscribers' STOP replies to the Textbee phone (RA 10173).
+  // Default on ('true'); the inbound poll runs for it even with barangay replies off.
+  @IsString()
+  @IsOptional()
+  SMS_OPT_OUT_ENABLED?: string;
+
   // MOD-53 (ROLE_DASHBOARDS_PLAN.md Phase 7). 'true' = a CRITICAL advisory needs an
   // MDRRMO Supervisor's approval before release. Default off: publishing as before.
   @IsString()
@@ -187,6 +193,20 @@ class EnvironmentVariables {
   @IsOptional()
   MAP_GEOCODER_URL: string = 'https://nominatim.openstreetmap.org';
 
+  // Hospital destination routing (MOD-40/43). Default on: the ETA job routes each unit
+  // to where it is heading now (scene or hospital), caches the route and pushes
+  // responder.route_updated. 'false' = scene route only, no route events, no cache.
+  @IsString()
+  @IsOptional()
+  TRANSPORT_ROUTING_ENABLED?: string;
+
+  // C17 launch switch (MOD-40/48). Default off: a crew confirmation that the reporter is
+  // the patient never shows that reporter the hospital, and the confirm endpoint is
+  // refused. Turn on ('true') only after the LGU Data Protection Officer signs off.
+  @IsString()
+  @IsOptional()
+  REPORTER_DESTINATION_SHARING_ENABLED?: string;
+
   // Tier 2 evidence review (MOD-10/MOD-25) — an advisory AI plausibility check on
   // submitted photos, run async after upload. Never blocks upload or dispatch.
   // Unset = the check is skipped entirely; Tier 1 provenance scoring still runs.
@@ -197,6 +217,12 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   OPENAI_EVIDENCE_REVIEW_MODEL: string = 'gpt-4o-mini';
+
+  // Hospital "Find location" name assist (MOD-39). Optional; unset = the evidence
+  // review model. The AI only cleans names and breaks ties, never gives coordinates.
+  @IsString()
+  @IsOptional()
+  OPENAI_GEOCODE_ASSIST_MODEL?: string;
 
   @IsString()
   @IsOptional()

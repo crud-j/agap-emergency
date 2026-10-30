@@ -91,3 +91,56 @@ export function fetchSurgeResources(): Promise<SurgeResource[]> {
 export function sendSurgeBroadcast(body: { surgeId: string; message: string }): Promise<unknown> {
   return api.post('/disaster-mode/broadcast', body, getToken());
 }
+
+// ─── Surge recommendation (AUTOMATION_NEEDS_PLAN Phase 2, C2) ────────────────
+
+export interface SurgeRule {
+  id: string;
+  rule_key: string;
+  window_minutes: number;
+  min_incidents: number;
+  category: string | null;
+  /** geo_regions names; empty = any barangay. */
+  barangays: string[];
+  is_active: boolean;
+  updated_at: string;
+}
+
+export interface SurgeRuleChanges {
+  windowMinutes?: number;
+  minIncidents?: number;
+  barangays?: string[];
+  isActive?: boolean;
+}
+
+export interface RiverLevel {
+  meters: number | null;
+  recordedAt: string | null;
+  criticalMeters: number;
+}
+
+/** The `data_payload` of a SURGE_RECOMMENDED in-app notice (see surge-detector.service.ts). */
+export interface SurgeRecommendationData {
+  ruleKey: string;
+  count: number;
+  windowMinutes: number;
+  category: string | null;
+  barangays: string[];
+  riverLevelM?: number;
+}
+
+export function fetchSurgeRules(): Promise<SurgeRule[]> {
+  return api.get('/disaster-mode/rules', getToken());
+}
+
+export function updateSurgeRule(id: string, changes: SurgeRuleChanges): Promise<SurgeRule> {
+  return api.patch(`/disaster-mode/rules/${id}`, changes, getToken());
+}
+
+export function fetchRiverLevel(): Promise<RiverLevel> {
+  return api.get('/disaster-mode/river-level', getToken());
+}
+
+export function setRiverLevel(meters: number): Promise<RiverLevel> {
+  return api.put('/disaster-mode/river-level', { meters }, getToken());
+}

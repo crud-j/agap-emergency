@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchRiskHeatmap, fetchFloodZones, fetchRiskAreas, fetchRiskPatterns,
   createRiskArea, updateRiskArea, deleteRiskArea,
-  type RiskAreaChanges, type RiskAreaInput,
+  fetchRiskAreaProposals, approveRiskAreaProposal, dismissRiskAreaProposal,
+  type RiskAreaChanges, type RiskAreaInput, type ApproveProposalInput,
 } from './api';
 
 export function useRiskHeatmap() {
@@ -68,5 +69,31 @@ export function useDeleteRiskArea() {
   return useMutation({
     mutationFn: (id: string) => deleteRiskArea(id),
     onSuccess: invalidate,
+  });
+}
+
+/** System Administrator only (C7). Refreshed by the nightly job, so no polling. */
+export function useRiskAreaProposals() {
+  return useQuery({
+    queryKey: ['risk-area-proposals'],
+    queryFn: fetchRiskAreaProposals,
+    staleTime: 120_000,
+  });
+}
+
+export function useApproveRiskAreaProposal() {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateRisk();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ApproveProposalInput }) => approveRiskAreaProposal(id, body),
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ['risk-area-proposals'] }), invalidate()]),
+  });
+}
+
+export function useDismissRiskAreaProposal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => dismissRiskAreaProposal(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['risk-area-proposals'] }),
   });
 }

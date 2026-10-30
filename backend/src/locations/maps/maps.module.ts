@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MapProvider } from '@agap/shared';
 import { MapsService } from './maps.service';
+import { GeocodeCacheService } from './geocode-cache.service';
 import { GEOCODING_PROVIDER, ROUTING_PROVIDER, TILE_PROVIDER } from './maps.tokens';
 import { NominatimGeocodingProvider } from './providers/nominatim-geocoding.provider';
 import { OsrmRoutingProvider } from './providers/osrm-routing.provider';
@@ -24,6 +25,7 @@ import { MapLibreOsmTileProvider } from './providers/maplibre-osm-tile.provider'
   imports: [ConfigModule],
   providers: [
     MapsService,
+    GeocodeCacheService,
     NominatimGeocodingProvider,
     OsrmRoutingProvider,
     MapboxRoutingProvider,

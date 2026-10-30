@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type JSX } from 'react';
-import { Edit, Info, MapPinned, Plus, Power, Trash2 } from 'lucide-react';
+import { Check, Edit, Info, MapPinned, Plus, Power, Sparkles, Trash2, X } from 'lucide-react';
 import {
   Button, Badge, DataTable, EmptyState, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -11,8 +11,13 @@ import {
 import { titleCase } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 import { useBarangayDirectory } from '@/features/admin/barangay-contacts';
-import { useCreateRiskArea, useDeleteRiskArea, useRiskAreas, useUpdateRiskArea } from '@/features/risk/hooks';
-import { RISK_LEVELS, type RiskArea, type RiskAreaInput, type RiskLevel } from '@/features/risk/api';
+import {
+  useApproveRiskAreaProposal, useCreateRiskArea, useDeleteRiskArea, useDismissRiskAreaProposal,
+  useRiskAreaProposals, useRiskAreas, useUpdateRiskArea,
+} from '@/features/risk/hooks';
+import {
+  RISK_LEVELS, type RiskArea, type RiskAreaInput, type RiskAreaProposal, type RiskLevel,
+} from '@/features/risk/api';
 
 /**
  * MOD-51 risk areas, managed by the System Administrator (MODULE_GAPS_COMPLETION_PLAN.md
@@ -265,6 +270,124 @@ function RemoveDialog({ area, onClose }: { area: RiskArea | null; onClose: () =>
   );
 }
 
+// ─── Proposed areas (AUTOMATION_NEEDS_PLAN Phase 2, C7) ───────────────────────
+
+function ApproveDialog({ proposal, onClose }: { proposal: RiskAreaProposal; onClose: () => void }): JSX.Element {
+  const approve = useApproveRiskAreaProposal();
+  const [name, setName] = useState(`${proposal.barangay ?? 'Bocaue'} ${titleCase(proposal.risk_type).toLowerCase()} hotspot`);
+  const [level, setLevel] = useState<RiskLevel>(proposal.incident_count >= 10 ? 'HIGH' : 'MODERATE');
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (name.trim().length < 2) { setError('Give the area a name.'); return; }
+    try {
+      setError(null);
+      await approve.mutateAsync({ id: proposal.id, body: { name: name.trim(), riskLevel: level } });
+      onClose();
+    } catch (e) {
+      setError(errMsg(e, 'Could not approve the proposal.'));
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o && !approve.isPending) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Approve proposed area</DialogTitle>
+          <DialogDescription>
+            Creates a {titleCase(proposal.risk_type).toLowerCase()} risk area
+            {proposal.barangay ? ` in ${proposal.barangay}` : ''} with the cluster&apos;s map boundary
+            ({proposal.incident_count} incidents in {proposal.window_days} days). Recorded in the audit log.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="rp-name" className="mb-1 block text-xs font-semibold text-agap-textMid">Name</label>
+            <input id="rp-name" className={INPUT} maxLength={255} value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <span className="mb-1 block text-xs font-semibold text-agap-textMid">Level</span>
+            <Select value={level} onValueChange={(v) => setLevel(v as RiskLevel)}>
+              <SelectTrigger aria-label="Level" className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {RISK_LEVELS.map((l) => <SelectItem key={l} value={l}>{titleCase(l)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          {error && <p role="alert" className="text-xs text-agap-danger">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={approve.isPending}>Cancel</Button>
+          <Button variant="primary" loading={approve.isPending} onClick={save}><Check size={14} /> Create risk area</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProposedAreas(): JSX.Element | null {
+  const proposals = useRiskAreaProposals();
+  const dismiss = useDismissRiskAreaProposal();
+  const [approving, setApproving] = useState<RiskAreaProposal | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const rows = proposals.data ?? [];
+
+  // Nothing to review: keep the tab as it was.
+  if (proposals.isLoading || (!proposals.isError && rows.length === 0)) return null;
+
+  const columns: Column<RiskAreaProposal>[] = [
+    { key: 'type', header: 'Type', accessor: (p) => <span className="text-xs font-semibold text-agap-textMain">{titleCase(p.risk_type)}</span> },
+    { key: 'barangay', header: 'Barangay', accessor: (p) => <span className="text-xs text-agap-textMid">{p.barangay ?? 'Outside barangay lines'}</span> },
+    {
+      key: 'count',
+      header: 'Incidents',
+      accessor: (p) => <span className="font-mono text-xs tabular-nums text-agap-textMid">{p.incident_count} in {p.window_days} days</span>,
+    },
+    {
+      key: 'actions',
+      header: '',
+      accessor: (p) => (
+        <div className="flex justify-end gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={dismiss.isPending}
+            onClick={async () => {
+              try { setError(null); await dismiss.mutateAsync(p.id); } catch (e) { setError(errMsg(e, 'Could not dismiss the proposal.')); }
+            }}
+            aria-label={`Dismiss ${titleCase(p.risk_type)} proposal${p.barangay ? ` in ${p.barangay}` : ''}`}
+          >
+            <X size={14} /> Dismiss
+          </Button>
+          <Button size="sm" variant="primary" onClick={() => setApproving(p)}>
+            <Check size={14} /> Approve
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <section className="space-y-2 rounded-2xl border border-[rgba(217,119,6,0.25)] bg-agap-amberSoft p-4">
+      <h2 className="flex items-center gap-2 text-sm font-extrabold text-agap-textMain">
+        <Sparkles size={15} className="text-agap-amber" aria-hidden />
+        Proposed areas
+      </h2>
+      <p className="text-xs text-agap-textSub">
+        Found by the nightly check: places where several incidents of one type happened close together in the last 90 days.
+        Nothing is added until you approve it.
+      </p>
+      {proposals.isError ? (
+        <p className="text-xs text-agap-danger">Couldn&apos;t load proposed areas.</p>
+      ) : (
+        <DataTable columns={columns} data={rows} getRowKey={(p) => p.id} />
+      )}
+      {error && <p role="alert" className="text-xs text-agap-danger">{error}</p>}
+      {approving && <ApproveDialog key={approving.id} proposal={approving} onClose={() => setApproving(null)} />}
+    </section>
+  );
+}
+
 // ─── Tab ──────────────────────────────────────────────────────────────────────
 
 export function RiskAreasTab(): JSX.Element {
@@ -331,6 +454,8 @@ export function RiskAreasTab(): JSX.Element {
           <Plus size={15} /> Add risk area
         </Button>
       </div>
+
+      <ProposedAreas />
 
       {areas.isError ? (
         <p className="rounded-xl border border-[rgba(212,72,88,0.2)] bg-agap-dangerSoft px-4 py-2.5 text-sm text-agap-danger">

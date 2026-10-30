@@ -139,6 +139,21 @@ describe('IncidentStatusNotifier.notifyReporter', () => {
     );
   });
 
+  it('TRANSPORTING is status only: no hospital name or id in the feed row or the push, and no transport is read (C17)', async () => {
+    const { notifier, prisma, notifications, queue } = build();
+
+    await notifier.notifyReporter('inc-1', IncidentStatus.TRANSPORTING);
+
+    expect(prisma.incident.findUnique).toHaveBeenCalledWith({
+      where: { id: 'inc-1' },
+      select: { public_reference: true, incident_reporters: { select: { user_id: true } } },
+    });
+    const row = notifications.create.mock.calls[0][0];
+    expect(row.body).toBe('Responders are taking the patient to a receiving facility for INC-2026-000123.');
+    const sent = JSON.stringify([row, queue.add.mock.calls[0]]);
+    expect(sent).not.toMatch(/hospital|Joni|Villanueva|destination|facilityId|patientId/i);
+  });
+
   it('uses the closed message and jobId for CLOSED', async () => {
     const { notifier, notifications, queue } = build();
 
@@ -356,6 +371,7 @@ describe('RespondersService.updateStatus → reporter notifier', () => {
       incidentEvent: { create: jest.fn().mockResolvedValue({}) },
       dispatches: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
       resources: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      transportRecord: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     const prisma = {
       dispatches: {
@@ -380,6 +396,9 @@ describe('RespondersService.updateStatus → reporter notifier', () => {
       realtime as any,
       { log: jest.fn() } as any,
       new IncidentStatusService(),
+      // No clientRequestId in these requests, so the retry wrapper just runs the update.
+      { once: (_d: string, _i: string, _c: unknown, run: () => unknown) => run() } as any,
+      {} as any,
       notifier as any,
     );
     return { service, notifier };

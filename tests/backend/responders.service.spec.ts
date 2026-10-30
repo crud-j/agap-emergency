@@ -11,6 +11,8 @@ import { PrismaService } from '@backend/common/prisma/prisma.service';
 import { RealtimeService } from '@backend/realtime/realtime.service';
 import { AuditService } from '@backend/audit/audit.service';
 import { IncidentStatusService } from '@backend/incidents/incident-status/incident-status.service';
+import { TransportService } from '@backend/incidents/transport/transport.service';
+import { TransportAudienceService } from '@backend/incidents/transport/transport-audience.service';
 import { ResponderAvailability } from '@agap/shared';
 import { createMockPrisma } from './helpers/prisma.mock';
 
@@ -64,6 +66,8 @@ describe('RespondersService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RealtimeService, useValue: mockRealtime },
         { provide: AuditService, useValue: mockAudit },
+        { provide: TransportService, useValue: { beginTransport: jest.fn(), announceTransportBegun: jest.fn() } },
+        { provide: TransportAudienceService, useValue: { roomsForDispatch: jest.fn().mockResolvedValue({ incidentRoom: true, userIds: [] }) } },
       ],
     }).compile();
 

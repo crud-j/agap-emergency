@@ -8,7 +8,7 @@ import Map, {
 } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Maximize2, Minimize2 } from 'lucide-react';
-import { isSignalLost } from '@agap/shared';
+import { FACILITY_SERVICE_AREA_BOUNDS, isSignalLost, toLngLat, type TransportLeg } from '@agap/shared';
 import { useMapStyle } from '@/features/map/hooks';
 import {
   BOCAUE_BOUNDS, BOCAUE_CENTER, BOCAUE_DEFAULT_ZOOM, BOCAUE_MIN_ZOOM, BOCAUE_MAX_ZOOM,
@@ -20,9 +20,11 @@ import { MapErrorOverlay } from '@/components/map/MapErrorOverlay';
 import { resolveMissingStyleImages } from '@/components/map/missing-style-images';
 import { AmbulanceMarker } from '@/components/map/AmbulanceMarker';
 import { CitizenMarker, reporterLabel } from '@/components/map/CitizenMarker';
+import { HospitalMarker } from '@/components/map/HospitalMarker';
+import { LEG_COLORS, LegChip } from '@/components/map/LegChip';
 import { titleCase } from '@/lib/incident-format';
 import { useNow } from '@/lib/use-now';
-import { formatAge } from '@/features/map/live-tracking';
+import { formatAge, isUnitOnMap, type LegChip as LegChipData } from '@/features/map/live-tracking';
 import type { LiveResponderPosition } from '@/features/map/api';
 
 /**
@@ -35,6 +37,9 @@ const FLOOD_PRONE: Array<{ name: string; center: [number, number]; radiusM: numb
   { name: 'Igulot',   center: [120.9500, 14.7097], radiusM: 850 },
   { name: 'Bambang',  center: [120.9103, 14.7847], radiusM: 900 },
 ];
+
+/** Min zoom while the bounds are widened to the service area (a hospital outside Bocaue). */
+const SERVICE_AREA_MIN_ZOOM = 9;
 
 /** Call-sign labels appear under unit markers from this zoom up. */
 const LABEL_MIN_ZOOM = 14;
@@ -52,6 +57,26 @@ export interface MapIncident {
   /** Staff-only reporter map icon (WP3.6); null/undefined → neutral pin. */
   reporter_sex?: 'MALE' | 'FEMALE' | null;
   reporter_is_guest?: boolean | null;
+}
+
+/** A hospital drawn on the map (MOD-39): a transport destination or the optional VERIFIED layer. */
+export interface MapFacility {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  verified: boolean;
+  /** A unit is heading to (or is at) this hospital: emphasised and labelled. */
+  destination?: boolean;
+}
+
+/** One unit's route, styled by leg (ops map: every tracked unit). [lng, lat] pairs. */
+export interface MapRoute {
+  id: string;
+  geometry: Array<[number, number]>;
+  leg: TransportLeg;
+  /** Stale or older than 120 s: drawn faded. */
+  lastKnown?: boolean;
 }
 
 /** Camera tracking of the selected incident's accepted unit (dispatch dashboard). */
@@ -102,10 +127,12 @@ function MapFlyController({ incidents, selectedId }: { incidents: MapIncident[];
  * eases to the unit on each new position; a fit request frames scene + unit.
  */
 function UnitCameraController({
-  unit, scene, follow, fitRequest,
+  unit, scene, destinations, follow, fitRequest,
 }: {
   unit: [number, number] | null;
   scene: [number, number] | null;
+  /** Hospitals a unit is heading to: framed with the unit and scene. */
+  destinations: Array<[number, number]>;
   follow: boolean;
   fitRequest: number;
 }): null {
@@ -122,7 +149,7 @@ function UnitCameraController({
 
   useEffect(() => {
     if (!map || fitRequest === 0) return;
-    const pts = [unit, scene].filter((p): p is [number, number] => p != null);
+    const pts = [unit, scene, ...destinations].filter((p): p is [number, number] => p != null);
     if (pts.length === 0) return;
     if (pts.length === 1) {
       map.easeTo({ center: pts[0]!, zoom: Math.max(map.getZoom(), 15), duration: 600 });
@@ -147,8 +174,18 @@ interface IncidentMapViewProps {
   onSelect: (id: string) => void;
   /** Dispatch dashboard only: track the selected incident's accepted unit. */
   tracking?: UnitTrackingView;
-  /** Routed line from the tracked unit to the scene, [lng, lat] pairs. */
+  /** Routed line of the tracked unit's current leg, [lng, lat] pairs. */
   routeGeometry?: Array<[number, number]> | null;
+  /** Leg of `routeGeometry`: TO_FACILITY is purple and dashed. Default TO_SCENE. */
+  routeStyle?: 'TO_SCENE' | 'TO_FACILITY';
+  /** `routeGeometry` is stale or older than 120 s: drawn faded. */
+  routeLastKnown?: boolean;
+  /** More routes, each with its own leg (ops map). */
+  routes?: MapRoute[];
+  /** Destination hospitals (always shown) and, optionally, every VERIFIED hospital. */
+  facilities?: MapFacility[];
+  /** Leg chip per dispatch id, for the unit popup and marker tooltips. */
+  unitLegs?: Record<string, LegChipData>;
 }
 
 /**
@@ -160,7 +197,8 @@ interface IncidentMapViewProps {
  * advisory circles are rendered as MapLibre GL fill + line layers.
  */
 export function IncidentMapView({
-  incidents, responders, selectedId, onSelect, tracking, routeGeometry,
+  incidents, responders, selectedId, onSelect, tracking, routeGeometry, routeStyle = 'TO_SCENE',
+  routeLastKnown = false, routes, facilities, unitLegs,
 }: IncidentMapViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const styleUrl = useMapStyle();
@@ -176,7 +214,7 @@ export function IncidentMapView({
   const selectedCoords = selectedInc ? coordsOf(selectedInc) : null;
 
   const visibleResponders = useMemo(
-    () => responders.filter((r) => r.lat != null && r.lng != null && isWithinBocaue(r.lng, r.lat)),
+    () => responders.filter((r) => r.lat != null && r.lng != null && isUnitOnMap(r.lng, r.lat)),
     [responders],
   );
   const trackedUnit = tracking?.dispatchId
@@ -199,17 +237,50 @@ export function IncidentMapView({
     })),
   }), []);
 
+  const allRoutes = useMemo<MapRoute[]>(
+    () => [
+      ...(routeGeometry && routeGeometry.length > 1
+        ? [{ id: 'tracked', geometry: routeGeometry, leg: routeStyle, lastKnown: routeLastKnown }]
+        : []),
+      ...(routes ?? []).filter((r) => r.geometry.length > 1),
+    ],
+    [routeGeometry, routeStyle, routeLastKnown, routes],
+  );
   const routeGeoJSON = useMemo(
     () =>
-      routeGeometry && routeGeometry.length > 1
+      allRoutes.length > 0
         ? {
-            type: 'Feature' as const,
-            properties: {},
-            geometry: { type: 'LineString' as const, coordinates: routeGeometry },
+            type: 'FeatureCollection' as const,
+            features: allRoutes.map((r) => ({
+              type: 'Feature' as const,
+              properties: { id: r.id, leg: r.leg, lastKnown: !!r.lastKnown },
+              geometry: { type: 'LineString' as const, coordinates: r.geometry },
+            })),
           }
         : null,
-    [routeGeometry],
+    [allRoutes],
   );
+
+  // Hospital points built at runtime from the API (no static GeoJSON); [lng, lat] via toLngLat.
+  // A destination wins over the same hospital in the optional VERIFIED layer.
+  const hospitalPoints = useMemo(() => {
+    const byId = new globalThis.Map<string, MapFacility & { point: [number, number] }>();
+    for (const f of facilities ?? []) {
+      if (!byId.has(f.id) || f.destination) byId.set(f.id, { ...f, point: toLngLat(f) });
+    }
+    return [...byId.values()];
+  }, [facilities]);
+  const destinationPoints = useMemo(
+    () => hospitalPoints.filter((h) => h.destination).map((h) => h.point),
+    [hospitalPoints],
+  );
+
+  // A transport to a hospital outside Bocaue widens the bounds to the service area
+  // while it lasts; the Bocaue boundary, mask and incident markers are unchanged.
+  const wideArea =
+    destinationPoints.some(([lng, lat]) => !isWithinBocaue(lng, lat)) ||
+    allRoutes.some((r) => r.geometry.some(([lng, lat]) => !isWithinBocaue(lng, lat))) ||
+    visibleResponders.some((r) => !isWithinBocaue(r.lng, r.lat));
 
   useEffect(() => {
     function syncFullscreen() {
@@ -279,8 +350,8 @@ export function IncidentMapView({
           latitude: BOCAUE_CENTER[1],
           zoom: BOCAUE_DEFAULT_ZOOM,
         }}
-        maxBounds={BOCAUE_BOUNDS}
-        minZoom={BOCAUE_MIN_ZOOM}
+        maxBounds={wideArea ? FACILITY_SERVICE_AREA_BOUNDS : BOCAUE_BOUNDS}
+        minZoom={wideArea ? SERVICE_AREA_MIN_ZOOM : BOCAUE_MIN_ZOOM}
         maxZoom={BOCAUE_MAX_ZOOM}
         style={{ height: '100%', width: '100%' }}
         onError={() => setTileError(true)}
@@ -297,6 +368,7 @@ export function IncidentMapView({
           <UnitCameraController
             unit={trackedPoint}
             scene={selectedCoords}
+            destinations={destinationPoints}
             follow={tracking.follow}
             fitRequest={tracking.fitRequest}
           />
@@ -340,17 +412,53 @@ export function IncidentMapView({
           />
         </Source>
 
-        {/* Routed line unit → scene (MOD-43). GL layer, so it sits under the DOM markers. */}
+        {/* Routed lines (MOD-43): scene leg solid green, hospital leg dashed purple.
+            GL layers, so they sit under the DOM markers. */}
         {routeGeoJSON && (
           <Source id="unit-route" type="geojson" data={routeGeoJSON}>
             <Layer
               id="unit-route-line"
               type="line"
+              filter={['!=', ['get', 'leg'], 'TO_FACILITY']}
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-              paint={{ 'line-color': '#0D6053', 'line-width': 5, 'line-opacity': 0.85 }}
+              paint={{
+                'line-color': LEG_COLORS.TO_SCENE,
+                'line-width': 5,
+                'line-opacity': ['case', ['get', 'lastKnown'], 0.4, 0.85],
+              }}
+            />
+            <Layer
+              id="unit-route-hospital-line"
+              type="line"
+              filter={['==', ['get', 'leg'], 'TO_FACILITY']}
+              layout={{ 'line-join': 'round' }}
+              paint={{
+                'line-color': LEG_COLORS.TO_FACILITY,
+                'line-width': 5,
+                'line-dasharray': [2, 1.5],
+                'line-opacity': ['case', ['get', 'lastKnown'], 0.4, 0.9],
+              }}
             />
           </Source>
         )}
+
+        {/* Hospitals: transport destinations (labelled) and the optional VERIFIED layer */}
+        {hospitalPoints.map((h) => (
+          <Marker
+            key={h.id}
+            longitude={h.point[0]}
+            latitude={h.point[1]}
+            anchor="center"
+            style={{ zIndex: h.destination ? 1 : 0 }}
+          >
+            <HospitalMarker
+              verified={h.verified}
+              selected={!!h.destination}
+              label={h.destination || zoom >= LABEL_MIN_ZOOM ? h.name : null}
+              title={`${h.name} · ${h.verified ? 'Verified location' : 'Location not verified'}`}
+            />
+          </Marker>
+        ))}
 
         {/* Incident scene markers (the reporter, never the patient) */}
         {incidents.map((inc) => {
@@ -382,6 +490,7 @@ export function IncidentMapView({
         {visibleResponders.map((r) => {
           const lost = isSignalLost(r.updated_at, now);
           const unitName = r.call_sign ?? r.resource_name ?? 'Responder';
+          const leg = r.dispatchId ? unitLegs?.[r.dispatchId] : undefined;
           return (
             <Marker
               key={r.dispatchId ?? r.responderId}
@@ -397,7 +506,7 @@ export function IncidentMapView({
                 callSign={r.call_sign ?? r.resource_name}
                 resourceType={r.resource_type ?? null}
                 showLabel={zoom >= LABEL_MIN_ZOOM}
-                title={`${unitName} · ${lost ? 'signal lost — ' : ''}last update ${formatAge(r.updated_at, now)}`}
+                title={`${unitName}${leg ? ` · ${leg.label}` : ''} · ${lost ? 'signal lost — ' : ''}last update ${formatAge(r.updated_at, now)}`}
               />
             </Marker>
           );
@@ -425,6 +534,11 @@ export function IncidentMapView({
                   }`}
                 >
                   {selectedUnit.call_sign ?? 'Unit'} · last update {formatAge(selectedUnit.updated_at, now)}
+                </div>
+              )}
+              {selectedUnit?.dispatchId && unitLegs?.[selectedUnit.dispatchId] && (
+                <div className="mt-1">
+                  <LegChip chip={unitLegs[selectedUnit.dispatchId]!} />
                 </div>
               )}
               <button

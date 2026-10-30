@@ -96,6 +96,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Self-hosted OSRM router (plan §13.1, Phase 5). Not started by default:
+  #   infrastructure/osrm/build.sh                 (once; builds data/ from the Geofabrik extract)
+  #   docker compose --profile routing up -d osrm
+  # Backend: MAP_PROVIDER_ROUTING_URL=http://osrm:5000 (in compose) or http://127.0.0.1:5005 (host).
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    container_name: agap_osrm
+    profiles: ["routing"]
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld --max-table-size 1000 /data/philippines-latest.osrm
+    volumes:
+      - ./infrastructure/osrm/data:/data:ro
+    expose:
+      - "5000"
+    ports:
+      # Localhost only, for a backend run on the host; other machines cannot reach it.
+      - "127.0.0.1:5005:5000"
+
 volumes:
   agap_postgres_data:
   agap_redis_data:

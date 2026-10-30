@@ -27,6 +27,7 @@ describe('reporter_sex exposure (WP3.6, least privilege)', () => {
     function makeController(participation: 'staff' | 'reporter' | 'crew' | null) {
       const incidents = {
         findById: jest.fn().mockResolvedValue({ id: 'inc-1', status: 'EN_ROUTE' }),
+        findReporterView: jest.fn().mockResolvedValue({ id: 'inc-1', status: 'EN_ROUTE' }),
         getReporterSex: jest.fn().mockResolvedValue('FEMALE'),
       };
       const participants = { getParticipation: jest.fn().mockResolvedValue(participation) };
@@ -42,10 +43,18 @@ describe('reporter_sex exposure (WP3.6, least privilege)', () => {
       expect(result.reporter_sex).toBe('FEMALE');
     });
 
-    it.each(['reporter', null] as const)('omits reporter_sex for %s (citizen-facing)', async (participation) => {
-      const { controller, incidents } = makeController(participation);
+    it('omits reporter_sex for the reporter (citizen-facing view)', async () => {
+      const { controller, incidents } = makeController('reporter');
       const result: any = await controller.findOne('inc-1', { user: { id: 'u', role: 'CITIZEN' } });
       expect(result).not.toHaveProperty('reporter_sex');
+      expect(incidents.getReporterSex).not.toHaveBeenCalled();
+    });
+
+    it('refuses a signed-in user who is not staff, crew or the reporter', async () => {
+      const { controller, incidents } = makeController(null);
+      await expect(controller.findOne('inc-1', { user: { id: 'u', role: 'CITIZEN' } })).rejects.toThrow(
+        'You do not have access to this incident',
+      );
       expect(incidents.getReporterSex).not.toHaveBeenCalled();
     });
   });

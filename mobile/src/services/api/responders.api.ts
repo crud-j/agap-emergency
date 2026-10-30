@@ -68,10 +68,12 @@ export function updateAssignmentStatus(
   status: string,
   token: string,
   notes?: string,
+  /** TRANSPORTING only (plan §19): the same id on a retry gets the first answer. */
+  clientRequestId?: string,
 ): Promise<void> {
   return authFetch<void>(`/v1/responders/assignments/${id}/status`, token, {
     method: 'PATCH',
-    body: JSON.stringify({ status, ...(notes ? { notes } : {}) }),
+    body: JSON.stringify({ status, ...(notes ? { notes } : {}), ...(clientRequestId ? { clientRequestId } : {}) }),
   });
 }
 

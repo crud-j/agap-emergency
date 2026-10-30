@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import '@/lib/maplibre-setup';
-import Map, { Marker, type MapRef, type MapLayerMouseEvent, type MarkerDragEvent } from 'react-map-gl/maplibre';
+import Map, {
+  Marker, type MapRef, type MapLayerMouseEvent, type MarkerDragEvent, type MarkerEvent,
+} from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useMapStyle } from '@/features/map/hooks';
 import { BOCAUE_CENTER, BOCAUE_DEFAULT_ZOOM } from '@/lib/bocaue-geo';
@@ -10,17 +12,29 @@ import { MapErrorOverlay } from '@/components/map/MapErrorOverlay';
 import { resolveMissingStyleImages } from '@/components/map/missing-style-images';
 import { HospitalMarker } from '@/components/map/HospitalMarker';
 
+/** A "Find location" result drawn beside the pin; clicking it picks it. */
+export interface MapCandidate {
+  id: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+}
+
 interface HospitalLocationMapProps {
   point: { latitude: number; longitude: number } | null;
   verified: boolean;
   onPick: (latitude: number, longitude: number) => void;
+  candidates?: MapCandidate[] | undefined;
+  onCandidateClick?: ((id: string) => void) | undefined;
 }
 
 /**
  * The map half of HospitalLocationPicker. Click or drag sets the point. Not
  * clamped to Bocaue: a receiving hospital may be anywhere in the service area.
  */
-export default function HospitalLocationMap({ point, verified, onPick }: HospitalLocationMapProps): JSX.Element {
+export default function HospitalLocationMap({
+  point, verified, onPick, candidates = [], onCandidateClick,
+}: HospitalLocationMapProps): JSX.Element {
   const styleUrl = useMapStyle();
   const mapRef = useRef<MapRef | null>(null);
   const attachMap = useCallback((map: MapRef | null) => {
@@ -58,6 +72,22 @@ export default function HospitalLocationMap({ point, verified, onPick }: Hospita
         onError={() => setTileError(true)}
         onLoad={() => setTileError(false)}
       >
+        {candidates.map((c) => (
+          <Marker
+            key={c.id}
+            longitude={c.longitude}
+            latitude={c.latitude}
+            anchor="center"
+            onClick={(e: MarkerEvent<MouseEvent>) => {
+              e.originalEvent.stopPropagation();
+              onCandidateClick?.(c.id);
+            }}
+          >
+            <div className="cursor-pointer opacity-70 hover:opacity-100">
+              <HospitalMarker verified={false} title={c.label} />
+            </div>
+          </Marker>
+        ))}
         {point && (
           <Marker
             longitude={point.longitude}

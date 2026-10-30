@@ -9,6 +9,8 @@ import { TriageService } from './triage/triage.service';
 import { AssessmentService } from './assessment/assessment.service';
 import { IncidentHandoverService } from './incident-handover/incident-handover.service';
 import { TransportService } from './transport/transport.service';
+import { TransportRequestCacheService } from './transport/transport-request-cache.service';
+import { TransportLegModule } from './transport/transport-leg.module';
 import { MediaModule } from '../media/media.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AuditModule } from '../audit/audit.module';
@@ -16,6 +18,7 @@ import { EmergencyContactsModule } from '../emergency-contacts/emergency-contact
 import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EmergencyAlertsModule } from '../emergency-alerts/emergency-alerts.module';
+import { LocationsModule } from '../locations/locations.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
@@ -29,6 +32,8 @@ import { QUEUE_NAMES } from '@agap/shared';
     BarangayCoordinationModule,
     NotificationsModule,
     EmergencyAlertsModule,
+    LocationsModule,
+    TransportLegModule,
   ],
   controllers: [IncidentsController],
   providers: [
@@ -40,7 +45,8 @@ import { QUEUE_NAMES } from '@agap/shared';
     AssessmentService,
     IncidentHandoverService,
     TransportService,
+    TransportRequestCacheService,
   ],
-  exports: [IncidentsService, IncidentStatusService],
+  exports: [IncidentsService, IncidentStatusService, TransportService, TransportLegModule],
 })
 export class IncidentsModule {}

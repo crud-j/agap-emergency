@@ -10,7 +10,11 @@ import { useAuthStore } from '../src/stores/auth.store';
 import { useAccessibilityStore } from '../src/stores/accessibility.store';
 import { homeRouteForRole } from '../src/lib/role-routing';
 import { OfflineBanner } from '../src/components/ui/OfflineBanner';
-import { incidentIdFromNotification, registerPushToken } from '../src/services/push/push-registration';
+import {
+  assignmentIdFromNotification,
+  incidentIdFromNotification,
+  registerPushToken,
+} from '../src/services/push/push-registration';
 import { useLiveIncidentRefresh } from '../src/hooks/useLiveIncidentRefresh';
 import { AgapSplash } from '../src/components/splash/AgapSplash';
 
@@ -99,19 +103,26 @@ function AuthGuard() {
     }
   }, [isAuthenticated, isLoading, accessibilityLoaded, segments, user?.role]);
 
-  // A tapped push opens its incident. Held until the session is loaded, and
-  // declared after the redirect above so a cold start lands home → incident.
-  const [tappedIncidentId, setTappedIncidentId] = useState<string | null>(null);
+  // A tapped push opens its assignment (responder) or incident. Held until the session
+  // is loaded, and declared after the redirect above so a cold start lands home → target.
+  const [tapped, setTapped] = useState<{ pathname: string; id: string } | null>(null);
   const handledResponses = useRef(new Set<string>());
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
     const take = (response: Notifications.NotificationResponse | null) => {
-      const id = incidentIdFromNotification(response);
       const key = response?.notification.request.identifier;
-      if (!id || !key || handledResponses.current.has(key)) return;
+      if (!key || handledResponses.current.has(key)) return;
+      // Assignment first: its param is the dispatch ID, not an incident ID.
+      const dispatchId = assignmentIdFromNotification(response);
+      const incidentId = dispatchId ? null : incidentIdFromNotification(response);
+      if (!dispatchId && !incidentId) return;
       handledResponses.current.add(key);
-      setTappedIncidentId(id);
+      setTapped(
+        dispatchId
+          ? { pathname: '/responder/assignment/[id]', id: dispatchId }
+          : { pathname: '/incidents/[id]', id: incidentId! },
+      );
     };
     take(Notifications.getLastNotificationResponse());
     const sub = Notifications.addNotificationResponseReceivedListener(take);
@@ -119,10 +130,10 @@ function AuthGuard() {
   }, []);
 
   useEffect(() => {
-    if (!tappedIncidentId || isLoading || !accessibilityLoaded || !isAuthenticated) return;
-    router.push({ pathname: '/incidents/[id]', params: { id: tappedIncidentId } } as never);
-    setTappedIncidentId(null);
-  }, [tappedIncidentId, isAuthenticated, isLoading, accessibilityLoaded]);
+    if (!tapped || isLoading || !accessibilityLoaded || !isAuthenticated) return;
+    router.push({ pathname: tapped.pathname, params: { id: tapped.id } } as never);
+    setTapped(null);
+  }, [tapped, isAuthenticated, isLoading, accessibilityLoaded]);
 
   return null;
 }

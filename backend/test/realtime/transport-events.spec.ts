@@ -50,7 +50,6 @@ describe('RealtimeService — MOD-40 transport events', () => {
       transportId: 'tr-1',
       dispatchId: 'disp-1',
       destinationId: 'fac-1',
-      destinationName: destination.name,
       destination,
       patientId: 'pat-1',
       transportStartedAt: '2026-10-28T01:00:00.000Z',
@@ -92,6 +91,17 @@ describe('RealtimeService — MOD-40 transport events', () => {
       const json = incidentRoomJson();
       for (const field of SENSITIVE_FIELDS) expect(json).not.toContain(`"${field}"`);
       expect(json).not.toContain('fac-1');
+      expect(gateway.emitToIncident).toHaveBeenCalledWith(INCIDENT_EVENTS.FACILITY_ARRIVAL, 'inc-1', {
+        incidentId: 'inc-1',
+        transportId: 'tr-1',
+        dispatchId: 'disp-1',
+        arrivedAt: '2026-10-28T01:20:00.000Z',
+      });
+    });
+
+    it('sends the incident room only the status fields, even if the payload carries more', () => {
+      service.facilityArrival({ ...payload, destinationName: 'Joni Villanueva' } as IncidentFacilityArrivalPayload);
+      expect(incidentRoomJson()).not.toContain('Joni Villanueva');
     });
 
     it('keeps the full payload for ops', () => {

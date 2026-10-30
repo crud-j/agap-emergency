@@ -19,6 +19,7 @@ import { memoryStorage } from 'multer';
 import { randomUUID } from 'crypto';
 import { extname, join, resolve, sep } from 'path';
 import { mkdir, writeFile, readFile } from 'fs/promises';
+import { haversineMeters } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { EvidenceAiReviewService } from './evidence-ai-review.service';
@@ -58,17 +59,6 @@ const BOCAUE_BOUNDS = { west: 120.885, south: 14.755, east: 120.965, north: 14.8
 const FRESH_WINDOW_MS = 15 * 60 * 1000; // photo older than this vs the report → stale
 const FUTURE_SKEW_MS = 2 * 60 * 1000;   // capture time this far after report → suspicious
 const LOCATION_MISMATCH_METERS = 500;   // capture GPS this far from the incident → flag
-
-function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const R = 6_371_000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(bLat - aLat);
-  const dLng = toRad(bLng - aLng);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
 
 /**
  * Cross-checks capture provenance against the incident's report time + location.

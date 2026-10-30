@@ -225,12 +225,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  sosSection: { alignItems: 'center', marginBottom: 32, paddingTop: 8, paddingBottom: 8 },
+  sosSection: { alignItems: 'center', marginBottom: 32, paddingTop: 4, paddingBottom: 12 },
   viewActiveBtn: { width: '100%', minHeight: 56, marginBottom: 20, borderRadius: 16, overflow: 'hidden' },
   gradientOverlay: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   viewActiveBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
-  sosHeading: { marginTop: 4, marginBottom: 8, fontSize: 24, fontWeight: '800', color: '#1C2B3A', textAlign: 'center' },
-  sosBody: { maxWidth: 300, marginBottom: 16, fontSize: 14, lineHeight: 22, fontWeight: '500', color: '#8795A3', textAlign: 'center' },
+  sosHeading: {
+    marginTop: 4, marginBottom: 8, fontSize: 26, lineHeight: 32, fontWeight: '900',
+    color: '#162B36', textAlign: 'center',
+    textShadowColor: 'rgba(255,255,255,0.75)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
+  sosBody: {
+    maxWidth: 320, marginBottom: 16, paddingHorizontal: 8, fontSize: 15, lineHeight: 23,
+    fontWeight: '700', color: '#29434D', textAlign: 'center',
+    textShadowColor: 'rgba(255,255,255,0.7)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
   shakeChip: { minHeight: 40, paddingHorizontal: 18, borderRadius: 20, backgroundColor: '#EDF1F4', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   shakeChipText: { fontSize: 13, fontWeight: '700', lineHeight: 18 },
 });

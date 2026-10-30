@@ -156,7 +156,7 @@ Traced as the code behaves today **[Confirmed]**:
 
 **Registration without duplicates [Recommendation].**
 - Seed with a fixed UUID in the existing `00000000-0000-0000-0002-…` series (next free: `…0002-000000000006`). Use `upsert` keyed on that id, so re-running the seed is idempotent.
-- The partial unique index on `(location_source, location_source_ref)` (§10) prevents a second registration of OSM `way 1290448946` through the UI.
+- The partial unique index on `location_source_ref` (§10) prevents a second registration of OSM `way 1290448946` through the UI, whatever source label it arrives with. (Corrected 2026-10-29, prompts C21: the original `(location_source, location_source_ref)` key let a `nominatim` pick of this `manual+osm-crosscheck` row through.)
 - The fictional seed "Bocaue General Hospital" (`…0002-000000000001`) has referrals and a hospital org attached in demo data. Leave it, but keep it `UNVERIFIED` (no coordinates). Do not guess coordinates for it.
 
 **Coordinate order and display consistency [Recommendation].**
@@ -276,6 +276,8 @@ Otherwise the result is `NEEDS_CONFIRMATION`: the user must pick a candidate or 
 ## 10. Database and Migration Plan
 
 > **Correction (2026-10-25, applied in Prompt 01) [Confirmed].** The generated column below was not used (prompts Correction C1). `location` stays a plain `geography` column filled by trigger `trg_facilities_sync_location` from `latitude`/`longitude`; code never writes it. The real SQL is `backend/prisma/migrations/20261025120000_facility_coordinates/migration.sql`. CHECK names carry a `_chk` suffix there.
+
+> **Correction (2026-10-29, after the Prompt 13 review) [Confirmed].** `uq_facilities_location_source_ref` is keyed on `location_source_ref` alone (migration `20261029120000_facility_source_ref_unique`, prompts C21). The two-column version below allowed one OSM object to be saved twice under different source labels.
 
 **Smallest change:** extend `facilities`. No new tables.
 
@@ -442,7 +444,7 @@ EN_ROUTE ─► ON_SCENE ─► TRANSPORTING ─► RESOLVED ─► CLOSED
 | Concept | Where it lives | Notes |
 |---|---|---|
 | Patient picked up / transport started | Incident `TRANSPORTING` + `transport_records.transport_started_at` | Created together in one transaction |
-| Destination selected / changed | `transport_records.destination_id` (+ `destination_changed`, `change_reason`, audit) | Crew before arrival. Dispatcher/Supervisor any time |
+| Destination selected / changed | `transport_records.destination_id` (+ `destination_changed`, `change_reason`, audit) | Crew, Dispatcher and Supervisor, before arrival only: after arrival the change is refused with 409 `TRANSPORT_ARRIVED` (the arrival already closed that hospital's referral; 2026-10-28). Re-sending the current hospital is not a change and is not re-validated |
 | Leg (derived, not stored) | `TransportLegService` | `TO_SCENE` if no open transport. `TO_FACILITY` if open transport with a routable destination. `AT_FACILITY` once `arrived_at` is set and the incident is not yet resolved |
 | Arrival | `transport_records.arrived_at` (+ matching open `facility_referrals.patient_arrived_at`) | The incident **stays `TRANSPORTING`**. The lifecycle has no "arrived at hospital" status and none is needed |
 | Handover completed | `transport_records.handover_completed_at` (exists, unused) | Optional: set when the crew taps "Handover complete". Can come before `RESOLVED` |
@@ -517,12 +519,12 @@ All events use the existing envelope from `RealtimeGateway.emit`. Rooms: `ops:al
 
 | Event | Status | Rooms | Payload |
 |---|---|---|---|
-| `responder.location_updated` | **Existing**, unchanged | ops + incident | `ResponderLocationUpdatedPayload` |
-| `responder.eta_updated` | **Existing**, kept for compatibility | ops + incident | `{ incidentId, dispatchId, etaSeconds, isEstimate, calculatedAt }`. Now leg-aware |
+| `responder.location_updated` | **Existing**, audience changed (Prompt 09) | ops always · incident only on `TO_SCENE` · hospital leg: crew/confirmed-reporter `user:` rooms (a moving or parked ambulance reveals the hospital, C6) | `ResponderLocationUpdatedPayload` |
+| `responder.eta_updated` | **Existing**, kept for compatibility | ops always · incident only on `TO_SCENE` (Prompt 07; hospital leg = ops + crew/confirmed-reporter `user:` rooms from Prompt 09) | `{ incidentId, dispatchId, etaSeconds, isEstimate, calculatedAt }`. Now leg-aware |
 | `incident.transporting` | **Existing**, payload trimmed | ops: full · incident: status only · confirmed reporter's `user:` room: destination | Incident-room copy is `{ incidentId, transportId, dispatchId, transportStartedAt }`: no `patientId`, `destinationId`, `destinationName` or `destination` (C18). Ops copy keeps everything and adds `destination` |
-| `incident.facility_arrival` | **Existing** | ops: full · incident: without `destinationId` · confirmed reporter's `user:` room | Add `dispatchId` |
+| `incident.facility_arrival` | **Existing** | ops: full · incident: status only (no `destinationId`/`destination`) · confirmed reporter's `user:` room: status + `destination` | Adds `dispatchId`; ops and confirmed-reporter copies carry `destination` (view) (Prompt 09) |
 | `incident.transport_updated` | **Proposed** | ops + crew/confirmed-reporter `user:` rooms. **Never the incident room** | `{ incidentId, dispatchId, transportId, destination: {id?, name, latitude, longitude, locationVerified} \| null, destinationWarning?: "FACILITY_DEACTIVATED" \| "FACILITY_AT_CAPACITY", changedAt }`. User-room copies omit `id` and `change_reason` |
-| `responder.route_updated` | **Proposed** | ops + incident | `{ incidentId, dispatchId, leg, destination \| null, route: { geometry: [lng,lat][], distanceMeters, durationSeconds, isEstimate: true, calculatedAt, stale } \| null }` |
+| `responder.route_updated` | **Existing** (Prompt 07) | ops always · incident only on `TO_SCENE` · crew/confirmed-reporter `user:` rooms (Prompt 09). Never the incident room on `TO_FACILITY`/`AT_FACILITY` (C18) | `{ incidentId, dispatchId, leg, destination \| null, route: { geometry: [lng,lat][], distanceMeters, durationSeconds, isEstimate: true, calculatedAt, stale } \| null }` |
 
 Add these to `shared/src/events/incident.events.ts` (`INCIDENT_EVENTS.TRANSPORT_UPDATED`) and `shared/src/events/responder.events.ts` (`ROUTE_UPDATED`), with typed payload interfaces.
 

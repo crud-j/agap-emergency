@@ -18,8 +18,13 @@ import {
 } from '@/features/dispatch/hooks';
 import { useResponders } from '@/features/responders/hooks';
 import { useIncident, useUpdateIncidentStatus } from '@/features/incidents/hooks';
+import { isRouteLastKnown } from '@agap/shared';
 import { useIncidentUnits, useLiveResponders, useRouteLine } from '@/features/map/hooks';
-import { formatEta, trackingPhase } from '@/features/map/live-tracking';
+import {
+  destinationFacilities, formatEta, legChip, trackingPhase, unitRoutePlan,
+} from '@/features/map/live-tracking';
+import { LegChip } from '@/components/map/LegChip';
+import { useNow } from '@/lib/use-now';
 import { UnitTrackingCard } from '@/components/dispatch/UnitTrackingCard';
 import { categoryIcon, formatAffectedCount, titleCase, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
@@ -162,13 +167,28 @@ export default function DispatchPage(): JSX.Element {
       ? { lat: Number(loc.latitude), lng: Number(loc.longitude) }
       : null;
   }, [selectedIncident]);
-  const route = useRouteLine(
-    phase === 'accepted' && tracked.position ? tracked.position : null,
-    phase === 'accepted' ? scene : null,
-  );
   const { data: units } = useIncidentUnits(selectedId, phase === 'accepted');
+  const trackedUnit = units?.find((u) => u.dispatchId === tracked.dispatchId) ?? null;
+  // Server route for the unit's current leg (scene or hospital); the client route
+  // to the same target is only a fallback while the server has none (plan §16.1).
+  const plan = unitRoutePlan(trackedUnit, scene);
+  const fromPoint = tracked.position ?? trackedUnit?.position ?? null;
+  const route = useRouteLine(
+    phase === 'accepted' && plan.fallbackTo ? fromPoint : null,
+    phase === 'accepted' ? plan.fallbackTo : null,
+  );
+  const now = useNow(5_000);
+  const routeGeometry = phase === 'accepted' ? plan.server?.geometry ?? route.data?.geometry ?? null : null;
+  const routeDistance = plan.server?.distanceMeters ?? (plan.fallbackTo ? route.data?.distanceMeters : null) ?? null;
+  const routeLastKnown = isRouteLastKnown(plan.server, now);
   const trackedEtaSeconds =
-    units?.find((u) => u.dispatchId === tracked.dispatchId)?.eta.seconds ?? route.data?.durationSeconds ?? null;
+    trackedUnit?.eta.seconds ?? plan.server?.durationSeconds ?? route.data?.durationSeconds ?? null;
+  const trackedChip = legChip(trackedUnit);
+  const unitLegs = useMemo(
+    () => Object.fromEntries((units ?? []).map((u) => [u.dispatchId, legChip(u)])),
+    [units],
+  );
+  const facilities = useMemo(() => destinationFacilities(units), [units]);
 
   const recQuery = useDispatchRecommendations(phase === 'none' ? selectedId : null);
   const nearestMeters = useMemo(() => {
@@ -193,7 +213,11 @@ export default function DispatchPage(): JSX.Element {
             onFollowChange: setFollowUnit,
             fitRequest,
           }}
-          routeGeometry={phase === 'accepted' ? route.data?.geometry ?? null : null}
+          routeGeometry={routeGeometry}
+          routeStyle={plan.leg === 'TO_FACILITY' ? 'TO_FACILITY' : 'TO_SCENE'}
+          routeLastKnown={routeLastKnown}
+          facilities={phase === 'accepted' ? facilities : []}
+          unitLegs={unitLegs}
         />
       </div>
 
@@ -304,23 +328,31 @@ export default function DispatchPage(): JSX.Element {
       </div>
 
       {/* ── Center-bottom: ETA pill ────────────────────────────────────── */}
-      {/* Accepted unit → routed live ETA. Before dispatch → "nearest unit" heuristic. */}
+      {/* Accepted unit → leg chip + routed live ETA. Before dispatch → "nearest unit" heuristic. */}
       {selectedId && phase === 'accepted' && tracked.dispatchId ? (
         <div className="pointer-events-none absolute bottom-5 left-1/2 z-[1000] -translate-x-1/2">
           <div className="pointer-events-auto flex items-center gap-2.5 rounded-full bg-agap-sidebar/90 px-5 py-2.5 shadow-[0_4px_20px_rgba(10,22,40,0.4)] backdrop-blur-sm border border-white/10">
             <Navigation size={14} className="text-agap-green shrink-0" />
             <span className="text-sm font-semibold text-white">{tracked.callSign ?? 'Assigned unit'}</span>
-            {route.data?.distanceMeters != null && (
+            <LegChip chip={trackedChip} tone="dark" />
+            {plan.leg !== 'AT_FACILITY' && (
               <>
+                {routeDistance != null && (
+                  <>
+                    <span className="text-white/30">·</span>
+                    <span className="font-mono text-sm text-white/80 tabular-nums">{km(routeDistance)}</span>
+                  </>
+                )}
                 <span className="text-white/30">·</span>
-                <span className="font-mono text-sm text-white/80 tabular-nums">{km(route.data.distanceMeters)}</span>
+                <span className="text-sm text-white/80 tabular-nums">{formatEta(trackedEtaSeconds)}</span>
+                <span className="rounded-full bg-agap-green/20 border border-agap-green/30 px-2 py-0.5 text-[10px] font-semibold text-agap-green uppercase tracking-wide">
+                  estimate
+                </span>
+                {routeLastKnown && (
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-300">last known route</span>
+                )}
               </>
             )}
-            <span className="text-white/30">·</span>
-            <span className="text-sm text-white/80 tabular-nums">{formatEta(trackedEtaSeconds)}</span>
-            <span className="rounded-full bg-agap-green/20 border border-agap-green/30 px-2 py-0.5 text-[10px] font-semibold text-agap-green uppercase tracking-wide">
-              estimate
-            </span>
           </div>
         </div>
       ) : selectedId && phase === 'none' && nearestMeters != null ? (

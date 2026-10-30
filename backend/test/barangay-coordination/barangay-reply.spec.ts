@@ -379,6 +379,7 @@ describe('BarangaySmsPoller.poll', () => {
     };
     const replies: any = {
       repliesEnabled: jest.fn(() => (all['BARANGAY_SMS_REPLIES_ENABLED'] ?? 'true') === 'true'),
+      optOutEnabled: jest.fn(() => (all['SMS_OPT_OUT_ENABLED'] ?? 'true') === 'true'),
       handleInbound: jest.fn().mockResolvedValue('APPLIED'),
     };
     const queue: any = { upsertJobScheduler: jest.fn().mockResolvedValue({}), removeJobScheduler: jest.fn().mockResolvedValue(true) };
@@ -416,8 +417,8 @@ describe('BarangaySmsPoller.poll', () => {
     expect(axiosGet.mock.calls[0][1].params.from).toBe(new Date(newest.getTime() - 2 * 60_000).toISOString());
   });
 
-  it('does nothing while replies are off, or without a Textbee key', async () => {
-    await expect(build({ BARANGAY_SMS_REPLIES_ENABLED: 'false' }).poller.poll()).resolves.toBe(0);
+  it('does nothing while replies and STOP processing are off, or without a Textbee key', async () => {
+    await expect(build({ BARANGAY_SMS_REPLIES_ENABLED: 'false', SMS_OPT_OUT_ENABLED: 'false' }).poller.poll()).resolves.toBe(0);
     await expect(build({ TEXTBEE_API_KEY: '' }).poller.poll()).resolves.toBe(0);
     await expect(build({ BARANGAY_SMS_INBOUND_MODE: 'webhook' }).poller.poll()).resolves.toBe(0);
     expect(axiosGet).not.toHaveBeenCalled();
@@ -433,7 +434,7 @@ describe('BarangaySmsPoller.poll', () => {
     on.poller.onApplicationBootstrap();
     expect(on.queue.upsertJobScheduler).toHaveBeenCalledWith('barangay-sms-poll', { every: 15_000 }, expect.anything());
 
-    const off = build({ BARANGAY_SMS_REPLIES_ENABLED: 'false' });
+    const off = build({ BARANGAY_SMS_REPLIES_ENABLED: 'false', SMS_OPT_OUT_ENABLED: 'false' });
     off.poller.onApplicationBootstrap();
     expect(off.queue.upsertJobScheduler).not.toHaveBeenCalled();
     expect(off.queue.removeJobScheduler).toHaveBeenCalledWith('barangay-sms-poll');

@@ -6,6 +6,7 @@ import { PrismaModule } from '../common/prisma/prisma.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { EmergencyAlertsModule } from '../emergency-alerts/emergency-alerts.module';
 import { LocationsModule } from '../locations/locations.module';
+import { IncidentsModule } from '../incidents/incidents.module';
 import { MapsModule } from '../locations/maps/maps.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
@@ -26,6 +27,7 @@ import { AnnouncementPushProcessor } from './processors/announcement-push.proces
     RealtimeModule,
     EmergencyAlertsModule,
     LocationsModule,
+    IncidentsModule,
     MapsModule,
     AnalyticsModule,
     BarangayCoordinationModule,

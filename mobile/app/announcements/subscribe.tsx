@@ -9,11 +9,12 @@ import {
   ActivityIndicator,
   Platform,
   KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { subscribeToSms } from '@/src/services/api/announcements.api';
+import { subscribeToSms, unsubscribeFromSms } from '@/src/services/api/announcements.api';
 
 const TEAL = '#0D6053';
 
@@ -27,7 +28,7 @@ const BOCAUE_BARANGAYS = [
   'Poblacion',
 ];
 
-type Step = 'form' | 'success';
+type Step = 'form' | 'success' | 'unsubscribed';
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -80,6 +81,69 @@ export default function SmsSubscribeScreen() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // MOD-53: the in-app equivalent of replying STOP. No consent box: stopping never needs one.
+  function handleUnsubscribe() {
+    if (!phone.trim()) { setError('Enter the mobile number to unsubscribe.'); return; }
+    if (!isValidPHPhone(phone)) {
+      setError('Enter a valid Philippine mobile number (e.g. 09171234567).');
+      return;
+    }
+    Alert.alert(
+      'Unsubscribe',
+      `Stop MDRRMO announcement SMS to ${phone}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unsubscribe',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setError(null);
+              setLoading(true);
+              await unsubscribeFromSms(normalizePhone(phone));
+              setStep('unsubscribed');
+            } catch (e: unknown) {
+              setError(e instanceof Error ? e.message : 'Unsubscribe failed. Please try again.');
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  if (step === 'unsubscribed') {
+    return (
+      <View style={styles.root}>
+        <SafeAreaView edges={['top']} style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={24} color="#111827" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>SMS Subscription</Text>
+          <View style={{ width: 40 }} />
+        </SafeAreaView>
+
+        <View style={styles.successWrap}>
+          <View style={styles.successIcon}>
+            <Ionicons name="checkmark-circle" size={56} color={TEAL} />
+          </View>
+          <Text style={styles.successTitle}>You're unsubscribed</Text>
+          <Text style={styles.successSub}>
+            MDRRMO announcements will no longer be sent by SMS to{' '}
+            <Text style={{ fontWeight: '700' }}>{phone}</Text>.
+          </Text>
+          <Text style={styles.successHint}>
+            You can still read announcements in the app. For emergencies, call 911.
+          </Text>
+          <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
+            <Text style={styles.doneBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   }
 
   if (step === 'success') {
@@ -252,6 +316,17 @@ export default function SmsSubscribeScreen() {
             )}
           </TouchableOpacity>
 
+          {/* Unsubscribe (MOD-53) */}
+          <TouchableOpacity
+            style={styles.unsubscribeBtn}
+            onPress={handleUnsubscribe}
+            disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel="Unsubscribe from SMS alerts"
+          >
+            <Text style={styles.unsubscribeText}>Already subscribed? Unsubscribe this number</Text>
+          </TouchableOpacity>
+
           {/* One-way notice */}
           <View style={styles.broadcastNotice}>
             <Ionicons name="radio-outline" size={13} color="#9CA3AF" style={{ marginRight: 6 }} />
@@ -372,6 +447,8 @@ const styles = StyleSheet.create({
   },
   submitBtnDisabled: { opacity: 0.5 },
   submitText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  unsubscribeBtn: { alignItems: 'center', paddingVertical: 10, marginBottom: 12 },
+  unsubscribeText: { fontSize: 13, fontWeight: '600', color: '#D44858' },
 
   // Broadcast notice
   broadcastNotice: { flexDirection: 'row', alignItems: 'flex-start' },

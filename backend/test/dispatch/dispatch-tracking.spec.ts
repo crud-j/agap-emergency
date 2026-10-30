@@ -23,8 +23,11 @@ function respondersSetup() {
   };
   const realtime = { dispatchUpdated: jest.fn(), notifyResponderLocationUpdated: jest.fn() };
   const audit = { log: jest.fn().mockResolvedValue(undefined) };
-  const service = new RespondersService(prisma as any, realtime as any, audit as any, new IncidentStatusService());
-  return { service, prisma, realtime, audit };
+  const audience = { roomsForDispatch: jest.fn().mockResolvedValue({ incidentRoom: true, userIds: [] }) };
+  const service = new RespondersService(
+    prisma as any, realtime as any, audit as any, new IncidentStatusService(), {} as any, audience as any,
+  );
+  return { service, prisma, realtime, audit, audience };
 }
 
 describe('WP5 backend support for the dispatch dashboard', () => {
@@ -70,13 +73,16 @@ describe('WP5 backend support for the dispatch dashboard', () => {
 
   describe('POST /responders/location (alternate push path)', () => {
     it('broadcasts the same dispatchId + call sign contract as /locations/track', async () => {
-      const { service, prisma, realtime } = respondersSetup();
+      const { service, prisma, realtime, audience } = respondersSetup();
       prisma.dispatches.findFirst.mockResolvedValue({ id: 'dispatch-1', resources: { call_sign: 'ALPHA-1' } });
 
       await service.pushLocation({ incidentId: 'inc-1', latitude: 14.7993, longitude: 120.9266 } as any, 'resp-1');
 
-      const [, payload] = realtime.notifyResponderLocationUpdated.mock.calls[0]!;
+      const [, payload, rooms] = realtime.notifyResponderLocationUpdated.mock.calls[0]!;
       expect(payload).toMatchObject({ responderId: 'resp-1', dispatchId: 'dispatch-1', callSign: 'ALPHA-1' });
+      // Same audience rule as /locations/track (scene leg here).
+      expect(audience.roomsForDispatch).toHaveBeenCalledWith('inc-1', 'dispatch-1');
+      expect(rooms).toEqual({ incidentRoom: true, userIds: [] });
       expect(JSON.stringify(payload)).not.toMatch(/name|phone/i);
     });
   });

@@ -19,6 +19,7 @@ import { usePathname, useRouter } from 'expo-router';
 import { useTranslations } from '../../hooks/useAccessibility';
 import { useAccessibilityStore } from '../../stores/accessibility.store';
 import { useIncidentStore } from '../../stores/incident.store';
+import { MDRRMO_HOTLINE, MDRRMO_HOTLINE_DISPLAY } from '../../config/hotlines';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -93,9 +94,6 @@ const PANEL_MAX_W = 380;
 const PANEL_GAP = 16;
 const NOTCH = 16;
 
-// Bocaue MDRRMO hotline. AGAP complements the hotline, never replaces it.
-const MDRRMO_HOTLINE = '09363309020';
-const MDRRMO_HOTLINE_DISPLAY = '0936 330 9020';
 
 /* -------------------------------------------------------------------------- */
 /*                                   MOTION                                   */

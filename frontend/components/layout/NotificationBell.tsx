@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Bell, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck } from 'lucide-react';
+import { Bell, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck, Siren } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useUnreadCount, useNotifications, useMarkRead, useMarkAllRead } from '@/features/notifications/hooks';
@@ -20,6 +20,7 @@ const EVENT_META: Record<string, { icon: typeof AlertCircle; color: string; bg: 
   RESPONDER_:                { icon: Truck,        color: '#7C3AED', bg: '#F5F3FF' },
   INCIDENT_UPDATED:          { icon: Info,         color: '#3B82F6', bg: '#EFF6FF' },
   ANNOUNCEMENT:              { icon: Megaphone,    color: '#0D6053', bg: '#EEF7F4' },
+  SURGE_:                    { icon: Siren,        color: '#D44858', bg: '#FDF2F3' },
 };
 
 function incidentLink(incidentId: string): string {
@@ -65,6 +66,9 @@ function NotifRow({
       router.push(incidentLink(notif.incident_id));
     } else if (notif.event_type === 'ANNOUNCEMENT' && typeof notif.data_payload?.announcementId === 'string') {
       router.push(`/announcements/${notif.data_payload.announcementId}`);
+    } else if (notif.event_type === 'SURGE_RECOMMENDED') {
+      // MOD-52: the surge page shows the recommendation with its Activate button.
+      router.push('/operations/surge');
     }
   }
 
@@ -130,6 +134,7 @@ export function NotificationBell() {
         duration: 8000,
       });
       if (n.incidentId) toastLinks.current.set(id, incidentLink(n.incidentId));
+      else if (n.type === 'SURGE_RECOMMENDED') toastLinks.current.set(id, '/operations/surge');
     });
   }, [toast]);
 

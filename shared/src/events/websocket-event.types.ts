@@ -12,6 +12,7 @@ import type { AnnouncementEventName, AnnouncementPublishedPayload } from './anno
 import type { BarangayEventName, BarangayNoticeUpdatedPayload } from './barangay.events';
 import type { NotificationEventName, NotificationCreatedPayload } from './notification.events';
 import type { ResourceEventName, ResourceStatusChangedPayload } from './resource.events';
+import type { SurgeEventName, SurgeRecommendedPayload, SurgeTriageTagUpdatedPayload } from './surge.events';
 
 export type AgapEventName =
   | IncidentEventName
@@ -21,7 +22,8 @@ export type AgapEventName =
   | AnnouncementEventName
   | NotificationEventName
   | BarangayEventName
-  | ResourceEventName;
+  | ResourceEventName
+  | SurgeEventName;
 
 export interface AgapWebSocketEvent<T = unknown> {
   event: AgapEventName;
@@ -51,4 +53,6 @@ export type AgapWebSocketPayloadMap = {
   'message.created': IncidentMessagePayload;
   'barangay.notice_updated': BarangayNoticeUpdatedPayload;
   'resource.status_changed': ResourceStatusChangedPayload;
+  'surge.recommended': SurgeRecommendedPayload;
+  'surge.triage_tag_updated': SurgeTriageTagUpdatedPayload;
 };

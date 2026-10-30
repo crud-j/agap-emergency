@@ -3,15 +3,17 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
-import { QUEUE_NAMES } from '@agap/shared';
+import { AuditAction, QUEUE_NAMES, normalizePhPhone } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { BLOCKED_ACCOUNT_STATUSES } from '../auth/account-status';
 import type { NotificationJobData } from '../jobs/processors/notification.processor';
+import type { SmsJobData } from '../jobs/processors/sms.processor';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 import { SmsSubscribeDto } from './dto/sms-subscribe.dto';
+import { phoneVariants } from './sms-opt-out';
 import {
   Announcement,
   Prisma,
@@ -802,10 +804,56 @@ export class AnnouncementsService {
   }
 
   async unsubscribe(phoneNumber: string) {
+    const phone = normalizePhPhone(phoneNumber);
+    const numbers = phone.kind === 'MOBILE' && phone.e164 ? phoneVariants(phone.e164) : [phoneNumber.trim()];
     await this.prisma.sms_subscribers.updateMany({
-      where: { phone_number: phoneNumber },
-      data: { is_active: false, opted_out_at: new Date() },
+      where: { phone_number: { in: numbers }, is_active: true },
+      data: { is_active: false, opted_out_at: new Date(), opt_out_source: 'APP' },
     });
     return { message: 'Unsubscribed' };
   }
+
+  /**
+   * MOD-53 / RA 10173: a subscriber replied STOP to the Textbee phone. Deactivates every
+   * active row for the number (stored as typed, so all three forms), audits it and sends one
+   * confirmation. Returns false when the sender is not an active subscriber.
+   */
+  async optOutBySms(fromE164: string): Promise<boolean> {
+    const rows = await this.prisma.sms_subscribers.findMany({
+      where: { phone_number: { in: phoneVariants(fromE164) }, is_active: true },
+      select: { id: true },
+    });
+    if (rows.length === 0) return false;
+
+    await this.prisma.sms_subscribers.updateMany({
+      where: { id: { in: rows.map((r) => r.id) } },
+      data: { is_active: false, opted_out_at: new Date(), opt_out_source: 'SMS_STOP' },
+    });
+
+    for (const row of rows) {
+      void this.audit.log({
+        action: AuditAction.UNSUBSCRIBE,
+        entityType: 'sms_subscriber',
+        entityId: row.id,
+        moduleId: 'MOD-53',
+        newValues: { is_active: false, opt_out_source: 'SMS_STOP' },
+      });
+    }
+
+    // Best-effort: the opt-out is already stored.
+    try {
+      await this.smsQueue.add(
+        'sms-opt-out-confirm',
+        { phone: fromE164, message: SMS_OPT_OUT_CONFIRMATION } satisfies SmsJobData,
+        { removeOnComplete: true, attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+      );
+    } catch (err) {
+      this.logger.error(`Queueing the SMS opt-out confirmation failed: ${String(err)}`);
+    }
+    return true;
+  }
 }
+
+/** Sent once after a STOP reply. Single SMS segment (< 160 characters), no web address. */
+export const SMS_OPT_OUT_CONFIRMATION =
+  'AGAP: You are unsubscribed from Bocaue MDRRMO announcements. For emergencies call 911.';

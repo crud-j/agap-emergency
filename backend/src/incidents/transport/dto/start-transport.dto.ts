@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsISO8601 } from 'class-validator';
+import { IsOptional, IsISO8601, IsUUID } from 'class-validator';
 import { IsRecordId } from '../../../common/decorators/is-record-id.decorator';
 
 export class StartTransportDto {
@@ -21,4 +21,11 @@ export class StartTransportDto {
   @IsOptional()
   @IsISO8601()
   estimatedArrivalAt?: string;
+
+  @ApiPropertyOptional({
+    description: 'Generated on the phone when the crew taps; a retry with the same id gets the first answer (plan §19)',
+  })
+  @IsOptional()
+  @IsUUID()
+  clientRequestId?: string;
 }

@@ -524,7 +524,7 @@ export default function HomeScreen() {
             <View style={styles.quickSep} />
             <TouchableOpacity
               style={styles.quickItem}
-              onPress={() => router.push('/profile' as never)}
+              onPress={() => router.push('/responder/profile' as never)}
               activeOpacity={0.75}
             >
               <Ionicons name="person-outline" size={16} color="#40536D" />

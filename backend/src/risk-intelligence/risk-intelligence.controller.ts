@@ -18,13 +18,18 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
 import { CreateRiskAreaDto, UpdateRiskAreaDto } from './dto/risk-area.dto';
+import { ApproveRiskAreaProposalDto, ListRiskAreaProposalsQuery } from './dto/risk-area-proposal.dto';
+import { HotspotDiscoveryService } from './hotspot-discovery.service';
 
 @ApiTags('risk')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller({ path: 'risk-intelligence', version: '1' })
 export class RiskIntelligenceController {
-  constructor(private readonly riskIntelligenceService: RiskIntelligenceService) {}
+  constructor(
+    private readonly riskIntelligenceService: RiskIntelligenceService,
+    private readonly hotspots: HotspotDiscoveryService,
+  ) {}
 
   @Get('heatmap')
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
@@ -80,6 +85,33 @@ export class RiskIntelligenceController {
   async deleteArea(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
     await this.riskIntelligenceService.deleteArea(id, req.user.id);
     return { message: 'Risk area deleted' };
+  }
+
+  // ── Proposed hotspots (AUTOMATION_NEEDS_PLAN Phase 2, C7) ──────────────────
+
+  @Get('proposals')
+  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'List risk areas proposed from incident clusters' })
+  async proposals(@Query() query: ListRiskAreaProposalsQuery) {
+    return this.hotspots.listProposals(query.status ?? 'PENDING');
+  }
+
+  @Post('proposals/:id/approve')
+  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'Approve a proposal: creates the risk area with its boundary (audited)' })
+  async approveProposal(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveRiskAreaProposalDto,
+    @Request() req: any,
+  ) {
+    return this.hotspots.approve(id, dto, req.user.id);
+  }
+
+  @Post('proposals/:id/dismiss')
+  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'Dismiss a proposal (audited)' })
+  async dismissProposal(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
+    return this.hotspots.dismiss(id, req.user.id);
   }
 
   @Get('patterns')

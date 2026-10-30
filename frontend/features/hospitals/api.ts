@@ -36,8 +36,51 @@ export interface Hospital {
 /** facilities.location_status. Only PENDING_REVIEW/REJECTED hospitals are hidden from ambulance crews. */
 export type HospitalLocationStatus = 'UNVERIFIED' | 'PENDING_REVIEW' | 'VERIFIED' | 'REJECTED';
 
-/** Where a coordinate came from. Prompt 05 only sends 'manual' (no geocoding yet). */
+/** Where a coordinate came from: a hand-placed pin, or a picked "Find location" candidate. */
 export type HospitalLocationSource = 'manual' | 'nominatim' | 'manual+osm-crosscheck';
+
+/** POST /hospitals/resolve-location: what staff typed (public facility data only). */
+export interface ResolveLocationBody {
+  name: string;
+  address?: string;
+  municipality?: string;
+  province?: string;
+}
+
+export type ResolveLocationResult = 'AUTO_SELECTABLE' | 'NEEDS_CONFIRMATION' | 'NO_RESULTS' | 'PROVIDER_UNAVAILABLE';
+
+/** One geocoder candidate (HospitalLocationResolverService). Coordinates are the provider's. */
+export interface ResolvedCandidate {
+  candidateId: string;
+  name: string;
+  address: string;
+  municipality: string | null;
+  province: string | null;
+  latitude: number;
+  longitude: number;
+  source: 'nominatim';
+  sourceRef: string;
+  category: string;
+  /** 0–1 */
+  score: number;
+  reasons: string[];
+  /** Id of the facility already registered with this sourceRef, else null. */
+  alreadyRegistered: string | null;
+}
+
+export interface ResolveLocationResponse {
+  normalizedName: string;
+  aiAssisted: boolean;
+  result: ResolveLocationResult;
+  candidates: ResolvedCandidate[];
+  /** The top candidate when AUTO_SELECTABLE; null otherwise. */
+  selectedCandidateId: string | null;
+}
+
+export interface SetHospitalActiveBody {
+  isActive: boolean;
+  reason?: string;
+}
 
 export interface HospitalLocationInput {
   latitude: number;
@@ -112,9 +155,14 @@ export interface CreateHospitalBody {
  * The shared directory hides PENDING_REVIEW and REJECTED hospitals. With
  * `includeUnreviewed`, reviewers get all of them and an Org Administrator also
  * gets their own organization's; other roles get the directory either way.
+ * `includeInactive` adds deactivated hospitals, for reviewers only (the registry page).
  */
-export function fetchHospitals(opts?: { includeUnreviewed?: boolean }): Promise<Hospital[]> {
-  return api.get(opts?.includeUnreviewed ? '/hospitals?includeUnreviewed=true' : '/hospitals', getToken());
+export function fetchHospitals(opts?: { includeUnreviewed?: boolean; includeInactive?: boolean }): Promise<Hospital[]> {
+  const params = new URLSearchParams();
+  if (opts?.includeUnreviewed) params.set('includeUnreviewed', 'true');
+  if (opts?.includeInactive) params.set('includeInactive', 'true');
+  const query = params.toString();
+  return api.get(query ? `/hospitals?${query}` : '/hospitals', getToken());
 }
 
 export function fetchNearbyHospitals(lat: number, lng: number): Promise<Hospital[]> {
@@ -155,6 +203,19 @@ export function setHospitalLocation(id: string, body: SetHospitalLocationBody): 
 /** Supervisor / System Admin only. VERIFIED needs coordinates (422 LOCATION_MISSING otherwise). */
 export function verifyHospitalLocation(id: string, body: VerifyHospitalLocationBody): Promise<Hospital> {
   return api.post(`/hospitals/${id}/location/verify`, body, getToken());
+}
+
+/**
+ * "Find location": scored map candidates for a typed hospital. Only on an explicit
+ * click (Nominatim policy, no autocomplete). A geocoder outage is a 200 PROVIDER_UNAVAILABLE.
+ */
+export function resolveHospitalLocation(body: ResolveLocationBody): Promise<ResolveLocationResponse> {
+  return api.post('/hospitals/resolve-location', body, getToken());
+}
+
+/** Supervisor / System Admin. Open transports continue; their crews and the console are warned. */
+export function setHospitalActive(id: string, body: SetHospitalActiveBody): Promise<Hospital> {
+  return api.patch(`/hospitals/${id}/active`, body, getToken());
 }
 
 export function createReferral(hospitalId: string, body: CreateReferralBody): Promise<HospitalReferral> {

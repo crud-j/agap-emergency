@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  StatusBar, Image, Animated,
+  StatusBar, Image, Animated, type ImageStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,6 +28,24 @@ const SEVERITY_CONFIG: Record<string, { color: string; bg: string; icon: string 
   WARNING:       { color: '#D97706', bg: '#FFFBEB', icon: 'warning' },
   ADVISORY:      { color: '#3B82F6', bg: '#EFF6FF', icon: 'information-circle' },
   INFORMATIONAL: { color: '#0D6053', bg: '#EEF7F4', icon: 'megaphone' },
+};
+
+const HEADER_LOGO_STYLE: ImageStyle = {
+  width: 50,
+  height: 50,
+  marginRight: 9,
+};
+
+const HERO_IMAGE_STYLE: ImageStyle = {
+  position: 'absolute',
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 35,
+  width: '100%',
+  height: '100%',
+  alignSelf: 'center',
+  resizeMode: 'contain', // Preserve the full image without cropping or zooming
 };
 
 
@@ -318,32 +336,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
-
-      {surgeBanner && <SurgeBanner announcement={surgeBanner} onDismiss={() => dismissSurge(surgeBanner)} />}
-
-      {/* Header — sits on the pearl background, separated with a fine bevel line */}
-      <View style={styles.header}>
-        <Image source={require('../../assets/icons/agap-icon.png')} style={styles.headerLogo} resizeMode="contain" />
-        <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/notifications' as any)}>
-            <Ionicons name="notifications-outline" size={24} color="#1C2B3A" />
-            {unreadCount > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.avatarBtn} onPress={() => router.push('/profile')}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarInitial}>{user?.full_name?.[0]?.toUpperCase() ?? 'U'}</Text>
-            </View>
-            {(user?.profile_completeness ?? 0) < 100 && (
-              <View style={styles.avatarBadge} />
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
       <Animated.ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -354,35 +347,71 @@ export default function HomeScreen() {
           transform: [{ translateY: screenProgress.interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }],
         }}
       >
-        {/* Greeting card — deep green with specular overlay matching the dial treatment */}
-        <LinearGradient
-          colors={['#0D6053', '#094A3E']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={styles.greetingCard}
-        >
-          {/* Top-left specular glint */}
-          <LinearGradient
-            pointerEvents="none"
-            colors={['rgba(255,255,255,0.16)', 'rgba(255,255,255,0.05)', 'rgba(255,255,255,0)']}
-            locations={[0, 0.38, 0.85]}
-            start={{ x: 0.1, y: 0 }}
-            end={{ x: 0.8, y: 0.72 }}
-            style={[StyleSheet.absoluteFill, { borderRadius: 22 }]}
+        <View pointerEvents="none" style={styles.heroBackdrop}>
+          <Image
+            source={require('../../assets/login-page-background.png')}
+            style={[HERO_IMAGE_STYLE, styles.heroSharpLayer, { transform: [{ scale: 2.1 }] }]}
+            resizeMode="contain"
           />
-          {/* Fine inner bevel border */}
-          <View pointerEvents="none" style={styles.greetingCardBevel} />
+          <Image
+            source={require('../../assets/login-page-background.png')}
+            style={[HERO_IMAGE_STYLE, styles.heroBlurLayer, { transform: [{ scale: 2.1 }] }]}
+            resizeMode="contain"
+            blurRadius={20}
+          />
+          <LinearGradient
+            colors={[
+              'rgba(3,20,35,0.16)',
+              'rgba(3,20,35,0.08)',
+              'rgba(242,245,248,0.28)',
+              'rgba(255,255,255,0.76)',
+              '#FFFFFF',
+            ]}
+            locations={[0, 0.34, 0.58, 0.82, 1]}
+            style={StyleSheet.absoluteFill}
+          />
+        </View>
 
-          <View style={styles.greetingText}>
-            <Text style={styles.greetingLine}>{greeting(t)},</Text>
-            <Text style={styles.greetingName} numberOfLines={1}>{user?.full_name ?? ''}</Text>
-            <Text style={styles.greetingSubtitle}>{t.home.greetingSubtitle}</Text>
+        <View style={styles.header}>
+          <View style={styles.headerBrand}>
+            <Image source={require('../../assets/icons/agap-solo-icon.png')} style={HEADER_LOGO_STYLE} resizeMode="contain" />
+            <View style={styles.headerBrandCopy}>
+              <Text style={styles.headerBrandName}>AGAP</Text>
+              <Text style={styles.headerBrandSubtitle}>Citizen</Text>
+            </View>
           </View>
+          <View style={styles.headerRight}>
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/notifications' as any)}>
+              <Ionicons name="notifications-outline" size={24} color="#1C2B3A" />
+              {unreadCount > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.avatarBtn} onPress={() => router.push('/profile')}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarInitial}>{user?.full_name?.[0]?.toUpperCase() ?? 'U'}</Text>
+              </View>
+              {(user?.profile_completeness ?? 0) < 100 && (
+                <View style={styles.avatarBadge} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {surgeBanner && <SurgeBanner announcement={surgeBanner} onDismiss={() => dismissSurge(surgeBanner)} />}
+
+        <View style={styles.heroGreeting}>
+          <Text style={styles.greetingLine}>{greeting(t)},</Text>
+          <Text style={styles.greetingName} numberOfLines={1}>{user?.full_name ?? ''}</Text>
+          <Text style={styles.greetingSubtitle}>{t.home.greetingSubtitle}</Text>
           {(user?.profile_completeness ?? 100) < 100 && (
             <TouchableOpacity onPress={() => router.push('/profile')}>
               <Text style={styles.completeProfileCta}>{t.home.completeProfile}</Text>
             </TouchableOpacity>
           )}
-        </LinearGradient>
+        </View>
 
         {activeIncident && <ActiveIncidentCard incident={activeIncident} />}
 
@@ -481,8 +510,80 @@ const BEVEL_BORDER = 'rgba(168,181,193,0.20)';
 
 const styles = StyleSheet.create({
   // Pearl off-white background — matches the neumorphic dial base colour.
-  safeArea: { flex: 1, backgroundColor: '#F2F5F8' },
-  scrollContent: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 132 },
+  /* Core Layout Container */
+safeArea: { 
+  flex: 1, 
+  backgroundColor: '#FFFFFF' /* Clean white base beneath the hero image */
+}, 
+
+/* Hero Backdrop Placement */
+  /* Hero Backdrop Placement */
+  heroBackdrop: { 
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    height: 440, // Taller responsive backdrop area keeps the centered image more visible
+    overflow: 'hidden', 
+  },
+
+  
+  // Soft Gaussian-like atmospheric layer behind the sharper centered image.
+  heroBlurLayer: { opacity: 0.10 },
+  heroSharpLayer: { opacity: 0.94 },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 100,
+    backgroundColor: 'transparent',
+  },
+  heroGreeting: {
+    marginTop: 18,
+    marginBottom: 22,
+    paddingHorizontal: 8,
+    alignItems: 'flex-start',
+    maxWidth: '94%',
+  },
+  greetingLine: {
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.62)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
+  },
+  greetingName: {
+    marginTop: 2,
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.7)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+  },
+  greetingSubtitle: {
+    marginTop: 6,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.62)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
+  },
+  completeProfileCta: {
+    marginTop: 10,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.62)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
+  },
 
   // ─── Surge banner ───────────────────────────────────────────────────────────
   surgeBannerContainer: { marginHorizontal: 16, marginTop: 8, marginBottom: 8, borderRadius: 16, overflow: 'hidden', ...CARD_SHADOW },
@@ -500,18 +601,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    // Fine bottom bevel line separating header from pearl page.
-    borderBottomWidth: 1,
-    borderBottomColor: BEVEL_BORDER,
+    backgroundColor: 'transparent',
+    zIndex: 10,
+    elevation: 0,
   },
-  headerLogo: { width: 130, height: 44 },
+  headerBrand: { flexDirection: 'row', alignItems: 'center', minWidth: 0 },
+  headerBrandCopy: { minWidth: 0, flexShrink: 1 },
+  headerBrandName: {
+    fontSize: 24,
+    lineHeight: 26,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.42)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  headerBrandSubtitle: {
+    marginTop: 1,
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '700',
+    letterSpacing: 0.15,
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.42)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  // Icon buttons match the dial face surface (#EDF1F4).
   headerIconBtn: {
     width: 44, height: 44, borderRadius: 22,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#EDF1F4',
-    borderWidth: 1, borderColor: BEVEL_BORDER,
+    backgroundColor: 'rgba(255,255,255,0.42)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)',
   },
   notifBadge: {
     position: 'absolute', top: 6, right: 6,
@@ -534,31 +656,6 @@ const styles = StyleSheet.create({
     width: 12, height: 12, borderRadius: 6,
     backgroundColor: '#D97706', borderWidth: 2, borderColor: '#F2F5F8',
   },
-
-  // ─── Greeting card ──────────────────────────────────────────────────────────
-  greetingCard: {
-    minHeight: 114,
-    marginTop: 16, marginBottom: 24,
-    paddingHorizontal: 22, paddingVertical: 22,
-    borderRadius: 22,
-    flexDirection: 'row', alignItems: 'center',
-    overflow: 'hidden',
-    ...CARD_SHADOW,
-    shadowColor: '#094A3E',
-    shadowOpacity: 0.22,
-  },
-  // Fine inner bevel — mirrors dialOuterBevel in HoldToSOS.
-  greetingCardBevel: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  greetingText: { flex: 1, minWidth: 0 },
-  greetingLine: { fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.72)' },
-  greetingName: { marginTop: 4, fontSize: 26, fontWeight: '800', color: '#FFFFFF' },
-  greetingSubtitle: { marginTop: 4, fontSize: 14, fontWeight: '500', color: 'rgba(255,255,255,0.72)' },
-  completeProfileCta: { marginLeft: 16, fontSize: 14, fontWeight: '700', color: '#D1FAE5' },
 
   // ─── Active incident card ────────────────────────────────────────────────────
   activeCard: {

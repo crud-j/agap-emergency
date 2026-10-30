@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Param,
   Body,
   UseGuards,
@@ -18,13 +19,18 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
 import { DeactivateSurgeDto, LinkSurgeIncidentDto, SurgeBroadcastDto, UpdateTriageTagDto } from './dto/surge-actions.dto';
+import { SetRiverLevelDto, UpdateSurgeRuleDto } from './dto/surge-rules.dto';
+import { SurgeRulesService } from './surge-rules.service';
 
 @ApiTags('surge')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller({ path: 'disaster-mode', version: '1' })
 export class DisasterModeController {
-  constructor(private readonly disasterModeService: DisasterModeService) {}
+  constructor(
+    private readonly disasterModeService: DisasterModeService,
+    private readonly surgeRules: SurgeRulesService,
+  ) {}
 
   @Get('status')
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
@@ -86,6 +92,40 @@ export class DisasterModeController {
   @ApiOperation({ summary: 'List available resources for surge' })
   async resources() {
     return this.disasterModeService.getAvailableResources();
+  }
+
+  // ── Surge recommendation (AUTOMATION_NEEDS_PLAN Phase 2, C2) ───────────────
+
+  @Get('rules')
+  @Roles(UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'List the surge recommendation rules (MOD-52)' })
+  async rules() {
+    return this.surgeRules.getRules();
+  }
+
+  @Patch('rules/:id')
+  @Roles(UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Edit a surge recommendation rule (audited)' })
+  async updateRule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSurgeRuleDto,
+    @Request() req: any,
+  ) {
+    return this.surgeRules.updateRule(id, dto, req.user.id);
+  }
+
+  @Get('river-level')
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Latest entered Bocaue River level' })
+  async riverLevel() {
+    return this.surgeRules.getRiverLevel();
+  }
+
+  @Put('river-level')
+  @Roles(UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Enter the current Bocaue River level (audited)' })
+  async setRiverLevel(@Body() dto: SetRiverLevelDto, @Request() req: any) {
+    return this.surgeRules.setRiverLevel(dto.meters, req.user.id);
   }
 
   @Post('broadcast')

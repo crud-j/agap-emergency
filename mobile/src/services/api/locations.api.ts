@@ -1,4 +1,4 @@
-import type { MapClientConfig, RouteResult } from '@agap/shared';
+import type { MapClientConfig, RouteResult, RouteSnapshot, TransportDestinationView, TransportLeg } from '@agap/shared';
 import { apiFetch } from './http';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
@@ -13,6 +13,14 @@ export interface LatestUnitPosition {
   callSign: string | null;
   unitName: string | null;
   resourceType: string | null;
+  /**
+   * Always sent by GET …/latest (C5/C17); absent on a unit first seen over the
+   * socket. On the hospital leg a reporter who is not crew-confirmed as the
+   * patient gets destination, route and position null.
+   */
+  leg?: TransportLeg;
+  destination?: TransportDestinationView | null;
+  route?: RouteSnapshot | null;
   position: {
     lat: number;
     lng: number;

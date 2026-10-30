@@ -12,7 +12,7 @@ describe('AssessmentService.submit (MOD-37)', () => {
     surge_incidents: { findFirst: jest.fn() },
     $transaction: jest.fn(),
   };
-  const realtime = { assessmentUpdated: jest.fn() };
+  const realtime = { assessmentUpdated: jest.fn(), triageTagUpdated: jest.fn() };
   const audit = { log: jest.fn().mockResolvedValue(undefined) };
 
   function makeService() {
@@ -52,6 +52,7 @@ describe('AssessmentService.submit (MOD-37)', () => {
 
   it('files the START tag on the active surge and links the incident (MOD-52)', async () => {
     prisma.surge_incidents.findFirst.mockResolvedValue({ id: 'surge-1' });
+    txTriageCreate.mockResolvedValue({ id: 'tag-1', surge_id: 'surge-1' });
     await makeService().submit('inc-1', { triageTag: 'RED', patientId: undefined }, 'resp-1');
     expect(txTriageCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({ surge_id: 'surge-1', incident_id: 'inc-1', triage_color: 'RED', tagged_by_id: 'resp-1' }),
@@ -60,12 +61,15 @@ describe('AssessmentService.submit (MOD-37)', () => {
       where: { id: 'inc-1' },
       data: { surge_incident_id: 'surge-1', is_surge_incident: true },
     });
+    // The surge triage board refreshes live (AUTOMATION_NEEDS_PLAN Phase 2, C2): IDs only.
+    expect(realtime.triageTagUpdated).toHaveBeenCalledWith({ surgeId: 'surge-1', tagId: 'tag-1' });
   });
 
   it('keeps the tag on the assessment only when no surge is active', async () => {
     await makeService().submit('inc-1', { triageTag: 'GREEN' }, 'resp-1');
     expect(txTriageCreate).not.toHaveBeenCalled();
     expect(txCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ triage_tag: 'GREEN' }) });
+    expect(realtime.triageTagUpdated).not.toHaveBeenCalled();
   });
 
   it('persists a full assessment and maps vitals to columns', async () => {

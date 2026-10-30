@@ -5,6 +5,7 @@ import { UserRole } from '@agap/shared';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { homeRouteForRole } from '@/src/lib/role-routing';
 import { ResponderNav } from '@/src/components/responder/responder-nav';
+import { useTransportOutboxSender } from '@/src/hooks/useTransportOutbox';
 
 // The four routes that show the shell nav. Nested operational screens do not.
 const SHELL_TABS = new Set([
@@ -20,6 +21,8 @@ export default function ResponderLayout() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const user = useAuthStore((s) => s.user);
+  // Transport actions saved offline are sent from any tab (plan §19).
+  useTransportOutboxSender();
 
   useEffect(() => {
     if (isLoading) return;

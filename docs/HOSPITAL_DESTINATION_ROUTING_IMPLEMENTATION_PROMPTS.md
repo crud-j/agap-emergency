@@ -65,6 +65,7 @@ These were checked against the code on 2026-10-25. The prompts below already inc
 | C18 | Redact the new `destination` field for non-patient reporters | `incident.transporting` already sends `destinationId` and `destinationName` to the incident room, and `incident.facility_arrival` sends `destinationId`. Any signed-in user can turn the id into a name with `GET /hospitals/:id` | Prompt 06 makes the incident-room copies of both events status-only: no `patientId`, `destinationId`, `destinationName` or `destination`. `incident.transport_updated` never goes to the incident room. Destination details reach a reporter only through their own `user:{id}` room after C17's confirmation (Prompt 09) |
 | C19 | New request DTOs validate ids with `@IsUUID()` | `@IsUUID()` rejects the fixed seed ids (`00000000-0000-0000-0002-…`, version digit 0), while `ParseUUIDPipe` on path ids accepts them. This blocked every transport start on seeded data (found 2026-10-26) | Every id field in a request body uses `@IsRecordId()` from `backend/src/common/decorators/is-record-id.decorator.ts` (= `IsUUID('loose')`). Never add a bare `@IsUUID()` (Prompts 08B, 13, 15 and any new DTO) |
 | C20 | New map components set up MapLibre themselves | The configured style references icons missing from its sprite, and its URL changes once `map-config` loads (found 2026-10-26) | Every web `<Map>` uses `ref={resolveMissingStyleImages}` from `frontend/components/map/missing-style-images.ts` and `styleDiffing={false}`, like `IncidentMapView`. Hospital markers use the one `frontend/components/map/HospitalMarker.tsx` (Prompt 12) |
+| C21 | Duplicate prevention by `(location_source, location_source_ref)` (§10; Prompts 01 and 03 below) | The seeded hospital is `manual+osm-crosscheck` + `osm:way:1290448946`; a Prompt 14 "Find location" pick of it sends `nominatim` + the same ref, so with a different name spelling it was saved as a second facility (found in the Prompt 13 review, 2026-10-29) | Fixed 2026-10-29 (user-approved): migration `20261029120000_facility_source_ref_unique` keys the index on `location_source_ref` alone and `HospitalsService.assertNoDuplicate` matches the ref alone. Read the two-column wording in Prompts 01 and 03 as the ref alone |
 
 **Reporter destination rule (C17, applies to every channel: REST, WebSocket, push, SMS, now and later):**
 
@@ -918,6 +919,10 @@ before arrival, and every destination change reaches viewers.
    of any of these. Returns { record, statusChanged, warnings }.
    startTransport becomes: $transaction(beginTransport) → post-commit emits → immediate refresh
    (Prompt 07 helper, reason 'transport_started').
+   The ops copy of incident.transporting: fill `destination` (TransportDestinationView, numeric
+   coordinates) and remove `destinationName` from IncidentTransportingPayload (it repeats
+   destination.name; no client reads it — Prompt 06 grep). Keep `destinationId` (ops needs the id).
+   The incident-room copy stays status-only (Prompt 06; do not touch it).
    Keep the existing 409 "already has an open transport" behaviour for the REST start when a
    record is already open AND a different destination was requested? Decide by reading the
    mobile caller (mobile/src/services/api/transport.api.ts + assignment screen): the mobile app
@@ -1380,10 +1385,50 @@ GOAL: Scenario D passes end to end.
    picked candidate, or 'manual' when the user moved the pin away from the candidate (> 25 m) or dropped one.
 3. Org Admin: create for own HOSPITAL org results in "Pending review" badge and the message from Prompt 05.
    Supervisor sees a "Pending review" filter/count and can Verify/Reject from the list.
+   A pick whose sourceRef is already registered is refused by the server with 409 DUPLICATE_FACILITY
+   whatever its source (C21); show the existing readable duplicate message. The "already registered"
+   link may 404 for a facility the caller cannot see (another org's PENDING_REVIEW): show "registered,
+   not visible to you" instead of an error.
+   Distance: use haversineMeters from @agap/shared for the 25 m rule. Replace the private copy in
+   frontend/app/(ops)/operations/triage/page.tsx (~line 44, takes [lat, lng] tuples) with it too; do not
+   add another distance helper (added by the Prompt 13 verification, 2026-10-29, user-approved).
 4. Tests: pure tests for "candidate moved > 25 m → manual" and the result-state → UI-state mapping.
 
-VERIFICATION: cd frontend && pnpm typecheck && pnpm lint && pnpm test. Manual run of plan Table E
-"Hospital registration" rows; record PASS/FAIL/NOT RUN.
+HOSPITAL DEACTIVATION (added by the Prompt 12 review, 2026-10-29, user-approved). Plan §9.4 gives the
+Supervisor "deactivate a facility" and plan §12 / Table E "Dispatcher" row 3 / the Definition of Done
+depend on it, but no endpoint or screen sets facilities.is_active = false, so
+TransportService.notifyFacilityChanged(…, 'deactivated') has no caller. This part is backend + web + mobile.
+Also read for this part: plan §12 ("Hospital deactivated during an active transport"), §16 item 5;
+backend/src/hospitals/{hospitals.controller,hospitals.service,destination-rules}.ts,
+backend/src/incidents/transport/transport.service.ts (notifyFacilityChanged),
+mobile/src/components/responder/transport-banners.tsx, mobile/src/hooks/useIncidentTracking.ts,
+mobile/src/lib/incident-tracking.ts, mobile/src/services/api/transport.api.ts.
+5. Backend: PATCH /hospitals/:id/active, dto { isActive: boolean, reason?: string (≤500) }. Same roles
+   as POST /hospitals/:id/location/verify. Writes is_active and an AuditLog row (entityType 'facility',
+   moduleId 'MOD-39', old/new is_active, reason) in one transaction. After commit, only when it went
+   true → false: notifyFacilityChanged(id, 'deactivated'). Open transports are never cancelled or
+   changed (Reliability Rules). No new rule copies: destination-rules.ts already refuses an inactive
+   hospital as a new destination; the pickers, /hospitals/nearby and ChangeTransportDialog keep listing
+   active hospitals only. The registry page needs to list deactivated hospitals to the same reviewer
+   roles so they can be reactivated: add one opt-in query flag beside includeUnreviewed; the default
+   stays active-only.
+6. Web registry page: "Deactivate" / "Reactivate" on a hospital (reviewer roles), with a confirm dialog
+   that says open transports continue and the dispatcher is warned. A "Deactivated" badge. The dispatcher
+   toast and drawer warning already exist (Prompt 12): do not add another.
+7. Mobile responder: transport.api.ts DestinationWarning gains 'FACILITY_DEACTIVATED'. A banner on the
+   assignment and map screens (transport-banners.tsx) while the open transport's hospital is deactivated:
+   from the incident.transport_updated destinationWarning, and from facilities.is_active === false in
+   GET /incidents/:id/transport after a reload (the field is already sent). Text in en + fil
+   (translations.ts `transport` namespace). The route and destination stay until the crew changes them.
+8. Tests: backend spec (role 403; audit row; notify called only on true → false; open transport row
+   unchanged; inactive hospital refused as a new destination; default list excludes it, the flag
+   includes it for reviewers only). Mobile pure test for the banner rule.
+
+VERIFICATION: cd frontend && pnpm typecheck && pnpm lint && pnpm test. For the deactivation part also:
+cd backend && npx jest --config ./test/jest.config.ts test/hospitals test/incidents && pnpm typecheck &&
+pnpm lint && pnpm test; cd mobile && pnpm typecheck && pnpm lint && pnpm test. Manual run of plan Table E
+"Hospital registration" rows and "Dispatcher" row 3 (deactivate during a transport → warning on
+dispatcher and responder, transport continues); record PASS/FAIL/NOT RUN.
 Write the end-of-prompt report (§0). STOP. (This completes plan Phase 4.)
 ```
 

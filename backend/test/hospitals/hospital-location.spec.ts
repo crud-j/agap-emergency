@@ -8,6 +8,7 @@ import { validate } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { UserRole } from '@agap/shared';
 import { HospitalsService } from '../../src/hospitals/hospitals.service';
+import { TransportService } from '../../src/incidents/transport/transport.service';
 import { HospitalsController } from '../../src/hospitals/hospitals.controller';
 import { ROLES_KEY } from '../../src/common/decorators/roles.decorator';
 import { NearbyQueryDto } from '../../src/hospitals/dto/nearby-query.dto';
@@ -38,6 +39,8 @@ function facility(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const mockTransport = { notifyFacilityChanged: jest.fn().mockResolvedValue(undefined) };
+
 describe('hospital location registry', () => {
   let service: HospitalsService;
   const mockAudit = { log: jest.fn().mockResolvedValue(undefined) };
@@ -61,6 +64,7 @@ describe('hospital location registry', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAudit },
         { provide: NotificationsService, useValue: { create: jest.fn() } },
+        { provide: TransportService, useValue: mockTransport },
       ],
     }).compile();
     service = module.get(HospitalsService);
@@ -123,6 +127,22 @@ describe('hospital location registry', () => {
     await expect(service.setLocation(facility().id, {
       latitude: 14.79679, longitude: 120.94358, source: 'manual', sourceRef: 'same',
     }, SYSTEM)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rejects a source reference already stored under another source (one OSM object = one hospital)', async () => {
+    // The seeded hospital is 'manual+osm-crosscheck'; a "Find location" pick of the same
+    // OSM way arrives as 'nominatim', under a differently spelled name.
+    mockPrisma.facility.findFirst.mockResolvedValue({ id: 'seeded', name: 'DOH — Joni Villanueva General Hospital' });
+    await expect(service.create({
+      name: 'Joni Villanueva Gen. Hosp.',
+      location: { latitude: 14.7968505, longitude: 120.9435893, source: 'nominatim', sourceRef: 'osm:way:1290448946' },
+    }, SYSTEM)).rejects.toMatchObject({
+      response: { code: 'DUPLICATE_FACILITY', existingFacilityId: 'seeded' },
+    });
+    const where = mockPrisma.facility.findFirst.mock.calls[0]![0].where;
+    expect(where.OR).toContainEqual({ location_source_ref: 'osm:way:1290448946' });
+    expect(JSON.stringify(where)).not.toContain('location_source"');
+    expect(mockPrisma.facility.create).not.toHaveBeenCalled();
   });
 
   it('creates pending locations for hospital org administrators', async () => {
@@ -190,6 +210,24 @@ describe('hospital location registry', () => {
         })]),
       }),
     }));
+  });
+
+  it('tells open transports to this hospital about a new location after it is saved (Prompt 08)', async () => {
+    mockPrisma.facility.findFirst.mockResolvedValue(null);
+    mockPrisma.facility.update.mockResolvedValue(facility());
+
+    await service.setLocation(facility().id, { latitude: 14.79679, longitude: 120.94358, source: 'manual' }, SYSTEM);
+
+    expect(mockTransport.notifyFacilityChanged).toHaveBeenCalledWith(facility().id, 'moved');
+    expect(mockPrisma.facility.update.mock.invocationCallOrder[0])
+      .toBeLessThan(mockTransport.notifyFacilityChanged.mock.invocationCallOrder[0]!);
+  });
+
+  it('does not notify transports when the location is refused', async () => {
+    await expect(service.setLocation(facility().id, {
+      latitude: 10.3157, longitude: 123.8854, source: 'manual',
+    }, SYSTEM)).rejects.toBeDefined();
+    expect(mockTransport.notifyFacilityChanged).not.toHaveBeenCalled();
   });
 
   it('treats a missing municipality like the DB index does (NULL or empty)', async () => {

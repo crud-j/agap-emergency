@@ -3,6 +3,7 @@
 import { useId, useMemo, type JSX } from 'react';
 import dynamic from 'next/dynamic';
 import { parseCoordinate, roundCoordinate, type CoordinateText } from '@/features/hospitals/location';
+import type { MapCandidate } from './HospitalLocationMap';
 
 const HospitalLocationMap = dynamic(() => import('./HospitalLocationMap'), {
   ssr: false,
@@ -19,6 +20,9 @@ interface HospitalLocationPickerProps {
   /** Draws the marker solid when the saved location is verified. */
   verified?: boolean;
   disabled?: boolean;
+  /** "Find location" results not yet picked, drawn as faint markers. */
+  candidates?: MapCandidate[];
+  onCandidateClick?: (id: string) => void;
 }
 
 /**
@@ -27,7 +31,7 @@ interface HospitalLocationPickerProps {
  * latitude first, then longitude.
  */
 export function HospitalLocationPicker({
-  value, onChange, verified = false, disabled = false,
+  value, onChange, verified = false, disabled = false, candidates, onCandidateClick,
 }: HospitalLocationPickerProps): JSX.Element {
   const id = useId();
   const lat = parseCoordinate(value.latitude, 'latitude');
@@ -64,7 +68,8 @@ export function HospitalLocationPicker({
       <p className="text-xs text-agap-textSub">
         Click the map or drag the pin to the ambulance entrance. Up to 7 decimal places.
       </p>
-      <HospitalLocationMap point={point} verified={verified} onPick={pick} />
+      <HospitalLocationMap point={point} verified={verified} onPick={pick}
+        candidates={candidates} onCandidateClick={disabled ? undefined : onCandidateClick} />
     </fieldset>
   );
 }

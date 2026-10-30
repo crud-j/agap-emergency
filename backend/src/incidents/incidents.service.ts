@@ -327,6 +327,62 @@ export class IncidentsService {
   }
 
   /**
+   * GET /incidents/:id for the incident's own registered reporter (plan §17): an
+   * allow-list of what the citizen app shows (status, reference, category, priority,
+   * the scene and the status timestamps). Never patients, assessments, attachments,
+   * caller answers, the reporter's contact numbers, dispatches or event notes.
+   * Coordinates are numbers (§0 rule 9).
+   */
+  async findReporterView(id: string) {
+    const incident = await this.prisma.incident.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        public_reference: true,
+        category: true,
+        priority: true,
+        status: true,
+        trigger_method: true,
+        description: true,
+        number_of_patients: true,
+        submitted_at: true,
+        received_at: true,
+        acknowledged_at: true,
+        dispatched_at: true,
+        en_route_at: true,
+        on_scene_at: true,
+        resolved_at: true,
+        closed_at: true,
+        updated_at: true,
+        incident_locations: {
+          select: {
+            latitude: true,
+            longitude: true,
+            formatted_address: true,
+            landmark: true,
+            street: true,
+            barangay: true,
+            municipality: true,
+            province: true,
+          },
+        },
+        incident_events: {
+          orderBy: { occurred_at: 'asc' },
+          select: { from_status: true, to_status: true, occurred_at: true },
+        },
+      },
+    });
+    if (!incident) throw new NotFoundException(`Incident ${id} not found`);
+    const loc = incident.incident_locations;
+    return {
+      ...incident,
+      incident_locations: loc
+        ? { ...loc, latitude: Number(loc.latitude), longitude: Number(loc.longitude) }
+        : null,
+    };
+  }
+
+  /**
    * Derived reporter map-icon sex. Callers must restrict this to staff and
    * assigned crew (see IncidentsController.findOne).
    */

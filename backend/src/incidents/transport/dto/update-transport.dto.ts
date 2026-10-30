@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsDateString, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { IsRecordId } from '../../../common/decorators/is-record-id.decorator';
 
 export class UpdateTransportDto {
@@ -18,4 +18,11 @@ export class UpdateTransportDto {
   @IsString()
   @MaxLength(500)
   changeReason?: string;
+
+  @ApiPropertyOptional({
+    description: 'Generated on the phone when the crew taps; a retry with the same id gets the first answer (plan §19)',
+  })
+  @IsOptional()
+  @IsUUID()
+  clientRequestId?: string;
 }

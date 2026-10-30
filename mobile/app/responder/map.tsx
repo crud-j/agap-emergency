@@ -10,12 +10,15 @@ import { useAuthStore } from '@/src/stores/auth.store';
 import { getMapConfig } from '@/src/services/api/locations.api';
 import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
 import { useResponderLocationShare } from '@/src/hooks/useResponderLocationShare';
-import { useRouteLine } from '@/src/hooks/useRouteLine';
+import { useTransportRoute } from '@/src/hooks/useTransportRoute';
+import { useTranslations } from '@/src/hooks/useAccessibility';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { categoryColor } from '@/src/lib/incident-visuals';
 import { shouldShareLocation } from '@/src/lib/assignment-progress';
+import { formatDistance, formatDuration } from '@/src/lib/transport-target';
 import { ResponderHeader } from '@/src/components/responder/responder-header';
+import { TransportBanners } from '@/src/components/responder/transport-banners';
 
 const LiveTrackingMap = React.lazy(
   () => Promise.resolve({
@@ -72,10 +75,13 @@ class MapErrorBoundary extends Component<
  * responder live position, and route geometry. Location sharing starts once the
  * crew has accepted (same rule as the assignment screen — see
  * `shouldShareLocation`) and stops when the incident reaches a terminal status.
+ * During transport the route and destination are the hospital (useTransportRoute,
+ * the same rule as the assignment screen).
  */
 export default function MapScreen() {
   const router = useRouter();
   const token  = useAuthStore((s) => s.accessToken);
+  const t      = useTranslations().transport;
 
   const mapAvailable = useMemo(() => isNativeMapAvailable(), []);
   const [boundaryKey, setBoundaryKey] = useState(0);
@@ -86,6 +92,7 @@ export default function MapScreen() {
     unclassifiedAssignments,
     isLoading,
     isError,
+    hasData,
     isStale,
     refetch,
   } = useResponderAssignments();
@@ -128,10 +135,25 @@ export default function MapScreen() {
       ? { lat: Number(loc.latitude), lng: Number(loc.longitude) }
       : null;
 
-  const route = useRouteLine(
-    mapAvailable && canShare ? responderPoint : null,
-    mapAvailable && canShare ? destination : null,
-  );
+  const incidentStatus = primaryAssignment?.incidents?.status ?? null;
+  const transport = useTransportRoute({
+    dispatchId: primaryAssignment?.id,
+    incidentId: primaryAssignment?.incident_id,
+    incidentStatus,
+    scene: destination,
+    myPoint: responderPoint,
+    enabled: mapAvailable && canShare,
+  });
+  const { route, target } = transport;
+  const openTransport =
+    transport.myTransport && !transport.myTransport.arrived_at ? transport.myTransport : null;
+  const transporting = incidentStatus === 'TRANSPORTING' && !!openTransport;
+  const etaText =
+    route.durationSeconds == null
+      ? null
+      : target.kind === 'FACILITY' && target.label
+        ? t.etaToHospital(formatDistance(route.distanceMeters), formatDuration(route.durationSeconds), target.label)
+        : t.etaToScene(formatDistance(route.distanceMeters), formatDuration(route.durationSeconds));
 
   // Use any non-null styleUrl from the backend; fall back to demo only when null.
   // (The provider check was removed — Mapbox styleUrls now correctly return null
@@ -153,7 +175,8 @@ export default function MapScreen() {
 
   // ── Error ─────────────────────────────────────────────────────────────────
 
-  if (isError) {
+  // Only when nothing was ever loaded: a failed poll keeps the last loaded map (plan §19).
+  if (isError && !hasData) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
@@ -252,6 +275,9 @@ export default function MapScreen() {
                 incident={destination}
                 responder={canShare ? responderPoint : null}
                 routeGeometry={canShare ? (route.geometry ?? null) : null}
+                routeDimmed={route.lastKnown}
+                destination={transport.destinationMarker}
+                incidentDimmed={incidentStatus === 'TRANSPORTING' && !!transport.destinationMarker}
                 responderIcon="ambulance"
                 citizenSex={incident?.reporter_sex ?? null}
                 priority={incident?.priority}
@@ -274,10 +300,10 @@ export default function MapScreen() {
         <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator={false}>
 
           {/* Stale banner */}
-          {isStale && (
+          {(isStale || isError) && (
             <View style={styles.staleBanner}>
-              <Ionicons name="time-outline" size={13} color="#D97706" />
-              <Text style={styles.staleText}>Assignment data may be stale</Text>
+              <Ionicons name={isError ? 'cloud-offline' : 'time-outline'} size={13} color="#D97706" />
+              <Text style={styles.staleText}>{isError ? t.showingLastLoaded : 'Assignment data may be stale'}</Text>
               <TouchableOpacity onPress={() => refetch()}>
                 <Text style={styles.refreshLink}>Refresh</Text>
               </TouchableOpacity>
@@ -289,8 +315,19 @@ export default function MapScreen() {
             <View style={styles.destRow}>
               <Ionicons name="location" size={15} color={accent} style={{ marginTop: 1 }} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.destAddress} numberOfLines={2}>{address}</Text>
-                <Text style={styles.destRef}>{incident?.public_reference ?? ''}</Text>
+                {transporting ? (
+                  <>
+                    <Text style={styles.destAddress} numberOfLines={2}>
+                      {openTransport?.facilities?.name ?? t.destinationNotSet}
+                    </Text>
+                    <Text style={styles.destRef}>{t.cardTitle}</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.destAddress} numberOfLines={2}>{address}</Text>
+                    <Text style={styles.destRef}>{incident?.public_reference ?? ''}</Text>
+                  </>
+                )}
               </View>
               <TouchableOpacity
                 style={styles.openBtn}
@@ -325,12 +362,11 @@ export default function MapScreen() {
                     : 'Live location sharing active'
                   : 'Starting location sharing…'}
               </Text>
-              {route.durationSeconds != null && (
-                <Text style={styles.etaText}>
-                  ~{Math.round(route.durationSeconds / 60)} min est.
-                </Text>
-              )}
             </View>
+          )}
+
+          {canShare && etaText != null && (
+            <Text style={[styles.etaText, route.lastKnown && styles.etaStale]} numberOfLines={1}>{etaText}</Text>
           )}
 
           {/* Upload failing — the citizen is NOT seeing this unit */}
@@ -351,6 +387,11 @@ export default function MapScreen() {
                 Location permission denied — the citizen cannot see your position.
               </Text>
             </View>
+          )}
+
+          {canShare && (
+            <TransportBanners transporting={transporting} target={target} routeLastKnown={route.lastKnown}
+              destinationDeactivated={transport.destinationDeactivated} />
           )}
         </ScrollView>
       </SafeAreaView>
@@ -396,7 +437,8 @@ const styles = StyleSheet.create({
   shareStrip: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   shareDot:   { width: 8, height: 8, borderRadius: 4 },
   shareText:  { flex: 1, fontSize: 12, color: '#40536D' },
-  etaText:    { fontSize: 12, color: '#0D6053', fontWeight: '700' },
+  etaText:    { fontSize: 12, color: '#0D6053', fontWeight: '700', marginBottom: 8 },
+  etaStale:   { opacity: 0.6 },
 
   warnRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#FFFBEB', borderRadius: 10, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(217,119,6,0.20)' },
   errorRow: { backgroundColor: '#FDF0F1', borderColor: 'rgba(212,72,88,0.20)' },

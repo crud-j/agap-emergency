@@ -35,12 +35,13 @@ export function Providers({ children }: { children: ReactNode }): ReactElement {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SocketProvider>
-        <ToastProvider>
+      {/* Toasts wrap the socket provider: it shows live transport notices (MOD-40). */}
+      <ToastProvider>
+        <SocketProvider>
           {children}
           <ToastViewport />
-        </ToastProvider>
-      </SocketProvider>
+        </SocketProvider>
+      </ToastProvider>
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   );

@@ -18,8 +18,9 @@ import {
   BOCAUE_MAX_ZOOM,
 } from '@/src/config/bocaue-geo';
 import { BocaueBarangayBoundaryLayer } from './bocaue-boundary-layer';
-import { isSignalLost, isWestbound, priorityRingColor } from '@agap/shared';
+import { isSignalLost, isWestbound, priorityRingColor, toLngLat } from '@agap/shared';
 import { AMBULANCE_ICON, citizenIconFor } from '@/src/lib/map-icons';
+import { SERVICE_AREA_BOUNDS, needsServiceAreaBounds } from '@/src/lib/transport-target';
 import { colors } from '@/src/theme/tokens';
 
 export interface LatLngLite {
@@ -33,6 +34,8 @@ interface RegionChange {
 
 // Bocaue flood zones can have degraded connectivity. Allow 15 s before surfacing an error.
 const TILE_LOAD_TIMEOUT_MS = 15_000;
+// Zoomed out far enough to frame a transport to a hospital elsewhere in Bulacan.
+const SERVICE_AREA_MIN_ZOOM = 9;
 
 /**
  * Interactive live-tracking map (MOD-13 / MOD-22 / MOD-43) rendered with MapLibre
@@ -48,6 +51,12 @@ const TILE_LOAD_TIMEOUT_MS = 15_000;
  *  - `navigationHeading`: camera rotates to face travel direction when in 3D mode.
  *  - `supports3dBuildings`: enables fill-extrusion layer; only true when the active
  *    tile style has OpenMapTiles building height data (backend `MAP_STYLE_URL`).
+ *
+ * Transport (plan §15): `destination` draws the hospital marker. While it is set the
+ * fit-route button (and the first fit when it appears) frames the responder, the
+ * hospital and the route, not the scene; `incidentDimmed` fades the scene pin and
+ * `routeDimmed` fades a last-known route. When the destination or the route leaves
+ * Bocaue, `maxBounds` widens from the Bocaue clamp to the service area.
  *
  * Load lifecycle: `onDidFinishLoadingStyle` clears the 15-second timeout. Either
  * `onDidFailLoadingMap` or the timeout surfacing shows a retry overlay. Tapping
@@ -68,6 +77,9 @@ export function LiveTrackingMap({
   navigationHeading = null,
   supports3dBuildings = false,
   showBoundary = false,
+  destination = null,
+  incidentDimmed = false,
+  routeDimmed = false,
 }: {
   styleUrl: string;
   incident: LatLngLite | null;
@@ -84,6 +96,12 @@ export function LiveTrackingMap({
    *  OpenMapTiles-format building height data (see backend MAP_STYLE_URL). */
   supports3dBuildings?: boolean;
   showBoundary?: boolean;
+  /** The transport's hospital (MOD-40); null outside transport or without coordinates. */
+  destination?: (LatLngLite & { label: string }) | null;
+  /** Fade the scene pin (during transport). */
+  incidentDimmed?: boolean;
+  /** Fade the route line (a last-known route, plan §19). */
+  routeDimmed?: boolean;
 }) {
   const cameraRef = useRef<CameraRef>(null);
   const [follow, setFollow] = useState(true);
@@ -98,6 +116,11 @@ export function LiveTrackingMap({
   const lastFollowUpdateRef = useRef(0);
 
   const center = responder ?? incident;
+  const wideArea = needsServiceAreaBounds([
+    ...(destination ? [destination] : []),
+    ...(routeGeometry ?? []).map(([lng, lat]) => ({ lat, lng })),
+  ]);
+  const activeBounds: LngLatBounds = wideArea ? SERVICE_AREA_BOUNDS : BOCAUE_BOUNDS;
   const responderSignalLost = responder?.updatedAt
     ? isSignalLost(responder.updatedAt, now)
     : false;
@@ -168,19 +191,21 @@ export function LiveTrackingMap({
     setFollow(true); // re-enter follow so the camera centres immediately
   }
 
-  function clampToBocaue(bounds: LngLatBounds): LngLatBounds {
+  function clampToBounds(bounds: LngLatBounds): LngLatBounds {
     return [
-      Math.max(bounds[0], BOCAUE_BOUNDS[0]),
-      Math.max(bounds[1], BOCAUE_BOUNDS[1]),
-      Math.min(bounds[2], BOCAUE_BOUNDS[2]),
-      Math.min(bounds[3], BOCAUE_BOUNDS[3]),
+      Math.max(bounds[0], activeBounds[0]),
+      Math.max(bounds[1], activeBounds[1]),
+      Math.min(bounds[2], activeBounds[2]),
+      Math.min(bounds[3], activeBounds[3]),
     ];
   }
 
   function fitRoute() {
     const pts: LatLngLite[] = [];
     if (responder) pts.push(responder);
-    if (incident)  pts.push(incident);
+    // During transport frame the responder and the hospital, not the scene behind them.
+    if (destination) pts.push(destination);
+    else if (incident) pts.push(incident);
     if (routeGeometry) for (const [lng, lat] of routeGeometry) pts.push({ lat, lng });
     if (pts.length < 2) {
       recenter();
@@ -198,11 +223,20 @@ export function LiveTrackingMap({
     setIs3d(false);   // flat top-down for route overview
     setFollow(false);
     try {
-      cameraRef.current?.fitBounds(clampToBocaue(rawBounds), { duration: 600 });
+      cameraRef.current?.fitBounds(clampToBounds(rawBounds), { duration: 600 });
     } catch {
       // ignore
     }
   }
+
+  // A new hospital (transport start or destination change): frame it once with the
+  // responder. Follow resumes from the Recenter button.
+  const destinationKey = destination ? `${destination.lat},${destination.lng}` : null;
+  useEffect(() => {
+    if (!destinationKey) return;
+    const timer = setTimeout(fitRoute, 400); // let the camera mount first
+    return () => clearTimeout(timer);
+  }, [destinationKey]);
 
   function onRegionIsChanging(event: NativeSyntheticEvent<RegionChange>) {
     // User pan/zoom releases follow. Programmatic moves (userInteraction=false) don't.
@@ -226,8 +260,8 @@ export function LiveTrackingMap({
       >
         <Camera
           ref={cameraRef}
-          maxBounds={BOCAUE_BOUNDS}
-          minZoom={BOCAUE_MIN_ZOOM}
+          maxBounds={activeBounds}
+          minZoom={wideArea ? SERVICE_AREA_MIN_ZOOM : BOCAUE_MIN_ZOOM}
           maxZoom={BOCAUE_MAX_ZOOM}
           pitch={activePitch}
           bearing={activeBearing}
@@ -275,22 +309,43 @@ export function LiveTrackingMap({
             <Layer
               id="route-line"
               type="line"
-              style={{ lineColor: '#0D6053', lineWidth: 5, lineOpacity: 0.85, lineCap: 'round', lineJoin: 'round' }}
+              style={{
+                lineColor: '#0D6053',
+                lineWidth: 5,
+                lineOpacity: routeDimmed ? 0.35 : 0.85,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
             />
           </GeoJSONSource>
         )}
 
         {incident && (
           <Marker id="incident" lngLat={[incident.lng, incident.lat]}>
-            {citizenIcon ? (
-              <View style={[styles.citizenMarker, { borderColor: priorityRingColor(priority) }]}>
-                <Image source={citizenIcon} style={styles.citizenImage} resizeMode="contain" />
+            <View style={incidentDimmed && styles.dimmed}>
+              {citizenIcon ? (
+                <View style={[styles.citizenMarker, { borderColor: priorityRingColor(priority) }]}>
+                  <Image source={citizenIcon} style={styles.citizenImage} resizeMode="contain" />
+                </View>
+              ) : (
+                <View style={[styles.pin, styles.incidentPin]}>
+                  <Ionicons name="alert" size={16} color="#FFFFFF" />
+                </View>
+              )}
+            </View>
+          </Marker>
+        )}
+
+        {destination && (
+          <Marker id="destination" lngLat={toLngLat({ latitude: destination.lat, longitude: destination.lng })}>
+            <View style={styles.destinationWrap} accessibilityLabel={destination.label}>
+              <View style={[styles.pin, styles.destinationPin]}>
+                <Ionicons name="medical" size={16} color="#FFFFFF" />
               </View>
-            ) : (
-              <View style={[styles.pin, styles.incidentPin]}>
-                <Ionicons name="alert" size={16} color="#FFFFFF" />
+              <View style={styles.destinationLabel}>
+                <Text style={styles.destinationLabelText} numberOfLines={1}>{destination.label}</Text>
               </View>
-            )}
+            </View>
           </Marker>
         )}
 
@@ -426,6 +481,18 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   incidentPin: { backgroundColor: '#DC2626' },
+  dimmed: { opacity: 0.45 },
+  destinationWrap: { alignItems: 'center' },
+  destinationPin: { backgroundColor: '#2563EB' },
+  destinationLabel: {
+    marginTop: 3,
+    maxWidth: 160,
+    backgroundColor: colors.white,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  destinationLabelText: { fontSize: 10, fontWeight: '700', color: '#1E3A8A' },
   citizenMarker: {
     width: 46,
     height: 46,

@@ -12,9 +12,37 @@ import type {
  * in `maps.module.ts` from configuration.
  */
 
+/** Forward search for a named place (MOD-39 "Find location"). */
+export interface GeocodeSearchQuery {
+  text: string;
+  /** ISO 3166-1 alpha-2 codes, comma-separated (e.g. 'ph'). */
+  countryCodes?: string;
+  /** [west, south, east, north]: prefer (or with `bounded`, restrict to) this box. */
+  viewbox?: [number, number, number, number];
+  bounded?: boolean;
+  limit?: number;
+}
+
+/** One provider result. Its coordinates are the provider's, never computed or AI-made. */
+export interface GeocodeCandidate {
+  name: string;
+  displayName: string;
+  latitude: number;
+  longitude: number;
+  /** 'key=value' of the main tag, e.g. 'amenity=hospital'. */
+  category: string;
+  /** Stable provider reference, e.g. 'osm:way:123' (facilities.location_source_ref). */
+  sourceRef: string;
+  /** Provider's own 0–1 prominence. */
+  importance: number;
+  address: { municipality?: string; province?: string };
+}
+
 export interface GeocodingProvider {
   /** MOD-12 — resolve a human-readable address + barangay for a point. */
   reverseGeocode(point: LatLng): Promise<ReverseGeocodeResult>;
+  /** MOD-39 — candidates for a typed name/address. Throws when the provider fails, so callers can tell "none" from "down". */
+  search(query: GeocodeSearchQuery): Promise<GeocodeCandidate[]>;
 }
 
 export interface RoutingProvider {

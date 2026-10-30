@@ -8,9 +8,11 @@ import { CreateHospitalDto } from './dto/create-hospital.dto';
 import { UpdateHospitalDto } from './dto/update-hospital.dto';
 import { SetLocationDto } from './dto/set-location.dto';
 import { VerifyLocationDto } from './dto/verify-location.dto';
+import { SetActiveDto } from './dto/set-active.dto';
 import { CreateReferralDto } from './dto/create-referral.dto';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TransportService } from '../incidents/transport/transport.service';
 import { AuditAction, IncidentStatus, UserRole, isCoordinateInServiceArea, looksSwapped } from '@agap/shared';
 import { activeMemberOrgIds, assertCanManageOrg } from '../organizations/org-scope';
 import { UNREVIEWED_STATUSES } from './destination-rules';
@@ -26,13 +28,19 @@ export class HospitalsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly transport: TransportService,
   ) {}
 
-  async findAll(actor?: ReferralActor, includeUnreviewed = false) {
+  /**
+   * `includeInactive` lists deactivated hospitals too, for reviewers only (the registry
+   * page, so they can be reactivated). Pickers and every other caller stay active-only.
+   */
+  async findAll(actor?: ReferralActor, includeUnreviewed = false, includeInactive = false) {
+    const showInactive = includeInactive && !!actor && LOCATION_REVIEWERS.includes(actor.role);
     const facilities = await this.prisma.facility.findMany({
       where: {
         facility_type: 'HOSPITAL',
-        is_active: true,
+        ...(!showInactive && { is_active: true }),
         ...(await this.reviewVisibility(actor, includeUnreviewed)),
       },
       orderBy: { name: 'asc' },
@@ -106,7 +114,7 @@ export class HospitalsService {
       }
     }
     if (dto.location) this.assertValidLocation(dto.location.latitude, dto.location.longitude);
-    await this.assertNoDuplicate(dto.name, dto.municipality, dto.location?.source, dto.location?.sourceRef);
+    await this.assertNoDuplicate(dto.name, dto.municipality, dto.location?.sourceRef);
 
     const status = !dto.location
       ? facility_location_status.UNVERIFIED
@@ -207,7 +215,7 @@ export class HospitalsService {
       await assertCanManageOrg(this.prisma, actor, existing.organization_id);
     }
     this.assertValidLocation(dto.latitude, dto.longitude);
-    await this.assertNoDuplicate(existing.name, existing.municipality, dto.source, dto.sourceRef, id);
+    await this.assertNoDuplicate(existing.name, existing.municipality, dto.sourceRef, id);
     const status = actor.role === UserRole.ORG_ADMINISTRATOR
       ? facility_location_status.PENDING_REVIEW
       : facility_location_status.VERIFIED;
@@ -272,6 +280,41 @@ export class HospitalsService {
     return toFacilityView(updated);
   }
 
+  /**
+   * Deactivate or reactivate a hospital (plan §9.4, §12). An inactive hospital cannot be
+   * chosen as a new destination (destination-rules.ts). Open transports to it are never
+   * cancelled or changed (Reliability Rules): after a true → false change their crews and
+   * the console get transport_updated FACILITY_DEACTIVATED, and the crew decides.
+   */
+  async setActive(id: string, dto: SetActiveDto, actor: ReferralActor) {
+    const existing = await this.findById(id);
+    if (existing.is_active === dto.isActive) return existing;
+    // Inactive rows are outside the active-name index, so a same-named hospital may exist by now.
+    if (dto.isActive) await this.assertNoDuplicate(existing.name, existing.municipality, null, id);
+    try {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.facility.update({
+          where: { id },
+          data: { is_active: dto.isActive, updated_at: new Date() },
+        });
+        await this.audit.logInTransaction(tx, {
+          action: AuditAction.UPDATE,
+          actorId: actor.id,
+          entityType: 'facility',
+          entityId: id,
+          moduleId: 'MOD-39',
+          oldValues: { is_active: existing.is_active },
+          newValues: { is_active: dto.isActive, reason: dto.reason ?? null },
+        });
+        return row;
+      });
+      if (!dto.isActive) await this.transport.notifyFacilityChanged(id, 'deactivated');
+      return toFacilityView(updated);
+    } catch (error) {
+      this.rethrowDuplicate(error);
+    }
+  }
+
   private assertValidLocation(latitude: number, longitude: number): void {
     if (!isCoordinateInServiceArea(latitude, longitude)) {
       if (looksSwapped(latitude, longitude)) {
@@ -291,12 +334,12 @@ export class HospitalsService {
   private async assertNoDuplicate(
     name: string,
     municipality?: string | null,
-    source?: string,
-    sourceRef?: string,
+    sourceRef?: string | null,
     excludeId?: string,
   ): Promise<void> {
     // Mirrors the DB unique indexes: lower(name) + lower(coalesce(municipality, '')) among
-    // active hospitals, and (location_source, location_source_ref) across all facilities.
+    // active hospitals, and location_source_ref across all facilities. The ref alone is the
+    // place: a 'nominatim' pick of a 'manual+osm-crosscheck' hospital is the same hospital.
     const sameMunicipality: Prisma.FacilityWhereInput = municipality
       ? { municipality: { equals: municipality, mode: 'insensitive' } }
       : { OR: [{ municipality: null }, { municipality: '' }] };
@@ -310,7 +353,7 @@ export class HospitalsService {
             name: { equals: name, mode: 'insensitive' },
             ...sameMunicipality,
           },
-          ...(source && sourceRef ? [{ location_source: source, location_source_ref: sourceRef }] : []),
+          ...(sourceRef ? [{ location_source_ref: sourceRef }] : []),
         ],
       },
       select: { id: true, name: true },
@@ -349,8 +392,9 @@ export class HospitalsService {
     throw error;
   }
 
-  private async onFacilityLocationChanged(_facilityId: string): Promise<void> {
-    // TODO Prompt 08 emits incident.transport_updated for open transports.
+  /** Open transports to this hospital get transport_updated and a new route (plan §12). Never throws. */
+  private async onFacilityLocationChanged(facilityId: string): Promise<void> {
+    await this.transport.notifyFacilityChanged(facilityId, 'moved');
   }
 
   async createReferral(

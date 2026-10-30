@@ -46,7 +46,8 @@ export class AssessmentService {
 
     const v = dto.vitals ?? {};
 
-    const assessment = await this.prisma.$transaction(async (tx) => {
+    const { assessment, triageTag } = await this.prisma.$transaction(async (tx) => {
+      let triageTag: { id: string; surge_id: string } | null = null;
       const created = await tx.on_scene_assessments.create({
         data: {
           incident_id: incidentId,
@@ -70,7 +71,7 @@ export class AssessmentService {
       });
 
       if (surge && dto.triageTag) {
-        await tx.triage_tags.create({
+        triageTag = await tx.triage_tags.create({
           data: {
             surge_id: surge.id,
             incident_id: incidentId,
@@ -93,7 +94,7 @@ export class AssessmentService {
         });
       }
 
-      return created;
+      return { assessment: created, triageTag };
     });
 
     // Immutable audit trail (MOD-46) — best-effort, never blocks the write.
@@ -128,6 +129,11 @@ export class AssessmentService {
       });
     } catch (err) {
       this.logger.warn(`Realtime emit failed for assessment_updated: ${String(err)}`);
+    }
+
+    // Live surge triage board (MOD-52): the responder app files START tags here.
+    if (triageTag) {
+      this.realtime.triageTagUpdated({ surgeId: triageTag.surge_id, tagId: triageTag.id });
     }
 
     return assessment;

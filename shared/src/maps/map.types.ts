@@ -73,6 +73,17 @@ export interface RouteSnapshot {
   stale: boolean;
 }
 
+/** A route older than this is "last known": drawn dimmed and labelled (plan §13.2/§19). */
+export const ROUTE_LAST_KNOWN_AFTER_MS = 120_000;
+
+/** True when the server marked the route stale or it was calculated over 120 s ago. */
+export function isRouteLastKnown(route: RouteSnapshot | null | undefined, now: number = Date.now()): boolean {
+  if (!route) return false;
+  if (route.stale) return true;
+  const at = Date.parse(route.calculatedAt);
+  return Number.isFinite(at) && now - at > ROUTE_LAST_KNOWN_AFTER_MS;
+}
+
 /** Options for building a non-interactive static map image (e.g. SOS confirm). */
 export interface StaticMapOptions {
   center: LatLng;

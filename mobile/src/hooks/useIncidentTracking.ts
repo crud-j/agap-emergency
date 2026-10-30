@@ -4,12 +4,16 @@ import type {
   AgapWebSocketEvent,
   ResponderLocationUpdatedPayload,
   IncidentStatusChangedPayload,
+  IncidentTransportUpdatedPayload,
   ResponderEtaUpdatedPayload,
+  ResponderRouteUpdatedPayload,
 } from '@agap/shared';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { connectSocket } from '@/src/services/websocket/agap-socket';
 import { getLatestTrackingPositions, type LatestUnitPosition } from '@/src/services/api/locations.api';
-import { mergeTrackingLocation } from '@/src/lib/incident-tracking';
+import { mergeRouteUpdate, mergeTrackingLocation, mergeTransportUpdate } from '@/src/lib/incident-tracking';
+import { deriveTransportView, type TransportView } from '@/src/lib/transport-view';
+import type { DestinationNotice } from '@/src/lib/transport-target';
 
 export interface ResponderPosition {
   lat: number;
@@ -29,9 +33,25 @@ export interface IncidentTrackingState {
   etaSeconds: number | null;
   etaIsEstimate: boolean;
   seedFailed: boolean;
+  /** Every accepted unit as seeded and patched (leg, destination and server route included). */
+  units: LatestUnitPosition[];
+  /** What the reporter screen shows about transport; only the server's payload decides it (C17). */
+  transportView: TransportView;
+  /** The unit `transportView` is about (hospital leg), if any. */
+  transportUnit: LatestUnitPosition | null;
+  /** By dispatch id: the last transport_updated warning. The responder banner reads it. */
+  destinationNotices: Record<string, DestinationNotice>;
 }
 
 const trackingQueryKey = (incidentId: string) => ['incident-tracking-latest', incidentId] as const;
+/** REST poll while the socket is down (plan §19); none while it is connected. */
+const DISCONNECTED_POLL_MS = 15_000;
+/**
+ * How many mounted hooks watch each incident on the shared socket. The room is left
+ * only when the last one unmounts, so closing one screen (e.g. the assignment detail)
+ * does not stop another (the responder Map tab) from receiving the incident's events.
+ */
+const roomWatchers = new Map<string, number>();
 
 /**
  * Live incident tracking (MOD-13 / MOD-42 / MOD-43). Joins the incident's room,
@@ -54,6 +74,10 @@ export function useIncidentTracking(
     etaSeconds: null,
     etaIsEstimate: true,
     seedFailed: false,
+    units: [],
+    transportView: 'TO_SCENE',
+    transportUnit: null,
+    destinationNotices: {},
   });
 
   const { data: seededUnits, isError: seedFailed, refetch } = useQuery({
@@ -64,12 +88,14 @@ export function useIncidentTracking(
     },
     enabled: !!incidentId && !!token,
     refetchOnReconnect: true,
+    refetchInterval: state.connected ? false : DISCONNECTED_POLL_MS,
   });
 
   useEffect(() => {
     if (!incidentId || !token) return;
 
     const socket = connectSocket(token);
+    roomWatchers.set(incidentId, (roomWatchers.get(incidentId) ?? 0) + 1);
 
     const join = () => {
       setState((s) => ({ ...s, connected: true }));
@@ -105,6 +131,29 @@ export function useIncidentTracking(
         ),
       );
     };
+    // Server route for the unit's current leg (Prompt 07/09). On the hospital leg only
+    // the crew and a crew-confirmed reporter receive it (C17).
+    const onRoute = (env: AgapWebSocketEvent<ResponderRouteUpdatedPayload>) => {
+      const route = env.data;
+      if (route.incidentId !== incidentId) return;
+      queryClient.setQueryData<LatestUnitPosition[]>(
+        trackingQueryKey(incidentId),
+        (units) => mergeRouteUpdate(units, route),
+      );
+    };
+    const onTransportUpdated = (env: AgapWebSocketEvent<IncidentTransportUpdatedPayload>) => {
+      const transport = env.data;
+      if (transport.incidentId !== incidentId) return;
+      queryClient.setQueryData<LatestUnitPosition[]>(
+        trackingQueryKey(incidentId),
+        (units) => mergeTransportUpdate(units, transport),
+      );
+      // Each update replaces the dispatch's notice, so a later change without a warning clears it.
+      const notice: DestinationNotice = { warning: transport.destinationWarning ?? null, receivedAt: Date.now() };
+      setState((s) => ({ ...s, destinationNotices: { ...s.destinationNotices, [transport.dispatchId]: notice } }));
+      // The crew's transport list (useTransportRoute) re-reads the hospital, like the web console.
+      void queryClient.invalidateQueries({ queryKey: ['incident-transports', incidentId] });
+    };
     const onStatus = (env: AgapWebSocketEvent<IncidentStatusChangedPayload>) => {
       setState((s) => ({ ...s, status: env.data.newStatus }));
     };
@@ -114,14 +163,24 @@ export function useIncidentTracking(
     socket.on('disconnect', onDisconnect);
     socket.on('responder.location_updated', onResponderLocation);
     socket.on('responder.eta_updated', onEta);
+    socket.on('responder.route_updated', onRoute);
+    socket.on('incident.transport_updated', onTransportUpdated);
     socket.on('incident.status_changed', onStatus);
 
     return () => {
-      socket.emit('leave:incident', { incidentId });
+      const watchers = (roomWatchers.get(incidentId) ?? 1) - 1;
+      if (watchers > 0) {
+        roomWatchers.set(incidentId, watchers);
+      } else {
+        roomWatchers.delete(incidentId);
+        socket.emit('leave:incident', { incidentId });
+      }
       socket.off('connect', join);
       socket.off('disconnect', onDisconnect);
       socket.off('responder.location_updated', onResponderLocation);
       socket.off('responder.eta_updated', onEta);
+      socket.off('responder.route_updated', onRoute);
+      socket.off('incident.transport_updated', onTransportUpdated);
       socket.off('incident.status_changed', onStatus);
     };
   }, [incidentId, token, queryClient, refetch]);
@@ -134,6 +193,7 @@ export function useIncidentTracking(
     units[0] ??
     null;
   const position = selectedUnit?.position ?? null;
+  const transport = deriveTransportView(state.status ?? initialStatus, units);
 
   return {
     ...state,
@@ -151,5 +211,8 @@ export function useIncidentTracking(
     etaSeconds: selectedUnit?.eta.seconds ?? null,
     etaIsEstimate: true,
     seedFailed,
+    units,
+    transportView: transport.view,
+    transportUnit: transport.unit,
   };
 }

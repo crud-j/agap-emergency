@@ -140,8 +140,23 @@ export interface IncidentTransport {
   arrived_at: string | null;
   destination_changed?: boolean;
   change_reason?: string | null;
-  facilities: { id: string; name: string } | null;
+  facilities: TransportFacility | null;
 }
+
+/** The destination as GET /incidents/:id/transport sends it (numeric coordinates). */
+export interface TransportFacility {
+  id: string;
+  name: string;
+  municipality?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  location_status?: string;
+  receiving_status?: string;
+  is_active?: boolean;
+}
+
+/** PATCH /incidents/:id/transport/:tid: the record plus the destination warnings (never blocking). */
+export type TransportUpdateResult = IncidentTransport & { warnings?: Array<'FACILITY_AT_CAPACITY'> };
 
 export interface IncidentListParams {
   status?: string;
@@ -292,6 +307,6 @@ export function updateIncidentTransport(
   incidentId: string,
   transportId: string,
   body: { destinationId: string; estimatedArrivalAt?: string; changeReason?: string },
-): Promise<IncidentTransport> {
+): Promise<TransportUpdateResult> {
   return api.patch(`/incidents/${incidentId}/transport/${transportId}`, body, getToken());
 }
