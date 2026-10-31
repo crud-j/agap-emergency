@@ -104,4 +104,4 @@ Give the citizen and the Operations Center a sense of "how far away" without pre
 
 **Do not claim:**
 - Guaranteed or real-time-to-the-second travel time — ETA is a routing-provider estimate, recalculated on a throttle, not a live telemetry feed.
-- Tracking of units not on an accepted dispatch — only crews with an accepted dispatch report a position here.
+- Tracking of units not on an active dispatch — only crews on an active dispatch report a position here; idle units send none.

@@ -19,16 +19,16 @@ Content for the [Individual Module Report template](../M_5.pdf). Each section be
 ## 2. Module Description
 
 **Description**
-Ranks the units best suited to respond to a specific incident — filtered by capability, scored by readiness, proximity, a travel estimate, and current workload — and presents that ranking, with its reasons, to the dispatcher.
+Ranks the available units best suited to respond to a specific incident — scored by capability match, distance from the unit's base, and unit type — and presents that ranking, with its reasons, to the dispatcher.
 
 **Purpose**
 Decision support, not decision-making: the system never decides which unit goes, it only makes the dispatcher's choice faster and better-informed, and the dispatcher can always override it.
 
 **Tasks Performed**
-1. Filters candidate units by whether their capabilities actually match the incident's category, using a required-capability matrix per category.
-2. Checks each candidate's current readiness/availability.
-3. Calculates real distance using PostGIS.
-4. Factors in unit type and current workload.
+1. Takes only Available, active units within 20 km of the incident (or any Available unit when the incident has no location).
+2. Scores each unit's verified capabilities against the required-capability list for the incident's category (MOD-29).
+3. Calculates the distance from the unit's base location to the incident with PostGIS.
+4. Combines capability (50%), distance (35%) and unit-type fit (15%) into one score.
 5. Returns a ranked list with the reasoning spelled out for each candidate.
 6. Leaves the final unit selection to the dispatcher on the Dispatch screen — nothing here auto-assigns anything.
 
@@ -39,7 +39,7 @@ Decision support, not decision-making: the system never decides which unit goes,
 | No. | AS-IS Input (Existing Process) | TO-BE Input (Proposed Automated Process) |
 |---|---|---|
 | 1 | A dispatcher's memory of who's typically free, or a round of phone calls asking | The incident's category and location |
-| 2 | Whatever a unit says about its own distance and availability when called | Each candidate unit's capability flags, current readiness, PostGIS-calculated distance, and current workload |
+| 2 | Whatever a unit says about its own distance and availability when called | Each Available unit's verified capabilities, unit type and base location |
 | 3 | No consistent method as the number of organizations and units grows | The ranked output: a scored list of suitable units with the reasoning behind each rank |
 
 ---
@@ -50,8 +50,8 @@ Decision support, not decision-making: the system never decides which unit goes,
 |---|---|---|
 | 1 | Phone calls asking around which units are free and how far away | `backend/src/dispatch/resource-matching/resource-matching.service.ts` |
 | 2 | Dispatcher's own memory of unit locations and typical availability | A required-capability matrix mapping incident category to unit capability |
-| 3 | No distance calculation — just a rough sense of "who's close" | PostGIS distance calculation against the units' recorded locations |
-| 4 | — | Operations Center Dispatch screen displaying the ranked list and reasons alongside the Confirm Dispatch action (MOD-31) |
+| 3 | No distance calculation — just a rough sense of "who's close" | PostGIS distance calculation from the units' base locations (20 km limit) |
+| 4 | — | Operations Center Dispatch screen displaying the ranked list and reasons alongside the Authorize Dispatch action (MOD-31) |
 
 ---
 
@@ -77,11 +77,11 @@ Decision support, not decision-making: the system never decides which unit goes,
 | Step | Process Description | Step Type |
 |---|---|---|
 | 1 | The incident reaches the dispatch stage (Acknowledged or Assessed). | Processing |
-| 2 | The backend filters candidate units by the required-capability matrix for that incident's category. | Processing |
-| 3 | Each remaining candidate's current readiness is checked. | Validation |
-| 4 | PostGIS calculates real distance from each candidate to the incident location. | Processing |
-| 5 | Unit type and current workload are factored into the score. | Processing |
-| 6 | The backend returns a ranked list with the reasoning for each entry (e.g. "1.2 km away, BLS-capable, currently available"). | Database |
+| 2 | The backend takes Available, active units with a base location within 20 km of the incident, nearest first. | Processing |
+| 3 | Each unit's verified capabilities are compared with the required-capability list for the incident's category. | Validation |
+| 4 | PostGIS calculates the distance from each unit's base to the incident location. | Processing |
+| 5 | The backend combines capability match (50%), distance (35%) and unit-type fit (15%) into a score and sorts the units by it. | Processing |
+| 6 | The backend returns a ranked list with the reasoning for each entry (e.g. "Capability match: 2/3 required", "Distance: 1.2km", "Type: Ambulance (strong match for medical incidents)"). | Database |
 | 7 | The Dispatch screen displays the ranking; the dispatcher may accept the top recommendation or pick any other unit instead. | User Action |
 
 **TO-BE Outputs**

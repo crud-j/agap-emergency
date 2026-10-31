@@ -26,7 +26,7 @@ Give dispatch, fleet and resource-matching one authoritative source of "who exis
 
 **Tasks Performed**
 1. Creates, edits, and filters organization records through the web console's Organizations page.
-2. Creates, edits, and filters unit/resource records through the Resources/Fleet page, each visibly owned by one organization.
+2. Creates, edits, and filters unit/resource records through the Registry tab of the Fleet & Units page, each visibly owned by one organization.
 3. Enforces ownership at the authorization layer, not just in the UI — an Org Administrator can edit only their own organization's units.
 4. Records capabilities, contacts, operating area, and status per unit.
 5. Validates, authenticates, and persists every record and change with identifiers and timestamps.
@@ -48,7 +48,7 @@ Give dispatch, fleet and resource-matching one authoritative source of "who exis
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Verbal/institutional knowledge of agency rosters, with no written master list | Operations Center Organizations page, `frontend/app/(ops)/organizations` |
-| 2 | No system enforcing who may edit a given unit's record | Operations Center Resources/Fleet registry page, `frontend/app/(ops)/resources` |
+| 2 | No system enforcing who may edit a given unit's record | Operations Center Fleet & Units page, Registry tab (`frontend/components/resources/RegistryTab.tsx`) |
 | 3 | — | NestJS `backend/src/organizations` and `backend/src/resources` services with an ownership-authorization guard (Org Administrator scoped to their own organization's units) |
 | 4 | — | PostgreSQL persistence of organization and unit records with identifiers and timestamps |
 
@@ -76,8 +76,8 @@ Give dispatch, fleet and resource-matching one authoritative source of "who exis
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | An authorized dispatcher opens Organizations and sees MDRRMO, BFP, and Bocaue Hospital listed, each with its units under Resources/Fleet. | User Action |
-| 2 | The dispatcher (or an Org Administrator) creates or edits a unit's capability flags, contacts, or status. | User Action |
+| 1 | A signed-in operations user opens Organizations and sees MDRRMO, BFP, and Bocaue Hospital listed; units are listed in the Registry tab of Fleet & Units. A System Administrator can add a new organization. | User Action |
+| 2 | An Org Administrator (for their own organization) or a System Administrator adds or edits a unit in the Registry tab, or edits an organization's details. Dispatchers can view the registry but only change a unit's operational status (MOD-28). | User Action |
 | 3 | The backend validates the fields and authenticates the actor. | Validation |
 | 4 | If the actor is an Org Administrator, the backend checks the unit belongs to that administrator's own organization before allowing the edit; editing another organization's unit is refused. | Validation |
 | 5 | The record is persisted in PostgreSQL with an identifier, owning organization, and timestamp. | Database |
@@ -96,7 +96,7 @@ Give dispatch, fleet and resource-matching one authoritative source of "who exis
 ## Owner notes (not part of the report)
 
 **Test before signing:**
-1. As a dispatcher, create a new unit under MDRRMO and edit one unit's capability flags.
+1. As a System Administrator, add a new unit under MDRRMO in Fleet & Units → Registry, and edit one unit's details. Sign in as a dispatcher and confirm the Registry has no Add or Edit buttons.
 2. Sign in as `orgadmin@mdrrmo.bocaue.gov.ph`, attempt to edit a BFP-owned unit (should be refused), then edit an MDRRMO unit (should be allowed) — this is the clearest proof the ownership check is enforced server-side, not just hidden in the UI.
 
 **Do not claim:**

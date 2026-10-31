@@ -88,7 +88,7 @@ Find problems, such as location permission being off, before an emergency happen
 | 2 | The app reads the location permission and whether location services are on, plus the notification and camera permissions, motion sensor availability and internet connection. | Processing |
 | 3 | The app sends this device report with the device ID to the backend. | Integration |
 | 4 | The backend combines the device report with the account status (contacts, verified phone, medical consent and profile) and rates each item Ready, Limited or Action Needed. | Processing |
-| 5 | The backend works out the overall status. Not Ready if any Essential item (location, notifications, connection) needs action; Limited if any Recommended item (contacts, verified phone) isn't ready; otherwise Ready. Optional items (camera, motion sensor, medical profile) never lower it. | Validation |
+| 5 | The backend works out the overall status. Not Ready if any Essential item (location, notifications, connection) needs action; Limited if any Essential item is only partly ready (for example a weak connection) or any Recommended item (contacts, verified phone) isn't ready; otherwise Ready. Optional items (camera, motion sensor, medical profile) never lower it. | Validation |
 | 6 | The backend saves the latest report for that device, replacing the previous one. | Database |
 | 7 | The app shows the overall status and the checklist, with Essential items first. | Processing |
 | 8 | Without internet, the app applies the same rules on the phone and shows the result so the citizen still sees what to fix. | Processing |

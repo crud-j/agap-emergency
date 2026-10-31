@@ -27,7 +27,7 @@ Let a dispatcher or supervisor see the whole municipal picture at a glance inste
 **Tasks Performed**
 1. Plots every active incident as a marker on a MapLibre map, colored by priority.
 2. Plots every responding unit's position, updated live.
-3. Overlays flood-prone-barangay boundaries (Lolomboy, Bunlo, Igulot, Bambang) over the base map.
+3. Overlays flood-prone-barangay advisory circles (Lolomboy, Bunlo, Igulot, Bambang) over the base map.
 4. Opens the matching incident drawer directly when a marker is clicked.
 5. Updates the map the moment a new incident is submitted or a unit's position changes, with no manual refresh, by reading the same real-time event engine (MOD-20) used across operations.
 
@@ -49,7 +49,7 @@ Let a dispatcher or supervisor see the whole municipal picture at a glance inste
 |---|---|---|
 | 1 | Printed municipal maps and staff familiarity with the area | Operations Center Map screen, `frontend/app/(ops)/operations/map` |
 | 2 | Memory of where units typically are | MapLibre rendering incident markers (colored by priority) and live responder markers |
-| 3 | No live position tracking of units | Flood-prone-barangay boundary overlay (Lolomboy, Bunlo, Igulot, Bambang) drawn over the base map |
+| 3 | No live position tracking of units | Flood-prone-barangay advisory circles (Lolomboy, Bunlo, Igulot, Bambang) drawn over the base map |
 | 4 | — | Socket.io subscription to the same real-time event engine as MOD-20, so new incidents/positions appear without a page refresh |
 
 ---
@@ -77,17 +77,18 @@ Let a dispatcher or supervisor see the whole municipal picture at a glance inste
 |---|---|---|
 | 1 | A dispatcher or supervisor opens Operations → Map. | User Action |
 | 2 | MapLibre renders every active incident as a marker colored by priority, and every responding unit's current position. | Processing |
-| 3 | Flood-prone-barangay boundaries are drawn as an overlay on the same base map. | Processing |
-| 4 | A new incident submitted from the phone is pushed through the same real-time event engine used across operations and appears on the map with no refresh. | Notification |
-| 5 | A responder's marker moves as their phone reports a new position. | Notification |
-| 6 | Clicking any marker opens that incident's drawer directly. | User Action |
+| 3 | Flood-prone barangays (Lolomboy, Bunlo, Igulot, Bambang) are drawn as advisory circles on the same base map. | Processing |
+| 4 | Each tracked unit's route is drawn by leg — solid to the scene, dashed to the destination hospital — with a "to scene" or "to hospital" label on the unit. "Show hospitals" adds every hospital with a verified location. | Processing |
+| 5 | A new incident submitted from the phone is pushed through the same real-time event engine used across operations and appears on the map with no refresh. | Notification |
+| 6 | A responder's marker moves as their phone reports a new position. | Notification |
+| 7 | Clicking any marker opens that incident's drawer directly. | User Action |
 
 **TO-BE Outputs**
 
 | No. | Output Produced by the Proposed Process |
 |---|---|
 | 1 | A live map showing every active incident (by priority color) and every responding unit's current position |
-| 2 | A flood-prone-barangay overlay over the base map |
+| 2 | A flood-prone-barangay overlay, unit routes by leg, and an optional hospital layer over the base map |
 | 3 | An incident drawer opened directly from a clicked marker |
 
 ---

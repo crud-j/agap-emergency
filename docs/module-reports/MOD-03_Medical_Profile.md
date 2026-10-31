@@ -119,6 +119,6 @@ Have important medical facts written down ahead of time, with the citizen's expl
 **Encryption (added 2026-10-23):** every medical value is AES-256-GCM encrypted with `MEDICAL_ENCRYPTION_KEY` before it is saved, and bound to its owner. A screenshot of the `medical_profiles` row (values start with `v1.`) next to the readable app screen shows it. The server needs the key set; without it a profile can't be saved (dispatch is never affected).
 
 **Do not claim:**
-- **Responders viewing the profile in an app.** The backend `GET /medical-profiles/:userId` (with an access log) exists, but no web or mobile screen calls it.
+- **Responders viewing the profile in an app.** The backend `GET /medical-profiles/:userId` exists (it now allows only a responder on an active crew for that patient's incident, and logs every access), but no web or mobile screen calls it.
 - **Deleting the profile from the app.** The backend `DELETE /medical-profiles/me` exists, but no screen uses it.
 - **The access log and data export** on the Privacy screen. They belong to MOD-48, not this module.

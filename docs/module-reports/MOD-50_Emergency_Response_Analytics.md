@@ -19,13 +19,13 @@ Content for the [Individual Module Report template](../M_5.pdf). Each section be
 ## 2. Module Description
 
 **Description**
-Turns every timestamp the rest of AGAP generates into metrics MDRRMO can actually use — incident volume, response times, dispatch performance, SLA compliance, and the false-alert rate, filterable by 7, 30, or 90 days.
+Turns every timestamp the rest of AGAP generates into metrics MDRRMO can actually use — incident volume, response times, acknowledge and dispatch SLA compliance, and the false-alert rate, filterable by 7, 30, or 90 days.
 
 **Purpose**
 Accountability and continuous improvement — showing, with numbers, whether the office is actually getting faster and better, not just busier.
 
 **Tasks Performed**
-1. Aggregates incident volume, response-time distribution, and dispatch performance for a chosen date range.
+1. Aggregates incident volume (by category and status) and response times for a chosen date range.
 2. Measures SLA compliance against the active SLA policy (default 120s to acknowledge, 300s to dispatch).
 3. Computes a false-alert rate for the same date range.
 4. Shows "No data" for an empty range instead of a misleading zero percent.
@@ -50,7 +50,7 @@ Accountability and continuous improvement — showing, with numbers, whether the
 | 1 | Staff memory and manual logbook review to estimate performance | `backend/src/analytics/analytics.service.ts` |
 | 2 | No structured, queryable incident history | Operations Center Analytics page, `frontend/app/(ops)/analytics` |
 | 3 | No defined SLA policy to measure against | PostgreSQL queries over incident lifecycle timestamps already written by other modules as a side effect of their own work |
-| 4 | — | Authenticated, role-checked NestJS services computing volume, response-time, dispatch-performance, SLA-compliance, and false-alert-rate charts |
+| 4 | — | Authenticated, role-checked NestJS services computing volume, response-time, SLA-compliance and false-alert-rate figures (Supervisor and System Administrator) |
 
 ---
 
@@ -76,10 +76,10 @@ Accountability and continuous improvement — showing, with numbers, whether the
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | A supervisor or dispatcher opens the Analytics page and selects a 7/30/90-day window. | User Action |
+| 1 | A Supervisor opens the Analytics page (only Supervisors see it) and selects a 7/30/90-day window. | User Action |
 | 2 | The analytics service reads incident lifecycle timestamps already sitting in PostgreSQL. | Processing |
-| 3 | It aggregates incident volume, response-time distribution, and dispatch performance for that window. | Processing |
-| 4 | It measures SLA compliance against the active SLA policy's thresholds. | Validation |
+| 3 | It aggregates incident volume by category and by status, and response times, for that window. | Processing |
+| 4 | It measures acknowledge and dispatch SLA compliance against the active SLA policy's thresholds. | Validation |
 | 5 | It computes the false-alert rate for the same window. | Processing |
 | 6 | The charts render; an empty date range shows "No data" rather than a misleading zero percent. | Database |
 
@@ -87,8 +87,8 @@ Accountability and continuous improvement — showing, with numbers, whether the
 
 | No. | Output Produced by the Proposed Process |
 |---|---|
-| 1 | Incident-volume, response-time, and dispatch-performance charts for the selected window |
-| 2 | An SLA-compliance figure measured against the active policy |
+| 1 | Incident-volume (by category and status) and response-time charts for the selected window |
+| 2 | Acknowledge SLA and Dispatch SLA compliance figures measured against the active policy |
 | 3 | A false-alert rate, or an honest "No data" state for an empty range |
 
 ---

@@ -30,7 +30,7 @@ Give the Operations Center a second, independent channel to learn of a new repor
 3. Queues the SMS job on Redis/BullMQ so sending never blocks the incident-creation request.
 4. Sends the queued message through the Textbee gateway API using the configured device.
 5. Logs the outcome (sent / gateway-rejected / not-configured) without retrying or altering the incident if it fails.
-6. Queues the parallel data-path push notification to the Operations Center and, when the reporter is signed in, to their emergency contacts — alongside the SMS, not instead of it.
+6. Queues the incident's first SLA check (MOD-41) beside the SMS; the data path (HTTPS and the live dashboard event) runs alongside it, not instead of it.
 
 ---
 
@@ -41,7 +41,7 @@ Give the Operations Center a second, independent channel to learn of a new repor
 | 1 | Caller's spoken details relayed to the Operations Center operator by phone or radio | The saved incident's reference number, coordinates (or none), submission time and category |
 | 2 | Operator's own notes of which incidents have been phoned in | The configured MDRRMO operations phone number (`MDRRMO_OPS_PHONE`) |
 | 3 | | Textbee API key and device ID (`TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID`) |
-| 4 | | The queued push-notification payload for the Operations Center and, when signed in, the reporter's emergency contacts |
+| 4 | | The incident's SLA policy, for the first SLA check |
 
 ---
 
@@ -52,7 +52,7 @@ Give the Operations Center a second, independent channel to learn of a new repor
 | 1 | Telephone / radio relay to the Operations Center | `OpsAlertService` (`backend/src/emergency-alerts/ops-alert.service.ts`) — payload build and SMS/SLA queueing |
 | 2 | Operator's memory or handwritten note of what was phoned in | Redis + BullMQ SMS queue and worker (`backend/src/jobs/processors/sms.processor.ts`) |
 | 3 | | Textbee SMS gateway API (Android device SIM) |
-| 4 | | Notification queue for the parallel push path (`backend/src/notifications`) |
+| 4 | | SLA monitor queue (`backend/src/jobs`) for the first SLA check (MOD-41) |
 | 5 | | PostgreSQL as the already-persisted source of truth the SMS only announces |
 
 ---
@@ -82,7 +82,7 @@ Give the Operations Center a second, independent channel to learn of a new repor
 | 2 | The service builds the compact SMS payload from the saved incident's reference, coordinates, submission time and category, truncated to 160 characters. | Processing |
 | 3 | It reads the configured MDRRMO operations phone number; if it's unset or a placeholder, the SMS step is skipped and logged, and nothing else is affected. | Validation |
 | 4 | The SMS job is queued on Redis/BullMQ so the incident-creation request is never blocked waiting on it. | Integration |
-| 5 | In parallel, a push-notification job is queued for the Operations Center and, if the reporter is signed in, another for their emergency contacts. | Notification |
+| 5 | Alongside the SMS, the service queues the incident's first SLA check (MOD-41), while the data path delivers the incident live to the Operations Center dashboard (MOD-20) and the reporter's emergency contacts get their own SMS (MOD-16). | Notification |
 | 6 | The SMS worker sends the message through the Textbee gateway API using the configured device. | Integration |
 | 7 | If Textbee isn't configured or rejects the request, the error is logged (with guidance to check the API key/device ID) and swallowed — the job resolves without retrying, and the incident is unaffected. | Processing |
 | 8 | On success, delivery is logged. Unlike the barangay-notice critical path (a different module), this path does not poll Textbee for a delivered/failed confirmation. | Processing |
@@ -92,7 +92,7 @@ Give the Operations Center a second, independent channel to learn of a new repor
 | No. | Output Produced by the Proposed Process |
 |---|---|
 | 1 | SMS delivered, or skipped/logged, to the Operations Center phone via Textbee |
-| 2 | Parallel push-notification jobs queued for the Operations Center and the reporter's emergency contacts |
+| 2 | The first SLA check queued for the incident, beside the live dashboard alert (data path) |
 | 3 | Log record of the send/skip/failure outcome |
 | 4 | No change to the incident record — the message only announces the already-saved incident |
 
@@ -106,5 +106,5 @@ Give the Operations Center a second, independent channel to learn of a new repor
 3. Use an invalid Textbee API key and confirm the incident still saves normally; check the log for the gateway-rejected warning.
 
 **Do not claim:**
-- A general-purpose multi-channel gateway (email, voice, arbitrary recipients) — this module sends to one configured phone number via Textbee SMS, alongside the push path.
+- A general-purpose multi-channel gateway (email, voice, arbitrary recipients) — this module sends to one configured phone number via Textbee SMS, alongside the HTTPS data path.
 - Delivery-confirmation polling on this path — that exists only for barangay critical SMS notices, a different module's code path.

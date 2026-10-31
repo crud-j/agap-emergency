@@ -26,12 +26,11 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 
 **Tasks Performed**
 1. Creates the `dispatches` row and marks the resource `DISPATCHED`, inside one database transaction with the incident's status change.
-2. Writes an audit entry (`MOD-31`) for the dispatch, every reassignment, cancellation, and crew add/remove.
+2. Writes an audit entry (`MOD-31`) for the dispatch.
 3. Broadcasts `incident.assigned`, `incident.status_changed`, `dispatch.created`, and `resource.status_changed` to the ops room and the incident's room.
 4. Notifies the reporter ("Help is on the way") through the in-app feed and a queued push job.
-5. Sends a push notification to each crew member's phone for a new assignment, an added crew member, or a cancelled assignment. The push shows only the category and reference number, and tapping it opens the assignment.
+5. Sends a push notification to each crew member's phone for a new assignment. The push shows only the category and reference number, and tapping it opens the assignment.
 6. Notifies the assigning dispatcher's console bell when the responder's own status changes (en route, on scene, transporting, resolved) — `IncidentStatusNotifier.notifyDispatcher`.
-7. Supports cancel, reassign (cancel + recreate against a new resource), and add/remove crew, each audited and broadcast.
 
 ---
 
@@ -51,10 +50,10 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Two-way radio to the unit | `DispatchService.create` (`backend/src/dispatch/dispatch.service.ts`) — transactional dispatch creation with row-level locking on responder availability |
-| 2 | Verbal confirmation back to the dispatcher | `POST /v1/dispatch`, `PATCH /dispatch/:id/cancel`, `PATCH /dispatch/:id/reassign`, `POST/DELETE /dispatch/:id/crew` (`backend/src/dispatch/dispatch.controller.ts`) |
+| 2 | Verbal confirmation back to the dispatcher | `POST /v1/dispatch` (`backend/src/dispatch/dispatch.controller.ts`) |
 | 3 | Dispatcher's memory/logbook of who is assigned where | `RealtimeService`/`AgapGateway` — `incidentAssigned`, `notifyIncidentStatusChanged`, `notifyDispatchCreated`, `resourceStatusChanged` emits |
 | 4 |  | `IncidentStatusNotifier` (`backend/src/notifications/incident-status-notifier.ts`) — reporter push + in-app feed row; dispatcher in-app bell on responder progress |
-| 5 |  | `AuditService` — one audit row per dispatch, cancel, reassign, crew change (`moduleId: 'MOD-31'`) |
+| 5 |  | `AuditService` — one audit row per dispatch (`moduleId: 'MOD-31'`) |
 | 6 |  | Redis + BullMQ notification queue and Firebase Cloud Messaging — assignment push on a high-priority "Responder assignments" Android channel (3 attempts) |
 | 7 |  | Mobile: `mobile/app/responder/assignments.tsx` + `useResponderAssignments` hook — REST poll every 15 seconds as the fallback |
 
@@ -82,7 +81,7 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | The dispatcher opens Dispatch on an Acknowledged/Assessed incident, picks a unit (optionally from MOD-30's ranked list) and clicks Confirm Dispatch. | User Action |
+| 1 | The dispatcher opens Dispatch on an Acknowledged/Assessed incident, picks a unit (optionally from MOD-30's ranked list) and clicks Authorize Dispatch. | User Action |
 | 2 | The backend checks the incident is in a dispatchable status and the resource is `AVAILABLE`; any named crew's availability rows are locked and checked before the dispatch commits. | Validation |
 | 3 | In one transaction: the `dispatches` row is created PENDING, the resource is marked `DISPATCHED`, the incident is marked `DISPATCHED`, and an `incidentEvent` row is written. | Database |
 | 4 | An audit row (`MOD-31`, action `DISPATCH`) is written with the resource and crew IDs. | Database |
@@ -91,8 +90,7 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 | 7 | The backend queues one push per crew member: "New assignment — <category> · <reference>. Open AGAP to accept." It carries no address, patient or reporter details because it shows on the lock screen. A failed push never affects the dispatch. | Notification |
 | 8 | The responder taps the push and the app opens that assignment directly. | User Action |
 | 9 | As the assigned responder changes their own status (en route, on scene, transporting, resolved) elsewhere in the app, `IncidentStatusNotifier.notifyDispatcher` writes an in-app bell notification for the dispatcher who made the assignment. | Notification |
-| 10 | The dispatcher can cancel (frees the resource, broadcasts `dispatch.cancelled`, and pushes "Assignment cancelled" to the crew), reassign (cancel + re-create against a new resource), or add/remove crew (an added member gets the assignment push) — each audited and broadcast the same way. | Processing |
-| 11 | If a push doesn't arrive, the assignment still surfaces in the Missions list, which polls assignments every 15 seconds and on pull-to-refresh. | Processing |
+| 10 | If a push doesn't arrive, the assignment still surfaces in the Missions list, which polls assignments every 15 seconds and on pull-to-refresh. | Processing |
 
 **TO-BE Outputs**
 
@@ -102,7 +100,7 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 | 2 | Live ops/incident-room broadcast of the assignment and resource status change |
 | 3 | Reporter push/in-app notice that responders are en route |
 | 4 | Dispatcher in-app notice as the responder's status progresses |
-| 5 | Assignment (or cancellation) push notification on each crew member's phone |
+| 5 | Assignment push notification on each crew member's phone |
 | 6 | Responder's assignment visible in the mobile Missions list within 15 seconds, even without the push |
 
 ---
@@ -118,4 +116,5 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 **Do not claim:**
 - A live Socket.io update on the Missions screen. The phone learns of an assignment from the push or the 15-second poll, not from a socket event.
 - Dispatching a second unit to an incident that is already Dispatched. The backend accepts a dispatch only while the incident is Acknowledged, Assessed or Dispatch Pending (finding P3-F1 in the unit field-flow plan). Add crew to the existing dispatch instead.
+- Cancelling, reassigning or changing the crew of a dispatch, or the "Assignment cancelled" push. The backend supports them, but no screen offers them (see MOD-31's implementation gap).
 - Messaging to a unit or crew outside AGAP (no external-agency radio/CAD bridge) — assignment always targets an AGAP-registered resource and user.

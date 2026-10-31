@@ -45,7 +45,7 @@ Give every citizen a verified identity and contact number, so that reports, emer
 | 5 | Barangay resident records (RBI), kept separately | Device GPS coordinates (for the Bocaue check) |
 | 6 | | Agreement to the Terms of Service and Privacy Policy |
 | 7 | | 6-digit one-time SMS code (OTP) |
-| 8 | | Profile preferences (language, text size, high contrast, reduced motion, map icon) |
+| 8 | | Profile preferences (language, text size, high contrast, reduced motion) and an optional map icon choice (Male, Female or Prefer not to say) |
 
 ---
 
@@ -99,7 +99,7 @@ Give every citizen a verified identity and contact number, so that reports, emer
 | 8 | The backend marks the phone verified, sets the account to Active, creates a session, and returns access and refresh tokens. The app stores them in Secure Store and opens Home. | Database |
 | 9 | On later visits, the citizen signs in with a password, a one-time SMS code (valid 10 minutes), or a saved passkey (fingerprint or face). | User Action |
 | 10 | For a forgotten password, the citizen requests a reset code by SMS, enters it with a new password, and the backend saves the new hashed password. | Processing |
-| 11 | The Profile screen shows the name and the phone and email with their verification status. The citizen changes language, text size, contrast, motion and map icon; each change is saved to the account. | Database |
+| 11 | The Profile screen shows the name and the phone and email with their verification status. The citizen changes language, text size, contrast, motion and the optional map icon (Male, Female or Prefer not to say, used only for the reporter's icon on the responder's map); each change is saved to the account. | Database |
 | 12 | When the citizen signs out, the backend revokes the session and the app deletes the stored tokens. | Processing |
 
 **TO-BE Outputs**

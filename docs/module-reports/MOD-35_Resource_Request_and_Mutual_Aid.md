@@ -41,7 +41,7 @@ Turn mutual-aid requests — "we need another ambulance from the next barangay" 
 | 2 | Verbally agreed resource type and quantity | Resource type, quantity and needed capabilities |
 | 3 | A verbal yes or no, not recorded | Priority and request notes |
 | 4 | — | The requesting organization (resolved from the signed-in user) |
-| 5 | — | The providing organization's approve/deny decision and notes |
+| 5 | — | The providing organization's accept/reject decision and notes |
 
 ---
 
@@ -78,18 +78,18 @@ Turn mutual-aid requests — "we need another ambulance from the next barangay" 
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | A Dispatcher or Supervisor opens the resource-request form for the incident and enters resource type, quantity, needed capabilities, priority and notes. | User Action |
+| 1 | A Dispatcher or Supervisor opens the Mutual Aid tab on the Multi-Agency page, picks the incident, and enters resource type, quantity, needed capabilities, priority and notes. | User Action |
 | 2 | The backend validates the request body and resolves the requesting organization from the signed-in user's account. | Validation |
 | 3 | The backend creates the resource-request record with status Pending. | Database |
-| 4 | The receiving organization's Org Administrator (or System Administrator) reviews pending requests, filterable by incident, organization or status. | User Action |
-| 5 | The reviewer approves (the backend resolves their organization as the provider and marks the request fulfilled) or denies the request, with notes. | Validation |
-| 6 | The backend persists the decision and notes against the request record. | Database |
+| 4 | An Org Administrator of another organization (or a System Administrator) opens the Requests inbox and reviews pending requests, filterable by incident, organization or status. | User Action |
+| 5 | The reviewer clicks Provide (accept) or Deny (reject) and confirms, with notes. The backend refuses an organization accepting its own request, and refuses a request that was already answered, so two organizations can't both become the provider. | Validation |
+| 6 | The backend saves the decision (Accepted, with the reviewer's organization as the provider and the fulfilled time, or Rejected) and notes, and writes an audit entry. | Database |
 
 **TO-BE Outputs**
 
 | No. | Output Produced by the Proposed Process |
 |---|---|
-| 1 | A persisted resource request with status (Pending, Approved/Fulfilled, Denied) |
+| 1 | A persisted resource request with status (Pending, Accepted or Rejected) and an audit entry for each step |
 | 2 | A recorded providing organization and decision notes once resolved |
 | 3 | A filterable list of requests by incident, organization or status |
 

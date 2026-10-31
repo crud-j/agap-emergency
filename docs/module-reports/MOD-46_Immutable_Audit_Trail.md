@@ -51,7 +51,7 @@ Give supervisors and system administrators a record they can trust when reviewin
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | A supervisor's memory, verbal confirmation, or informal notes | `backend/src/audit/audit.service.ts` — `log()` (fire-and-forget) and `logInTransaction()` (transactional) write paths |
-| 2 | No searchable record at all | PostgreSQL `audit_log` table (insert-only; no update or delete path in the service) |
+| 2 | No searchable record at all | PostgreSQL `audit_logs` table (insert-only; no update or delete path in the service) |
 | 3 | | NestJS REST API (`/v1/audit`), restricted to Supervisor and System Administrator (incident-scoped reads also open to Dispatcher) |
 | 4 | | Operations Center Audit page, `frontend/app/(ops)/audit` |
 
@@ -83,7 +83,7 @@ Give supervisors and system administrators a record they can trust when reviewin
 | 2 | That module's service calls the audit service with the action, actor, entity, module ID, and before/after values. | Integration |
 | 3 | For actions that must not be recorded unless the underlying change commits (e.g. an account unlock), the audit write runs inside the same database transaction; its failure rolls back the change too. | Database |
 | 4 | For routine actions, the write runs outside the transaction and is wrapped so a logging failure is caught and logged, never blocking the action it describes. | Validation |
-| 5 | The row is appended to `audit_log` with a server timestamp. There is no update or delete path exposed anywhere in the service. | Database |
+| 5 | The row is appended to `audit_logs` with a server timestamp. There is no update or delete path in the application, and a database trigger refuses any UPDATE, DELETE or TRUNCATE on the table. | Database |
 | 6 | A Supervisor or System Administrator opens the Audit page, filters by action, actor, entity type/ID, or date range, and pages through results; a Dispatcher, Supervisor, or System Administrator can pull the trail for one incident. | User Action |
 | 7 | The API attaches the acting user's (and, for account-level events, the affected user's) display name and role to each row for readability, without exposing phone number or email. | Processing |
 
@@ -91,7 +91,7 @@ Give supervisors and system administrators a record they can trust when reviewin
 
 | No. | Output Produced by the Proposed Process |
 |---|---|
-| 1 | An appended, timestamped `audit_log` row per consequential action |
+| 1 | An appended, timestamped `audit_logs` row per consequential action |
 | 2 | A filterable, paginated audit list for Supervisors and System Administrators |
 | 3 | A per-incident audit trail for Dispatchers, Supervisors, and System Administrators |
 
@@ -101,9 +101,9 @@ Give supervisors and system administrators a record they can trust when reviewin
 
 **Test before signing:**
 1. As an administrator, unlock a locked account and confirm an `ACCOUNT_UNLOCKED` row appears in Audit with the reason recorded.
-2. Try to find an update or delete endpoint for an audit entry in the API — there isn't one.
+2. Try to find an update or delete endpoint for an audit entry in the API — there isn't one. In the database, run `DELETE FROM audit_logs WHERE ...` on a test row; it must be refused ("audit_logs is append-only").
 3. Open Audit, filter by action and by date range, and confirm paging works.
 4. Pull the audit trail for one incident and confirm it only shows that incident's entries.
 
 **Do not claim:**
-- Database-level tamper-proof (WORM) storage. The guarantee is that the application code has no update/delete path — not that the underlying table is physically immutable.
+- Physically tamper-proof (WORM) storage. The application has no update/delete path and a database trigger refuses UPDATE, DELETE and TRUNCATE, but a database superuser could still remove the trigger.

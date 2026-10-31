@@ -25,7 +25,7 @@ While an incident is active, this module tracks and shares two live positions: t
 Let the reporter see that help is actually moving, and let the dispatcher/supervisor see every unit's real position on the ops map, without either side having to ask by radio "where are you now."
 
 **Tasks Performed**
-1. Accepts a responder's GPS position only while they are crewed on an ACCEPTED dispatch for that incident (object-level ownership check).
+1. Accepts a responder's GPS position only while they are crewed on an active dispatch for that incident (object-level ownership check), inside Bocaue or, while transporting to a hospital, inside the wider service area.
 2. Saves every position to `location_history`, keyed by incident, responder and timestamp.
 3. Streams the update over Socket.io to the incident's room (reporter + crew) and the operations room (`ops:all`).
 4. Returns the latest position and a routed ETA for each unit on an incident, collapsing multiple crew phones on one unit into a single freshest fix.
@@ -81,10 +81,10 @@ Let the reporter see that help is actually moving, and let the dispatcher/superv
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | A responder's phone, while the dispatch is ACCEPTED, posts latitude/longitude/heading/speed to `/locations/track` at the mobile app's reporting interval. | User Action |
-| 2 | The backend checks the coordinate falls inside Bocaue and that the posting user is actually crewed on an ACCEPTED dispatch for that incident; otherwise the position is rejected (`ForbiddenException`). | Validation |
+| 1 | While the responder is crewed on an active dispatch, the responder app shares its position automatically, posting latitude/longitude/heading/speed to `/locations/track` about every 5 seconds or every 15 m of movement. | User Action |
+| 2 | The backend checks that the posting user is crewed on an active dispatch for that incident (otherwise the position is rejected), and that the position is inside Bocaue — or, while the crew is transporting a patient to a hospital, inside the wider service area. | Validation |
 | 3 | The backend saves the fix to `location_history` with the incident ID, responder ID and timestamp. | Database |
-| 4 | The backend emits `responder.location_updated` (call sign only, never a name/phone) to the incident room and the ops room over Socket.io. | Notification |
+| 4 | The backend emits `responder.location_updated` (call sign only, never a name/phone) over Socket.io: on the way to the scene, to the incident room and the ops room; on the way to a hospital, only to the ops room and the crew, because the position would reveal the destination. | Notification |
 | 5 | The backend enqueues a throttled `eta-refresh` job (BullMQ, one per 15 s per dispatch) that recalculates a routed ETA from the freshest fix. | Processing |
 | 6 | The citizen's tracking screen (joined via `join:incident`) patches the responder marker and ETA live; a reconnect re-seeds from `GET /tracking/:incidentId/latest` so no gap is left unfilled. | Notification |
 | 7 | The dispatcher/supervisor ops map reads `GET /locations/responders`, one marker per active unit, collapsing multiple crew phones on the same dispatch into the freshest single fix. | Processing |
@@ -110,4 +110,5 @@ Let the reporter see that help is actually moving, and let the dispatcher/superv
 
 **Do not claim:**
 - Continuous background tracking when the app is closed or the phone is locked — a position is only sent when the responder screen/app actively posts one.
-- A guaranteed reporting interval — the throttle caps ETA recalculation at once per 15 seconds per dispatch, but GPS push frequency itself depends on the mobile app's own polling, not a server-enforced cadence.
+- A guaranteed reporting interval — the phone asks for a position about every 5 seconds, but the actual rate depends on the phone; the server only caps ETA recalculation at once per 15 seconds per dispatch.
+- The citizen seeing the unit's position on the way to the hospital. It is hidden from the incident room on that leg.

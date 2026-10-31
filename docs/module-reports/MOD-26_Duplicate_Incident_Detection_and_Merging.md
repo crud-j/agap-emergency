@@ -19,17 +19,17 @@ Content for the [Individual Module Report template](../M_5.pdf). Each section be
 ## 2. Module Description
 
 **Description**
-During a real event the same emergency is often reported more than once, by different bystanders from different phones. This module finds those probable duplicates using time and location closeness (via PostGIS), category similarity, and text similarity, and surfaces ranked candidates for a dispatcher to review.
+During a real event the same emergency is often reported more than once, by different bystanders from different phones. This module shows the dispatcher, on the Triage page, other recent reports of the same category made within 15 minutes and 200 metres, nearest first, and lets the dispatcher merge a report into the one it duplicates.
 
 **Purpose**
 Avoid wasting a scarce unit on a response that duplicates one already mobilized, while keeping the merge decision in human hands — nothing merges automatically.
 
 **Tasks Performed**
-1. Compares each new incident against recent open incidents by distance, time window, category, and description similarity.
-2. Ranks and surfaces likely duplicate candidates directly in the dispatcher's incident workflow.
+1. Finds other open reports of the same category made within 15 minutes and 200 metres of the report being triaged.
+2. Lists those candidates on the Triage page, nearest first, with their distance.
 3. Requires the dispatcher's explicit confirmation before merging two incidents.
 4. Designates one incident as the master and preserves the other's full history rather than deleting it.
-5. Records every candidate match and every merge decision to the audit trail.
+5. Records every merge on the incident's timeline and in the audit trail.
 
 ---
 
@@ -38,8 +38,8 @@ Avoid wasting a scarce unit on a response that duplicates one already mobilized,
 | No. | AS-IS Input (Existing Process) | TO-BE Input (Proposed Automated Process) |
 |---|---|---|
 | 1 | The operator's memory of a similar call just received, or a lucky cross-check of the logbook | Two or more incident records with location, time, category, and description |
-| 2 | No systematic check against recently opened reports | The computed similarity factors (distance, time window, category match, text similarity) |
-| 3 | No shared record if the first operator doesn't happen to notice | The dispatcher's explicit confirm-or-decline decision on a surfaced candidate |
+| 2 | No systematic check against recently opened reports | The matching rules: same category, within 15 minutes and 200 metres |
+| 3 | No shared record if the first operator doesn't happen to notice | The dispatcher's Merge choice and its confirmation |
 
 ---
 
@@ -48,10 +48,10 @@ Avoid wasting a scarce unit on a response that duplicates one already mobilized,
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Operator's memory and a manual cross-check of the paper/spreadsheet logbook | `backend/src/incidents/duplicate-detection/` service comparing new incidents against recent open ones |
-| 2 | No distance or time-window calculation — purely recall-based | PostGIS distance calculation and a time-window check between candidate incidents |
-| 3 | No category or text comparison tool | Category-match and description text-similarity scoring |
-| 4 | — | Dispatcher-facing candidate surfacing inside the incident workflow, with explicit confirm/decline |
-| 5 | — | PostgreSQL persistence of the merge (master incident retains both reports' history) and an audit-trail entry per decision |
+| 2 | No distance or time-window calculation — purely recall-based | Distance and time-window check between reports (shared thresholds: 15 minutes, 200 metres) |
+| 3 | No category or text comparison tool | Operations web console Triage page (Next.js) with a Possible duplicates panel |
+| 4 | — | NestJS REST API `POST /v1/incidents/:id/merge` (Dispatcher, Supervisor) |
+| 5 | — | PostgreSQL persistence of the merge (the duplicate keeps its own history and points to its master) and an audit-trail entry per merge |
 
 ---
 
@@ -78,28 +78,29 @@ Avoid wasting a scarce unit on a response that duplicates one already mobilized,
 | Step | Process Description | Step Type |
 |---|---|---|
 | 1 | A new incident is submitted and saved. | Database |
-| 2 | The duplicate-detection service compares it against recent open incidents by distance, time window, category, and description similarity. | Processing |
-| 3 | Likely candidates are ranked and surfaced to the dispatcher directly inside the incident workflow. | Notification |
-| 4 | The dispatcher reviews the candidate and either confirms or declines the merge. | User Action |
-| 5 | On confirmation, the system designates one incident as the master and preserves the other's history rather than deleting it. | Database |
-| 6 | Every candidate match and every merge decision — confirmed or declined — is written to the audit trail. | Database |
+| 2 | When the dispatcher opens the report on the Triage page, the page looks for other open reports of the same category made within 15 minutes and 200 metres of it. | Processing |
+| 3 | Matching reports are listed in a Possible duplicates panel, nearest first, with their reference and distance. | Processing |
+| 4 | The dispatcher clicks Merge on the report it duplicates and confirms; or leaves the list alone if it is a separate emergency. | User Action |
+| 5 | The backend refuses merging a report into itself, into a report that is itself a duplicate, or a report that is already finished. Otherwise it sets the report to Duplicate, links it to its master, and keeps its history; nothing is deleted. | Validation |
+| 6 | The merge is written to the report's timeline and the audit trail, and broadcast live so other screens update. | Database |
 
 **TO-BE Outputs**
 
 | No. | Output Produced by the Proposed Process |
 |---|---|
-| 1 | A ranked list of probable duplicate candidates shown to the dispatcher |
-| 2 | A master incident record preserving both reports' history after a confirmed merge |
-| 3 | An audit-trail entry for every surfaced candidate and every merge decision |
+| 1 | A list of possible duplicates, nearest first, shown to the dispatcher |
+| 2 | The duplicate report marked Duplicate and linked to its master, with both histories kept |
+| 3 | A timeline event and audit-trail entry for every merge |
 
 ---
 
 ## Owner notes (not part of the report)
 
 **Test before signing:**
-1. Submit two SOS reports of the same category, close together in time and location (from two different phones or sessions); open either incident and confirm the possible-duplicate candidate is surfaced.
-2. Confirm a merge and verify the master incident retains both reports' history rather than deleting one; separately, decline a merge candidate and confirm nothing changes.
+1. Submit two SOS reports of the same category, close together in time and location (from two different phones or sessions); open the newer one on the Triage page and confirm the other is listed under Possible duplicates.
+2. Click Merge, confirm, and check the newer report shows Duplicate with a link to the master, its timeline is kept, and an audit row exists.
 
 **Do not claim:**
-- A guaranteed or AI-validated duplicate match — this surfaces probable candidates for a human to judge.
+- A guaranteed or AI-validated duplicate match, or text similarity — the list uses category, time and distance only, for a human to judge.
+- A record of a dispatcher deciding *not* to merge. Only merges are recorded.
 - Automatic or lossless merging — every merge requires explicit dispatcher confirmation.

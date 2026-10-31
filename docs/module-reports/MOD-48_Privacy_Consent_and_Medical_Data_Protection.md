@@ -79,7 +79,7 @@ Earn the trust that comes with holding medical information, without claiming to 
 | 1 | Before any medical data is accepted, the backend requires a separate, explicit consent record, granted or withdrawn, with a timestamp. | Validation |
 | 2 | Every medical value saved is classified and, for the medical profile, encrypted at rest with AES-256-GCM. | Processing |
 | 3 | Access to sensitive data is logged. | Database |
-| 4 | The citizen opens their own Privacy screen and views the access log or exports their own data. | User Action |
+| 4 | The citizen opens their own Privacy screen and views the access log or exports their own data as a CSV or PDF file. | User Action |
 | 5 | If the citizen withdraws consent, the Medical Profile screen (MOD-03) locks again immediately. | Validation |
 | 6 | Consequential actions are written to the audit trail. | Database |
 
