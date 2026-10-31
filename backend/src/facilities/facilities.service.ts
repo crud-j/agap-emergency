@@ -18,6 +18,15 @@ export class FacilitiesService {
     });
   }
 
+  /** Active evacuation centers, for a rescue crew's trip log. No contacts or capacity data. */
+  async listEvacuationCenters() {
+    return this.prisma.facility.findMany({
+      where: { is_active: true, facility_type: 'EVACUATION_CENTER' },
+      select: { id: true, name: true, barangay: true, latitude: true, longitude: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async findById(id: string) {
     const facility = await this.prisma.facility.findUnique({
       where: { id },

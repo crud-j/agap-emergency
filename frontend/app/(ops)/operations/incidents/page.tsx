@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState, type JSX } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Archive, Search } from 'lucide-react';
 import {
-  DataTable, PriorityBadge, StatusChip, Button,
+  DataTable, PriorityBadge, StatusChip, Button, Badge,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   type Column,
 } from '@/components/ui';
@@ -15,6 +15,8 @@ import { useWsState } from '@/lib/use-ws-state';
 import { useIncidents } from '@/features/incidents/hooks';
 import { categoryIcon, titleCase, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
+import { FIRE_TONE_BADGE, fireQueueBadge } from '@/lib/fire-report-view';
+import { rescueQueueBadge } from '@/lib/rescue-trip-view';
 
 const ALL = 'ALL';
 const PRIORITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
@@ -44,6 +46,8 @@ interface QueueRow {
   status: string;
   barangay: string;
   submitted_at: string;
+  fire: ReturnType<typeof fireQueueBadge>;
+  rescued: string | null;
 }
 
 /**
@@ -134,6 +138,8 @@ function IncidentQueue(): JSX.Element {
         status: i.status,
         barangay: i.incident_locations?.barangay ?? '—',
         submitted_at: i.submitted_at,
+        fire: fireQueueBadge(i),
+        rescued: rescueQueueBadge(i),
       }));
   }, [incidents, search, status, category, priority, barangay, sort]);
 
@@ -157,7 +163,19 @@ function IncidentQueue(): JSX.Element {
       },
     },
     { key: 'priority', header: 'Priority', accessor: (r) => <PriorityBadge priority={r.priority} /> },
-    { key: 'status', header: 'Status', accessor: (r) => <StatusChip status={r.status} /> },
+    {
+      key: 'status',
+      header: 'Status',
+      accessor: (r) => (
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <StatusChip status={r.status} />
+          {/* MOD-36: the latest fire report's status (plan Phase 3). */}
+          {r.fire && <Badge variant={FIRE_TONE_BADGE[r.fire.tone]}>{r.fire.text}</Badge>}
+          {/* MOD-52: people rescued so far by rescue units (plan Phase 4). */}
+          {r.rescued && <Badge variant="green">{r.rescued}</Badge>}
+        </span>
+      ),
+    },
     { key: 'barangay', header: 'Barangay', accessor: (r) => <span className="text-sm text-agap-textMid">{r.barangay}</span> },
     { key: 'age', header: 'Age', accessor: (r) => <span className="text-xs text-agap-textSub tabular-nums">{timeAgo(r.submitted_at)}</span> },
   ];

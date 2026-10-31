@@ -4,14 +4,14 @@
 
 **System:** AGAP — A GPS-Based Mobile Emergency Alert System for Immediate Hospital Ambulance Dispatch
 **Module ID:** MOD-32
-**Module Name:** Responder / Ambulance Crew Mobile Interface
+**Module Name:** Responder / Unit Crew Mobile Interface
 **Prepared By:** Christian Joaquin
 **Context:** Bocaue, Bulacan MDRRMO / LGU Operations Center
 
 ---
 ## 1. Module Identification
 
--   **Module Name:** Responder / Ambulance Crew Mobile Interface
+-   **Module Name:** Responder / Unit Crew Mobile Interface
 -   **Module ID:** MOD-32
 -   **Version:** 1.0
 -   **Date Created / Updated:** September 8, 2026 / initial detailed
@@ -23,7 +23,9 @@
 
 ## 2. Purpose / Objective
 
-Provides responders/ambulance crews with a mobile operational workspace.
+Provides responder crews for ambulance, fire, rescue, and general units with a
+mobile operational workspace. The unit's resource type selects the field flow;
+the shared accept, en-route, on-scene, and finish process remains common.
 
 The module exists to give this capability one clear owner, predictable
 behavior and a testable interface to the rest of the emergency-response
@@ -38,6 +40,9 @@ availability, medical outcomes or faster physical travel.
 -   Assignment inbox - incident summary -
     navigation - status updates - location -
     assessment - transport and handover.
+-   Unit-specific field actions: medical transport/first aid, fire-condition
+    reporting (Phase 3 placeholder), and rescue-trip recording (Phase 4
+    placeholder).
 
 ### Out of Scope
 

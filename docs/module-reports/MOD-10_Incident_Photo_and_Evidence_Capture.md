@@ -1,6 +1,6 @@
 # MOD-10 — Incident Photo and Evidence Capture
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -49,7 +49,7 @@ Show dispatchers what the scene looks like (smoke, water level, vehicles) so the
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Personal phone camera | AGAP Citizen mobile app (Expo Camera) |
-| 2 | Text messaging / Facebook Messenger | NestJS REST API (`POST /api/v1/incidents/:id/attachments`, multipart) |
+| 2 | Text messaging / Facebook Messenger | NestJS REST API (`POST /v1/incidents/:id/attachments`, multipart) |
 | 3 | | S3-compatible object storage (local disk fallback in development) |
 | 4 | | Advisory authenticity check (capture time, place and source) |
 | 5 | | PostgreSQL (`incident_attachments`) |
@@ -88,6 +88,7 @@ Show dispatchers what the scene looks like (smoke, water level, vehicles) so the
 | 7 | The backend scores the capture: was it live, taken near the report time and place, inside Bocaue. It saves the record with the score and the reasons. | Database |
 | 8 | The dashboard is told a file was added; the drawer shows the media with a chip: Verified, Review or Suspect, and the reasons in plain words. | Notification |
 | 9 | If the upload fails, the app tells the reporter the report was delivered but the photo was not. | Notification |
+| 10 | If a photo is clearly not genuine or not relevant, the dispatcher or supervisor clicks Reject on it in the drawer and can add a note. The backend refuses a second rejection, saves who rejected it and when, writes an audit entry, and the chip changes to Rejected for every viewer. The incident itself is not changed. | Database |
 
 **TO-BE Outputs**
 
@@ -97,6 +98,7 @@ Show dispatchers what the scene looks like (smoke, water level, vehicles) so the
 | 2 | Authenticity score and reasons saved with the file |
 | 3 | Media and check chip in the dispatcher's drawer |
 | 4 | Upload result message to the reporter |
+| 5 | Rejected-photo record (who, when, note) with an audit entry |
 
 ---
 
@@ -113,5 +115,6 @@ Show dispatchers what the scene looks like (smoke, water level, vehicles) so the
 - Choosing an existing photo from the gallery. Only live capture is offered.
 - More than one photo per report from the app.
 - The check proving a photo is real. It is advisory; the dispatcher decides.
+- The AI photo review. It runs only when `OPENAI_API_KEY` is set (empty by default), and then only adds an advisory label. Add it to the TO-BE only if your group turns it on for the demo.
 
 **Changed 2026-10-23:** only the incident's own reporter can upload (before, any signed-in account could attach a file to any incident).

@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
+import { HelpRequestDto } from './dto/help-request.dto';
 
 @ApiTags('responders')
 @ApiBearerAuth()
@@ -96,6 +97,18 @@ export class RespondersController {
     @Body() dto: UpdateAssignmentStatusDto,
   ) {
     return this.respondersService.updateStatus(id, req.user.id, dto);
+  }
+
+  @Post('assignments/:id/help-request')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER)
+  @ApiOperation({ summary: 'Ask dispatchers for additional field help' })
+  async requestHelp(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: any,
+    @Body() dto: HelpRequestDto,
+  ) {
+    return this.respondersService.requestHelp(id, req.user.id, dto);
   }
 
   @Post('location')

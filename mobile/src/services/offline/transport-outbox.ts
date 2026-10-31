@@ -1,10 +1,13 @@
 /**
  * Transport outbox (MOD-19, plan §19): start transport, destination change and arrival
  * tapped while the phone is offline are saved here (Expo Secure Store) and sent in tap
- * order when it reconnects. Each keeps the clientRequestId generated at the tap, so a
- * resend is recognised by the server and never records twice (Rule 12).
+ * order when it reconnects. A fire crew's report and a rescue crew's trip (unit field
+ * flow plan, Phases 3–4) wait in the same queue, so each is sent before a later step of
+ * the same crew. Each keeps the
+ * clientRequestId generated at the tap, so a resend is recognised by the server and
+ * never records twice (Rule 12).
  *
- * Only these three crew actions are queued. SOS is never held for later delivery
+ * Only these crew actions are queued. SOS is never held for later delivery
  * (transmission.tsx) and does not use this.
  *
  * An item leaves the outbox only on a 2xx, or on a 4xx the server will refuse again
@@ -15,9 +18,11 @@ import * as SecureStore from 'expo-secure-store';
 import { ApiError, NetworkError } from '@/src/services/api/http';
 import { updateAssignmentStatus } from '@/src/services/api/responders.api';
 import { listTransports, recordArrival, updateTransportDestination } from '@/src/services/api/transport.api';
+import { submitFireReport, type FireReportBody } from '@/src/services/api/fire-reports.api';
+import { submitRescueTrip, type RescueTripBody } from '@/src/services/api/rescue-trips.api';
 import { generateUUID } from '@/src/lib/uuid';
 
-/** Plan §19: at most 3 pending transport actions per dispatch. */
+/** Plan §19: at most 3 pending actions per dispatch. */
 export const MAX_PENDING_PER_DISPATCH = 3;
 /** Drop messages kept for the screen (newest last). */
 const MAX_DROPS = 5;
@@ -27,7 +32,11 @@ export type OutboxAction =
   | { kind: 'start'; incidentId: string; dispatchId: string }
   /** transportId null: the start is still waiting too; the open record is looked up when sending. */
   | { kind: 'destination'; incidentId: string; dispatchId: string; transportId: string | null; destinationId: string }
-  | { kind: 'arrive'; incidentId: string; dispatchId: string; transportId: string };
+  | { kind: 'arrive'; incidentId: string; dispatchId: string; transportId: string }
+  /** A fire report: POST /incidents/:id/fire-report. Several may wait; each is its own report. */
+  | { kind: 'fireReport'; incidentId: string; dispatchId: string; body: FireReportBody }
+  /** A rescue trip: POST /incidents/:id/rescue-trip. Several may wait; each is its own trip. */
+  | { kind: 'rescueTrip'; incidentId: string; dispatchId: string; body: RescueTripBody };
 
 export type OutboxItem = OutboxAction & {
   clientRequestId: string;
@@ -60,12 +69,13 @@ export type EnqueueResult = 'QUEUED' | 'FULL' | 'ALREADY_QUEUED';
 /**
  * Adds an item at the end. FULL: this dispatch already has 3 waiting. ALREADY_QUEUED:
  * the same tap, or a second start / arrival for the same dispatch (a double tap).
+ * Destinations, fire reports and rescue trips can each wait more than once.
  */
 export function enqueue(state: OutboxState, item: OutboxItem): { state: OutboxState; result: EnqueueResult } {
   const same = pendingFor(state, item.dispatchId);
   if (
     same.some((i) => i.clientRequestId === item.clientRequestId)
-    || (item.kind !== 'destination' && same.some((i) => i.kind === item.kind))
+    || ((item.kind === 'start' || item.kind === 'arrive') && same.some((i) => i.kind === item.kind))
   ) {
     return { state, result: 'ALREADY_QUEUED' };
   }
@@ -179,7 +189,9 @@ function isOutboxItem(value: unknown): value is OutboxItem {
     && typeof v.clientRequestId === 'string'
     && typeof v.dispatchId === 'string'
     && typeof v.incidentId === 'string'
-    && (v.kind === 'start' || v.kind === 'destination' || v.kind === 'arrive');
+    && (v.kind === 'start' || v.kind === 'destination' || v.kind === 'arrive'
+      || ((v.kind === 'fireReport' || v.kind === 'rescueTrip')
+        && typeof (v as { body?: unknown }).body === 'object' && (v as { body?: unknown }).body !== null));
 }
 
 // ─── Sending ───────────────────────────────────────────────────────────────────
@@ -198,6 +210,10 @@ export async function sendOutboxItem(item: OutboxItem, token: string): Promise<u
         clientRequestId: item.clientRequestId,
         occurredAt: item.tappedAt,
       });
+    case 'fireReport':
+      return submitFireReport(item.incidentId, { ...item.body, clientRequestId: item.clientRequestId }, token);
+    case 'rescueTrip':
+      return submitRescueTrip(item.incidentId, { ...item.body, clientRequestId: item.clientRequestId }, token);
   }
 }
 

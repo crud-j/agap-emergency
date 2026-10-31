@@ -1,6 +1,6 @@
 # MOD-24 — Emergency Severity and Priority Recommendation
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -29,7 +29,7 @@ Make sure a genuinely severe report isn't missed in a busy queue, and show the d
 2. Raises that default to CRITICAL only when specific intake answers match a defined list of high-risk conditions, and records which answer(s) triggered the raise.
 3. Recomputes the recommendation on demand from the incident's stored caller answers (`GET /dispatch/priority/:incidentId`), so the rule set can change without rewriting old incidents.
 4. Shows the recommended priority next to the current priority on the Triage screen when they differ.
-5. Lets the dispatcher confirm or override the priority during triage (`submitTriage`), with an optional note — the recommendation never applies itself.
+5. Lets the dispatcher confirm or override the priority from the Incident priority control in the incident drawer (`submitTriage`), with an optional note — the recommendation never applies itself.
 
 ---
 
@@ -40,7 +40,7 @@ Make sure a genuinely severe report isn't missed in a busy queue, and show the d
 | 1 | Caller's verbally described situation, judged for urgency on the spot by the operator | The incident's category |
 | 2 | | The caller's MOD-09 intake answers (e.g. pinned, fuel/fire, trapped, burning target, explosions, spreading, stranded, water level/trend, vulnerable people, live wires) |
 | 3 | | The incident's currently stored priority |
-| 4 | | The dispatcher's confirmed or overridden priority and optional note, submitted at triage |
+| 4 | | The dispatcher's confirmed or overridden priority and optional note, set in the incident drawer |
 
 ---
 
@@ -50,7 +50,7 @@ Make sure a genuinely severe report isn't missed in a busy queue, and show the d
 |---|---|---|
 | 1 | Operator judgment over the phone, with no structured severity rule | `backend/src/incidents/priority/priority.service.ts`, calling the shared rule function `recommendIntakePriority` (`shared/src/constants/incident-intake.ts`) |
 | 2 | | `backend/src/dispatch/dispatch.service.ts` (`getPriorityRecommendation`, `submitTriage`) and `GET /dispatch/priority/:incidentId` |
-| 3 | | `frontend/app/(ops)/operations/triage/page.tsx` — `PriorityRecChip` component, via `usePriorityRecommendation` |
+| 3 | | `frontend/app/(ops)/operations/triage/page.tsx` — the recommended priority (`PriorityRecChip`), and the Incident priority control in the incident drawer |
 | 4 | | PostgreSQL — the incident's stored `priority` field and its intake `caller_answers` |
 
 ---
@@ -79,7 +79,7 @@ Make sure a genuinely severe report isn't missed in a busy queue, and show the d
 | 3 | If any condition matches, the priority is raised to CRITICAL (never lowered) and each matching condition is recorded as a reason; otherwise the category default is kept. | Validation |
 | 4 | Unless the submitter already specified a priority, this recommendation becomes the incident's stored priority. | Database |
 | 5 | At triage, the dispatcher opens the incident; the recommendation is recomputed live from the stored answers and shown next to the current priority when they differ, with the matching reasons listed. | Processing |
-| 6 | The dispatcher confirms or changes the priority and may add a note; this is saved as the incident's priority of record and is blocked once the incident reaches a terminal status. | User Action |
+| 6 | In the incident drawer's Incident priority control, the dispatcher confirms or changes the priority and may add a note; this is saved as the incident's priority of record and is blocked once the incident reaches a terminal status. | User Action |
 | 7 | An audit/incident-event record captures the triage decision. | Database |
 
 **TO-BE Outputs**
@@ -98,7 +98,7 @@ Make sure a genuinely severe report isn't missed in a busy queue, and show the d
 1. Submit a road-accident SOS with "pinned" answered yes and confirm the incident is created at CRITICAL priority.
 2. Submit a road-accident SOS with no high-risk answers and confirm it defaults to HIGH, matching the category default.
 3. On the Triage screen, open an incident where the recommendation differs from the current priority and confirm the reasons are listed.
-4. Submit triage with a different priority and a note, and confirm it's saved and blocked once the incident is resolved/closed.
+4. In the incident drawer, set a different priority with a note, and confirm it's saved and blocked once the incident is resolved/closed.
 
 **Do not claim:**
 - A machine-learning or probabilistic "confidence" score — the service returns only a priority and a plain-English list of matched conditions.

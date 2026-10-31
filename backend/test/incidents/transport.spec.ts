@@ -277,7 +277,6 @@ describe('TransportService — MOD-40', () => {
     it.each([
       IncidentStatus.EN_ROUTE,
       IncidentStatus.DISPATCHED,
-      IncidentStatus.ASSISTING,
       IncidentStatus.RESOLVED,
     ])('%s → 409 TRANSPORT_NOT_ALLOWED_IN_STATUS and no record is created', async (status) => {
       givenIncident(status);
@@ -295,6 +294,37 @@ describe('TransportService — MOD-40', () => {
       expect(tx.incident.update).not.toHaveBeenCalled();
       expect(mockRealtime.incidentTransporting).not.toHaveBeenCalled();
       expect(mockLocations.requestImmediateRefresh).not.toHaveBeenCalled();
+    });
+
+    it('ASSISTING → TRANSPORTING is allowed for a crew that needs transport after treatment', async () => {
+      givenIncident(IncidentStatus.ASSISTING);
+
+      await expect(
+        service.startTransport(INCIDENT_ID, { dispatchId: DISPATCH_ID }, ACTOR_ID, 'DISPATCHER'),
+      ).resolves.toEqual(expect.objectContaining({ incident_id: INCIDENT_ID }));
+      expect(tx.transportRecord.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a fire-truck crew with 409 TRANSPORT_NOT_FOR_UNIT: no record, no transition, nothing emitted', async () => {
+      givenIncident(IncidentStatus.ON_SCENE);
+      tx.dispatches.findUnique.mockResolvedValue({ incident_id: INCIDENT_ID, resources: { resource_type: 'FIRE_TRUCK' } });
+
+      await expect(
+        service.startTransport(INCIDENT_ID, { dispatchId: DISPATCH_ID }, CREW_USER, UserRole.RESPONDER),
+      ).rejects.toMatchObject({ response: { code: 'TRANSPORT_NOT_FOR_UNIT' } });
+      expect(tx.transportRecord.create).not.toHaveBeenCalled();
+      expect(tx.incident.update).not.toHaveBeenCalled();
+      expect(mockRealtime.incidentTransporting).not.toHaveBeenCalled();
+    });
+
+    it('a dispatcher can still start a transport on a fire-truck dispatch (dispatcher routes unchanged)', async () => {
+      givenIncident(IncidentStatus.ON_SCENE);
+      tx.dispatches.findUnique.mockResolvedValue({ incident_id: INCIDENT_ID, resources: { resource_type: 'FIRE_TRUCK' } });
+
+      await expect(
+        service.startTransport(INCIDENT_ID, { dispatchId: DISPATCH_ID }, ACTOR_ID, UserRole.DISPATCHER),
+      ).resolves.toEqual(expect.objectContaining({ incident_id: INCIDENT_ID }));
+      expect(tx.transportRecord.create).toHaveBeenCalledTimes(1);
     });
 
     it('rolls back: a failed transition inside the transaction propagates and nothing is emitted', async () => {

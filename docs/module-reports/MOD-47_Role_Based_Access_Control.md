@@ -1,6 +1,6 @@
 # MOD-47 — Role-Based Access Control
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -53,7 +53,7 @@ Keep sensitive actions — dispatch authorization, account administration, medic
 | 1 | Phone-based identity verification and personal judgment | `JwtAuthGuard` (identity), `RolesGuard` + `@Roles()` decorator (role check), `RecentAuthGuard` (step-up auth) |
 | 2 | No access list, no record of who can do what | `assertCanManageOrg()` (`backend/src/organizations/org-scope.ts`) — server-side own-organization check |
 | 3 | | `backend/src/permissions` service and `permissions`/`role_permissions` PostgreSQL tables |
-| 4 | | NestJS REST API (`/api/v1/permissions`), restricted to Org Administrator (read) and System Administrator (read/write) |
+| 4 | | NestJS REST API (`/v1/permissions`), restricted to Org Administrator (read) and System Administrator (read/write) |
 | 5 | | MOD-46 Immutable Audit Trail, recording permission grants/revokes and admin actions |
 
 ---

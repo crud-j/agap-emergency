@@ -110,10 +110,12 @@ describe('role-access', () => {
     expect(labels(ROLE.DISPATCHER)).toEqual([
       'Dashboard', 'Incident Queue', 'Live Map', 'Triage', 'Dispatch',
       'Multi-Agency', 'Fleet & Units', 'Hospitals & Facilities', 'Incident History',
+      'Account Security',
     ]);
-    expect(labels(ROLE.PUBLISHER)).toEqual(['Dashboard', 'Announcements', 'Publication History']);
+    expect(labels(ROLE.PUBLISHER)).toEqual(['Dashboard', 'Announcements', 'Publication History', 'Account Security']);
     expect(labels(ROLE.ORG_ADMIN)).toEqual([
       'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Hospitals & Facilities', 'Barangay Directory',
+      'Account Security',
     ]);
     expect(labels(ROLE.HOSPITAL_USER)).toEqual(['Hospitals & Facilities']);
     expect(showsSidebar(ROLE.HOSPITAL_USER)).toBe(false);
@@ -126,11 +128,13 @@ describe('role-access', () => {
       'Analytics', 'Risk Map',
       'Approvals',
       'Incident History',
+      'Account Security',
     ]);
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
       'Dashboard', 'Organizations', 'Fleet & Units', 'Hospitals & Facilities',
       'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'Risk Areas', 'Audit Log',
       'Security Events', 'Integrations', 'Configuration',
+      'Account Security',
     ]);
   });
 });

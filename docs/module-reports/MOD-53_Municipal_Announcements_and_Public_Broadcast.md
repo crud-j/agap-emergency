@@ -1,6 +1,6 @@
 # MOD-53 — Municipal Announcements and Public Broadcast
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -31,6 +31,7 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 4. Sends push notifications and subscriber SMS, and updates the app live.
 5. Cancels a released notice with a correction note, and archives old notices.
 6. Lets residents read notices and subscribe to SMS alerts in the app.
+7. Unsubscribes a resident who taps Unsubscribe in the app or replies STOP to an SMS advisory.
 
 ---
 
@@ -46,6 +47,7 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 | 6 | | Language (Filipino, English or both) and optional image with description |
 | 7 | | Publish now, or a scheduled date and time |
 | 8 | | Resident's phone number and barangay preference (SMS subscription) |
+| 9 | | Resident's unsubscribe request: the Unsubscribe button in the app, or an SMS reply of STOP (also UNSUBSCRIBE, ITIGIL or HUWAG NA) |
 
 ---
 
@@ -54,12 +56,12 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Official LGU / MDRRMO Facebook page | AGAP Operations web console (Next.js, React, Tailwind CSS) with announcement templates |
-| 2 | Text blasts from staff mobile phones | NestJS REST API (`/api/v1/announcements`) with JWT and role checks (Announcements Publisher) |
+| 2 | Text blasts from staff mobile phones | NestJS REST API (`/v1/announcements`) with JWT and role checks (Announcements Publisher) |
 | 3 | Barangay public address systems, megaphones, roving announcements | PostgreSQL (`announcements`, `sms_subscribers`, audit log) and object storage for images |
 | 4 | Printed notices posted at barangay halls | Scheduled job that runs every minute (automatic release) |
 | 5 | Two-way radio to barangay officials | Redis + BullMQ queues |
 | 6 | | Firebase Cloud Messaging (push notifications) |
-| 7 | | Textbee SMS gateway (subscriber SMS, 160 characters max) |
+| 7 | | Textbee SMS gateway (subscriber SMS, 160 characters max, and a poller that reads STOP replies sent to the gateway phone) |
 | 8 | | Socket.io real-time event (`announcement.published`) and AGAP Citizen mobile app (Expo, React Native) |
 
 ---
@@ -100,10 +102,11 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 | 6 | On publish, the backend sets the status to Published, records who approved it and when, and writes an audit entry. A job that runs every minute releases scheduled notices when their time comes. | Database |
 | 7 | The backend broadcasts `announcement.published` over Socket.io so that open screens update immediately. | Integration |
 | 8 | The backend queues a push notification to registered phones (Firebase Cloud Messaging) with the title and summary. | Notification |
-| 9 | The backend queues an SMS through Textbee to every active subscriber: "AGAP: title. summary", cut to 160 characters. The number sent is saved. Failed push or SMS never undoes the publish. | Notification |
+| 9 | The backend queues an SMS through Textbee to every active subscriber: "AGAP: title. summary Reply STOP to opt out.", cut to 160 characters. The number sent is saved. Failed push or SMS never undoes the publish. | Notification |
 | 10 | Residents see the notice in the app's Announcements list (filterable by category) and open the full notice. Anyone can subscribe to SMS alerts with a phone number and an optional barangay. | User Action |
-| 11 | If a notice is wrong, the publisher cancels it with a correction note (5–1000 characters). The notice stays visible by link, marked cancelled with the reason. | Processing |
-| 12 | The publisher archives released or cancelled notices. They move to History in the console and to the public archive in the app. | Database |
+| 11 | To stop the SMS, a resident taps Unsubscribe in the app and confirms, or replies STOP to an advisory. The backend reads replies to the gateway phone, matches the number in any of its three formats, marks the subscription inactive, writes an audit entry, and sends one confirmation SMS. A STOP from a barangay hotline is not treated as an unsubscribe. | Processing |
+| 12 | If a notice is wrong, the publisher cancels it with a correction note (5–1000 characters). The notice stays visible by link, marked cancelled with the reason. | Processing |
+| 13 | The publisher archives released or cancelled notices. They move to History in the console and to the public archive in the app. | Database |
 
 **TO-BE Outputs**
 
@@ -114,6 +117,7 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 | 3 | SMS advisory (160 characters max) sent to subscribers, with the count recorded |
 | 4 | Notice shown in the app's Announcements list and in the public archive |
 | 5 | Cancellation with a correction note, or an archived record, in the console's History |
+| 6 | Deactivated SMS subscription with an audit entry, and a confirmation SMS for a STOP reply |
 
 ---
 
@@ -127,9 +131,11 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 5. Schedule another notice 2 minutes ahead and confirm it releases by itself.
 6. Cancel one with a note, then archive it.
 7. Subscribe a number in the app. With Textbee loaded, confirm the SMS arrives.
+8. Tap Unsubscribe in the app; the next advisory must skip that number.
+9. With "Receive SMS" on in the Textbee app, reply STOP from a subscribed phone; confirm one confirmation SMS and that the subscription is inactive. (Not yet tried with a real phone.)
 
 **Do not claim:**
-- **Unsubscribing.** The SMS says "Reply STOP to opt out", but nothing processes STOP replies, and the app has no unsubscribe button. The backend `POST /announcements/unsubscribe` exists without any screen.
 - **SMS targeted by barangay.** Every active subscriber gets every SMS; the saved barangay preference isn't used yet.
-- **A separate approver.** The publisher approves their own notice (role dashboards plan, Phase 7, not built).
 - **Superseding a notice** (replacing it with a newer one). The backend `POST /:id/supersede` exists, but the console doesn't offer it.
+
+**Optional, off by default:** with `ANNOUNCEMENT_APPROVAL_REQUIRED=true`, a CRITICAL advisory must be submitted to an MDRRMO Supervisor, who approves it or returns it with a reason on the Approvals page; the submitter can't approve their own. Add it to the TO-BE only if your group turns the flag on for the demo.

@@ -1,6 +1,6 @@
 # MOD-07 — Shake-to-Alert Trigger
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -52,7 +52,7 @@ Help a resident who cannot easily look at or press the screen (for example while
 | 2 | MDRRMO hotline / 911 | Expo Sensors (accelerometer) shake detector, 2-second debounce |
 | 3 | | Expo Haptics / Vibration for the countdown |
 | 4 | | Zustand stores (setting, report draft) and Expo Secure Store |
-| 5 | | NestJS REST API (`POST /api/v1/incidents` with `triggerMethod`) |
+| 5 | | NestJS REST API (`POST /v1/incidents` with `triggerMethod`) |
 | 6 | | PostgreSQL (`incidents.trigger_method`) and the web incident drawer |
 
 ---
@@ -112,4 +112,4 @@ Help a resident who cannot easily look at or press the screen (for example while
 **Do not claim:**
 - Shake detection while the app is closed, in the background or on the lock screen.
 - Countdown text in Filipino. The countdown is English only for now.
-- `POST /api/v1/emergency-alerts/shake`. It exists but no screen uses it.
+- `POST /v1/emergency-alerts/shake`. It exists but no screen uses it.

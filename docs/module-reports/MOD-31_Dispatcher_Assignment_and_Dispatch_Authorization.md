@@ -1,6 +1,6 @@
 # MOD-31 — Dispatcher Assignment and Dispatch Authorization
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -48,7 +48,7 @@ Enforce one of AGAP's core rules directly in the workflow: dispatch recommendati
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Radio/phone call to assign a unit, with the decision living only in the dispatcher's memory | Operations Center Dispatch screen, `frontend/app/(ops)/operations/dispatch` |
-| 2 | A follow-up radio call to reassign or recall, with no written record of why | `backend/src/dispatch/dispatch.service.ts` (confirmed ~399 lines, 13 Prisma persistence calls) handling assign, confirm, reassign, and cancel actions |
+| 2 | A follow-up radio call to reassign or recall, with no written record of why | `backend/src/dispatch/dispatch.service.ts` handling assign, confirm, reassign, and cancel actions |
 | 3 | Whatever gets jotted in the logbook afterward, if anything | PostgreSQL persistence of each assignment/authorization/reassignment/cancellation with timestamps |
 | 4 | — | Audit-trail write on every consequential dispatch action |
 | 5 | — | Socket.io broadcast of dispatch events (`dispatch.created/updated/cancelled`) to authorized clients |

@@ -1,6 +1,6 @@
 # MOD-06 — Immediate SOS Trigger / One-Button SOS
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -53,7 +53,7 @@ Give residents one fast, hard-to-trigger-by-accident way to report an emergency 
 | 1 | Mobile phone (voice call) | AGAP Citizen mobile app (Expo, React Native, Expo Router) |
 | 2 | MDRRMO hotline / 911 | Hold-to-SOS button with vibration and sound |
 | 3 | Paper logbook or incident form | Expo Location (GPS) and Zustand report draft |
-| 4 | Two-way radio to responders | NestJS REST API (`POST /api/v1/incidents`, sign-in optional, rate-limited) |
+| 4 | Two-way radio to responders | NestJS REST API (`POST /v1/incidents`, sign-in optional, rate-limited) |
 | 5 | | PostgreSQL (`incidents`, `incident_reporters`, `incident_locations`, `incident_events`) |
 | 6 | | Socket.io (live alert to the Operations Center) and Redis + BullMQ (SMS jobs) |
 
@@ -120,4 +120,4 @@ Give residents one fast, hard-to-trigger-by-accident way to report an emergency 
 **Do not claim:**
 - A Medical incident type in the app. Only Road incident, Fire and Natural disaster are offered (flooding is filed as Flood).
 - Saving a report on the phone to send later (MOD-19 was eliminated).
-- `POST /api/v1/emergency-alerts/sos`. It exists but no screen uses it; the app sends through `POST /api/v1/incidents`.
+- `POST /v1/emergency-alerts/sos`. It exists but no screen uses it; the app sends through `POST /v1/incidents`.

@@ -1,6 +1,6 @@
 # MOD-03 — Medical Profile
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -53,7 +53,7 @@ Have important medical facts written down ahead of time, with the citizen's expl
 |---|---|---|
 | 1 | Verbal interview at the scene | AGAP Citizen mobile app (Expo, React Native, Expo Router) |
 | 2 | Paper patient-care or assessment form | TanStack Query (loading and saving the profile) |
-| 3 | Personal records carried by the patient (prescriptions, ID cards) | NestJS REST API (`/api/v1/consent`, `/api/v1/medical-profiles`) with input validation |
+| 3 | Personal records carried by the patient (prescriptions, ID cards) | NestJS REST API (`/v1/consent`, `/v1/medical-profiles`) with input validation |
 | 4 | Telephone (calling relatives for medical history) | JWT sign-in check (each citizen can reach only their own profile) |
 | 5 | | PostgreSQL (`consent_records`, `medical_profiles` tables) |
 

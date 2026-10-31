@@ -1,6 +1,6 @@
 # MOD-28 — Response Unit Availability and Readiness
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -75,7 +75,7 @@ Give the dispatcher a single, always-current board to check before recommending 
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | The dispatcher opens the Fleet board and sees a live status summary for every unit. | User Action |
+| 1 | The dispatcher opens the Fleet board and sees a live status summary for every unit. The board has a Units view and a Responders view, each with a search box and filters (organization, unit type and readiness for units; availability for responders). | User Action |
 | 2 | The dispatcher can change a unit's status manually via the dropdown (e.g. to Maintenance), and the summary tile counts update immediately. | User Action |
 | 3 | Separately, a responder flips their own availability toggle on their phone. | User Action |
 | 4 | That update is persisted and broadcast through the same real-time event engine as MOD-20. | Database |

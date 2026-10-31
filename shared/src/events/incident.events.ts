@@ -14,6 +14,8 @@ export const INCIDENT_EVENTS = {
   EN_ROUTE: 'incident.en_route',
   ARRIVED: 'incident.arrived',
   ASSESSMENT_UPDATED: 'incident.assessment_updated',
+  /** A crew's fire report or rescue trip (unit field flow plan, Phases 3–4). Ops room only. */
+  FIELD_REPORT: 'incident.field_report',
   TRANSPORTING: 'incident.transporting',
   FACILITY_ARRIVAL: 'incident.facility_arrival',
   TRANSPORT_UPDATED: 'incident.transport_updated',
@@ -103,6 +105,36 @@ export interface IncidentTransportUpdatedPayload {
   destination: (TransportDestinationView & { id?: string }) | null;
   destinationWarning?: 'FACILITY_DEACTIVATED' | 'FACILITY_AT_CAPACITY';
   changedAt: string;
+}
+
+/**
+ * A crew's field report (MOD-32/36, unit field flow plan). Sent to the ops room only.
+ * Statuses, codes and counts only: never notes, names or coordinates.
+ * `kind: 'FIRE'` carries the fire fields; `kind: 'RESCUE'` carries the trip's counts,
+ * codes and the destination facility's name.
+ */
+export interface IncidentFieldReportPayload {
+  incidentId: string;
+  kind: 'FIRE' | 'RESCUE';
+  reportId: string;
+  dispatchId: string | null;
+  reportedAt: string;
+  fireStatus?: string | null;
+  alarmLevel?: string | null;
+  hazards?: string[];
+  casualtiesSeen?: number | null;
+  trappedPersons?: number | null;
+  rescuedCount?: number | null;
+  families?: number | null;
+  children?: number | null;
+  elderly?: number | null;
+  pwd?: number | null;
+  pregnant?: number | null;
+  stillWaiting?: number | null;
+  waterLevel?: string | null;
+  access?: string | null;
+  takenTo?: string | null;
+  takenToFacilityName?: string | null;
 }
 
 /**

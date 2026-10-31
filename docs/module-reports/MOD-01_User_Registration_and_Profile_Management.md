@@ -1,6 +1,6 @@
 # MOD-01 — User Registration and Profile Management
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -55,7 +55,7 @@ Give every citizen a verified identity and contact number, so that reports, emer
 |---|---|---|
 | 1 | Telephone / mobile phone (MDRRMO hotline) | AGAP Citizen mobile app (Expo, React Native, Expo Router) |
 | 2 | Paper logbook and incident forms | Expo Location (device GPS) |
-| 3 | Ballpen and filing cabinet | NestJS REST API (`/api/v1/auth`, `/api/v1/users`) with input validation |
+| 3 | Ballpen and filing cabinet | NestJS REST API (`/v1/auth`, `/v1/users`) with input validation |
 | 4 | Barangay resident records (paper or spreadsheet) | PostgreSQL with PostGIS (accounts, verification codes, sessions, Bocaue boundary) |
 | 5 | | Redis + BullMQ job queue |
 | 6 | | Textbee SMS gateway (OTP delivery) |

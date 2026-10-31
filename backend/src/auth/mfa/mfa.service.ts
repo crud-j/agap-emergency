@@ -218,7 +218,7 @@ export class MfaService {
 
   async passkeyBegin(mfaToken: string, ctx: AuthRequestContext) {
     const claims = await this.tokens.verify(mfaToken, 'mfa');
-    return this.webAuthn.beginAuthenticationForUser(claims.userId, ctx.ipAddress, ctx.userAgent);
+    return this.webAuthn.beginAuthenticationForUser(claims.userId, ctx.ipAddress, ctx.userAgent, ctx.origin);
   }
 
   async passkeyComplete(

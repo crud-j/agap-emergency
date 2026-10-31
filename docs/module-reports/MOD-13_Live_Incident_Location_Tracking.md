@@ -1,6 +1,6 @@
 # MOD-13 — Live Incident Location Tracking
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -49,7 +49,7 @@ Let the reporter see that help is actually moving, and let the dispatcher/superv
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Two-way radio / mobile phone call | `POST /api/v1/locations/track` (`backend/src/locations/locations.controller.ts`) — responder-only, role-guarded |
+| 1 | Two-way radio / mobile phone call | `POST /v1/locations/track` (`backend/src/locations/locations.controller.ts`) — responder-only, role-guarded |
 | 2 | Operator's memory of the barangay road network | `LocationsService.trackResponder` (`backend/src/locations/locations.service.ts`) — ownership check against `dispatches`/`dispatch_crew` before accepting a fix |
 | 3 | Paper or whiteboard unit log | PostgreSQL `location_history` table (one row per GPS fix, `recorded_at` timestamp) |
 | 4 |  | `RealtimeService.notifyResponderLocationUpdated` → Socket.io `AgapGateway`, rooms `incident:{id}` and `ops:all` |

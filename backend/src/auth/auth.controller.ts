@@ -275,10 +275,11 @@ export class AuthController {
     @Body() dto: WebAuthnRegisterBeginDto,
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
+    @Headers('origin') origin?: string,
   ) {
     // deviceLabel is accepted for API compatibility; it is persisted on /complete.
     void dto;
-    return this.webAuthnService.beginRegistration(req.user.id, ip, userAgent);
+    return this.webAuthnService.beginRegistration(req.user.id, ip, userAgent, origin);
   }
 
   @Post('passkey/register/complete')
@@ -311,8 +312,9 @@ export class AuthController {
     @Body() dto: WebAuthnAuthenticateBeginDto,
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
+    @Headers('origin') origin?: string,
   ) {
-    return this.webAuthnService.beginAuthentication(dto.identifier, ip, userAgent);
+    return this.webAuthnService.beginAuthentication(dto.identifier, ip, userAgent, origin);
   }
 
   @Post('passkey/authenticate/complete')

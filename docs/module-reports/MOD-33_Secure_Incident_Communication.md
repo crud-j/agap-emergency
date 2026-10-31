@@ -1,6 +1,6 @@
 # MOD-33 — Secure Incident Communication
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -48,7 +48,7 @@ Keep operational coordination tied to the incident record itself, so anyone revi
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Two-way radio | NestJS REST API — `GET`/`POST /api/v1/communications/:incidentId`, `PATCH /api/v1/communications/:incidentId/messages/:messageId/read` (`backend/src/communications`) |
+| 1 | Two-way radio | NestJS REST API — `GET`/`POST /v1/communications/:incidentId`, `PATCH /v1/communications/:incidentId/messages/:messageId/read` (`backend/src/communications`) |
 | 2 | Personal mobile phone calls or text messages | PostgreSQL (`incident_messages`, `message_reads` tables) |
 | 3 | — | Participant check against the incident's reporter, dispatch and dispatch-crew records |
 | 4 | — | Socket.io `message.created` broadcast to the incident's room |

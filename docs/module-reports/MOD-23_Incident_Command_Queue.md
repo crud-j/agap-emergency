@@ -1,6 +1,6 @@
 # MOD-23 — Incident Command Queue
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -81,8 +81,9 @@ Let a dispatcher work from one list instead of hunting through separate screens,
 | 3 | The dispatcher narrows the list with search text and the status/category/priority/barangay filters, and picks a sort order. | User Action |
 | 4 | The table re-renders client-side against the already-fetched page as filters/sort change. | Processing |
 | 5 | A new incident, or a status change to one already shown, arrives over Socket.io and the list updates with no manual refresh. | Notification |
-| 6 | Clicking a row — or opening the page with `?id=<incidentId>` — opens the shared incident-detail drawer for that incident. | User Action |
-| 7 | Past the first 100 rows, the dispatcher pages forward/back; each page is fetched from the backend. | Processing |
+| 6 | Rows show a badge with the latest fire report status (for example "Under control") and the number of people rescued so far, when field crews have reported them (MOD-32). | Processing |
+| 7 | Clicking a row — or opening the page with `?id=<incidentId>` — opens the shared incident-detail drawer for that incident, which includes the Fire card, the Rescue card and any crew help requests. | User Action |
+| 8 | Past the first 100 rows, the dispatcher pages forward/back; each page is fetched from the backend. | Processing |
 
 **TO-BE Outputs**
 
@@ -91,6 +92,7 @@ Let a dispatcher work from one list instead of hunting through separate screens,
 | 1 | Filtered, sorted, paginated incident list reflecting the chosen view |
 | 2 | Live-updating list with no manual refresh on new or changed incidents |
 | 3 | Incident-detail drawer opened from a row or a deep link |
+| 4 | Fire-status and people-rescued badges on the rows |
 
 ---
 

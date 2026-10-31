@@ -662,7 +662,7 @@ describe('MfaService — second step', () => {
     ).rejects.toThrow('Passkey verification failed');
     expect(user.failed_login_count).toBe(1);
     await s.mfa.passkeyBegin(mfaToken, ctx);
-    expect(s.webAuthn.beginAuthenticationForUser).toHaveBeenCalledWith(user.id, IP, UA);
+    expect(s.webAuthn.beginAuthenticationForUser).toHaveBeenCalledWith(user.id, IP, UA, undefined);
   });
 });
 

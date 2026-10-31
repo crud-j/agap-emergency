@@ -15,7 +15,7 @@
 
 1. **One home route.** Every role's first link is **Dashboard** at `/dashboard`, which renders that role's own content. There are no separate overview routes.
 2. **One name per page.** A page has the same label and route for every role that can open it (table below).
-3. **Profile is not a sidebar link.** Name, password, passkeys and MFA live in the user menu (bottom of the sidebar) and the Account security button in the top bar (`/account/security`).
+3. **Profile is not a sidebar link.** Name and sign-out live in the user menu (bottom of the sidebar). The one exception is **Account Security** (`/account/security`: password, passkeys, MFA, sessions), the last sidebar link for every console role under an "Account" group so it is easy to find. The Hospital Portal has no sidebar, so Hospital Users reach it from the shield button in the top bar.
 4. **No link without a backend.** A link appears only if every endpoint the page loads allows that role.
 5. **Sections, not links.** Content that belongs to one page (filters, tabs, panels) is never also a sidebar link.
 

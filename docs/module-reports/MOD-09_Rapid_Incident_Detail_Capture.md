@@ -1,6 +1,6 @@
 # MOD-09 — Rapid Incident Detail Capture
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -52,7 +52,7 @@ Give dispatchers the details that change what they send (people trapped, fuel le
 |---|---|---|
 | 1 | Telephone / MDRRMO hotline | AGAP Citizen mobile app (Details screen) |
 | 2 | Operator's memory and experience for questions | Shared intake question list (`@agap/shared`), used by app, backend and web |
-| 3 | Paper logbook or incident form | NestJS REST API (`POST /api/v1/incidents`) with answer filtering |
+| 3 | Paper logbook or incident form | NestJS REST API (`POST /v1/incidents`) with answer filtering |
 | 4 | | PostgreSQL (`incident_details.caller_answers`, `priority_reasons`, `incidents.hazard_flags`) |
 | 5 | | Operations Center incident drawer (Caller details section) |
 

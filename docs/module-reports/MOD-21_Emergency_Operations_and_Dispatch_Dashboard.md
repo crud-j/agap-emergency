@@ -1,6 +1,6 @@
 # MOD-21 — Emergency Operations and Dispatch Dashboard
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -19,7 +19,7 @@ Content for the [Individual Module Report template](../AGAP_Individual_Module_Re
 ## 2. Module Description
 
 **Description**
-Gives the signed-in dispatcher one home screen: live KPI counts (active, unreviewed, critical, en route/on scene, resolved in the last 24 hours, and unit availability), a connection-state indicator, surge-mode/critical-announcement banners, three quick-action links, and the 8 most recently reported incidents. Supervisors, system administrators, the municipal/publisher account and org administrators each land on their own separate dashboard from the same route.
+Gives the signed-in dispatcher one home screen: live KPI counts (active, unreviewed, critical, en route/on scene, resolved in the last 24 hours, and unit availability), a connection-state indicator, surge-mode/critical-announcement banners, four "Next actions" links (Review new reports, Assign units, Open live map, View all incidents), and the 8 most recently reported incidents. Supervisors, system administrators, the municipal/publisher account and org administrators each land on their own separate dashboard from the same route.
 
 **Purpose**
 Let a dispatcher coming on shift see the state of the whole operation at a glance and jump straight to wherever action is needed, instead of opening each screen separately to find out.
@@ -104,5 +104,5 @@ Let a dispatcher coming on shift see the state of the whole operation at a glanc
 4. Stop the backend briefly and confirm the retry strip appears instead of a silent blank dashboard.
 
 **Do not claim:**
-- An incident-creation form, a broadcast/announcement composer, or an SMS-send action on this dashboard — the quick actions link only to the existing Dispatch, Incident Queue and Map screens.
+- An incident-creation form, a broadcast/announcement composer, or an SMS-send action on this dashboard — the Next actions link only to the existing Triage, Dispatch, Map and Incident Queue screens.
 - This as the Supervisor's dashboard — the Supervisor, System Administrator, Publisher and Org Administrator roles each render a separate dashboard component from the same route.

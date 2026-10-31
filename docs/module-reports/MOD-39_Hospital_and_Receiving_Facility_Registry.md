@@ -1,6 +1,6 @@
 # MOD-39 — Hospital and Receiving Facility Registry
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -19,16 +19,18 @@ Content for the [Individual Module Report template](../AGAP_Individual_Module_Re
 ## 2. Module Description
 
 **Description**
-Maintains the master list of hospitals and receiving facilities AGAP knows about — their profile, location, receiving contact, capabilities, current status, and when they were last verified.
+Maintains the master list of hospitals and receiving facilities AGAP knows about: name, address, contact numbers, emergency room, ICU and blood bank, a reviewed map location, whether the hospital is active, and its current receiving status and available beds. It also reminds hospitals when their receiving status is out of date.
 
 **Purpose**
-Give every other module that needs to know "which hospital can take this patient" — MOD-40's destination picker, hospital referrals — one accurate, administered source of truth instead of everyone keeping their own list.
+Give every module that needs to know "which hospital can take this patient" (hospital ranking and referrals in MOD-38, the crew's destination picker in MOD-40) one administered source, with locations that were checked by a person and a receiving status whose age is always visible.
 
 **Tasks Performed**
-1. Registers each hospital/facility as a profile with location, receiving contact, capabilities, status, and a last-verified date.
-2. Lets an authorized user search the list, create a new facility, and edit an existing one through the Hospitals page.
-3. Validates and authenticates every field and change, persisted with identifiers and timestamps.
-4. Serves as the source MOD-40's destination picker reads from when sorting hospitals by distance.
+1. Registers a hospital, created by a System Administrator, or by an Org Administrator for their own hospital organization.
+2. Sets the hospital's location by map pin or address search, with suggested coordinates; a Supervisor or System Administrator verifies or rejects it, and locations outside the service area or swapped coordinates are refused.
+3. Activates or deactivates a hospital (Supervisor or System Administrator).
+4. Records the hospital's receiving status (Open, At Capacity, Emergency Only, Closed, Unknown) and available beds, reported by its own Hospital Users or by a Dispatcher or Supervisor, with the time of the report.
+5. Shows how old each receiving status is, and flags a status older than 12 hours.
+6. Sends reminders: an hourly notice to a hospital's users when its status is over 6 hours old, and a monthly review notice to Org Administrators for records not verified in 90 days.
 
 ---
 
@@ -36,9 +38,11 @@ Give every other module that needs to know "which hospital can take this patient
 
 | No. | AS-IS Input (Existing Process) | TO-BE Input (Proposed Automated Process) |
 |---|---|---|
-| 1 | A name and number scribbled somewhere, or kept in whoever's phone contacts | A facility profile: name, location, receiving contact, capabilities |
-| 2 | Capability information held only as institutional knowledge | A status flag and a last-verified date |
-| 3 | No shared list, so different staff may have different, outdated numbers for the same hospital | A search, create, or edit request from an authorized user |
+| 1 | A name and number scribbled somewhere, or kept in whoever's phone contacts | Hospital profile: name, address, barangay, municipality, province, organization, contact and emergency numbers |
+| 2 | Capability information held only as institutional knowledge | Capabilities: emergency room, ICU, blood bank |
+| 3 | No shared list, so different staff may have different, outdated numbers for the same hospital | Location: map pin or address search result (latitude and longitude, source) |
+| 4 | A phone call to ask whether the hospital can still take patients | Reviewer's decision: verify or reject the location; activate or deactivate the hospital |
+| 5 | | Receiving status report: status and available beds |
 
 ---
 
@@ -46,10 +50,11 @@ Give every other module that needs to know "which hospital can take this patient
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Personal phone contacts or scribbled notes with hospital numbers | Operations Center Hospitals page, `frontend/app/(ops)/hospitals` |
-| 2 | Institutional memory of which hospital can handle what | `backend/src/hospitals` and `backend/src/facilities` services with CRUD, validation, and authentication |
-| 3 | No shared, administered record at all | PostgreSQL persistence of the facility profile with identifiers and timestamps |
-| 4 | — | A nearby-facility query consumed by MOD-40's destination picker and hospital referrals |
+| 1 | Personal phone contacts or scribbled notes with hospital numbers | Operations web console Hospitals page (Next.js) with a location finder and map picker (MapLibre) |
+| 2 | Institutional memory of which hospital can handle what | NestJS REST API (`/v1/hospitals`, `PATCH /v1/facilities/:id/status`) with role and own-organization checks |
+| 3 | No shared, administered record at all | Map search through the AGAP maps service (Nominatim) for address search and suggested coordinates, with a manual pin when the provider is unavailable |
+| 4 | — | PostgreSQL with PostGIS (`facilities` table with location, location status, receiving status and its time), audit log |
+| 5 | — | Scheduled jobs (hourly and monthly) that create in-app reminders |
 
 ---
 
@@ -62,40 +67,50 @@ Give every other module that needs to know "which hospital can take this patient
 | 1 | Hospital information lives in whoever's memory or phone contacts happens to have it. |
 | 2 | It's updated only when someone happens to notice a number or detail is wrong. |
 | 3 | There's no shared list, so different staff can have different, outdated contact numbers for the same hospital. |
-| 4 | Capability information (can this facility handle trauma? burns?) exists only as institutional knowledge. |
+| 4 | Whether a hospital can take patients right now is learned only by calling it during the emergency. |
 
 **AS-IS Outputs**
 
 | No. | Output Produced by the Existing Process |
 |---|---|
 | 1 | Inconsistent, personally-held contact information across staff |
-| 2 | No written record of a facility's actual capabilities |
+| 2 | No written record of a facility's capabilities or current receiving status |
 
 ### 5.2 TO-BE Process (Proposed Automated Process)
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | An authorized dispatcher opens the Hospitals page and searches for a facility. | User Action |
-| 2 | The dispatcher opens the facility's profile and views location, contacts, and capabilities. | Processing |
-| 3 | The dispatcher edits a field (e.g. a contact number) and saves, or creates a new facility record. | User Action |
-| 4 | The backend validates the fields, authenticates the actor, and persists the record with an identifier and timestamp. | Validation |
-| 5 | MOD-40's destination picker and hospital referrals read this registry as their source of truth. | Processing |
+| 1 | A System Administrator, or an Org Administrator of a hospital organization, opens the Hospitals page, clicks Add hospital, and enters the profile and capabilities. | User Action |
+| 2 | They set the location with the address search or a map pin; the system can suggest coordinates. | User Action |
+| 3 | The backend checks the role and organization, refuses a location outside the service area or with swapped coordinates, checks for a duplicate hospital, and saves it. A location entered by a System Administrator is saved as verified; one entered by an Org Administrator is saved as Pending review. | Validation |
+| 4 | A Supervisor or System Administrator filters the list to Pending review and verifies or rejects the location. Only a verified location is used for distances. | User Action |
+| 5 | The backend saves the decision and writes an audit entry. A Supervisor or System Administrator can also deactivate or reactivate a hospital. | Database |
+| 6 | A Hospital User of that hospital's organization (or a Dispatcher or Supervisor) clicks Update status and reports the receiving status and available beds. | User Action |
+| 7 | The backend confirms the user may report for that hospital, saves the status with the time of the report, and writes an audit entry. | Database |
+| 8 | The Hospitals page shows "Updated n h ago" for each hospital, in amber after 12 hours, when dispatch treats the status as unknown. | Processing |
+| 9 | Every hour, the system sends one reminder to the hospital's users when its status is older than 6 hours. On the 1st of each month, Org Administrators get a list of their hospitals and resources not verified in 90 days. The jobs never change a hospital's status. | Notification |
+| 10 | Hospital ranking and referrals (MOD-38) and the crew's destination picker (MOD-40) read this registry. | Integration |
 
 **TO-BE Outputs**
 
 | No. | Output Produced by the Proposed Process |
 |---|---|
-| 1 | A searchable, administered list of hospitals and facilities |
-| 2 | A persisted, editable facility profile (location, contacts, capabilities, status, last-verified date) |
-| 3 | The data MOD-40's destination picker sorts by distance when a responder selects a hospital |
+| 1 | Searchable list of hospitals with filters (all, pending review, deactivated) |
+| 2 | Saved hospital profile with a reviewed location and audit entries |
+| 3 | Current receiving status and beds, with the time it was reported |
+| 4 | Status-reminder and monthly review notices |
+| 5 | The data MOD-38 ranks and MOD-40's destination picker sorts by distance |
 
 ---
 
 ## Owner notes (not part of the report)
 
 **Test before signing:**
-1. Search for a hospital on the Hospitals page, open its profile, and edit one field (e.g. a contact number); confirm it saves.
-2. Create a new facility to show the registry is a live CRUD screen, not static seed data; confirm it's the same list MOD-40's destination picker pulls from.
+1. As an Org Administrator of a hospital organization, add a hospital with a map pin; confirm it shows as Pending review.
+2. As a Supervisor, verify its location.
+3. As that hospital's Hospital User, click Update status → At Capacity; confirm "Updated 0 h ago" and that a Hospital User of another organization can't report for it.
+4. Confirm the hospital now ranks lower in the Refer to hospital dialog (MOD-38).
 
 **Do not claim:**
-- Live, automatic synchronization with a hospital's own internal capacity/bed-management system — status is as current as the last manual update.
+- Editing a hospital's name, contacts or capabilities after it is created. The backend `PATCH /v1/hospitals/:id` exists, but no screen uses it.
+- Live synchronization with a hospital's own bed-management system. The status is as current as the last report.

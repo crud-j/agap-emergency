@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Bell, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck, Siren } from 'lucide-react';
+import { Bell, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck, Siren, Flame, LifeBuoy } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useUnreadCount, useNotifications, useMarkRead, useMarkAllRead } from '@/features/notifications/hooks';
@@ -9,7 +9,8 @@ import type { AppNotification } from '@/features/notifications/api';
 import { Toast } from '@/components/ui/toast';
 import { useToast } from '@/components/ui/use-toast';
 import { onIncidentEvent } from '@/lib/websocket';
-import type { NotificationCreatedPayload } from '@agap/shared';
+import { crewHelpNote } from '@/lib/crew-help-note';
+import { NOTIFICATION_EVENT_TYPES, type NotificationCreatedPayload } from '@agap/shared';
 
 // ─── Event-type display config ─────────────────────────────────────────────────
 
@@ -19,6 +20,10 @@ const EVENT_META: Record<string, { icon: typeof AlertCircle; color: string; bg: 
   INCIDENT_AWAITING_CLOSURE: { icon: CheckCircle2, color: '#0D6053', bg: '#EEF7F4' },
   RESPONDER_:                { icon: Truck,        color: '#7C3AED', bg: '#F5F3FF' },
   INCIDENT_UPDATED:          { icon: Info,         color: '#3B82F6', bg: '#EFF6FF' },
+  [NOTIFICATION_EVENT_TYPES.CREW_HELP_REQUESTED]: { icon: Siren, color: '#D44858', bg: '#FDF2F3' },
+  [NOTIFICATION_EVENT_TYPES.FIRE_REPORT_ALERT]:   { icon: Flame, color: '#D44858', bg: '#FDF2F3' },
+  [NOTIFICATION_EVENT_TYPES.RESCUE_PEOPLE_WAITING]:      { icon: LifeBuoy, color: '#D44858', bg: '#FDF2F3' },
+  [NOTIFICATION_EVENT_TYPES.RESCUE_AMBULANCE_SUGGESTED]: { icon: LifeBuoy, color: '#D44858', bg: '#FDF2F3' },
   ANNOUNCEMENT:              { icon: Megaphone,    color: '#0D6053', bg: '#EEF7F4' },
   SURGE_:                    { icon: Siren,        color: '#D44858', bg: '#FDF2F3' },
 };
@@ -60,8 +65,11 @@ function NotifRow({
   const unread = notif.status === 'PENDING';
   const { icon: Icon, color, bg } = getEventMeta(notif.event_type);
 
+  const crewNote = crewHelpNote(notif);
+
   function handleClick() {
     if (unread) onRead(notif.id);
+    // Incident notices (crew help, fire report and rescue notices included) open that incident.
     if (notif.incident_id) {
       router.push(incidentLink(notif.incident_id));
     } else if (notif.event_type === 'ANNOUNCEMENT' && typeof notif.data_payload?.announcementId === 'string') {
@@ -99,6 +107,11 @@ function NotifRow({
           </p>
         )}
         <p className="line-clamp-2 text-xs text-agap-textSub leading-relaxed">{notif.body}</p>
+        {crewNote && (
+          <p className="mt-1 line-clamp-3 text-xs italic text-agap-textMain leading-relaxed">
+            Crew note: {crewNote}
+          </p>
+        )}
       </div>
 
       {/* Right */}

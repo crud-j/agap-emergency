@@ -21,6 +21,7 @@ import {
   fetchIncidentTransports,
   updateIncidentTransport,
   rejectAttachment,
+  fetchRescueSummary,
 } from './api';
 
 export function useIncidents(params?: IncidentListParams, opts?: { enabled?: boolean }) {
@@ -152,6 +153,15 @@ export function useIncidentTransports(id: string | null) {
     queryFn: () => fetchIncidentTransports(id!),
     enabled: !!id,
     refetchInterval: 20_000,
+  });
+}
+
+/** A rescue unit's trips and running totals (MOD-32/52, plan Phase 4); `incident.field_report` refreshes it. */
+export function useRescueSummary(id: string | null) {
+  return useQuery({
+    queryKey: ['incident-rescue', id],
+    queryFn: () => fetchRescueSummary(id!),
+    enabled: !!id,
   });
 }
 

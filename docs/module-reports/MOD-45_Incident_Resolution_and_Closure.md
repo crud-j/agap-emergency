@@ -1,6 +1,6 @@
 # MOD-45 — Incident Resolution and Closure
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -47,7 +47,7 @@ Give every incident a documented ending instead of just letting it go quiet, and
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Verbal report-back from the field crew | `backend/src/incidents/incidents.service.ts` (`createResolution`, `close`) and matching REST routes (`POST /api/v1/incidents/:id/resolution`, `POST /api/v1/incidents/:id/close`) |
+| 1 | Verbal report-back from the field crew | `backend/src/incidents/incidents.service.ts` (`createResolution`, `close`) and matching REST routes (`POST /v1/incidents/:id/resolution`, `POST /v1/incidents/:id/close`) |
 | 2 | Logbook entry, if written | PostgreSQL `incident_resolutions` table (upserted, unique per incident) |
 | 3 | | Operations Center Incident Detail drawer, Resolution dialog (`frontend/components/incidents/IncidentDetailDrawer.tsx`) |
 | 4 | | Reporter standing query used for the Verified Reporter badge (MOD-01) |

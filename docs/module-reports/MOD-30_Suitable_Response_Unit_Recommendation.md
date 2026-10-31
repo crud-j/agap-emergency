@@ -1,6 +1,6 @@
 # MOD-30 — Suitable Response Unit Recommendation
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -48,7 +48,7 @@ Decision support, not decision-making: the system never decides which unit goes,
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Phone calls asking around which units are free and how far away | `backend/src/dispatch/resource-matching/resource-matching.service.ts` (confirmed ~296 lines of real scoring logic, not a stub) |
+| 1 | Phone calls asking around which units are free and how far away | `backend/src/dispatch/resource-matching/resource-matching.service.ts` |
 | 2 | Dispatcher's own memory of unit locations and typical availability | A required-capability matrix mapping incident category to unit capability |
 | 3 | No distance calculation — just a rough sense of "who's close" | PostGIS distance calculation against the units' recorded locations |
 | 4 | — | Operations Center Dispatch screen displaying the ranked list and reasons alongside the Confirm Dispatch action (MOD-31) |

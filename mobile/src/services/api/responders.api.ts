@@ -1,4 +1,4 @@
-import type { ResponderAvailability } from '@agap/shared';
+import type { CrewHelpNeed, ResponderAvailability } from '@agap/shared';
 import { apiFetch } from './http';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
@@ -47,6 +47,10 @@ export interface Assignment {
   created_at: string;
   updated_at: string;
   accepted_at: string | null;
+  en_route_at: string | null;
+  on_scene_at: string | null;
+  field_done_at: string | null;
+  active_dispatch_count: number;
   incidents: AssignmentIncident | null;
   resources: AssignmentResource | null;
 }
@@ -74,6 +78,33 @@ export function updateAssignmentStatus(
   return authFetch<void>(`/v1/responders/assignments/${id}/status`, token, {
     method: 'PATCH',
     body: JSON.stringify({ status, ...(notes ? { notes } : {}), ...(clientRequestId ? { clientRequestId } : {}) }),
+  });
+}
+
+export interface HelpRequestBody {
+  need: CrewHelpNeed;
+  count?: number;
+  /** Free text for dispatchers only; never logged on the phone. */
+  note?: string;
+  clientRequestId?: string;
+}
+
+export interface HelpRequestResult {
+  /** True when dispatch was already told about this need in the last few minutes. */
+  deduplicated: boolean;
+  incidentId: string;
+}
+
+/** Ask dispatch for more help (plan Phase 2 step 5). Never creates a dispatch by itself. */
+export function requestHelp(id: string, body: HelpRequestBody, token: string): Promise<HelpRequestResult> {
+  return authFetch<HelpRequestResult>(`/v1/responders/assignments/${id}/help-request`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      need: body.need,
+      ...(body.count != null ? { count: body.count } : {}),
+      ...(body.note?.trim() ? { note: body.note.trim() } : {}),
+      ...(body.clientRequestId ? { clientRequestId: body.clientRequestId } : {}),
+    }),
   });
 }
 

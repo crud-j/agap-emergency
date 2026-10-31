@@ -33,6 +33,8 @@ import { Prisma, type Incident } from '@prisma/client';
 import { EmergencyContactNotificationService } from '../emergency-contacts/emergency-contact-notification.service';
 import { REPORTER_SEX_INCLUDE, reporterSexFrom, type ReporterSex } from '../common/utils/reporter-sex';
 import { OpsAlertService } from '../emergency-alerts/ops-alert.service';
+import { addAgencyParticipant } from './agency-participants';
+import { FIRE_REPORT_INCLUDE } from './fire-report/fire-report.service';
 
 /** ICS situation report (incident_command_structures.situation_notes, MOD-36). */
 const ICS_SITUATION_NOTES_MAX = 4000;
@@ -320,6 +322,8 @@ export class IncidentsService {
         barangay_notices: { include: { barangay: { select: { id: true, name: true } } } },
         dispatches: true,
         on_scene_assessments: { orderBy: { assessed_at: 'desc' } },
+        // Fire card (MOD-36): newest first, the first is the current picture.
+        fire_field_reports: { orderBy: { reported_at: 'desc' }, include: FIRE_REPORT_INCLUDE },
       },
     });
     if (!incident) throw new NotFoundException(`Incident ${id} not found`);
@@ -434,6 +438,14 @@ export class IncidentsService {
             barangay: { select: { id: true, name: true } },
           },
         },
+        // The queue's fire-status badge (MOD-23): the latest fire report only.
+        fire_field_reports: {
+          orderBy: { reported_at: 'desc' },
+          take: 1,
+          select: { fire_status: true, alarm_level: true },
+        },
+        // The queue's "12 rescued" badge (MOD-23/52): each trip's count only.
+        rescue_trip_reports: { select: { rescued_count: true } },
       },
       orderBy: { submitted_at: 'desc' },
       ...(skip > 0 ? { skip } : {}),
@@ -1100,23 +1112,10 @@ export class IncidentsService {
 
   async addAgency(id: string, organizationId: string, userId: string) {
     await this.findById(id);
-    const participant = await this.prisma.incident_agency_participants.create({
-      data: {
-        incident_id: id,
-        organization_id: organizationId,
-        invited_by_id: userId,
-      },
-    });
-    void this.audit.log({
-      action: 'CREATE',
-      actorId: userId,
-      entityType: 'incident_agency_participant',
-      entityId: participant.id,
-      moduleId: 'MOD-34',
-      incidentId: id,
-      newValues: { organization_id: organizationId },
-    });
-    this.realtime.incidentUpdated(id, { agencyAdded: organizationId });
+    const { participant } = await addAgencyParticipant(
+      { prisma: this.prisma, audit: this.audit, realtime: this.realtime },
+      { incidentId: id, organizationId, actorId: userId },
+    );
     return participant;
   }
 

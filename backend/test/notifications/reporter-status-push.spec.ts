@@ -367,9 +367,13 @@ describe('IncidentsService.updateStatus → reporter notifier', () => {
 describe('RespondersService.updateStatus → reporter notifier', () => {
   function build() {
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ status: IncidentStatus.ON_SCENE }]),
       incident: { update: jest.fn().mockResolvedValue({}) },
       incidentEvent: { create: jest.fn().mockResolvedValue({}) },
-      dispatches: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
+      dispatches: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'dispatch-1', resource_id: 'res-1', status: 'ACCEPTED' }]),
+        update: jest.fn(),
+      },
       resources: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       transportRecord: { findFirst: jest.fn().mockResolvedValue(null) },
     };

@@ -1,6 +1,6 @@
 # MOD-20 — Real-Time Event / WebSocket Engine
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -47,7 +47,7 @@ Give dispatchers, supervisors and responders situational awareness that is actua
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Two-way radio / mobile phone call between staff | Socket.io gateway, `backend/src/realtime/agap.gateway.ts` (confirmed ~175 lines of real `@SubscribeMessage`/emit handlers, not a stub) |
+| 1 | Two-way radio / mobile phone call between staff | Socket.io gateway, `backend/src/realtime/agap.gateway.ts` |
 | 2 | Whoever is on that specific channel at that moment | Authenticated connection handshake — a connection without a valid, unexpired JWT is rejected |
 | 3 | Manual face-to-face or verbal relay to the next person | Room-scoped subscriptions (per-incident room, per-organization operations room, per-user room) |
 | 4 | — | The standard event set: `incident.created/updated/status_changed/escalated/closed`, `dispatch.created/updated/cancelled`, `resource.status_changed/location_updated`, `responder.location_updated/status_changed/eta_updated`, `notification.created`, `escalation.created/updated` |

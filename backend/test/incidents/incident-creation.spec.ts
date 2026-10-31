@@ -460,6 +460,14 @@ describe('IncidentsService', () => {
             },
             incident_details: { select: { priority_reasons: true } },
             barangay_notices: expect.any(Object),
+            // The queue's fire badge: the latest report's status and alarm level only, never its notes.
+            fire_field_reports: {
+              orderBy: { reported_at: 'desc' },
+              take: 1,
+              select: { fire_status: true, alarm_level: true },
+            },
+            // The queue's rescued badge: each trip's count only, never notes or places.
+            rescue_trip_reports: { select: { rescued_count: true } },
           },
         }),
       );

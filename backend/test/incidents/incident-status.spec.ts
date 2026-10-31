@@ -117,13 +117,13 @@ describe('IncidentStatusService', () => {
       expect(client.incidentEvent.create.mock.calls[0][0].data).toMatchObject({ triggered_by_role: null, notes: null });
     });
 
-    it('throws on an invalid transition before any write', async () => {
+    it('allows ASSISTING → TRANSPORTING after on-scene treatment', async () => {
       const client = tx();
       await expect(service.recordTransition(client as any, {
         incidentId: 'inc-1', from: IncidentStatus.ASSISTING, to: IncidentStatus.TRANSPORTING, actorId: 'user-1',
-      })).rejects.toThrow(BadRequestException);
-      expect(client.incident.update).not.toHaveBeenCalled();
-      expect(client.incidentEvent.create).not.toHaveBeenCalled();
+      })).resolves.toMatchObject({ status: IncidentStatus.ON_SCENE });
+      expect(client.incident.update).toHaveBeenCalled();
+      expect(client.incidentEvent.create).toHaveBeenCalled();
     });
 
     it('returns 409 INCIDENT_STATUS_CHANGED when the status moved concurrently, and writes no event', async () => {

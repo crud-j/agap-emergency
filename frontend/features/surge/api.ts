@@ -13,6 +13,18 @@ export interface SurgeState {
   active_incident_count: number;
   affected_barangays: string[];
   mass_casualty: boolean;
+  /** Rescue trips since the surge was declared, per barangay (plan Phase 4). Empty when inactive. */
+  rescue_by_barangay: BarangayRescueTotal[];
+}
+
+export interface BarangayRescueTotal {
+  /** null: the incident's location has no barangay. */
+  barangay: string | null;
+  incidents: number;
+  trips: number;
+  rescued: number;
+  /** Sum of each incident's latest still-waiting estimate. */
+  stillWaiting: number;
 }
 
 export interface ActivateSurgeBody {
@@ -55,6 +67,7 @@ interface BackendSurgeStatus {
     affected_barangays: string[];
     bocaue_river_level?: string | null;
   } | null;
+  rescueByBarangay?: BarangayRescueTotal[];
 }
 
 export async function fetchSurgeState(): Promise<SurgeState> {
@@ -69,6 +82,7 @@ export async function fetchSurgeState(): Promise<SurgeState> {
     active_incident_count: 0,
     affected_barangays: raw.surge?.affected_barangays ?? [],
     mass_casualty: false,
+    rescue_by_barangay: raw.rescueByBarangay ?? [],
   };
 }
 

@@ -1,6 +1,7 @@
 import type {
   IncidentEventName, IncidentCreatedPayload, IncidentStatusChangedPayload, IncidentLocationUpdatedPayload, IncidentAssignedPayload,
   IncidentMessagePayload, IncidentTransportingPayload, IncidentFacilityArrivalPayload, IncidentTransportUpdatedPayload,
+  IncidentFieldReportPayload,
 } from './incident.events';
 import type {
   ResponderEventName, ResponderLocationUpdatedPayload, ResponderStatusChangedPayload, ResponderEtaUpdatedPayload,
@@ -41,6 +42,7 @@ export type AgapWebSocketPayloadMap = {
   'incident.transporting': IncidentTransportingPayload;
   'incident.facility_arrival': IncidentFacilityArrivalPayload;
   'incident.transport_updated': IncidentTransportUpdatedPayload;
+  'incident.field_report': IncidentFieldReportPayload;
   'responder.location_updated': ResponderLocationUpdatedPayload;
   'responder.status_changed': ResponderStatusChangedPayload;
   'responder.eta_updated': ResponderEtaUpdatedPayload;

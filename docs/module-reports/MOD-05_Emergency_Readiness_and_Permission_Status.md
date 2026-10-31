@@ -1,6 +1,6 @@
 # MOD-05 — Emergency Readiness and Permission Status
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -55,7 +55,7 @@ Find problems, such as location permission being off, before an emergency happen
 | 1 | Resident's personal mobile phone | AGAP Citizen mobile app (Expo, React Native, Expo Router) |
 | 2 | Telephone / MDRRMO hotline (used only when the emergency happens) | Expo Location, Expo Notifications, Expo Camera, Expo Sensors (permission and sensor status) |
 | 3 | | Network status check (online, limited, offline) |
-| 4 | | NestJS REST API (`GET` and `PUT /api/v1/users/me/readiness`) with JWT sign-in check |
+| 4 | | NestJS REST API (`GET` and `PUT /v1/users/me/readiness`) with JWT sign-in check |
 | 5 | | Readiness rules on the server, with the same rules in the app for use offline |
 | 6 | | PostgreSQL (`device_readiness_reports` table) |
 

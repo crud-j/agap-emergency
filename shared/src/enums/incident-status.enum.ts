@@ -93,7 +93,7 @@ export const INCIDENT_STATUS_TRANSITIONS: Readonly<
     IncidentStatus.RESOLVED,
   ],
   [IncidentStatus.TRANSPORTING]: [IncidentStatus.RESOLVED],
-  [IncidentStatus.ASSISTING]: [IncidentStatus.RESOLVED],
+  [IncidentStatus.ASSISTING]: [IncidentStatus.TRANSPORTING, IncidentStatus.RESOLVED],
   [IncidentStatus.RESOLVED]: [IncidentStatus.CLOSED],
   [IncidentStatus.UNABLE_TO_RESPOND]: [IncidentStatus.DISPATCH_PENDING],
   [IncidentStatus.REFERRED]: [IncidentStatus.CLOSED],

@@ -8,6 +8,7 @@ import { logout } from '@/lib/session';
 import { useWsState } from '@/lib/use-ws-state';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { cn } from '@/lib/utils';
+import { showsSidebar } from '@/lib/role-access';
 import { LogOut, ChevronRight, ShieldCheck } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 
@@ -122,14 +123,17 @@ export function Topbar(): JSX.Element {
               {user.name ?? user.email}
             </span>
 
-            <Link
-              href="/account/security"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-agap-textSub hover:bg-agap-surface hover:text-agap-green transition-colors focus:outline-none focus:ring-2 focus:ring-agap-green"
-              aria-label="Account security"
-              title="Account security"
-            >
-              <ShieldCheck size={14} />
-            </Link>
+            {/* Sidebar roles reach Account Security from the sidebar; the Hospital Portal has none. */}
+            {!showsSidebar(user.role) && (
+              <Link
+                href="/account/security"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-agap-textSub hover:bg-agap-surface hover:text-agap-green transition-colors focus:outline-none focus:ring-2 focus:ring-agap-green"
+                aria-label="Account security"
+                title="Account security"
+              >
+                <ShieldCheck size={14} />
+              </Link>
+            )}
 
             <button
               onClick={handleLogout}

@@ -1,6 +1,6 @@
 # MOD-50 — Emergency Response Analytics
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -47,7 +47,7 @@ Accountability and continuous improvement — showing, with numbers, whether the
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Staff memory and manual logbook review to estimate performance | `backend/src/analytics/analytics.service.ts` (confirmed ~438 lines of real aggregation logic) |
+| 1 | Staff memory and manual logbook review to estimate performance | `backend/src/analytics/analytics.service.ts` |
 | 2 | No structured, queryable incident history | Operations Center Analytics page, `frontend/app/(ops)/analytics` |
 | 3 | No defined SLA policy to measure against | PostgreSQL queries over incident lifecycle timestamps already written by other modules as a side effect of their own work |
 | 4 | — | Authenticated, role-checked NestJS services computing volume, response-time, dispatch-performance, SLA-compliance, and false-alert-rate charts |

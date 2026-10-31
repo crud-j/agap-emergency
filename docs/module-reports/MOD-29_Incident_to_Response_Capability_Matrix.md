@@ -1,6 +1,6 @@
 # MOD-29 — Incident-to-Response Capability Matrix
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -50,7 +50,7 @@ Give the capability side of unit recommendation one fixed, consistent definition
 |---|---|---|
 | 1 | Dispatcher's own operational knowledge of which units can do what | `backend/src/dispatch/resource-matching/resource-matching.service.ts` — `CAPABILITY_MATRIX` and `TYPE_AFFINITY` constants and the capability-scoring function |
 | 2 | No catalog, reference table, or standard | PostgreSQL `resource_capabilities` (catalog) and `resource_capability_assignments` (per-unit assignment, with a verified flag) |
-| 3 | — | NestJS `POST`/`DELETE /api/v1/resources/:id/capabilities` endpoints, restricted to Org Administrator (own organization only) and System Administrator |
+| 3 | — | NestJS `POST`/`DELETE /v1/resources/:id/capabilities` endpoints, restricted to Org Administrator (own organization only) and System Administrator |
 | 4 | — | Operations Center Resources/Fleet registry page, `frontend/app/(ops)/resources`, displaying each unit's capabilities as read-only chips |
 
 ---

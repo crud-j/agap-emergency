@@ -20,6 +20,9 @@ export interface DispatchUpdatedPayload {
   dispatchId: string;
   resourceId: string;
   status: string;
+  enRouteAt?: string | null;
+  onSceneAt?: string | null;
+  fieldDoneAt?: string | null;
   updatedAt: string;
 }
 

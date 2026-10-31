@@ -2,8 +2,16 @@ import type { ComponentProps } from 'react';
 import type { Ionicons } from '@expo/vector-icons';
 import { en, type Translations } from '@/src/i18n/translations';
 import { ApiError } from '@/src/services/api/http';
+import { UNIT_FIELD_FLOWS, type UnitFieldFlow } from '@agap/shared';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
+
+export interface DispatchFieldProgress {
+  enRouteAt?: string | null;
+  onSceneAt?: string | null;
+  fieldDoneAt?: string | null;
+  otherUnitsActive?: boolean;
+}
 
 export type NextAction =
   | { kind: 'accept'; label: string; icon: IoniconName }
@@ -18,13 +26,19 @@ export type NextAction =
       confirm?: { title: string; message: string };
     }
   /** Record arrival at the hospital on this crew's open transport (confirmed first). */
-  | { kind: 'arrive'; label: string; icon: IoniconName };
+  | { kind: 'arrive'; label: string; icon: IoniconName }
+  /** Open the fire report form (plan Phase 3). Not a status step: it never moves the incident. */
+  | { kind: 'fireReport'; label: string; icon: IoniconName }
+  /** Open the rescue trip form (plan Phase 4). Not a status step: it never moves the incident. */
+  | { kind: 'rescueTrip'; label: string; icon: IoniconName };
 
 const TERMINAL_INCIDENT_STATUSES = new Set([
   'RESOLVED', 'CLOSED', 'CANCELLED', 'FALSE_ALERT', 'DUPLICATE', 'UNABLE_TO_RESPOND', 'REFERRED',
 ]);
 
-const RESOLVE_ACTION: NextAction = {
+type StatusAction = Extract<NextAction, { kind: 'status' }>;
+
+const RESOLVE_ACTION: StatusAction = {
   kind: 'status',
   label: 'Mark Resolved',
   status: 'RESOLVED',
@@ -37,12 +51,38 @@ const RESOLVE_ACTION: NextAction = {
   },
 };
 
+const FINISH_OWN_UNIT_CONFIRM = {
+  title: 'Finish your unit’s work?',
+  message:
+    'Your unit becomes available again. Other units are still working on this incident, ' +
+    'so it stays open until the last one finishes.',
+};
+
+const POST_SCENE_STATUSES = new Set(['TRANSPORTING', 'ASSISTING']);
+const MOVING_STATUSES = new Set(['EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING']);
+
+/**
+ * This crew's own step. The incident status is the furthest step of any unit, so
+ * a second unit reads its dispatch stamps first; past the scene (transport,
+ * treating) and at the end, the incident status is what this crew acts on.
+ */
+function unitStep(incidentStatus: string | null | undefined, progress?: DispatchFieldProgress) {
+  if (!progress) return incidentStatus;
+  if (incidentStatus && TERMINAL_INCIDENT_STATUSES.has(incidentStatus)) return incidentStatus;
+  if (progress.onSceneAt) return incidentStatus && POST_SCENE_STATUSES.has(incidentStatus) ? incidentStatus : 'ON_SCENE';
+  if (progress.enRouteAt) return 'EN_ROUTE';
+  // No stamps while another unit moved the incident ahead: this unit hasn't left yet.
+  // (A dispatch from before per-unit stamps, alone on its incident, still follows the incident.)
+  if (progress.otherUnitsActive && incidentStatus && MOVING_STATUSES.has(incidentStatus)) return 'DISPATCHED';
+  return incidentStatus;
+}
+
 /**
  * The dispatch row only ever moves PENDING/SENT → ACCEPTED → COMPLETED. The
  * responder's field progress (EN_ROUTE → ON_SCENE → TRANSPORTING/ASSISTING →
- * RESOLVED) is recorded on the *incident* by PATCH /responders/assignments/:id/status.
- * So once the crew has accepted, the next step must be read from the incident
- * status — reading the dispatch status would leave "Mark En Route" showing forever.
+ * RESOLVED) is recorded on the dispatch and incident by PATCH
+ * /responders/assignments/:id/status. Dispatch stamps take precedence so a
+ * second unit can advance independently while the incident is already ahead.
  * The crew can resolve; closing stays the dispatcher's call (MOD-45).
  *
  * While TRANSPORTING, `transport` is this crew's transport: `{ open: true }` →
@@ -55,26 +95,56 @@ export function nextAssignmentActions(
   incidentStatus?: string | null,
   transport?: { open: boolean } | null,
   labels: Translations['transport'] = en.transport,
+  progress?: DispatchFieldProgress,
+  flow: UnitFieldFlow = UNIT_FIELD_FLOWS.MEDICAL_TRANSPORT,
 ): NextAction[] {
   if (dispatchStatus === 'PENDING' || dispatchStatus === 'SENT') {
     return [{ kind: 'accept', label: 'Accept Assignment', icon: 'checkmark-circle' }];
   }
   if (dispatchStatus !== 'ACCEPTED') return [];
 
-  switch (incidentStatus) {
+  const effectiveStatus = unitStep(incidentStatus, progress);
+  const resolveAction: StatusAction = progress?.otherUnitsActive
+    ? { ...RESOLVE_ACTION, label: 'Finish (your unit)', confirm: FINISH_OWN_UNIT_CONFIRM }
+    : RESOLVE_ACTION;
+  const finishAction: StatusAction = { ...resolveAction, secondary: true };
+  const transportAction: StatusAction = { kind: 'status', label: 'Transporting', status: 'TRANSPORTING', icon: 'car' };
+  const assistAction: StatusAction = {
+    kind: 'status', label: 'Treating on Scene', status: 'ASSISTING', icon: 'medkit', secondary: true,
+  };
+  // A fire or rescue crew keeps its own on-scene tools while another unit transports or
+  // treats (the incident is then TRANSPORTING / ASSISTING, but this unit is still working).
+  const sceneWork: NextAction[] | null =
+    flow === UNIT_FIELD_FLOWS.FIRE
+      ? [{ kind: 'fireReport', label: 'Fire Report', icon: 'flame' }, finishAction]
+      : flow === UNIT_FIELD_FLOWS.RESCUE
+        ? [{ kind: 'rescueTrip', label: 'Record Rescue Trip', icon: 'boat' }, finishAction]
+        : null;
+
+  switch (effectiveStatus) {
     case 'EN_ROUTE':
       return [{ kind: 'status', label: 'Mark On Scene', status: 'ON_SCENE', icon: 'location' }];
     case 'ON_SCENE':
-      return [
-        { kind: 'status', label: 'Transporting', status: 'TRANSPORTING', icon: 'car' },
-        { kind: 'status', label: 'Treating on Scene', status: 'ASSISTING', icon: 'medkit', secondary: true },
-      ];
+      if (sceneWork) return sceneWork;
+      // Every flow can finish; the server refuses Transporting / Treating to the wrong unit type.
+      switch (flow) {
+        case UNIT_FIELD_FLOWS.MEDICAL_FIRST:
+          return [{ ...assistAction, secondary: false }, finishAction];
+        case UNIT_FIELD_FLOWS.GENERAL:
+          return [resolveAction];
+        default:
+          return [transportAction, assistAction];
+      }
     case 'TRANSPORTING':
+      if (sceneWork) return sceneWork;
       if (transport === undefined) return [];
       if (transport?.open) return [{ kind: 'arrive', label: labels.arrivedAction, icon: 'medical' }];
-      return [RESOLVE_ACTION];
+      return [resolveAction];
     case 'ASSISTING':
-      return [RESOLVE_ACTION];
+      if (sceneWork) return sceneWork;
+      // Treated on scene, then needs a hospital (ASSISTING → TRANSPORTING, D4).
+      if (flow === UNIT_FIELD_FLOWS.MEDICAL_TRANSPORT) return [resolveAction, { ...transportAction, secondary: true }];
+      return [resolveAction];
     default:
       if (incidentStatus && TERMINAL_INCIDENT_STATUSES.has(incidentStatus)) return [];
       return [{ kind: 'status', label: 'Mark En Route', status: 'EN_ROUTE', icon: 'navigate' }];

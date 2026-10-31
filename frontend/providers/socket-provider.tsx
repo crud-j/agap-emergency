@@ -227,6 +227,24 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       },
     );
 
+    // ─── incident.field_report (MOD-36, plan Phase 3) ────────────────────────
+    // A crew's fire report or rescue trip: the drawer's Fire / Rescue card, the queue
+    // badges and (for a trip) the surge page's per-barangay totals reload.
+    const offFieldReport = onIncidentEvent<{ incidentId: string; kind?: 'FIRE' | 'RESCUE' }>(
+      'incident.field_report',
+      ({ incidentId, kind }) => {
+        startTransition(() => {
+          qc.invalidateQueries({ queryKey: ['incidents'] });
+          if (kind === 'RESCUE') {
+            qc.invalidateQueries({ queryKey: ['incident-rescue', incidentId] });
+            qc.invalidateQueries({ queryKey: ['surge-state'] });
+          } else {
+            qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+          }
+        });
+      },
+    );
+
     // ─── dispatch.created ────────────────────────────────────────────────────
     const offDispatchCreated = onIncidentEvent<DispatchCreatedPayload>(
       'dispatch.created',
@@ -447,6 +465,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       offTriageTag();
       offUpdated();
       offAssessment();
+      offFieldReport();
       offDispatchCreated();
       offDispatchCancelled();
       offEscCreated();

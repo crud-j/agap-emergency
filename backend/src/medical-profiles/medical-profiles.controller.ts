@@ -65,6 +65,6 @@ export class MedicalProfilesController {
     @Param('userId', ParseUUIDPipe) userId: string,
     @Request() req: any,
   ) {
-    return this.medicalProfilesService.findForResponder(userId, req.user.id);
+    return this.medicalProfilesService.findForResponder(userId, req.user.id, req.user.role);
   }
 }

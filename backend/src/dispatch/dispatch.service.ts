@@ -13,6 +13,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
+import { addAgencyParticipant } from '../incidents/agency-participants';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
 import {
@@ -174,6 +175,24 @@ export class DispatchService {
       incidentId: dto.incidentId,
       newValues: { resourceId: dto.resourceId, crewIds: dto.initialCrewIds ?? [] },
     });
+
+    // MOD-34 (decision D5): the unit's organization joins the incident's agencies, with
+    // the unit type as its role. Idempotent; a failure here never affects the dispatch.
+    if (resource.organization_id) {
+      try {
+        await addAgencyParticipant(
+          { prisma: this.prisma, audit: this.audit, realtime: this.realtime },
+          {
+            incidentId: dto.incidentId,
+            organizationId: resource.organization_id,
+            actorId: dispatcherId,
+            roleInIncident: String(resource.resource_type),
+          },
+        );
+      } catch (err) {
+        this.logger.warn(`Agency participant not added for dispatch ${dispatch.id}: ${String(err)}`);
+      }
+    }
 
     // persist → commit → emit (best-effort). The incident was transitioned to
     // DISPATCHED inside the transaction above, so fan out: the assignment, the

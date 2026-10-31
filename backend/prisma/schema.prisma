@@ -81,7 +81,9 @@ model User {
   notifications                                                            Notification[]
   offline_event_queue                                                      offline_event_queue[]
   on_scene_assessments                                                     on_scene_assessments[]
-  organization_memberships                                                 organization_memberships[]
+  fire_field_reports                                                       fire_field_reports[]
+  rescue_trip_reports                                                      rescue_trip_reports[]
+  organization_memberships                                                organization_memberships[]
   resource_status_log                                                      resource_status_log[]
   responder_availability_changes                                           ResponderAvailability[]        @relation("responderAvailabilityChangedBy")
   responder_availability_user                                              ResponderAvailability?         @relation("responderAvailabilityUser")
@@ -246,7 +248,9 @@ model Incident {
   notifications                Notification[]
   offline_event_queue          offline_event_queue[]
   on_scene_assessments         on_scene_assessments[]
-  resource_recommendations     resource_recommendations[]
+  fire_field_reports           fire_field_reports[]
+  rescue_trip_reports          rescue_trip_reports[]
+  resource_recommendations    resource_recommendations[]
   resource_requests            ResourceRequest[]
   resource_status_log          resource_status_log[]
   resources                    resources[]
@@ -393,6 +397,7 @@ model Facility {
   facility_capabilities   facility_capabilities[]
   facility_referrals      facility_referrals[]
   transport_records       TransportRecord[]
+  rescue_trip_reports     rescue_trip_reports[]
 
   @@index([location], map: "idx_facilities_location", type: Gist)
   @@index([location_status], map: "idx_facilities_location_status")
@@ -685,6 +690,9 @@ model dispatches {
   authorized_at        DateTime               @default(now()) @db.Timestamptz(6)
   sent_at              DateTime?              @db.Timestamptz(6)
   accepted_at          DateTime?              @db.Timestamptz(6)
+  en_route_at          DateTime?              @db.Timestamptz(6)
+  on_scene_at          DateTime?              @db.Timestamptz(6)
+  field_done_at        DateTime?              @db.Timestamptz(6)
   rejected_at          DateTime?              @db.Timestamptz(6)
   rejected_reason      String?
   completed_at         DateTime?              @db.Timestamptz(6)
@@ -697,6 +705,8 @@ model dispatches {
   resources            resources              @relation(fields: [resource_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   facility_referrals   facility_referrals[]
   on_scene_assessments on_scene_assessments[]
+  fire_field_reports   fire_field_reports[]
+  rescue_trip_reports  rescue_trip_reports[]
   transport_records    TransportRecord[]
 
   @@index([dispatcher_id], map: "idx_dispatches_dispatcher")
@@ -1089,6 +1099,64 @@ model on_scene_assessments {
   incident_patients   incident_patients?   @relation(fields: [patient_id], references: [id], onUpdate: NoAction)
 
   @@index([incident_id], map: "idx_assessments_incident")
+}
+
+/// A fire crew's size-up report (MOD-32/36). Append-only: every report is a new row
+/// and the latest is the current picture. Codes are text checked against
+/// @agap/shared FIRE_* constants (D1 is provisional), so a code change needs no enum migration.
+model fire_field_reports {
+  id                  String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id         String      @db.Uuid
+  dispatch_id         String?     @db.Uuid
+  reported_by_id      String      @db.Uuid
+  alarm_level         String?     @db.VarChar(30)
+  fire_status         String?     @db.VarChar(20)
+  structures_involved Int?        @db.SmallInt
+  occupancy_type      String?     @db.VarChar(30)
+  hazards             String[]    @default([])
+  spreading           Boolean?
+  evacuation_needed   Boolean?
+  casualties_seen     Int?        @db.SmallInt
+  trapped_persons     Int?        @db.SmallInt
+  notes               String?
+  client_request_id   String?     @unique @db.Uuid
+  reported_at         DateTime    @default(now()) @db.Timestamptz(6)
+  incidents           Incident    @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  dispatches          dispatches? @relation(fields: [dispatch_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users               User        @relation(fields: [reported_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([incident_id, reported_at(sort: Desc)], map: "idx_fire_reports_incident")
+}
+
+/// A rescue crew's trip log (MOD-32/52). One row per trip, append-only. Counts only,
+/// never names. Codes are text checked against @agap/shared rescue constants (D2).
+model rescue_trip_reports {
+  id                   String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id          String      @db.Uuid
+  dispatch_id          String?     @db.Uuid
+  reported_by_id       String      @db.Uuid
+  rescued_count        Int?        @db.SmallInt
+  families             Int?        @db.SmallInt
+  children             Int?        @db.SmallInt
+  elderly              Int?        @db.SmallInt
+  pwd                  Int?        @db.SmallInt
+  pregnant             Int?        @db.SmallInt
+  still_waiting        Int?        @db.SmallInt
+  water_level          String?     @db.VarChar(20)
+  access               String?     @db.VarChar(20)
+  taken_to             String?     @db.VarChar(30)
+  taken_to_facility_id String?     @db.Uuid
+  taken_to_other       String?     @db.VarChar(200)
+  notes                String?
+  client_request_id    String?     @unique @db.Uuid
+  reported_at          DateTime    @default(now()) @db.Timestamptz(6)
+  incidents            Incident    @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  dispatches           dispatches? @relation(fields: [dispatch_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                User        @relation(fields: [reported_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  facilities           Facility?   @relation(fields: [taken_to_facility_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([incident_id, reported_at(sort: Desc)], map: "idx_rescue_trips_incident")
+  @@index([reported_at], map: "idx_rescue_trips_reported_at")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments

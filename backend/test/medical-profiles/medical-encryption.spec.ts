@@ -1,4 +1,5 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import { AuditAction } from '@agap/shared';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
@@ -67,13 +68,18 @@ describe('MedicalProfilesService — stores only sealed values', () => {
   const prisma = {
     consent_records: { findFirst: jest.fn().mockResolvedValue({ id: uuidv4() }) },
     sensitive_data_access_log: { create: jest.fn() },
+    // The responder is crewed on an active dispatch of the patient's incident (F6).
+    dispatches: {
+      findFirst: jest.fn().mockResolvedValue({ incidents: { id: uuidv4(), public_reference: 'INC-2026-000777' } }),
+    },
     medicalProfile: {
       findUnique: jest.fn(() => Promise.resolve(stored)),
       create: jest.fn(({ data }) => { stored = { id: uuidv4(), ...data }; return Promise.resolve(stored); }),
       update: jest.fn(({ data }) => { stored = { ...stored, ...data }; return Promise.resolve(stored); }),
     },
   };
-  const service = new MedicalProfilesService(prisma as any, crypto);
+  const audit = { log: jest.fn().mockResolvedValue(undefined) };
+  const service = new MedicalProfilesService(prisma as any, crypto, audit as any);
 
   beforeEach(() => { stored = null; jest.clearAllMocks(); });
 
@@ -102,5 +108,51 @@ describe('MedicalProfilesService — stores only sealed values', () => {
     const result = await service.findForResponder(USER_ID, uuidv4());
     expect(prisma.sensitive_data_access_log.create).toHaveBeenCalled();
     expect(result.medical_conditions).toEqual(['Diabetes']);
+  });
+
+  it('a responder is scoped to an active crew on an incident where the user is reporter or patient', async () => {
+    stored = { id: uuidv4(), ...crypto.sealFields(USER_ID, PLAIN), user_id: USER_ID };
+    const responderId = uuidv4();
+    await service.findForResponder(USER_ID, responderId, 'RESPONDER');
+
+    expect(prisma.dispatches.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        status: { in: ['PENDING', 'SENT', 'ACCEPTED'] },
+        dispatch_crew: { some: { user_id: responderId } },
+        incidents: {
+          OR: [
+            { incident_reporters: { user_id: USER_ID } },
+            { incident_patients: { some: { user_id: USER_ID } } },
+          ],
+        },
+      },
+    }));
+    // The access log names the incident it was read for.
+    expect(prisma.sensitive_data_access_log.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ purpose: 'Responder incident access INC-2026-000777' }),
+    });
+  });
+
+  it('a responder off that incident is refused (403), audited, and nothing is read or logged as an access', async () => {
+    stored = { id: uuidv4(), ...crypto.sealFields(USER_ID, PLAIN), user_id: USER_ID };
+    prisma.dispatches.findFirst.mockResolvedValueOnce(null);
+    const responderId = uuidv4();
+
+    await expect(service.findForResponder(USER_ID, responderId, 'RESPONDER'))
+      .rejects.toBeInstanceOf(ForbiddenException);
+    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+      action: AuditAction.PERMISSION_DENIED, actorId: responderId, entityType: 'medical_profile', moduleId: 'MOD-48',
+    }));
+    expect(prisma.medicalProfile.findUnique).not.toHaveBeenCalled();
+    expect(prisma.sensitive_data_access_log.create).not.toHaveBeenCalled();
+  });
+
+  it('a dispatcher is not crew-scoped (unchanged)', async () => {
+    stored = { id: uuidv4(), ...crypto.sealFields(USER_ID, PLAIN), user_id: USER_ID };
+    await service.findForResponder(USER_ID, uuidv4(), 'DISPATCHER');
+    expect(prisma.dispatches.findFirst).not.toHaveBeenCalled();
+    expect(prisma.sensitive_data_access_log.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ purpose: 'Responder incident access' }),
+    });
   });
 });

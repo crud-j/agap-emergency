@@ -1,10 +1,10 @@
 'use client';
 
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  AlertCircle, AlertOctagon, CheckCircle2, Hourglass, Navigation, Truck, RefreshCw,
-  ArrowRight, MapPin, Map as MapIcon, List, Radio,
+  AlertCircle, AlertOctagon, CheckCircle2, ChevronRight, Hourglass, Navigation, Truck, RefreshCw,
+  ArrowRight, MapPin, Map as MapIcon, List, Radio, Activity,
 } from 'lucide-react';
 import {
   StatCard, PriorityBadge, StatusChip, EmptyState, Button,
@@ -12,6 +12,7 @@ import {
 import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
 import { DashboardBanners } from '@/components/dashboard/DashboardBanners';
 import { useWsState } from '@/lib/use-ws-state';
+import { useNow } from '@/lib/use-now';
 import { useIncidents } from '@/features/incidents/hooks';
 import { useDispatchSummary } from '@/features/analytics/hooks';
 import { categoryIcon, timeAgo, titleCase } from '@/lib/incident-format';
@@ -26,12 +27,11 @@ const PRIORITY_STRIP: Record<string, string> = {
   LOW:      'border-l-[3px] border-l-emerald-500',
 };
 
-const PRIORITY_DOT: Record<string, string> = {
-  CRITICAL: 'bg-red-500',
-  HIGH:     'bg-orange-500',
-  MEDIUM:   'bg-amber-400',
-  LOW:      'bg-emerald-500',
-};
+/** Recent-incidents columns; the header row and every incident row share it so they line up. */
+const ROW_GRID =
+  'grid grid-cols-[minmax(0,1fr)_auto_3.5rem] items-center gap-x-3 sm:grid-cols-[minmax(0,1fr)_6.5rem_8.5rem_4rem] sm:gap-x-4';
+
+const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green/60';
 
 /**
  * MOD-21 — Emergency Operations and Dispatch Dashboard (Dispatcher). The Supervisor
@@ -59,20 +59,23 @@ export function OpsDashboard(): JSX.Element {
     failures.forEach((f) => void f.q.refetch());
   }
 
+  const loading = summaryQuery.isLoading;
+
   return (
     <div className="space-y-5">
 
       {/* ── Page header ──────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
           <h1 className="text-[22px] font-bold text-agap-textMain leading-tight tracking-tight">
             Operations Dashboard
           </h1>
-          <p className="mt-0.5 text-[13px] text-agap-textSub">
+          <p className="mt-0.5 text-[13px] text-slate-500">
             Bocaue MDRRMO · live emergency operations overview
           </p>
         </div>
-        <div className="flex items-center gap-2 pt-0.5">
+        <div className="flex items-center gap-3 pt-0.5">
+          <UpdatedAgo at={summaryQuery.dataUpdatedAt} fetching={summaryQuery.isFetching} />
           <ConnectionIndicator state={wsState} />
         </div>
       </div>
@@ -82,123 +85,181 @@ export function OpsDashboard(): JSX.Element {
 
       {/* ── Retry strip ──────────────────────────────────────────────────── */}
       {failures.length > 0 && (
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-agap-danger/20 bg-agap-dangerSoft px-4 py-3">
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-agap-danger/20 bg-agap-dangerSoft px-4 py-3"
+        >
           <div className="flex items-center gap-2 text-[13px] text-agap-danger">
-            <AlertCircle size={15} className="shrink-0" />
+            <AlertCircle size={15} aria-hidden="true" className="shrink-0" />
             <span>
               Couldn&apos;t load {failures.map((f) => f.label).join(', ')}. Data shown may be incomplete.
             </span>
           </div>
           <Button variant="danger" size="sm" onClick={retryAll}>
-            <RefreshCw size={13} />
+            <RefreshCw size={13} aria-hidden="true" />
             Retry
           </Button>
         </div>
       )}
 
-      {/* ── KPI grid ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <KpiLink href="/operations/incidents">
-          <StatCard
-            label="Active"
-            value={summary?.active ?? '—'}
-            icon={<AlertCircle size={17} />}
-            trendLabel={summary && `${summary.last24h.reported} reported · ${vsPrevious(summary.last24h.reported, summary.previous24h.reported)}`}
-            loading={summaryQuery.isLoading}
-          />
-        </KpiLink>
-        <KpiLink href="/operations/triage">
-          <StatCard
-            label="Unreviewed"
-            value={summary?.unreviewed ?? '—'}
-            icon={<Hourglass size={17} />}
-            variant={summary && summary.unreviewed > 0 ? 'warning' : 'default'}
-            trendLabel={summary && `${summary.awaitingDispatch} awaiting dispatch`}
-            loading={summaryQuery.isLoading}
-          />
-        </KpiLink>
-        <KpiLink href="/operations/incidents">
+      {/* ── KPI grid — most urgent first ─────────────────────────────────── */}
+      <section aria-label="Live counts" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <KpiLink href="/operations/incidents" label="Critical incidents" value={summary?.critical} destination="incident queue">
           <StatCard
             label="Critical"
             value={summary?.critical ?? '—'}
-            icon={<AlertOctagon size={17} />}
+            icon={<AlertOctagon size={17} aria-hidden="true" />}
             variant={summary && summary.critical > 0 ? 'critical' : 'default'}
             trendLabel={summary && `${summary.last24h.critical} reported · ${vsPrevious(summary.last24h.critical, summary.previous24h.critical)}`}
-            loading={summaryQuery.isLoading}
+            loading={loading}
           />
         </KpiLink>
-        <KpiLink href="/operations/dispatch">
+        <KpiLink href="/operations/triage" label="Unreviewed incidents" value={summary?.unreviewed} destination="triage">
           <StatCard
-            label="En route · on scene"
-            value={summary ? `${summary.enRoute} · ${summary.onScene}` : '—'}
-            icon={<Navigation size={17} />}
-            loading={summaryQuery.isLoading}
+            label="Unreviewed"
+            value={summary?.unreviewed ?? '—'}
+            icon={<Hourglass size={17} aria-hidden="true" />}
+            variant={summary && summary.unreviewed > 0 ? 'warning' : 'default'}
+            trendLabel={summary && `${summary.awaitingDispatch} awaiting dispatch`}
+            loading={loading}
           />
         </KpiLink>
-        <KpiLink href="/operations/history">
+        <KpiLink href="/operations/incidents" label="Active incidents" value={summary?.active} destination="incident queue">
           <StatCard
-            label="Resolved, 24 h"
-            value={summary?.last24h.resolved ?? '—'}
-            icon={<CheckCircle2 size={17} />}
-            variant="success"
-            trendLabel={summary && vsPrevious(summary.last24h.resolved, summary.previous24h.resolved)}
-            loading={summaryQuery.isLoading}
+            label="Active"
+            value={summary?.active ?? '—'}
+            icon={<AlertCircle size={17} aria-hidden="true" />}
+            trendLabel={summary && `${summary.last24h.reported} reported · ${vsPrevious(summary.last24h.reported, summary.previous24h.reported)}`}
+            loading={loading}
           />
         </KpiLink>
-        <KpiLink href="/operations/fleet">
+        <KpiLink
+          href="/operations/dispatch"
+          label="Units in the field"
+          value={summary ? summary.enRoute + summary.onScene : undefined}
+          destination="dispatch"
+        >
+          <StatCard
+            label="In the field"
+            value={summary ? summary.enRoute + summary.onScene : '—'}
+            icon={<Navigation size={17} aria-hidden="true" />}
+            trendLabel={summary && `${summary.enRoute} en route · ${summary.onScene} on scene`}
+            loading={loading}
+          />
+        </KpiLink>
+        <KpiLink href="/operations/fleet" label="Units available" value={summary?.units.available} destination="fleet">
           <StatCard
             label="Units available"
             value={summary?.units.available ?? '—'}
-            icon={<Truck size={17} />}
+            icon={<Truck size={17} aria-hidden="true" />}
             variant="success"
             trendLabel={summary && `${summary.units.deployed} deployed · ${summary.units.unavailable} out of service`}
-            loading={summaryQuery.isLoading}
+            loading={loading}
           />
         </KpiLink>
-      </div>
+        <KpiLink href="/operations/history" label="Resolved in the last 24 hours" value={summary?.last24h.resolved} destination="history">
+          <StatCard
+            label="Resolved, 24 h"
+            value={summary?.last24h.resolved ?? '—'}
+            icon={<CheckCircle2 size={17} aria-hidden="true" />}
+            variant="success"
+            trendLabel={summary && vsPrevious(summary.last24h.resolved, summary.previous24h.resolved)}
+            loading={loading}
+          />
+        </KpiLink>
+      </section>
 
-      {/* ── Quick actions: existing screens only (no incident form, broadcast or SMS) ── */}
-      <div className="flex flex-wrap gap-2">
-        <QuickAction href="/operations/dispatch" icon={<Radio size={14} />}>Assign unit</QuickAction>
-        <QuickAction href="/operations/incidents" icon={<List size={14} />}>View all incidents</QuickAction>
-        <QuickAction href="/operations/map" icon={<MapIcon size={14} />}>Open map</QuickAction>
-      </div>
+      {/* ── Work area: next actions beside the newest reports ─────────────── */}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
 
-      {/* ── Recent incidents ─────────────────────────────────────────────── */}
-      <div className="rounded-xl bg-white border border-agap-track/40 shadow-card overflow-hidden">
-        {/* Table header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-agap-track/30">
-          <h3 className="text-[13px] font-bold text-agap-textMain">Recent Incidents</h3>
-          <Link
-            href="/operations/incidents"
-            className="flex items-center gap-1 text-[12px] font-semibold text-agap-green hover:text-agap-green/80 transition-colors"
-          >
-            View all <ArrowRight size={13} />
-          </Link>
-        </div>
-
-        {/* Column labels */}
-        {!incidentsQuery.isLoading && !incidentsQuery.isError && recent.length > 0 && (
-          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-5 py-2 border-b border-agap-track/20">
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-agap-textSub">Incident</span>
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-agap-textSub">Priority</span>
-            <span className="hidden sm:block text-[10px] font-semibold uppercase tracking-widest text-agap-textSub">Status</span>
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-agap-textSub text-right">Time</span>
+        {/* Next actions — first in reading order; moves to the right column on wide screens. */}
+        <section
+          aria-labelledby="ops-next-actions"
+          className="h-fit rounded-xl border border-agap-track/40 bg-white shadow-card xl:order-2"
+        >
+          <div className="border-b border-agap-track/30 px-5 py-3.5">
+            <h2 id="ops-next-actions" className="text-[13px] font-bold text-agap-textMain">Next actions</h2>
           </div>
-        )}
+          {/* Existing screens only (no incident form, broadcast or SMS). */}
+          <ul className="divide-y divide-agap-track/20 p-1.5">
+            <ActionRow
+              href="/operations/triage"
+              icon={<Hourglass size={16} aria-hidden="true" />}
+              title="Review new reports"
+              detail={countDetail(summary?.unreviewed, 'waiting for review', 'Nothing to review')}
+              tone={summary && summary.unreviewed > 0 ? 'warning' : 'neutral'}
+              loading={loading}
+            />
+            <ActionRow
+              href="/operations/dispatch"
+              icon={<Radio size={16} aria-hidden="true" />}
+              title="Assign units"
+              detail={countDetail(summary?.awaitingDispatch, 'awaiting dispatch', 'No incidents awaiting dispatch')}
+              tone={summary && summary.awaitingDispatch > 0 ? 'primary' : 'neutral'}
+              loading={loading}
+            />
+            <ActionRow
+              href="/operations/map"
+              icon={<MapIcon size={16} aria-hidden="true" />}
+              title="Open live map"
+              detail="Incidents, units and routes"
+            />
+            <ActionRow
+              href="/operations/incidents"
+              icon={<List size={16} aria-hidden="true" />}
+              title="View all incidents"
+              detail="Full incident queue with filters"
+            />
+          </ul>
+        </section>
 
-        <div className="divide-y divide-agap-track/15">
+        {/* Recent incidents */}
+        <section
+          aria-labelledby="ops-recent"
+          className="min-w-0 overflow-hidden rounded-xl border border-agap-track/40 bg-white shadow-card xl:order-1"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-agap-track/30 px-4 py-3.5 sm:px-5">
+            <div className="flex items-center gap-2">
+              <Activity size={15} aria-hidden="true" className="text-agap-green" />
+              <h2 id="ops-recent" className="text-[13px] font-bold text-agap-textMain">Recent incidents</h2>
+              {recent.length > 0 && (
+                <span className="text-xs text-slate-500">· newest {recent.length}</span>
+              )}
+            </div>
+            <Link
+              href="/operations/incidents"
+              className={`-mr-2 inline-flex h-9 items-center gap-1 rounded-lg px-2 text-[13px] font-semibold text-agap-green transition-colors hover:bg-agap-greenSoft ${FOCUS_RING}`}
+            >
+              View all <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+          </div>
+
+          {/* Column labels — same grid as the rows */}
+          {!incidentsQuery.isLoading && !incidentsQuery.isError && recent.length > 0 && (
+            <div
+              aria-hidden="true"
+              className={`${ROW_GRID} border-b border-agap-track/20 bg-agap-surface/40 py-2 pl-[calc(1rem+3px)] pr-4 text-[10.5px] font-semibold uppercase tracking-wider text-slate-500 sm:pl-[calc(1.25rem+3px)] sm:pr-5`}
+            >
+              <span>Incident</span>
+              <span>Priority</span>
+              <span className="hidden sm:block">Status</span>
+              <span className="text-right">Reported</span>
+            </div>
+          )}
+
           {incidentsQuery.isLoading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-5 py-3.5 animate-pulse">
-                <div className="h-9 w-9 shrink-0 rounded-lg bg-agap-track" />
-                <div className="flex-1 space-y-1.5">
-                  <div className="h-3 w-32 rounded bg-agap-track" />
-                  <div className="h-2.5 w-48 rounded bg-agap-track/60" />
+            <div aria-busy="true" aria-label="Loading recent incidents" className="divide-y divide-agap-track/15">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-5 py-3.5 animate-pulse motion-reduce:animate-none">
+                  <div className="h-9 w-9 shrink-0 rounded-lg bg-agap-track" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3 w-32 rounded bg-agap-track" />
+                    <div className="h-2.5 w-48 rounded bg-agap-track/60" />
+                  </div>
+                  <div className="h-5 w-16 rounded-full bg-agap-track" />
                 </div>
-                <div className="h-5 w-16 rounded-full bg-agap-track" />
-              </div>
-            ))
+              ))}
+            </div>
           ) : incidentsQuery.isError ? (
             <EmptyState
               icon={AlertCircle}
@@ -206,20 +267,27 @@ export function OpsDashboard(): JSX.Element {
               description="The incident feed is unavailable. Check your connection and retry."
               action={
                 <Button variant="secondary" size="sm" onClick={() => void incidentsQuery.refetch()}>
-                  <RefreshCw size={13} />
+                  <RefreshCw size={13} aria-hidden="true" />
                   Retry
                 </Button>
               }
             />
           ) : recent.length === 0 ? (
             <EmptyState
+              icon={CheckCircle2}
               title="No incidents yet"
               description="All clear — no emergency incidents have been reported in Bocaue."
             />
           ) : (
-            recent.map((inc) => <IncidentRow key={inc.id} incident={inc} />)
+            <ul className="divide-y divide-agap-track/15">
+              {recent.map((inc) => (
+                <li key={inc.id}>
+                  <IncidentRow incident={inc} />
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );
@@ -234,22 +302,92 @@ function vsPrevious(current: number, previous: number): string {
   return `${diff > 0 ? '+' : '−'}${Math.abs(diff)} vs previous 24 h`;
 }
 
-function KpiLink({ href, children }: { href: string; children: JSX.Element }): JSX.Element {
+function countDetail(count: number | undefined, label: string, none: string): string | undefined {
+  if (count === undefined) return undefined;
+  return count === 0 ? none : `${count} ${label}`;
+}
+
+/** How fresh the counts are — the dashboard must never look live when it is not. */
+function UpdatedAgo({ at, fetching }: { at: number; fetching: boolean }): JSX.Element | null {
+  const now = useNow(10_000);
+  if (!at) return null;
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  const text = seconds < 15 ? 'just now' : seconds < 60 ? `${seconds}s ago` : `${Math.round(seconds / 60)} min ago`;
   return (
-    <Link href={href} className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green">
+    <span className="hidden items-center gap-1.5 text-xs text-slate-500 sm:inline-flex">
+      <RefreshCw
+        size={12}
+        aria-hidden="true"
+        className={fetching ? 'animate-spin motion-reduce:animate-none' : ''}
+      />
+      Updated {text}
+    </span>
+  );
+}
+
+/** A KPI card that opens its screen; the accessible name says what it counts and where it goes. */
+function KpiLink({
+  href, label, value, destination, children,
+}: {
+  href: string;
+  label: string;
+  value: number | undefined;
+  destination: string;
+  children: JSX.Element;
+}): JSX.Element {
+  return (
+    <Link
+      href={href}
+      aria-label={`${label}: ${value ?? 'loading'}. Open ${destination}.`}
+      className={`group rounded-xl transition-transform active:scale-[0.99] motion-reduce:transform-none [&>div]:h-full [&:hover>div]:border-agap-green/30 ${FOCUS_RING} focus-visible:ring-offset-2`}
+    >
       {children}
     </Link>
   );
 }
 
-function QuickAction({ href, icon, children }: { href: string; icon: JSX.Element; children: string }): JSX.Element {
+function ActionRow({
+  href, icon, title, detail, tone = 'neutral', loading,
+}: {
+  href: string;
+  icon: ReactNode;
+  title: string;
+  detail?: string | undefined;
+  tone?: 'primary' | 'warning' | 'neutral';
+  loading?: boolean;
+}): JSX.Element {
+  const tile =
+    tone === 'primary' ? 'bg-agap-green text-white'
+    : tone === 'warning' ? 'bg-agap-amberSoft text-agap-amber'
+    : 'bg-agap-surface text-agap-textMid';
   return (
-    <Link
-      href={href}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-agap-track/60 bg-white px-3.5 py-2 text-sm font-semibold text-agap-textMain shadow-card hover:bg-agap-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green/40"
-    >
-      {icon} {children}
-    </Link>
+    <li>
+      <Link
+        href={href}
+        className={`group flex min-h-14 items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-agap-surface/70 ${FOCUS_RING}`}
+      >
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tile}`}>{icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-semibold text-agap-textMain">{title}</span>
+          {loading ? (
+            <span className="mt-1 block h-2.5 w-28 animate-pulse rounded bg-agap-track/70 motion-reduce:animate-none" />
+          ) : detail ? (
+            <span
+              className={`block truncate text-xs ${
+                tone === 'warning' ? 'font-medium text-agap-amber' : tone === 'primary' ? 'font-medium text-agap-green' : 'text-slate-500'
+              }`}
+            >
+              {detail}
+            </span>
+          ) : null}
+        </span>
+        <ChevronRight
+          size={16}
+          aria-hidden="true"
+          className="shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-agap-textMid motion-reduce:transform-none"
+        />
+      </Link>
+    </li>
   );
 }
 
@@ -262,39 +400,39 @@ function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element 
     incident.incident_locations?.formatted_address ??
     null;
   const strip = PRIORITY_STRIP[incident.priority] ?? 'border-l-[3px] border-l-agap-track';
-  const dot   = PRIORITY_DOT[incident.priority]   ?? 'bg-agap-textSub';
 
   return (
     <Link
       href={`/operations/incidents?focus=${incident.id}`}
-      className={`flex items-center gap-3 px-5 py-3 transition-colors hover:bg-agap-surface focus:outline-none focus-visible:bg-agap-surface ${strip}`}
+      className={`${ROW_GRID} min-h-14 px-4 py-3 transition-colors hover:bg-agap-surface/60 sm:px-5 focus-visible:bg-agap-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-agap-green/60 ${strip}`}
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-agap-surface text-agap-textMid">
-        <Icon size={15} />
+      <span className="flex min-w-0 items-center gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-agap-surface text-agap-textMid">
+          <Icon size={16} aria-hidden="true" />
+        </span>
+        <span className="min-w-0">
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="font-mono text-[12px] font-semibold text-agap-textMain tabular-nums">
+              {incident.public_reference}
+            </span>
+            <span className="truncate text-xs text-agap-textMid">{titleCase(incident.category)}</span>
+          </span>
+          <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-slate-500">
+            <MapPin size={11} aria-hidden="true" className="shrink-0" />
+            <span className={`truncate ${location ? '' : 'italic'}`}>{location ?? 'Location pending'}</span>
+          </span>
+        </span>
       </span>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="font-mono text-[12px] font-semibold text-agap-textMain tabular-nums">
-            {incident.public_reference}
-          </span>
-          <span className="text-[11px] text-agap-textSub">{titleCase(incident.category)}</span>
-        </div>
-        <p className="truncate text-[11px] text-agap-textSub flex items-center gap-1 mt-0.5">
-          {location && <MapPin size={10} className="shrink-0" />}
-          {location ?? 'Location pending'}
-        </p>
-      </div>
-
-      <div className="flex items-center gap-1 shrink-0">
-        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-        <PriorityBadge priority={incident.priority} showDot={false} />
-      </div>
-      <StatusChip status={incident.status} className="hidden sm:inline-flex shrink-0" />
-      <span className="w-14 shrink-0 text-right font-mono text-[11px] text-agap-textSub tabular-nums">
+      <span>
+        <PriorityBadge priority={incident.priority} />
+      </span>
+      <span className="hidden sm:block">
+        <StatusChip status={incident.status} />
+      </span>
+      <span className="text-right font-mono text-[11px] text-slate-500 tabular-nums">
         {timeAgo(incident.submitted_at)}
       </span>
     </Link>
   );
 }
-

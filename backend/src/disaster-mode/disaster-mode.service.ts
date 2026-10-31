@@ -6,6 +6,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { ActivateSurgeDto } from './dto/activate-surge.dto';
 import { TriageTagDto } from './dto/triage-tag.dto';
+import { rescueTotalsByBarangay, type BarangayRescueTotal } from '../incidents/rescue-trip/rescue-summary';
 
 @Injectable()
 export class DisasterModeService {
@@ -23,7 +24,38 @@ export class DisasterModeService {
       where: { status: 'ACTIVE' },
       orderBy: { activated_at: 'desc' },
     });
-    return { active: !!active, surge: active };
+    return {
+      active: !!active,
+      surge: active,
+      rescueByBarangay: active ? await this.rescueByBarangay(active.activated_at) : [],
+    };
+  }
+
+  /**
+   * Rescued / still waiting per barangay from the crews' rescue trips logged since the
+   * surge was declared (unit field flow plan Phase 4). Only while a surge is active.
+   * Best-effort: the surge status still loads if this fails.
+   */
+  private async rescueByBarangay(since: Date): Promise<BarangayRescueTotal[]> {
+    try {
+      const trips = await this.prisma.rescue_trip_reports.findMany({
+        where: { reported_at: { gte: since } },
+        select: {
+          incident_id: true,
+          rescued_count: true,
+          still_waiting: true,
+          reported_at: true,
+          incidents: { select: { incident_locations: { select: { barangay: true } } } },
+        },
+      });
+      return rescueTotalsByBarangay(trips.map(({ incidents, ...t }) => ({
+        ...t,
+        barangay: incidents.incident_locations?.barangay ?? null,
+      })));
+    } catch (err) {
+      this.logger.warn(`Surge rescue totals failed: ${String(err)}`);
+      return [];
+    }
   }
 
   async activate(dto: ActivateSurgeDto, userId: string, orgId: string) {

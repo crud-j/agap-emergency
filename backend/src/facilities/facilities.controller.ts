@@ -32,6 +32,14 @@ export class FacilitiesController {
     return this.facilitiesService.findAll();
   }
 
+  /** Rescue crews pick where they took people (unit field flow plan Phase 4). Before `:id`. */
+  @Get('evacuation-centers')
+  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiOperation({ summary: 'Active evacuation centers (name, barangay, coordinates)' })
+  async evacuationCenters() {
+    return this.facilitiesService.listEvacuationCenters();
+  }
+
   @Get(':id')
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Get a facility' })

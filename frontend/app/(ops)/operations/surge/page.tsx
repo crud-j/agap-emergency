@@ -3,7 +3,7 @@
 import { useState, type JSX, type FormEvent } from 'react';
 import {
   Siren, ShieldAlert, Users, Truck, Megaphone,
-  CheckCircle2, XCircle, Clock, AlertTriangle, Waves, Edit, SlidersHorizontal,
+  CheckCircle2, XCircle, Clock, AlertTriangle, Waves, Edit, SlidersHorizontal, LifeBuoy,
 } from 'lucide-react';
 import {
   Card, CardHeader, CardTitle, Badge, Button, DataTable, Skeleton, EmptyState,
@@ -25,7 +25,7 @@ import {
   useSurgeRecommendation,
   type SurgeRecommendation,
 } from '@/features/surge/hooks';
-import type { TriageTag, SurgeResource, SurgeRule, RiverLevel } from '@/features/surge/api';
+import type { TriageTag, SurgeResource, SurgeRule, RiverLevel, BarangayRescueTotal } from '@/features/surge/api';
 import { useMarkRead } from '@/features/notifications/hooks';
 import { useBarangays } from '@/hooks/useBarangay';
 
@@ -542,6 +542,54 @@ function RuleDialog({ rule, onClose }: { rule: SurgeRule; onClose: () => void })
   );
 }
 
+/**
+ * MOD-52 (unit field flow plan Phase 4): people rescued and still waiting per barangay,
+ * from the rescue crews' trip logs since the surge was declared. Most waiting first.
+ */
+function RescueByBarangayCard({ totals }: { totals: BarangayRescueTotal[] }): JSX.Element {
+  const rescued = totals.reduce((sum, t) => sum + t.rescued, 0);
+  const waiting = totals.reduce((sum, t) => sum + t.stillWaiting, 0);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <LifeBuoy size={15} className="text-agap-textSub" />
+          Rescue by Barangay
+        </CardTitle>
+        <span className="text-xs text-agap-textSub">
+          {rescued} rescued · ~{waiting} still waiting · from rescue crews' trip logs
+        </span>
+      </CardHeader>
+      {totals.length === 0 ? (
+        <EmptyState icon={LifeBuoy} title="No rescue trips yet" description="Trips logged by rescue boats and trucks appear here." />
+      ) : (
+        <table className="w-full text-sm" data-testid="rescue-by-barangay">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-agap-textSub">
+              <th className="py-2 pr-3 font-semibold">Barangay</th>
+              <th className="py-2 pr-3 text-right font-semibold">Rescued</th>
+              <th className="py-2 pr-3 text-right font-semibold">Still waiting</th>
+              <th className="py-2 text-right font-semibold">Trips</th>
+            </tr>
+          </thead>
+          <tbody>
+            {totals.map((t) => (
+              <tr key={t.barangay ?? 'unknown'} className="border-t border-[rgba(168,181,193,0.20)]">
+                <td className="py-2 pr-3 font-semibold text-agap-textMain">{t.barangay ?? 'Barangay not given'}</td>
+                <td className="py-2 pr-3 text-right tabular-nums">{t.rescued}</td>
+                <td className="py-2 pr-3 text-right tabular-nums">
+                  {t.stillWaiting > 0 ? <Badge variant="amber">~{t.stillWaiting}</Badge> : '0'}
+                </td>
+                <td className="py-2 text-right tabular-nums text-agap-textSub">{t.trips}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+}
+
 function SurgeRulesCard(): JSX.Element {
   const rules = useSurgeRules();
   const [editing, setEditing] = useState<SurgeRule | null>(null);
@@ -812,6 +860,8 @@ export default function SurgePage(): JSX.Element {
               );
             })}
           </div>
+
+          <RescueByBarangayCard totals={surge?.rescue_by_barangay ?? []} />
 
           {/* Triage tags table */}
           <Card>

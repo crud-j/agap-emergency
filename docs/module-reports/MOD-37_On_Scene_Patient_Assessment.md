@@ -1,6 +1,6 @@
 # MOD-37 — On-Scene Patient Assessment
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -38,8 +38,9 @@ Improve the flow of information from the scene to the rest of the system; it sup
 | No. | AS-IS Input (Existing Process) | TO-BE Input (Proposed Automated Process) |
 |---|---|---|
 | 1 | Verbal radio or phone report of what the responder found on the patient | Patient reference, or an explicit "unknown patient" marker |
-| 2 | A handwritten paper patient-care form filled out by the responder | Symptoms, vital signs, observations, and interventions |
+| 2 | A handwritten paper patient-care form filled out by the responder | Consciousness, breathing, vital signs (including GCS), visible injuries, interventions, number of patients and notes |
 | 3 | A logbook or spreadsheet entry made after the fact | The authenticated responder's identity and the incident they're authorized for |
+| 4 | | START triage tag (Red, Yellow, Green or Black), optional |
 
 ---
 
@@ -82,6 +83,7 @@ Improve the flow of information from the scene to the rest of the system; it sup
 | 4 | The assessment service persists the record permanently to PostgreSQL, linked to the incident and the responder. | Database |
 | 5 | The save is written to the audit trail. | Database |
 | 6 | The assessment becomes visible to the dispatcher and supervisor through the incident's record on the web side. | Notification |
+| 7 | If a surge is active (MOD-52) and a triage tag was chosen, the backend also adds the tag to the surge's triage board in the same save, and the board updates live. | Integration |
 
 **TO-BE Outputs**
 
@@ -90,6 +92,7 @@ Improve the flow of information from the scene to the rest of the system; it sup
 | 1 | A persisted, timestamped patient assessment linked to the incident and responder |
 | 2 | An audit-trail entry recording the save |
 | 3 | A live view of the assessment in the web Incident Command Queue drawer |
+| 4 | A triage-board entry during an active surge |
 
 ---
 

@@ -1,6 +1,6 @@
 # MOD-48 — Privacy, Consent and Medical Data Protection
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -101,5 +101,6 @@ Earn the trust that comes with holding medical information, without claiming to 
 3. Withdraw consent and confirm the Medical Profile screen (MOD-03) locks again immediately.
 
 **Do not claim:**
+- A responder viewing a patient's medical profile. The backend now allows it only for a responder on an active crew for that patient's incident, records the purpose, and logs a refused attempt as Permission Denied, but no responder screen calls it yet (uncommitted Unit Field Flow work, Phase 2).
 - Legal compliance certification.
 - Guaranteed deletion across every backup copy, or automatic consent propagation to every system that might touch the data.

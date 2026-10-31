@@ -1,6 +1,6 @@
 # MOD-16 — Emergency Contact Notification
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -19,13 +19,13 @@ Content for the [Individual Module Report template](../AGAP_Individual_Module_Re
 ## 2. Module Description
 
 **Description**
-The moment a citizen's report is saved, this module looks up that citizen's own emergency contacts (MOD-02) who have "notify on alert" switched on, and queues one SMS to each of them through the Textbee gateway — fire-and-forget, so a slow or failed SMS can never delay or cancel the incident itself.
+The moment a citizen's report is saved, this module looks up that citizen's own active emergency contacts (MOD-02) and queues one SMS to each of them through the Textbee gateway — fire-and-forget, so a slow or failed SMS can never delay or cancel the incident itself.
 
 **Purpose**
 Let the people a citizen already chose — family, a trusted neighbor — find out automatically that an emergency was reported, without the citizen or a dispatcher having to call them one by one while the emergency is still happening.
 
 **Tasks Performed**
-1. Reads only that reporter's active, `notify_on_alert = true` contacts, ordered by priority.
+1. Reads only that reporter's active contacts, ordered by priority. (Every contact saved in the app is set to receive alerts.)
 2. Builds one SMS per contact: reporter's name, incident category, public reference number, cut to 160 characters.
 3. Queues each SMS as a separate BullMQ job (`contact-alert`) with 2 retry attempts and a fixed 5-second backoff.
 4. Sends each queued SMS through the Textbee gateway (`POST .../gateway/devices/{deviceId}/send-sms`) using the MDRRMO device's own SIM.
@@ -37,7 +37,7 @@ Let the people a citizen already chose — family, a trusted neighbor — find o
 
 | No. | AS-IS Input (Existing Process) | TO-BE Input (Proposed Automated Process) |
 |---|---|---|
-| 1 | Caller's verbally-given relative's name and number, written down on the spot | Reporter's saved emergency contacts (name, phone, `notify_on_alert`) |
+| 1 | Caller's verbally-given relative's name and number, written down on the spot | Reporter's saved emergency contacts (name, phone) |
 | 2 | Operator's own phone, used to personally call each relative | Incident's public reference, category, and reporter's name |
 | 3 | Operator's memory of which relative to call first | Textbee API key and device ID (`TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID`) |
 
@@ -48,7 +48,7 @@ Let the people a citizen already chose — family, a trusted neighbor — find o
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Operator's personal or office phone, one call per relative | `EmergencyContactNotificationService.notifyContactsOfIncident` (`backend/src/emergency-contacts/emergency-contact-notification.service.ts`) |
-| 2 | Memory of who the caller's relatives are | PostgreSQL `EmergencyContact` table, filtered on `is_active` and `notify_on_alert` |
+| 2 | Memory of who the caller's relatives are | PostgreSQL `EmergencyContact` table, filtered on active contacts |
 | 3 | Paper logbook noting who was called and when | BullMQ `SMS` queue, job name `contact-alert`, `attempts: 2`, fixed 5 s backoff |
 | 4 |  | `SmsProcessor` (`backend/src/jobs/processors/sms.processor.ts`) — real Textbee HTTP call via axios, 10 s timeout |
 | 5 |  | Textbee SMS gateway (`api.textbee.dev`), Android device + local SIM at the MDRRMO office |

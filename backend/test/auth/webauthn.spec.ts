@@ -98,6 +98,32 @@ describe('WebAuthnService', () => {
       );
     });
 
+    it('picks the RP ID that covers the requesting web origin', async () => {
+      service = new WebAuthnService(
+        prisma as any,
+        authService as any,
+        auditService as any,
+        makeConfig({
+          WEBAUTHN_RP_ID: 'agap-dev.ngrok-free.dev, localhost',
+          WEBAUTHN_ORIGIN: 'http://localhost:3001, https://agap-dev.ngrok-free.dev',
+        }) as any,
+      );
+      prisma.user.findUnique.mockResolvedValue(user);
+
+      await service.beginRegistration('user-1', undefined, undefined, 'http://localhost:3001');
+      expect(generateRegistrationOptions).toHaveBeenLastCalledWith(expect.objectContaining({ rpID: 'localhost' }));
+
+      // No Origin (native app) or an origin not on the allow-list → the default, first RP ID.
+      await service.beginRegistration('user-1');
+      expect(generateRegistrationOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ rpID: 'agap-dev.ngrok-free.dev' }),
+      );
+      await service.beginRegistration('user-1', undefined, undefined, 'http://localhost:9999');
+      expect(generateRegistrationOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ rpID: 'agap-dev.ngrok-free.dev' }),
+      );
+    });
+
     it('rejects guest accounts', async () => {
       prisma.user.findUnique.mockResolvedValue({ ...user, is_guest: true });
       await expect(service.beginRegistration('user-1')).rejects.toThrow('Guest accounts');
@@ -123,7 +149,7 @@ describe('WebAuthnService', () => {
       expect(verifyRegistrationResponse).toHaveBeenCalledWith(
         expect.objectContaining({
           expectedOrigin: ['https://agap.example.ph', 'https://ops.agap.example.ph', APK_ORIGIN],
-          expectedRPID: 'agap.example.ph',
+          expectedRPID: ['agap.example.ph'],
           requireUserVerification: true,
         }),
       );

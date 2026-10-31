@@ -13,7 +13,7 @@ import { RealtimeService } from '../../realtime/realtime.service';
 import { LocationsService } from '../../locations/locations.service';
 import { RouteCacheService } from '../../locations/route-cache.service';
 import { IncidentStatusService } from '../incident-status/incident-status.service';
-import { AuditAction, IncidentStatus, ReporterStatus, UserRole } from '@agap/shared';
+import { AuditAction, IncidentStatus, ReporterStatus, UserRole, fieldFlowFor, UNIT_FIELD_FLOWS } from '@agap/shared';
 import type { IncidentTransportUpdatedPayload, TransportDestinationView } from '@agap/shared';
 import { OrgActor, activeMemberOrgIds } from '../../organizations/org-scope';
 import { DestinationWarning, SelectableDestination, assertSelectableDestination } from '../../hospitals/destination-rules';
@@ -279,9 +279,12 @@ export class TransportService {
       }
     }
 
-    // ON_SCENE moves to TRANSPORTING; TRANSPORTING means another unit or patient.
-    // Anything else (EN_ROUTE, ASSISTING, RESOLVED, …) cannot start a transport.
-    if (previousStatus !== IncidentStatus.ON_SCENE && previousStatus !== IncidentStatus.TRANSPORTING) {
+    // ON_SCENE or ASSISTING moves to TRANSPORTING; TRANSPORTING means another unit or patient.
+    if (
+      previousStatus !== IncidentStatus.ON_SCENE &&
+      previousStatus !== IncidentStatus.ASSISTING &&
+      previousStatus !== IncidentStatus.TRANSPORTING
+    ) {
       throw new ConflictException({
         code: 'TRANSPORT_NOT_ALLOWED_IN_STATUS',
         status: previousStatus,
@@ -289,11 +292,21 @@ export class TransportService {
       });
     }
 
-    const dispatch = await tx.dispatches.findUnique({ where: { id: dispatchId }, select: { incident_id: true } });
+    const dispatch = await tx.dispatches.findUnique({
+      where: { id: dispatchId },
+      select: { incident_id: true, resources: { select: { resource_type: true } } },
+    });
     if (!dispatch || dispatch.incident_id !== incidentId) {
       throw new BadRequestException('Dispatch not found or does not belong to this incident');
     }
     await this.assertCrew(tx, dispatchId, actor.id, actor.role);
+    if (actor.role === UserRole.RESPONDER && dispatch.resources?.resource_type &&
+      fieldFlowFor(dispatch.resources?.resource_type) !== UNIT_FIELD_FLOWS.MEDICAL_TRANSPORT) {
+      throw new ConflictException({
+        code: 'TRANSPORT_NOT_FOR_UNIT',
+        message: 'This unit cannot transport patients.',
+      });
+    }
 
     const open = await tx.transportRecord.findFirst({ where: openTransportWhere({ dispatch_id: dispatchId }) });
     if (open) {
@@ -350,7 +363,8 @@ export class TransportService {
         estimated_arrival_at: input.estimatedArrivalAt ? new Date(input.estimatedArrivalAt) : null,
       },
     });
-    const statusChanged = previousStatus === IncidentStatus.ON_SCENE;
+    const statusChanged =
+      previousStatus === IncidentStatus.ON_SCENE || previousStatus === IncidentStatus.ASSISTING;
     if (statusChanged) {
       await this.statusService.recordTransition(tx, {
         incidentId,

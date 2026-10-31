@@ -27,11 +27,11 @@ function record(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setup(incidentStatus: IncidentStatus) {
+function setup(incidentStatus: IncidentStatus, resourceType = 'AMBULANCE') {
   const tx = {
     $queryRaw: jest.fn().mockResolvedValue([{ status: incidentStatus }]),
     dispatches: {
-      findUnique: jest.fn().mockResolvedValue({ incident_id: INCIDENT }),
+      findUnique: jest.fn().mockResolvedValue({ incident_id: INCIDENT, resources: { resource_type: resourceType } }),
       findMany: jest.fn().mockResolvedValue([{ id: DISPATCH, resource_id: 'res-1', status: 'ACCEPTED' }]),
       update: jest.fn().mockResolvedValue({}),
     },
@@ -55,7 +55,8 @@ function setup(incidentStatus: IncidentStatus) {
     $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
     dispatches: {
       findUnique: jest.fn().mockResolvedValue({
-        id: DISPATCH, incident_id: INCIDENT, resource_id: 'res-1', status: 'ACCEPTED', dispatch_crew: [{ user_id: CREW }],
+        id: DISPATCH, incident_id: INCIDENT, resource_id: 'res-1', status: 'ACCEPTED',
+        dispatch_crew: [{ user_id: CREW }], resources: { resource_type: resourceType },
       }),
     },
     incident: { findUnique: jest.fn().mockResolvedValue({ status: incidentStatus }) },
@@ -102,6 +103,7 @@ describe('PATCH /responders/assignments/:id/status — TRANSPORTING (Prompt 08)'
     expect(tx.transportRecord.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ incident_id: INCIDENT, dispatch_id: DISPATCH, destination_id: null }),
     });
+
     // The IncidentEvent is the same as before: the crew's note, role RESPONDER.
     expect(tx.incidentEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -124,6 +126,18 @@ describe('PATCH /responders/assignments/:id/status — TRANSPORTING (Prompt 08)'
       transportId: 'tr-1', dispatchId: DISPATCH, destinationId: null, destination: null,
     }), null);
     expect(locations.requestImmediateRefresh).toHaveBeenCalledWith(DISPATCH, INCIDENT, 'transport_started');
+  });
+
+  it('refuses TRANSPORTING for a fire truck', async () => {
+    const { responders } = setup(IncidentStatus.ON_SCENE, 'FIRE_TRUCK');
+    await expect(responders.updateStatus(DISPATCH, CREW, { status: 'TRANSPORTING' } as any))
+      .rejects.toMatchObject({ response: { code: 'TRANSPORT_NOT_FOR_UNIT' } });
+  });
+
+  it('refuses ASSISTING for a fire truck', async () => {
+    const { responders } = setup(IncidentStatus.ON_SCENE, 'FIRE_TRUCK');
+    await expect(responders.updateStatus(DISPATCH, CREW, { status: 'ASSISTING' } as any))
+      .rejects.toMatchObject({ response: { code: 'ASSISTING_NOT_FOR_UNIT' } });
   });
 
   it('the following POST /transport with a destination sets it on that record: no 409, no second record', async () => {
@@ -156,18 +170,24 @@ describe('PATCH /responders/assignments/:id/status — TRANSPORTING (Prompt 08)'
     expect(realtime.incidentTransporting).toHaveBeenCalledTimes(1);
   });
 
-  it.each([IncidentStatus.ASSISTING, IncidentStatus.EN_ROUTE])(
-    '%s → TRANSPORTING is refused with 409 and nothing is written',
-    async (status) => {
-      const { tx, responders, realtime } = setup(status);
+  it('ASSISTING → TRANSPORTING creates the transport record and transitions the incident', async () => {
+    const { tx, responders, realtime } = setup(IncidentStatus.ASSISTING);
 
-      await expect(responders.updateStatus(DISPATCH, CREW, { status: 'TRANSPORTING' } as any))
-        .rejects.toBeInstanceOf(ConflictException);
-      expect(tx.transportRecord.create).not.toHaveBeenCalled();
-      expect(tx.incident.update).not.toHaveBeenCalled();
-      expect(realtime.notifyIncidentStatusChanged).not.toHaveBeenCalled();
-    },
-  );
+    await expect(responders.updateStatus(DISPATCH, CREW, { status: 'TRANSPORTING' } as any))
+      .resolves.toMatchObject({ incidentStatus: IncidentStatus.TRANSPORTING });
+    expect(tx.transportRecord.create).toHaveBeenCalledTimes(1);
+    expect(realtime.notifyIncidentStatusChanged).toHaveBeenCalled();
+  });
+
+  it('EN_ROUTE → TRANSPORTING is refused with 409 and nothing is written', async () => {
+    const { tx, responders, realtime } = setup(IncidentStatus.EN_ROUTE);
+
+    await expect(responders.updateStatus(DISPATCH, CREW, { status: 'TRANSPORTING' } as any))
+      .rejects.toBeInstanceOf(ConflictException);
+    expect(tx.transportRecord.create).not.toHaveBeenCalled();
+    expect(tx.incident.update).not.toHaveBeenCalled();
+    expect(realtime.notifyIncidentStatusChanged).not.toHaveBeenCalled();
+  });
 
   it('rolls back: a failure inside beginTransport leaves no status change and announces nothing', async () => {
     const { tx, responders, realtime, notifier, locations } = setup(IncidentStatus.ON_SCENE);
@@ -190,7 +210,7 @@ describe('PATCH /responders/assignments/:id/status — RESOLVED before arrival (
 
     expect((error as ConflictException).getResponse()).toMatchObject({ code: 'TRANSPORT_OPEN', transportId: 'tr-1' });
     expect(tx.transportRecord.findFirst).toHaveBeenCalledWith({
-      where: { dispatch_id: DISPATCH, arrived_at: null, incidents: { status: IncidentStatus.TRANSPORTING } },
+      where: { incident_id: INCIDENT, arrived_at: null, incidents: { status: IncidentStatus.TRANSPORTING } },
       select: { id: true },
     });
     expect(tx.incident.update).not.toHaveBeenCalled();

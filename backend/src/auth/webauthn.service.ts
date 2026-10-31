@@ -64,7 +64,10 @@ const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class WebAuthnService {
-  private readonly rpID: string;
+  /** Every configured RP ID; the first is the default (native apps send no Origin).
+   *  More than one lets the web portal on localhost and the mobile app on a tunnel
+   *  domain both run ceremonies against the same backend. */
+  private readonly rpIDs: string[];
   private readonly rpName = 'AGAP Emergency Response';
   /** Every origin an authenticator may legitimately report: the web portal origin(s),
    *  `https://<rpID>` for the iOS app, and one `android:apk-key-hash:` per signing key. */
@@ -76,7 +79,8 @@ export class WebAuthnService {
     private readonly auditService: AuditService,
     private readonly config: ConfigService,
   ) {
-    this.rpID = this.config.get<string>('WEBAUTHN_RP_ID', 'localhost');
+    const rpIDs = csv(this.config.get<string>('WEBAUTHN_RP_ID', 'localhost'));
+    this.rpIDs = rpIDs.length > 0 ? rpIDs : ['localhost'];
 
     const webOrigins = csv(this.config.get<string>('WEBAUTHN_ORIGIN', 'http://localhost:3000'));
     const androidOrigins = csv(this.config.get<string>('WEBAUTHN_ANDROID_CERT_FINGERPRINTS')).map(
@@ -89,7 +93,7 @@ export class WebAuthnService {
   // Registration
   // ---------------------------------------------------------------------------
 
-  async beginRegistration(userId: string, ipAddress?: string, userAgent?: string) {
+  async beginRegistration(userId: string, ipAddress?: string, userAgent?: string, origin?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException('Passkey operation failed');
     if (user.is_guest) {
@@ -103,7 +107,7 @@ export class WebAuthnService {
 
     const options = await generateRegistrationOptions({
       rpName: this.rpName,
-      rpID: this.rpID,
+      rpID: this._rpIDFor(origin),
       userID: new Uint8Array(Buffer.from(userId)),
       userName: user.email ?? user.phone_number ?? userId,
       userDisplayName: user.full_name,
@@ -152,7 +156,7 @@ export class WebAuthnService {
         response: response as unknown as RegistrationResponseJSON,
         expectedChallenge: challengeRecord.challenge,
         expectedOrigin: this.expectedOrigins,
-        expectedRPID: this.rpID,
+        expectedRPID: this.rpIDs,
         requireUserVerification: true,
       });
     } catch {
@@ -226,18 +230,18 @@ export class WebAuthnService {
    * credential descriptor — the authenticator finds no match and the UI reports
    * "no passkey on this device".
    */
-  async beginAuthentication(identifier?: string, ipAddress?: string, userAgent?: string) {
+  async beginAuthentication(identifier?: string, ipAddress?: string, userAgent?: string, origin?: string) {
     const user = identifier ? await this._resolveUser(identifier) : null;
-    return this._beginAuthenticationFor(user, !!identifier, ipAddress, userAgent);
+    return this._beginAuthenticationFor(user, !!identifier, ipAddress, userAgent, origin);
   }
 
   /**
    * Second-step ceremony for a user who already passed the password step: scoped to
    * their own passkeys, and the challenge is bound to them.
    */
-  async beginAuthenticationForUser(userId: string, ipAddress?: string, userAgent?: string) {
+  async beginAuthenticationForUser(userId: string, ipAddress?: string, userAgent?: string, origin?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    return this._beginAuthenticationFor(user, true, ipAddress, userAgent);
+    return this._beginAuthenticationFor(user, true, ipAddress, userAgent, origin);
   }
 
   private async _beginAuthenticationFor(
@@ -245,6 +249,7 @@ export class WebAuthnService {
     scoped: boolean,
     ipAddress?: string,
     userAgent?: string,
+    origin?: string,
   ) {
     let allowCredentials: { id: string; transports?: AuthenticatorTransport[] }[] = [];
     if (user) {
@@ -262,7 +267,7 @@ export class WebAuthnService {
     }
 
     const options = await generateAuthenticationOptions({
-      rpID: this.rpID,
+      rpID: this._rpIDFor(origin),
       allowCredentials,
       userVerification: 'required',
       timeout: 60000,
@@ -346,7 +351,7 @@ export class WebAuthnService {
         response: response as unknown as AuthenticationResponseJSON,
         expectedChallenge: challengeRecord.challenge,
         expectedOrigin: this.expectedOrigins,
-        expectedRPID: this.rpID,
+        expectedRPID: this.rpIDs,
         requireUserVerification: true,
         credential: {
           id: storedCredential.credential_id,
@@ -449,6 +454,22 @@ export class WebAuthnService {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * The RP ID for a ceremony started from `origin`. Browsers reject an RP ID that is
+   * not the page's host (or a parent domain of it), so an allowed web origin gets
+   * the configured RP ID that covers its host; anything else gets the default.
+   */
+  private _rpIDFor(origin?: string): string {
+    if (!origin || !this.expectedOrigins.includes(origin)) return this.rpIDs[0]!;
+    let host: string;
+    try {
+      host = new URL(origin).hostname;
+    } catch {
+      return this.rpIDs[0]!;
+    }
+    return this.rpIDs.find((id) => host === id || host.endsWith(`.${id}`)) ?? this.rpIDs[0]!;
+  }
 
   /**
    * Atomically take a PENDING, unexpired challenge so it can be used at most once.

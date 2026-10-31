@@ -1,6 +1,6 @@
 # MOD-08 — Emergency Cancellation and False Alert Management
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -51,7 +51,7 @@ Keep responders from being sent to emergencies that ended or never happened, whi
 |---|---|---|
 | 1 | Telephone / MDRRMO hotline | AGAP Citizen mobile app (incident screen and Cancel screen) |
 | 2 | Paper logbook | AGAP Operations Center web app (Triage page and incident drawer, Next.js) |
-| 3 | Two-way radio to recall responders | NestJS REST API (`PATCH /api/v1/false-alerts/:id/cancel`, `POST /api/v1/incidents/:id/false-alert`, `PATCH /api/v1/incidents/:id/status`) |
+| 3 | Two-way radio to recall responders | NestJS REST API (`PATCH /v1/false-alerts/:id/cancel`, `POST /v1/incidents/:id/false-alert`, `PATCH /v1/incidents/:id/status`) |
 | 4 | | Shared status transition rules (`@agap/shared`) |
 | 5 | | PostgreSQL (`incidents`, `incident_events`, `false_alerts`, `audit_logs`) |
 | 6 | | Socket.io status events and the reporter notification service |

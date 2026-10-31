@@ -1,6 +1,6 @@
 # MOD-51 — Emergency Intelligence and Risk Visualization
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -30,6 +30,7 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
 3. Lists the municipality's active flood risk zones, and all defined risk areas of any type.
 4. Lets a System Administrator create, update, or delete a risk area, validating its barangay against Bocaue's defined list.
 5. Reports incident patterns grouped by category.
+6. Every night, finds recurring clusters of incidents (at least 4 within about 150 m over the last 90 days, per category) that no active risk area covers yet, and proposes them as risk areas for a System Administrator to approve or dismiss.
 
 ---
 
@@ -41,6 +42,7 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
 | 2 | PAGASA bulletins and river-gauge readings, read and acted on manually | Incident GPS coordinates (latitude/longitude) |
 | 3 | No structured, queryable map of risk areas | A period filter (days back) for the map overlay |
 | 4 | | Risk area fields: name, type, risk level, barangay, flood threshold (meters), description, active flag |
+| 5 | | System Administrator's decision on a proposed area: approve (with a name and risk level) or dismiss |
 
 ---
 
@@ -50,10 +52,11 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
 |---|---|---|
 | 1 | Staff knowledge of flood-prone barangays, not written down anywhere queryable | `backend/src/risk-intelligence` — `RiskIntelligenceService`, `RiskIntelligenceController` |
 | 2 | PAGASA bulletins and river-gauge readings followed manually | PostgreSQL (`risk_areas`, `incident`, `incident_locations`, `geo_regions` tables) via Prisma |
-| 3 | | NestJS REST API (`/api/v1/risk-intelligence`) restricted by role (heatmap/map-points/patterns: Dispatcher and Supervisor; risk-area writes: System Administrator only) |
+| 3 | | NestJS REST API (`/v1/risk-intelligence`) restricted by role (heatmap/map-points/patterns: Dispatcher and Supervisor; risk-area writes: System Administrator only) |
 | 4 | | Operations Center risk map, `frontend/app/(ops)/operations/risk`, and `frontend/components/risk/RiskHeatmapView.tsx` |
 | 5 | | Administration → Risk Areas screen, `frontend/app/(ops)/administration/risk-areas` |
 | 6 | | MOD-46 Immutable Audit Trail for risk-area create/update/delete |
+| 7 | | Nightly hotspot job (2:30 AM) using PostGIS clustering (`ST_ClusterDBSCAN`) and the `risk_area_proposals` table |
 
 ---
 
@@ -87,6 +90,8 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
 | 6 | A Dispatcher or Supervisor lists active flood zones or all defined risk areas; a System Administrator creates, updates, or deletes a risk area from Administration → Risk Areas, with the barangay validated against Bocaue's defined barangay list. | Validation |
 | 7 | Risk-area changes are persisted and written to the audit trail with before/after values. | Database |
 | 8 | A Supervisor or System Administrator requests incident patterns, grouped and counted by category. | Processing |
+| 9 | Every night at 2:30 AM, the system clusters the last 90 days of incidents per category (leaving out false, duplicate and cancelled reports), skips clusters already covered by an active risk area or recently dismissed, and saves one Pending proposal per type and barangay with an outline around the cluster. | Processing |
+| 10 | A System Administrator opens the Proposed areas list on Administration → Risk Areas and either approves a proposal with a name and risk level, which creates the risk area with its outline (barangay check and audit apply), or dismisses it. Nothing becomes a risk area without this approval. | User Action |
 
 **TO-BE Outputs**
 
@@ -97,6 +102,7 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
 | 3 | A list of active flood zones and all defined risk areas |
 | 4 | A created, updated, or deleted risk area, audited |
 | 5 | An incident-pattern breakdown by category |
+| 6 | Proposed risk areas, and the risk areas created from approved proposals |
 
 ---
 
@@ -107,7 +113,8 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
 2. As a System Administrator, create a risk area with an invalid barangay name and confirm it's refused.
 3. Create, update, and delete a risk area and confirm each action appears in the Audit log with before/after values.
 4. Confirm a System Administrator sees the Risk Areas admin screen but not the heatmap/map-points endpoints (role-restricted since role dashboards Phase 5b).
+5. Run the nightly job on test data (or wait for 2:30 AM), approve one proposal and confirm a risk area with an outline and an audit row appear. Not yet tried through the screen.
 
 **Do not claim:**
-- PostGIS-based spatial density or true geospatial queries — the overlay uses a plain coordinate-grid bucket in PostgreSQL, and the barangay heatmap is a stated placeholder.
+- PostGIS-based density on the map overlay — the overlay uses a plain coordinate-grid bucket, and the barangay heatmap is a simple count. (Only the nightly hotspot proposals use PostGIS clustering.)
 - Flood forecasting, AI-driven prediction, or any guaranteed risk score — risk areas and thresholds are entered manually.

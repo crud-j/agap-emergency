@@ -42,6 +42,12 @@ import {
 import {
   formatDistance, formatDuration, shouldShowReporterPatientSwitch,
 } from '@/src/lib/transport-target';
+import { fieldFlowFor, UNIT_FIELD_FLOW_LABELS, UNIT_FIELD_FLOWS } from '@agap/shared';
+import { HelpRequestSheet } from '@/src/components/responder/help-request-sheet';
+import { getFireReports } from '@/src/services/api/fire-reports.api';
+import { fireSummaryLine, withFireFinishWarning } from '@/src/lib/fire-report';
+import { getRescueSummary } from '@/src/services/api/rescue-trips.api';
+import { rescueSummaryLine, withRescueFinishWarning } from '@/src/lib/rescue-trip';
 import { colors, cardShadow, radius } from '@/src/theme/tokens';
 import { DestinationPicker } from '@/src/components/responder/DestinationPicker';
 import {
@@ -76,8 +82,10 @@ export default function AssignmentDetailScreen() {
   const router = useRouter();
   const qc = useQueryClient();
   const token = useAuthStore((s) => s.accessToken);
-  const t = useTranslations().transport;
+  const translations = useTranslations();
+  const t = translations.transport;
   const [busy, setBusy] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [reporterBusy, setReporterBusy] = useState(false);
   // FACILITY_AT_CAPACITY from the last destination save (the API's warning).
   const [capacityWarning, setCapacityWarning] = useState(false);
@@ -159,16 +167,73 @@ export default function AssignmentDetailScreen() {
 
   const styleUrl = mapConfig?.styleUrl ?? MAPLIBRE_DEMO_STYLE;
 
+  const flow = fieldFlowFor(unit?.resource_type);
+  const isFireUnit = flow === UNIT_FIELD_FLOWS.FIRE;
+  // A fire unit's latest report (plan Phase 3): shown here and checked on Finish.
+  const { data: fireReports } = useQuery({
+    queryKey: ['fire-reports', data?.incident_id],
+    queryFn: () => getFireReports(data!.incident_id, token as string),
+    enabled: isFireUnit && !!data?.incident_id && !!token,
+    refetchInterval: 30000,
+    retry: false,
+  });
+  const latestFire = fireReports?.[0] ?? null;
+  const isRescueUnit = flow === UNIT_FIELD_FLOWS.RESCUE;
+  // A rescue unit's running totals (plan Phase 4): shown here and checked on Finish.
+  const { data: rescueSummary } = useQuery({
+    queryKey: ['rescue-summary', data?.incident_id],
+    queryFn: () => getRescueSummary(data!.incident_id, token as string),
+    enabled: isRescueUnit && !!data?.incident_id && !!token,
+    refetchInterval: 30000,
+    retry: false,
+  });
   const actions = nextAssignmentActions(
     dispatchStatus,
     incidentStatus,
     transport.transportsKnown ? (activeTransport ? { open: !activeTransport.arrived_at } : null) : undefined,
     t,
+    {
+      enRouteAt: data?.en_route_at,
+      onSceneAt: data?.on_scene_at,
+      fieldDoneAt: data?.field_done_at,
+      otherUnitsActive: (data?.active_dispatch_count ?? 1) > 1,
+    },
+    flow,
   );
   const fieldWorkDone =
     dispatchStatus === 'COMPLETED' || incidentStatus === 'RESOLVED' || incidentStatus === 'CLOSED';
 
   function onActionPress(action: NextAction) {
+    if (action.kind === 'fireReport') {
+      router.push(`/responder/fire-report/${dispatchId}` as never);
+      return;
+    }
+    if (action.kind === 'rescueTrip') {
+      router.push(`/responder/rescue-trip/${dispatchId}` as never);
+      return;
+    }
+    // A rescue unit finishing while people are still waiting is asked first; never blocked.
+    if (action.kind === 'status' && action.status === 'RESOLVED' && isRescueUnit) {
+      const confirm = withRescueFinishWarning(action.confirm, rescueSummary?.stillWaiting);
+      if (confirm) {
+        Alert.alert(confirm.title, confirm.message, [
+          { text: 'Not yet', style: 'cancel' },
+          { text: action.label, onPress: () => void runAction(action) },
+        ]);
+        return;
+      }
+    }
+    // A fire unit finishing before "Fire out" is asked first; it is never blocked.
+    if (action.kind === 'status' && action.status === 'RESOLVED' && isFireUnit) {
+      const confirm = withFireFinishWarning(action.confirm, latestFire?.fire_status);
+      if (confirm) {
+        Alert.alert(confirm.title, confirm.message, [
+          { text: 'Not yet', style: 'cancel' },
+          { text: action.label, onPress: () => void runAction(action) },
+        ]);
+        return;
+      }
+    }
     if (action.kind === 'arrive') {
       const hospital = openTransport?.facilities?.name;
       Alert.alert(
@@ -199,7 +264,7 @@ export default function AssignmentDetailScreen() {
   }
 
   async function runAction(action: NextAction) {
-    if (!dispatchId || !token || action.kind === 'arrive') return;
+    if (!dispatchId || !token || action.kind === 'arrive' || action.kind === 'fireReport' || action.kind === 'rescueTrip') return;
     // "Start transport" is the one status step that may wait on the phone (plan §19).
     const startItem = action.kind === 'status' && action.status === 'TRANSPORTING' && data?.incident_id
       ? newOutboxItem({ kind: 'start', incidentId: data.incident_id, dispatchId })
@@ -399,7 +464,7 @@ export default function AssignmentDetailScreen() {
         <ResponderHeader
           onBack={goBack}
           title={unit?.call_sign ?? 'Assignment'}
-          subtitle={unit?.name ?? 'Responding unit'}
+          subtitle={`${unit?.name ?? 'Responding unit'}${unit?.resource_type ? ` · ${UNIT_FIELD_FLOW_LABELS[flow]}` : ''}`}
         />
       </SafeAreaView>
 
@@ -532,6 +597,22 @@ export default function AssignmentDetailScreen() {
             {incident?.number_of_patients != null && (
               <InfoRow icon="people" label="Patients" value={String(incident.number_of_patients)} />
             )}
+            {isFireUnit && (
+              <InfoRow
+                icon="flame"
+                label="Fire status"
+                value={latestFire ? fireSummaryLine(latestFire) : 'No fire report yet'}
+                sub={latestFire ? `Reported ${new Date(latestFire.reported_at).toLocaleTimeString()}` : undefined}
+              />
+            )}
+            {isRescueUnit && (
+              <InfoRow
+                icon="boat"
+                label="Rescue trips"
+                value={rescueSummary ? rescueSummaryLine(rescueSummary) : 'No trips logged yet'}
+                sub={rescueSummary?.lastTripAt ? `Last trip ${new Date(rescueSummary.lastTripAt).toLocaleTimeString()}` : undefined}
+              />
+            )}
 
             {incidentStatus === 'TRANSPORTING' && (
               <View style={[styles.card, styles.transportCard]}>
@@ -626,6 +707,16 @@ export default function AssignmentDetailScreen() {
               />
             )}
 
+            {/* Ask dispatch for more help (plan Phase 2 step 5): every unit type, while
+                accepted and the incident is still open. Dispatch decides what to send. */}
+            {shareEnabled && (
+              <LinkRow
+                icon="megaphone"
+                label={translations.helpRequest.linkLabel}
+                onPress={() => setHelpOpen(true)}
+              />
+            )}
+
             {/* Incident chat (MOD-33) — message the reporter + dispatch. */}
             {data.incident_id && (
               <LinkRow
@@ -657,27 +748,40 @@ export default function AssignmentDetailScreen() {
             />
           )}
 
+          {dispatchId && token && (
+            <HelpRequestSheet
+              visible={helpOpen}
+              dispatchId={dispatchId}
+              token={token}
+              flow={flow}
+              onClose={() => setHelpOpen(false)}
+            />
+          )}
+
           {actions.length > 0 && (
             <SafeAreaView edges={['bottom']} style={styles.footer}>
               <View style={styles.actionRow}>
                 {actions.map((action) => {
                   const secondary = action.kind === 'status' && action.secondary;
+                  // The fire report and rescue trip forms only open a screen; what is filed there waits in line itself.
+                  const opensForm = action.kind === 'fireReport' || action.kind === 'rescueTrip';
+                  const blocked = !opensForm && (busy || waitingOnPhone);
                   return (
                     <TouchableOpacity
                       key={action.label}
                       style={[
                         styles.actionBtn,
                         secondary && styles.actionBtnSecondary,
-                        (busy || waitingOnPhone) && styles.actionBtnDisabled,
+                        blocked && styles.actionBtnDisabled,
                       ]}
                       onPress={() => onActionPress(action)}
                       // Nothing overtakes an action waiting on the phone (the banner shows it).
-                      disabled={busy || waitingOnPhone}
+                      disabled={blocked}
                       activeOpacity={0.85}
                       accessibilityRole="button"
                       accessibilityLabel={action.label}
                     >
-                      {busy ? (
+                      {busy && !opensForm ? (
                         <ActivityIndicator color={secondary ? colors.primary : '#FFFFFF'} />
                       ) : (
                         <>

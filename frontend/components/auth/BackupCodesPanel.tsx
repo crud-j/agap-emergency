@@ -11,7 +11,7 @@ interface BackupCodesPanelProps {
 }
 
 const buttonClass =
-  'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#126247]/40';
+  'inline-flex h-11 flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#126247]/40';
 
 function fileText(codes: string[]): string {
   return [
@@ -97,7 +97,7 @@ export function BackupCodesPanel({ codes, acknowledged, onAcknowledgedChange }: 
         <button type="button" onClick={print} className={buttonClass}>
           {t.backupPrint}
         </button>
-        <button type="button" onClick={() => void copy()} className={buttonClass}>
+        <button type="button" onClick={() => void copy()} aria-live="polite" className={buttonClass}>
           {copied ? t.backupCopied : t.backupCopy}
         </button>
       </div>

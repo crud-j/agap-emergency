@@ -44,6 +44,10 @@ export interface IncidentListItem {
     last_report_at: string | null;
     barangay: { id: string; name: string };
   }>;
+  /** The queue's fire badge (MOD-23): the latest fire report only, if any. */
+  fire_field_reports?: Array<Pick<IncidentFireReport, 'fire_status' | 'alarm_level'>>;
+  /** The queue's rescued badge (MOD-23/52): each rescue trip's count only. */
+  rescue_trip_reports?: Array<{ rescued_count: number | null }>;
 }
 
 export interface IncidentIntakeDetails {
@@ -88,6 +92,64 @@ export interface IncidentAssessment {
   assessed_at: string;
 }
 
+/** A fire crew's report (MOD-32/36) — mirrors fire_field_reports. Append-only; newest first. */
+export interface IncidentFireReport {
+  id: string;
+  dispatch_id: string | null;
+  alarm_level: string | null;
+  fire_status: string | null;
+  structures_involved: number | null;
+  occupancy_type: string | null;
+  hazards: string[];
+  spreading: boolean | null;
+  evacuation_needed: boolean | null;
+  casualties_seen: number | null;
+  trapped_persons: number | null;
+  notes: string | null;
+  reported_at: string;
+  /** The unit it came from (never a crew name). */
+  dispatches?: { resources: { name: string; call_sign: string | null } | null } | null;
+}
+
+/** A rescue crew's trip (MOD-32/52) — mirrors rescue_trip_reports. Append-only; newest first. */
+export interface IncidentRescueTrip {
+  id: string;
+  dispatch_id: string | null;
+  rescued_count: number | null;
+  families: number | null;
+  children: number | null;
+  elderly: number | null;
+  pwd: number | null;
+  pregnant: number | null;
+  still_waiting: number | null;
+  water_level: string | null;
+  access: string | null;
+  taken_to: string | null;
+  taken_to_facility_id: string | null;
+  taken_to_other: string | null;
+  notes: string | null;
+  reported_at: string;
+  /** The unit it came from (never a crew name). */
+  dispatches?: { resources: { name: string; call_sign: string | null } | null } | null;
+  facilities?: { id: string; name: string } | null;
+}
+
+/** GET /incidents/:id/rescue-summary: totals computed on the server, plus every trip. */
+export interface IncidentRescueSummary {
+  tripCount: number;
+  rescued: number;
+  families: number;
+  children: number;
+  elderly: number;
+  pwd: number;
+  pregnant: number;
+  stillWaiting: number | null;
+  stillWaitingAt: string | null;
+  lastTripAt: string | null;
+  byDestination: Array<{ takenTo: string | null; facilityId: string | null; facilityName: string | null; trips: number; rescued: number }>;
+  trips: IncidentRescueTrip[];
+}
+
 export interface IncidentEvent {
   id: string;
   from_status: string | null;
@@ -128,6 +190,7 @@ export interface IncidentDetail extends IncidentListItem {
   incident_events?: IncidentEvent[];
   incident_attachments?: IncidentAttachment[];
   on_scene_assessments?: IncidentAssessment[];
+  fire_field_reports?: IncidentFireReport[];
 }
 
 export interface IncidentTransport {
@@ -297,6 +360,10 @@ export function mergeIncident(id: string, masterIncidentId: string): Promise<Inc
 
 export function submitAssessment(incidentId: string, body: SubmitAssessmentBody): Promise<IncidentAssessment> {
   return api.post(`/incidents/${incidentId}/assessment`, body, getToken());
+}
+
+export function fetchRescueSummary(incidentId: string): Promise<IncidentRescueSummary> {
+  return api.get(`/incidents/${incidentId}/rescue-summary`, getToken());
 }
 
 export function fetchIncidentTransports(incidentId: string): Promise<IncidentTransport[]> {

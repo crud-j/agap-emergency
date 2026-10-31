@@ -1,6 +1,6 @@
 # MOD-36 — Incident Command / ICS Support
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -49,7 +49,7 @@ Give large incidents (mass-casualty, flood, multi-agency fire) a recognized comm
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Verbal command declaration at the scene | NestJS REST API — `POST /api/v1/incidents/:id/ics/activate`, `GET .../ics`, `POST .../ics/positions`, `POST .../ics/assign-ic`, `PATCH .../ics`, `POST .../ics/deactivate`, `DELETE .../ics/positions/:posId` (`backend/src/incidents`) |
+| 1 | Verbal command declaration at the scene | NestJS REST API — `POST /v1/incidents/:id/ics/activate`, `GET .../ics`, `POST .../ics/positions`, `POST .../ics/assign-ic`, `PATCH .../ics`, `POST .../ics/deactivate`, `DELETE .../ics/positions/:posId` (`backend/src/incidents`) |
 | 2 | Radio net for relaying objectives and status | PostgreSQL (`incident_command_structures`, `ics_assignments` tables) |
 | 3 | — | Operations Command page (`frontend/app/(ops)/operations/command`) |
 | 4 | — | Audit trail (MOD-46) and Socket.io `incident.updated` broadcast |

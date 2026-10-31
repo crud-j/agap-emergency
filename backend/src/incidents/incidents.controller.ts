@@ -23,6 +23,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { IncidentsService } from './incidents.service';
 import { AssessmentService } from './assessment/assessment.service';
+import { FireReportService } from './fire-report/fire-report.service';
+import { RescueTripService } from './rescue-trip/rescue-trip.service';
 import { IncidentHandoverService } from './incident-handover/incident-handover.service';
 import { TransportService } from './transport/transport.service';
 import { StartTransportDto } from './transport/dto/start-transport.dto';
@@ -33,6 +35,8 @@ import { MediaService, MULTER_MEMORY_STORAGE, MAX_VIDEO_UPLOAD_BYTES } from '../
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { UpdateIncidentStatusDto } from './dto/update-incident-status.dto';
 import { SubmitAssessmentDto } from './assessment/dto/submit-assessment.dto';
+import { SubmitFireReportDto } from './fire-report/dto/submit-fire-report.dto';
+import { SubmitRescueTripDto } from './rescue-trip/dto/submit-rescue-trip.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -60,6 +64,8 @@ export class IncidentsController {
     private readonly handoverService: IncidentHandoverService,
     private readonly transportService: TransportService,
     private readonly participants: IncidentParticipantService,
+    private readonly fireReportService: FireReportService,
+    private readonly rescueTripService: RescueTripService,
   ) {}
 
   /**
@@ -485,6 +491,60 @@ export class IncidentsController {
     @Request() req: any,
   ) {
     return this.assessmentService.submit(id, dto, req.user.id);
+  }
+
+  // ---- Fire reports (MOD-32/36, unit field flow plan Phase 3) ----
+
+  @Get(':id/fire-reports')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List fire reports, newest first (the first is the current picture)' })
+  async listFireReports(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    // Hazards, casualties and crew notes: staff and crew only, never the reporter.
+    await this.requireParticipation(req, id, ['staff', 'crew']);
+    return this.fireReportService.list(id);
+  }
+
+  @Post(':id/fire-report')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'File a fire report (a FIRE unit\'s crew, or staff relaying a radio report). All fields optional; append-only.',
+  })
+  async submitFireReport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitFireReportDto,
+    @Request() req: any,
+  ) {
+    return this.fireReportService.submit(id, dto, { id: req.user.id, role: req.user.role });
+  }
+
+  // ---- Rescue trips (MOD-32/52, unit field flow plan Phase 4) ----
+
+  @Get(':id/rescue-summary')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Rescue totals (rescued, vulnerable counts, latest still waiting, per destination) and every trip, newest first' })
+  async rescueSummary(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    // Counts and crew notes: staff and crew only, never the reporter.
+    await this.requireParticipation(req, id, ['staff', 'crew']);
+    return this.rescueTripService.summary(id);
+  }
+
+  @Post(':id/rescue-trip')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Log a rescue trip (a RESCUE unit\'s crew, or staff relaying a radio report). All fields optional; append-only.',
+  })
+  async submitRescueTrip(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitRescueTripDto,
+    @Request() req: any,
+  ) {
+    return this.rescueTripService.submit(id, dto, { id: req.user.id, role: req.user.role });
   }
 
   // ---- ICS ----

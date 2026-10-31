@@ -7,6 +7,8 @@ import { DuplicateDetectionService } from './duplicate-detection/duplicate-detec
 import { PriorityService } from './priority/priority.service';
 import { TriageService } from './triage/triage.service';
 import { AssessmentService } from './assessment/assessment.service';
+import { FireReportService } from './fire-report/fire-report.service';
+import { RescueTripService } from './rescue-trip/rescue-trip.service';
 import { IncidentHandoverService } from './incident-handover/incident-handover.service';
 import { TransportService } from './transport/transport.service';
 import { TransportRequestCacheService } from './transport/transport-request-cache.service';
@@ -43,6 +45,8 @@ import { QUEUE_NAMES } from '@agap/shared';
     PriorityService,
     TriageService,
     AssessmentService,
+    FireReportService,
+    RescueTripService,
     IncidentHandoverService,
     TransportService,
     TransportRequestCacheService,

@@ -69,7 +69,12 @@ describe('reporter_sex exposure (WP3.6, least privilege)', () => {
           incident_reporters: { is_guest: false, users: { sex: 'PREFER_NOT_TO_SAY' } },
         },
       };
-      const prisma = { dispatches: { findUnique: jest.fn().mockResolvedValue(dispatch) } };
+      const prisma = {
+        dispatches: {
+          findUnique: jest.fn().mockResolvedValue(dispatch),
+          count: jest.fn().mockResolvedValue(1),
+        },
+      };
       const service = new RespondersService(prisma as any, {} as any, {} as any, new IncidentStatusService());
 
       const result: any = await service.getAssignment('dispatch-1', 'resp-1');

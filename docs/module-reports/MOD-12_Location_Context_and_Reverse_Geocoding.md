@@ -1,6 +1,6 @@
 # MOD-12 — Location Context and Reverse Geocoding
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -48,7 +48,7 @@ Let dispatchers and responders read "street, barangay" instead of raw coordinate
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Printed municipal and barangay map | AGAP Citizen mobile app (Confirm Location and Details screens) |
-| 2 | Operator's local knowledge | NestJS REST API (`POST /api/v1/locations/geocode`, open to reports without an account) |
+| 2 | Operator's local knowledge | NestJS REST API (`POST /v1/locations/geocode`, open to reports without an account) |
 | 3 | | Nominatim (OpenStreetMap) reverse geocoding, 5-second timeout |
 | 4 | | PostgreSQL with PostGIS (`geo_regions` barangay boundaries, `incident_locations`) |
 

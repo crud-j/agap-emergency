@@ -181,6 +181,14 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/administration/config', label: 'Configuration', roles: [SYS_ADMIN] },
     ],
   },
+  {
+    // Every console role manages its own sign-in. The Hospital Portal has no sidebar,
+    // so its users keep the shield link in the Topbar.
+    label: 'Account',
+    items: [
+      { href: '/account/security', label: 'Account Security', roles: CONSOLE },
+    ],
+  },
 ];
 
 /** The sidebar for one role: groups with at least one visible link. */

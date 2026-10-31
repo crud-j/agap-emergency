@@ -1,6 +1,6 @@
 # MOD-11 — Precision GPS Capture
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -52,7 +52,7 @@ Send responders to the exact spot instead of a description, without letting a we
 | 2 | Printed municipal map | Expo Location (high accuracy, best of several readings) |
 | 3 | Operator's knowledge of Bocaue streets | MapLibre map preview with the Bocaue boundary |
 | 4 | | Shared Bocaue boundary check (`@agap/shared`), on the phone and the server |
-| 5 | | NestJS REST API (`POST /api/v1/incidents`) |
+| 5 | | NestJS REST API (`POST /v1/incidents`) |
 | 6 | | PostgreSQL with PostGIS (`incident_locations`) |
 
 ---

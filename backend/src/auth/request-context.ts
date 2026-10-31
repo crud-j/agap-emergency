@@ -5,6 +5,8 @@ import { TRUSTED_DEVICE_COOKIE } from './mfa/mfa.constants';
 export interface AuthRequestContext {
   ipAddress?: string | undefined;
   userAgent?: string | undefined;
+  /** Origin header of a browser request; picks the WebAuthn RP ID for that portal. */
+  origin?: string | undefined;
   /** Value of the agap_trusted cookie, if the browser sent one (not yet validated). */
   trustedDeviceToken?: string | undefined;
 }
@@ -19,10 +21,12 @@ export function authContextFromRequest(req: {
   cookies?: Record<string, unknown> | undefined;
 }): AuthRequestContext {
   const ua = req.headers?.['user-agent'];
+  const origin = req.headers?.['origin'];
   const trusted = req.cookies?.[TRUSTED_DEVICE_COOKIE];
   return {
     ipAddress: req.ip && isIP(req.ip) ? req.ip : undefined,
     userAgent: typeof ua === 'string' ? ua.slice(0, 512) : undefined,
+    origin: typeof origin === 'string' ? origin : undefined,
     trustedDeviceToken: typeof trusted === 'string' && trusted ? trusted : undefined,
   };
 }

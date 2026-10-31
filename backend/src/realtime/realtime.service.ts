@@ -16,6 +16,7 @@ import {
 import type {
   AgapEventName,
   IncidentCreatedPayload,
+  IncidentFieldReportPayload,
   IncidentStatusChangedPayload,
   IncidentAssignedPayload,
   IncidentLocationUpdatedPayload,
@@ -158,6 +159,16 @@ export class RealtimeService {
     this.safe('assessmentUpdated', () => {
       this.gateway.emitToOps(INCIDENT_EVENTS.ASSESSMENT_UPDATED, envelope);
       this.gateway.emitToIncident(INCIDENT_EVENTS.ASSESSMENT_UPDATED, incidentId, envelope);
+    });
+  }
+
+  /**
+   * A crew's fire report or rescue trip (unit field flow plan). Ops room only: the
+   * reporter's app doesn't get hazard or casualty details. Never notes or names.
+   */
+  fieldReport(payload: IncidentFieldReportPayload): void {
+    this.safe('fieldReport', () => {
+      this.gateway.emitToOps(INCIDENT_EVENTS.FIELD_REPORT, payload);
     });
   }
 

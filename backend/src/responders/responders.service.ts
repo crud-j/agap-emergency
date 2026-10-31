@@ -12,10 +12,13 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
+import { NotificationsService } from '../notifications/notifications.service';
+import { findEscalationRecipients } from '../jobs/escalation-recipients';
 import { IncidentStatusService } from '../incidents/incident-status/incident-status.service';
 import { TransportService } from '../incidents/transport/transport.service';
 import { openTransportWhere } from '../incidents/transport/open-transport';
 import { TransportAudienceService } from '../incidents/transport/transport-audience.service';
+import { notifyRescueStillWaiting } from '../incidents/rescue-trip/rescue-trip.service';
 import { assertResponderFixInArea } from '../locations/responder-fix-area';
 import { UpdateAssignmentStatusDto } from './dto/update-assignment-status.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
@@ -26,6 +29,10 @@ import {
   INCIDENT_STATUS_TRANSITIONS,
   ResponderAvailability,
   ResponderStatus,
+  fieldFlowFor,
+  UNIT_FIELD_FLOWS,
+  NOTIFICATION_EVENT_TYPES,
+  type CrewHelpNeed,
 } from '@agap/shared';
 import { REPORTER_SEX_INCLUDE, reporterSexFrom } from '../common/utils/reporter-sex';
 
@@ -68,6 +75,10 @@ const RESPONDER_STATUS_STEP: Record<
   RESOLVED: { prev: ResponderStatus.ON_SCENE, next: ResponderStatus.AVAILABLE },
 };
 
+const HELP_REQUEST_DEDUP_MS = 5 * 60 * 1000;
+/** No need name is a prefix of another, so `startsWith(prefix + need)` matches only that need. */
+const HELP_REQUEST_EVENT_PREFIX = 'Crew asked dispatch for help: ';
+
 type AvailabilityRow = { user_id: string; status: string };
 
 @Injectable()
@@ -82,6 +93,7 @@ export class RespondersService {
     private readonly transport: TransportService,
     private readonly audience: TransportAudienceService,
     @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async findAll(_filters: Record<string, unknown>) {
@@ -263,7 +275,13 @@ export class RespondersService {
       },
       orderBy: { created_at: 'desc' },
     });
-    return dispatches.map(withReporterSex);
+    const activeCounts = await Promise.all(dispatches.map((d) => this.prisma.dispatches.count({
+      where: { incident_id: d.incident_id, status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
+    })));
+    return dispatches.map((dispatch, index) => ({
+      ...withReporterSex(dispatch),
+      active_dispatch_count: activeCounts[index],
+    }));
   }
 
   async getAssignment(dispatchId: string, userId: string) {
@@ -278,7 +296,10 @@ export class RespondersService {
     if (!dispatch) throw new NotFoundException('Assignment not found');
     const isCrew = dispatch.dispatch_crew.some((c) => c.user_id === userId);
     if (!isCrew) throw new ForbiddenException('You are not assigned to this dispatch');
-    return withReporterSex(dispatch);
+    const activeDispatchCount = await this.prisma.dispatches.count({
+      where: { incident_id: dispatch.incident_id, status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
+    });
+    return { ...withReporterSex(dispatch), active_dispatch_count: activeDispatchCount };
   }
 
   async acceptAssignment(dispatchId: string, userId: string) {
@@ -357,12 +378,23 @@ export class RespondersService {
     return declined;
   }
 
-  private emitDispatchUpdated(dispatch: { id: string; incident_id: string; resource_id: string; status: unknown }) {
+  private emitDispatchUpdated(dispatch: {
+    id: string;
+    incident_id: string;
+    resource_id: string;
+    status: unknown;
+    en_route_at?: Date | null;
+    on_scene_at?: Date | null;
+    field_done_at?: Date | null;
+  }) {
     try {
       this.realtime.dispatchUpdated(dispatch.incident_id, {
         dispatchId: dispatch.id,
         resourceId: dispatch.resource_id,
         status: String(dispatch.status),
+        ...(dispatch.en_route_at !== undefined && { enRouteAt: dispatch.en_route_at?.toISOString() ?? null }),
+        ...(dispatch.on_scene_at !== undefined && { onSceneAt: dispatch.on_scene_at?.toISOString() ?? null }),
+        ...(dispatch.field_done_at !== undefined && { fieldDoneAt: dispatch.field_done_at?.toISOString() ?? null }),
       });
     } catch (err) {
       this.logger.warn(`Realtime emit failed for dispatch ${dispatch.id}: ${String(err)}`);
@@ -399,6 +431,15 @@ export class RespondersService {
     if (dispatch.status !== 'ACCEPTED') {
       throw new ConflictException('Accept the assignment before updating its status');
     }
+    const flow = fieldFlowFor(dispatch.resources?.resource_type);
+    if (dispatch.resources?.resource_type &&
+      incidentStatus === IncidentStatus.TRANSPORTING && flow !== UNIT_FIELD_FLOWS.MEDICAL_TRANSPORT) {
+      throw new ConflictException({ code: 'TRANSPORT_NOT_FOR_UNIT', message: 'This unit cannot transport patients.' });
+    }
+    if (dispatch.resources?.resource_type && incidentStatus === IncidentStatus.ASSISTING && flow !== UNIT_FIELD_FLOWS.MEDICAL_TRANSPORT &&
+      flow !== UNIT_FIELD_FLOWS.MEDICAL_FIRST) {
+      throw new ConflictException({ code: 'ASSISTING_NOT_FOR_UNIT', message: 'This unit cannot mark treating on scene.' });
+    }
 
     const incident = await this.prisma.incident.findUnique({
       where: { id: dispatch.incident_id },
@@ -407,21 +448,32 @@ export class RespondersService {
     if (!incident) throw new NotFoundException('Incident not found');
     const currentStatus = incident.status as unknown as IncidentStatus;
     // TRANSPORTING goes through the one transport entry path, which checks the
-    // status itself (ON_SCENE, or TRANSPORTING for a second unit) under a row lock.
+    // status itself (ON_SCENE, TRANSPORTING or ASSISTING for a second unit) under a row lock.
     const transporting = incidentStatus === IncidentStatus.TRANSPORTING;
-    // Same lifecycle rules the dispatcher endpoint enforces (MOD-15).
-    if (!transporting && !INCIDENT_STATUS_TRANSITIONS[currentStatus]?.includes(incidentStatus)) {
+    const resolving = incidentStatus === IncidentStatus.RESOLVED;
+    const progressStatus = incidentStatus === IncidentStatus.EN_ROUTE || incidentStatus === IncidentStatus.ON_SCENE;
+    // Steps of a still-open incident; RESOLVED and the terminal statuses are left
+    // out so a late EN_ROUTE / ON_SCENE on a finished incident is refused below.
+    const progressRank: Partial<Record<IncidentStatus, number>> = {
+      [IncidentStatus.DISPATCHED]: 0,
+      [IncidentStatus.EN_ROUTE]: 1,
+      [IncidentStatus.ON_SCENE]: 2,
+      [IncidentStatus.ASSISTING]: 3,
+      [IncidentStatus.TRANSPORTING]: 3,
+    };
+    const alreadyAhead = progressStatus &&
+      (progressRank[currentStatus] ?? -1) >= (progressRank[incidentStatus] ?? Number.MAX_SAFE_INTEGER);
+    // Same lifecycle rules the dispatcher endpoint enforces (MOD-15), except a
+    // unit may record progress after another unit has moved the incident ahead.
+    if (!transporting && !alreadyAhead && !INCIDENT_STATUS_TRANSITIONS[currentStatus]?.includes(incidentStatus)) {
       throw new ConflictException(
         `Cannot move incident from ${currentStatus} to ${incidentStatus}`,
       );
     }
 
     const now = new Date();
-    const resolving = incidentStatus === IncidentStatus.RESOLVED;
 
-    // Every active dispatch on the incident ends when it is resolved — the
-    // units go back to AVAILABLE so the dashboard can assign them again.
-    const { finishedDispatches, begun } = await this.prisma.$transaction(async (tx) => {
+    const { finishedDispatches, begun, stampedDispatch, resultingIncidentStatus } = await this.prisma.$transaction(async (tx) => {
       if (transporting) {
         // The record exists from this tap on, even if the destination picker is cancelled.
         const begun = await this.transport.beginTransport(tx, {
@@ -432,12 +484,33 @@ export class RespondersService {
           at: now,
           ...(clientRequestId && { clientRequestId }),
         });
-        return { finishedDispatches: [], begun };
+        return { finishedDispatches: [], begun, stampedDispatch: null, resultingIncidentStatus: incidentStatus };
       }
-      if (resolving) {
+
+      // Lock the incident so two crews finishing at once can't both see the other
+      // as still active (and leave the incident open with no unit on it).
+      const [locked] = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT status FROM incidents WHERE id = ${dispatch.incident_id}::uuid FOR UPDATE`;
+      if (locked && locked.status !== currentStatus) {
+        throw new ConflictException({
+          code: 'INCIDENT_STATUS_CHANGED',
+          message: 'Another unit just updated this incident. Refresh and try again.',
+        });
+      }
+
+      const active = await tx.dispatches.findMany({
+        where: {
+          incident_id: dispatch.incident_id,
+          status: { in: ['PENDING', 'SENT', 'ACCEPTED'] },
+        },
+        select: { id: true, resource_id: true, status: true },
+      });
+      const callerIsLastActive = active.length === 1 && active[0]!.id === dispatchId;
+
+      if (resolving && callerIsLastActive) {
         // The crew records arrival first; a dispatcher can still resolve (override).
         const open = await tx.transportRecord.findFirst({
-          where: openTransportWhere({ dispatch_id: dispatchId }),
+          where: openTransportWhere({ incident_id: dispatch.incident_id }),
           select: { id: true },
         });
         if (open) {
@@ -448,50 +521,77 @@ export class RespondersService {
           });
         }
       }
-      await this.statusService.recordTransition(tx, {
-        incidentId: dispatch.incident_id,
-        from: currentStatus,
-        to: incidentStatus,
-        actorId: userId,
-        actorRole: 'RESPONDER',
-        notes: dto.notes ?? null,
-        at: now,
-      });
 
-      if (!resolving) return { finishedDispatches: [], begun: null };
-
-      const active = await tx.dispatches.findMany({
-        where: {
-          incident_id: dispatch.incident_id,
-          status: { in: ['PENDING', 'SENT', 'ACCEPTED'] },
-        },
-        select: { id: true, resource_id: true, status: true },
-      });
-      const finished: Array<{ id: string; resource_id: string; status: 'COMPLETED' | 'CANCELLED' }> = [];
-      for (const d of active) {
-        // A unit that never accepted didn't respond — cancel rather than complete.
-        const status = d.status === 'ACCEPTED' ? 'COMPLETED' : 'CANCELLED';
-        await tx.dispatches.update({
-          where: { id: d.id },
-          data: { status, ...(status === 'COMPLETED' && { completed_at: now }) },
+      const shouldTransition = !alreadyAhead && (!resolving || callerIsLastActive);
+      if (shouldTransition) {
+        await this.statusService.recordTransition(tx, {
+          incidentId: dispatch.incident_id,
+          from: currentStatus,
+          to: incidentStatus,
+          actorId: userId,
+          actorRole: 'RESPONDER',
+          notes: dto.notes ?? null,
+          at: now,
         });
-        finished.push({ id: d.id, resource_id: d.resource_id, status });
       }
-      // Only release units still pinned to this incident.
+
+      if (progressStatus) {
+        const stamped = await tx.dispatches.update({
+          where: { id: dispatchId },
+          data: incidentStatus === IncidentStatus.EN_ROUTE
+            ? { en_route_at: now }
+            : { on_scene_at: now },
+        });
+        return {
+          finishedDispatches: [],
+          begun: null,
+          stampedDispatch: stamped,
+          resultingIncidentStatus: shouldTransition ? incidentStatus : currentStatus,
+        };
+      }
+
+      if (!resolving) {
+        return { finishedDispatches: [], begun: null, stampedDispatch: null, resultingIncidentStatus: incidentStatus };
+      }
+
+      await tx.dispatches.update({
+        where: { id: dispatchId },
+        data: { status: 'COMPLETED', completed_at: now, field_done_at: now },
+      });
       await tx.resources.updateMany({
         where: {
-          id: { in: active.map((d) => d.resource_id) },
+          id: dispatch.resource_id,
           current_incident_id: dispatch.incident_id,
         },
         data: { status: 'AVAILABLE', current_incident_id: null },
       });
-      return { finishedDispatches: finished, begun: null };
+      if (!callerIsLastActive) {
+        await tx.incidentEvent.create({
+          data: {
+            incident_id: dispatch.incident_id,
+            from_status: currentStatus,
+            to_status: currentStatus,
+            triggered_by_id: userId,
+            triggered_by_role: 'RESPONDER',
+            notes: `${dispatch.resources?.call_sign ?? 'Unit'} finished field work`,
+          },
+        });
+      }
+      return {
+        finishedDispatches: [{ id: dispatchId, resource_id: dispatch.resource_id, status: 'COMPLETED' as const, field_done_at: now }],
+        begun: null,
+        stampedDispatch: null,
+        resultingIncidentStatus: callerIsLastActive ? incidentStatus : currentStatus,
+      };
     });
 
     // A second unit starting its own transport leaves the incident TRANSPORTING:
     // no status change to audit, announce or notify (its transport record is audited).
     const previousStatus = begun?.previousStatus ?? currentStatus;
-    if (!begun || begun.statusChanged) {
+    if (stampedDispatch) {
+      this.emitDispatchUpdated({ ...stampedDispatch, incident_id: dispatch.incident_id });
+    }
+    if ((!begun || begun.statusChanged) && resultingIncidentStatus !== currentStatus) {
       void this.audit.log({
         action: AuditAction.STATUS_CHANGE,
         actorId: userId,
@@ -541,18 +641,16 @@ export class RespondersService {
       } catch (err) {
         this.logger.warn(`Realtime emit failed for unit ${d.resource_id}: ${String(err)}`);
       }
-      if (d.status === 'CANCELLED') {
-        try {
-          this.realtime.notifyDispatchCancelled(dispatch.incident_id, {
-            dispatchId: d.id,
-            resourceId: d.resource_id,
-          });
-        } catch (err) {
-          this.logger.warn(`Realtime emit failed for dispatch ${d.id}: ${String(err)}`);
-        }
-      } else {
-        this.emitDispatchUpdated({ ...d, incident_id: dispatch.incident_id });
-      }
+      this.emitDispatchUpdated({ ...d, incident_id: dispatch.incident_id });
+    }
+
+    // A rescue crew finishing while its trips say people are still waiting: tell the
+    // dispatchers (Phase 4). After the Finish is saved; never throws, never dispatches.
+    if (finishedDispatches.length > 0 && flow === UNIT_FIELD_FLOWS.RESCUE && this.notifications) {
+      await notifyRescueStillWaiting(
+        { prisma: this.prisma, notifications: this.notifications, logger: this.logger },
+        { incidentId: dispatch.incident_id, dispatchId, callSign: dispatch.resources?.call_sign ?? null },
+      );
     }
 
     const step = RESPONDER_STATUS_STEP[dto.status];
@@ -574,7 +672,7 @@ export class RespondersService {
       }
     }
 
-    return { dispatchId, status: dto.status, incidentStatus };
+    return { dispatchId, status: dto.status, incidentStatus: resultingIncidentStatus };
   }
 
   async pushLocation(dto: TrackLocationDto, userId: string) {
@@ -638,10 +736,86 @@ export class RespondersService {
     return record;
   }
 
+  async requestHelp(dispatchId: string, userId: string, dto: {
+    need: CrewHelpNeed;
+    count?: number;
+    note?: string;
+    clientRequestId?: string;
+  }) {
+    const dispatch = await this.prisma.dispatches.findUnique({
+      where: { id: dispatchId },
+      include: { dispatch_crew: true, incidents: { select: { id: true, public_reference: true, status: true } } },
+    });
+    if (!dispatch) throw new NotFoundException('Assignment not found');
+    if (!dispatch.dispatch_crew.some((crew) => crew.user_id === userId)) {
+      throw new ForbiddenException('You are not assigned to this dispatch');
+    }
+    if (!['PENDING', 'SENT', 'ACCEPTED'].includes(String(dispatch.status))) {
+      throw new ConflictException('This assignment is no longer active');
+    }
+    // One request per incident + need per 5 minutes, from any crew. Keyed on the
+    // saved event, so it holds even when no dispatcher was on duty to get a notice.
+    const duplicate = await this.prisma.incidentEvent.findFirst({
+      where: {
+        incident_id: dispatch.incident_id,
+        occurred_at: { gte: new Date(Date.now() - HELP_REQUEST_DEDUP_MS) },
+        notes: { startsWith: `${HELP_REQUEST_EVENT_PREFIX}${dto.need}` },
+      },
+      select: { id: true },
+    });
+    if (duplicate) return { deduplicated: true, incidentId: dispatch.incident_id };
+
+    const summary = `${dto.need}${dto.count ? ` (${dto.count})` : ''}`;
+    // Persist first. The citizen's timeline shows incident-event notes, so the
+    // crew's free-text note never goes there, nor into a notice body or a WS payload.
+    await this.prisma.incidentEvent.create({
+      data: {
+        incident_id: dispatch.incident_id,
+        from_status: dispatch.incidents.status,
+        to_status: dispatch.incidents.status,
+        triggered_by_id: userId,
+        triggered_by_role: 'RESPONDER',
+        notes: `${HELP_REQUEST_EVENT_PREFIX}${summary}`,
+      },
+    });
+    void this.audit.log({
+      action: AuditAction.CREATE, actorId: userId, actorRole: 'RESPONDER',
+      entityType: 'crew_help_request', entityId: dispatchId, moduleId: 'MOD-32',
+      incidentId: dispatch.incident_id,
+      newValues: { need: dto.need, ...(dto.count != null ? { count: dto.count } : {}), hasNote: Boolean(dto.note) },
+    });
+
+    // A notice to the dispatchers (they decide; nothing is dispatched here). Best-effort.
+    const payload = { need: dto.need, ...(dto.count != null ? { count: dto.count } : {}), dispatchId };
+    try {
+      const recipients = await findEscalationRecipients(this.prisma, ['DISPATCHER']);
+      const results = await Promise.allSettled(recipients.map((recipient) =>
+        this.notifications!.create({
+          userId: recipient.id,
+          eventType: NOTIFICATION_EVENT_TYPES.CREW_HELP_REQUESTED,
+          title: 'Crew help requested',
+          body: `${dispatch.incidents.public_reference}: ${summary}`,
+          incidentId: dispatch.incident_id,
+          // The note rides only in the recipient's own notice (notification.created carries no dataPayload).
+          dataPayload: { ...payload, ...(dto.note ? { note: dto.note } : {}) },
+        })));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed) this.logger.warn(`Crew help request: ${failed} dispatcher notice(s) failed for ${dispatch.incident_id}`);
+    } catch (err) {
+      this.logger.warn(`Crew help request notices failed for ${dispatch.incident_id}: ${String(err)}`);
+    }
+    try {
+      this.realtime.incidentUpdated(dispatch.incident_id, { type: NOTIFICATION_EVENT_TYPES.CREW_HELP_REQUESTED, ...payload });
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for crew help request: ${String(err)}`);
+    }
+    return { deduplicated: false, incidentId: dispatch.incident_id };
+  }
+
   private async assertCrewMember(dispatchId: string, userId: string) {
     const dispatch = await this.prisma.dispatches.findUnique({
       where: { id: dispatchId },
-      include: { dispatch_crew: true },
+      include: { dispatch_crew: true, resources: true },
     });
     if (!dispatch) throw new NotFoundException('Assignment not found');
     const isCrew = dispatch.dispatch_crew.some((c) => c.user_id === userId);

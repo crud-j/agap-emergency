@@ -1,6 +1,6 @@
 # MOD-43 — Live ETA and Responder Tracking
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -25,9 +25,9 @@ Calculates and shows an estimated arrival time for the responder assigned to an 
 Give the citizen and the Operations Center a sense of "how far away" without pretending the system can guarantee a travel time, a live GPS feed, or that a responder who's gone quiet has actually stopped.
 
 **Tasks Performed**
-1. Recalculates ETA when a responder's location updates, using the routing provider.
+1. Recalculates ETA when a responder's location updates, using the routing provider, to wherever the unit is heading now: the scene before transport, the destination hospital while transporting.
 2. Persists the latest ETA to the open transport record for that dispatch.
-3. Broadcasts the ETA and the responder's position over Socket.io to the citizen and operations dashboard.
+3. Broadcasts the ETA and the responder's position over Socket.io to the operations dashboard and the crew; the citizen's incident screen gets only the trip to the scene, never the route to the hospital.
 4. Flags a responder's position as stale ("signal lost") once it's older than the signal-lost threshold, instead of showing a frozen position as current.
 5. Re-seeds the latest known positions from PostgreSQL on connect/reconnect so a dropped WebSocket doesn't lose the picture.
 
@@ -38,7 +38,7 @@ Give the citizen and the Operations Center a sense of "how far away" without pre
 | No. | AS-IS Input (Existing Process) | TO-BE Input (Proposed Automated Process) |
 |---|---|---|
 | 1 | A radio call-in of the crew's rough location, if one happens | The responder's GPS position (latitude, longitude, heading, timestamp) tied to a dispatch |
-| 2 | The dispatcher's own estimate of travel time based on experience | The incident's location |
+| 2 | The dispatcher's own estimate of travel time based on experience | The incident's location, or the destination hospital's verified location while transporting |
 | 3 | | The routing provider's calculated travel duration |
 
 ---
@@ -49,7 +49,7 @@ Give the citizen and the Operations Center a sense of "how far away" without pre
 |---|---|---|
 | 1 | Two-way radio | Responder mobile app location reporting (Expo Location) |
 | 2 | Dispatcher's local knowledge of travel times | `backend/src/locations` (location persistence, throttled per dispatch) |
-| 3 | | Redis + BullMQ (`backend/src/jobs/processors/eta-refresh.processor.ts`) and `backend/src/locations/maps` routing provider |
+| 3 | | Redis + BullMQ (`backend/src/jobs/processors/eta-refresh.processor.ts`) and the routing provider (OSRM, self-hostable) with a route cache |
 | 4 | | PostgreSQL (`location_history`, `TransportRecord.estimated_arrival_at`) |
 | 5 | | Socket.io (`responder.location_updated`, `responder.eta_updated`) |
 | 6 | | Citizen Tracking screen and Operations Center live map, consuming the same feed |
@@ -78,9 +78,9 @@ Give the citizen and the Operations Center a sense of "how far away" without pre
 |---|---|---|
 | 1 | The responder app reports the crew's GPS position, which the backend persists and throttles per dispatch. | Integration |
 | 2 | Each accepted position queues an ETA refresh job for that dispatch. | Processing |
-| 3 | The job routes from the freshest known position of that dispatch's crew to the incident location using the configured routing provider. | Integration |
+| 3 | The job works out the unit's current leg (to the scene, or to the hospital while transporting) and routes from the freshest known position of that dispatch's crew to that point using the configured routing provider. | Integration |
 | 4 | If an open transport record exists for the dispatch, its estimated arrival time is updated; the ETA is always marked as an estimate. | Database |
-| 5 | The new ETA and position are broadcast over Socket.io to the incident's room (citizen Tracking screen, operations map). | Notification |
+| 5 | The new ETA and position are broadcast over Socket.io: the operations map and the crew get every leg with a "to scene" or "to hospital" label; the incident's room (citizen Tracking screen) gets the trip to the scene only. | Notification |
 | 6 | If the routing provider returns no duration, the refresh is skipped and the previous ETA is left as-is — a failed calculation never blocks or cancels the dispatch. | Validation |
 | 7 | On reconnect, viewers re-seed the latest known positions from PostgreSQL via REST, so a dropped socket doesn't show an empty map. | Integration |
 | 8 | If a responder's last position is older than the signal-lost threshold, viewers show "signal lost" instead of treating the last position as current. | Validation |

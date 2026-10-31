@@ -17,6 +17,7 @@ import {
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
   Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug, Inbox, ShieldCheck, MapPinned, LogOut,
+  Fingerprint,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -52,6 +53,7 @@ const ICONS: Record<string, LucideIcon> = {
   '/administration/security': ShieldAlert,
   '/administration/integrations': Plug,
   '/audit': FileSearch,
+  '/account/security': Fingerprint,
 };
 
 type NavItem = NavLink & { icon: LucideIcon };
@@ -175,6 +177,8 @@ function SidebarNav(): JSX.Element {
   const asideRef = useRef<HTMLElement>(null);
   const dockRef = useRef<HTMLElement>(null);
   const navContentRef = useRef<HTMLDivElement>(null);
+  const dockScrollRef = useRef<HTMLDivElement>(null);
+  const [dockEdges, setDockEdges] = useState({ start: false, end: false });
   const pendingSnapshot = useRef<Snapshot | null>(null);
   const [activePosition, setActivePosition] = useState<{ top: number; height: number } | null>(null);
 
@@ -336,6 +340,31 @@ function SidebarNav(): JSX.Element {
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [docked, pathname]);
 
+  // A long nav (admins) can start with the current page below the fold.
+  useEffect(() => {
+    if (docked || !asideMounted) return;
+    navContentRef.current
+      ?.querySelector<HTMLElement>('[aria-current="page"]')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [docked, asideMounted, pathname]);
+
+  /* ── Dock edge fades: hint that more icons scroll into view ─────────────── */
+
+  const updateDockEdges = useCallback(() => {
+    const el = dockScrollRef.current;
+    if (!el) return;
+    const start = el.scrollLeft > 2;
+    const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setDockEdges((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+  }, []);
+
+  useEffect(() => {
+    if (!docked) return;
+    updateDockEdges();
+    window.addEventListener('resize', updateDockEdges);
+    return () => window.removeEventListener('resize', updateDockEdges);
+  }, [docked, updateDockEdges]);
+
   const showTip = (label: string) => (e: SyntheticEvent<HTMLElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     setTip({ label, x: r.left + r.width / 2, y: r.top });
@@ -398,7 +427,7 @@ function SidebarNav(): JSX.Element {
             </div>
 
             {/* Nav */}
-            <nav aria-label="Operations navigation" className="flex-1 overflow-y-auto py-3 px-2 scrollbar-thin">
+            <nav aria-label="Operations navigation" className="flex-1 overflow-y-auto px-1 py-3 scrollbar-thin">
               <div ref={navContentRef} className={styles.navContent}>
                 {activePosition && (
                   <span
@@ -410,11 +439,12 @@ function SidebarNav(): JSX.Element {
                     }}
                   />
                 )}
-                {groups.map((group) => (
-                  <div key={group.label} className="mb-4">
+                {groups.map((group, gi) => (
+                  <div key={group.label} role="group" aria-labelledby={`nav-group-${gi}`} className="mb-4">
                     <p
+                      id={`nav-group-${gi}`}
                       className={cn(
-                        'mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-widest select-none',
+                        'mx-2 mb-1.5 px-2.5 text-[10.5px] font-semibold uppercase tracking-widest select-none',
                         styles.groupLabel,
                         styles.fadeText,
                       )}
@@ -430,7 +460,8 @@ function SidebarNav(): JSX.Element {
                           href={item.href}
                           aria-current={active ? 'page' : undefined}
                           className={cn(
-                            'relative z-10 mb-0.5 flex h-9 items-center gap-2.5 rounded-l-2xl px-2.5 text-[13px] font-medium transition-colors duration-200',
+                            'relative z-10 mx-2 mb-0.5 flex h-9 items-center gap-2.5 rounded-[0.85rem] px-2.5 text-[13px] font-medium transition-colors duration-200',
+                            styles.navLink,
                             active ? styles.activeLink : styles.inactiveLink,
                           )}
                         >
@@ -459,8 +490,10 @@ function SidebarNav(): JSX.Element {
                     </span>
                   </div>
                   <div className={cn('min-w-0 flex-1', styles.fadeText)}>
-                    <p className={cn('truncate text-xs font-semibold', styles.profileName)}>{user.name ?? user.email}</p>
-                    <p className={cn('mt-0.5 truncate text-[10px] font-medium', styles.profileRole)}>{user.role.replaceAll('_', ' ')}</p>
+                    <p title={user.name ?? user.email} className={cn('truncate text-xs font-semibold', styles.profileName)}>
+                      {user.name ?? user.email}
+                    </p>
+                    <p className={cn('mt-0.5 truncate text-[11px] font-medium', styles.profileRole)}>{user.role.replaceAll('_', ' ')}</p>
                   </div>
                   <button
                     type="button"
@@ -480,14 +513,20 @@ function SidebarNav(): JSX.Element {
                   'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-medium transition-colors duration-150',
                   styles.collapseButton,
                 )}
-                aria-label="Collapse sidebar to dock"
+                aria-label={overlay ? 'Close navigation' : 'Collapse sidebar to dock'}
                 aria-expanded={!docked}
-                title="Collapse (Ctrl+B)"
+                title={overlay ? undefined : 'Collapse (Ctrl+B)'}
               >
                 <span data-flip={TOGGLE_FLIP_KEY} className={styles.flipIcon}>
                   <PanelLeftClose size={16} />
                 </span>
-                <span className={styles.fadeText}>Collapse</span>
+                {/* Below lg the sidebar is an overlay menu, so "collapse" really means close. */}
+                <span className={styles.fadeText}>{overlay ? 'Close menu' : 'Collapse'}</span>
+                {!overlay && (
+                  <kbd aria-hidden="true" className={cn('ml-auto', styles.kbd, styles.fadeText)}>
+                    Ctrl B
+                  </kbd>
+                )}
               </button>
             </div>
           </aside>
@@ -497,7 +536,16 @@ function SidebarNav(): JSX.Element {
       {/* Floating dock */}
       {docked && (
         <nav ref={dockRef} aria-label="Operations navigation" className={styles.dock}>
-          <div className={styles.dockScroll} onScroll={hideTip}>
+          <div
+            ref={dockScrollRef}
+            className={styles.dockScroll}
+            data-fade-start={dockEdges.start || undefined}
+            data-fade-end={dockEdges.end || undefined}
+            onScroll={() => {
+              hideTip();
+              updateDockEdges();
+            }}
+          >
             {groups.map((group, gi) => (
               <Fragment key={group.label}>
                 {gi > 0 && <span aria-hidden="true" className={styles.dockDivider} />}

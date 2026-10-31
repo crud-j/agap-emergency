@@ -239,3 +239,103 @@ describe('the shared outbox (Secure Store)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+// Unit field flow plan, Phase 3: a fire crew's report waits in the same outbox.
+describe('fire reports in the outbox', () => {
+  const fireReport = (body: Record<string, unknown> = { fireStatus: 'ACTIVE', trappedPersons: 2 }) =>
+    newOutboxItem({ kind: 'fireReport', incidentId: INCIDENT, dispatchId: DISPATCH, body: body as never });
+
+  it('several reports can wait (each is its own report); the same tap is still queued once', () => {
+    const first = fireReport();
+    const second = fireReport({ fireStatus: 'UNDER_CONTROL' });
+    const state = queued(first, second);
+    expect(state.items.map((i) => i.clientRequestId)).toEqual([first.clientRequestId, second.clientRequestId]);
+    expect(enqueue(state, first).result).toBe('ALREADY_QUEUED');
+    expect(enqueue(state, fireReport()).result).toBe('QUEUED');
+    expect(enqueue(queued(first, second, fireReport()), fireReport()).result).toBe('FULL');
+  });
+
+  it('is sent to POST /incidents/:id/fire-report with its body and the clientRequestId fixed at the tap', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse({ id: 'rep-1' }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const item = fireReport({ fireStatus: 'ACTIVE', hazards: ['FIREWORKS_EXPLOSIVES'], notes: 'n' });
+    await sendOutboxItem(item, 'token');
+    await sendOutboxItem(item, 'token'); // a retry after a lost response
+
+    expect(fetchMock.mock.calls[0]![0]).toMatch(/\/v1\/incidents\/inc-1\/fire-report$/);
+    expect(fetchMock.mock.calls[0]![1].method).toBe('POST');
+    const bodies = fetchMock.mock.calls.map((c) => JSON.parse(c[1].body as string));
+    expect(bodies[0]).toEqual({
+      fireStatus: 'ACTIVE', hazards: ['FIREWORKS_EXPLOSIVES'], notes: 'n', clientRequestId: item.clientRequestId,
+    });
+    expect(bodies[1].clientRequestId).toBe(item.clientRequestId);
+  });
+
+  it('survives a restart in the store; a fire report item without its body is dropped as damaged', async () => {
+    const storage = memoryStorage();
+    const item = fireReport();
+    await saveOutbox(storage, 'user-a', queued(item));
+    expect((await loadOutbox(storage, 'user-a')).items).toEqual([item]);
+
+    const { body: _body, ...broken } = item as Extract<OutboxItem, { kind: 'fireReport' }>;
+    storage.data.set(outboxKey('user-a'), JSON.stringify({ items: [broken], drops: [] }));
+    expect((await loadOutbox(storage, 'user-a')).items).toEqual([]);
+  });
+
+  it('waits behind a transport step queued before it, in tap order', async () => {
+    const sent: string[] = [];
+    const result = await flushOutbox([start(), fireReport()], async (i) => void sent.push(i.kind));
+    expect(sent).toEqual(['start', 'fireReport']);
+    expect(result.removed).toHaveLength(2);
+  });
+});
+
+// Unit field flow plan, Phase 4: a rescue crew's trip waits in the same outbox.
+describe('rescue trips in the outbox', () => {
+  const rescueTrip = (body: Record<string, unknown> = { rescuedCount: 5, stillWaiting: 8 }) =>
+    newOutboxItem({ kind: 'rescueTrip', incidentId: INCIDENT, dispatchId: DISPATCH, body: body as never });
+
+  it('several trips can wait (each is its own trip); the same tap is still queued once', () => {
+    const first = rescueTrip();
+    const second = rescueTrip({ rescuedCount: 3 });
+    const state = queued(first, second);
+    expect(state.items.map((i) => i.clientRequestId)).toEqual([first.clientRequestId, second.clientRequestId]);
+    expect(enqueue(state, first).result).toBe('ALREADY_QUEUED');
+    expect(enqueue(state, rescueTrip()).result).toBe('QUEUED');
+    expect(enqueue(queued(first, second, rescueTrip()), rescueTrip()).result).toBe('FULL');
+  });
+
+  it('is sent to POST /incidents/:id/rescue-trip with its body and the clientRequestId fixed at the tap', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse({ id: 'trip-1' }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const item = rescueTrip({ rescuedCount: 6, children: 2, takenTo: 'EVACUATION_CENTER', takenToFacilityId: 'fac-ec' });
+    await sendOutboxItem(item, 'token');
+    await sendOutboxItem(item, 'token'); // a retry after a lost response
+
+    expect(fetchMock.mock.calls[0]![0]).toMatch(/\/v1\/incidents\/inc-1\/rescue-trip$/);
+    expect(fetchMock.mock.calls[0]![1].method).toBe('POST');
+    const bodies = fetchMock.mock.calls.map((c) => JSON.parse(c[1].body as string));
+    expect(bodies[0]).toEqual({
+      rescuedCount: 6, children: 2, takenTo: 'EVACUATION_CENTER', takenToFacilityId: 'fac-ec',
+      clientRequestId: item.clientRequestId,
+    });
+    expect(bodies[1].clientRequestId).toBe(item.clientRequestId);
+  });
+
+  it('survives a restart in the store; a rescue trip item without its body is dropped as damaged', async () => {
+    const storage = memoryStorage();
+    const item = rescueTrip();
+    await saveOutbox(storage, 'user-a', queued(item));
+    expect((await loadOutbox(storage, 'user-a')).items).toEqual([item]);
+
+    const { body: _body, ...broken } = item as Extract<OutboxItem, { kind: 'rescueTrip' }>;
+    storage.data.set(outboxKey('user-a'), JSON.stringify({ items: [broken], drops: [] }));
+    expect((await loadOutbox(storage, 'user-a')).items).toEqual([]);
+  });
+
+  it('waits behind a step queued before it, in tap order', async () => {
+    const sent: string[] = [];
+    await flushOutbox([start(), rescueTrip(), rescueTrip({ rescuedCount: 2 })], async (i) => void sent.push(i.kind));
+    expect(sent).toEqual(['start', 'rescueTrip', 'rescueTrip']);
+  });
+});

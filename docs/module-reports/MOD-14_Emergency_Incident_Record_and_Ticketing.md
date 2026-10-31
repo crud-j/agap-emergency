@@ -1,6 +1,6 @@
 # MOD-14 — Emergency Incident Record and Ticketing
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -53,7 +53,7 @@ Give every emergency one authoritative record from the moment it's reported, so 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Telephone / MDRRMO hotline | `IncidentsController` / `IncidentsService` (`backend/src/incidents/`) |
-| 2 | Paper logbook and incident forms | NestJS REST API (`POST/GET /api/v1/incidents`, auth optional on create) |
+| 2 | Paper logbook and incident forms | NestJS REST API (`POST/GET /v1/incidents`, auth optional on create) |
 | 3 | Barangay resident records, kept separately | PostgreSQL/Prisma (`incidents`, `incident_reporters`, `incident_patients`, `incident_events`, `incident_locations`, `incident_details`) in one transaction |
 | 4 |  | `DuplicateDetectionService` (MOD-26) and `PriorityService` (MOD-24), called inline during creation |
 | 5 |  | `RealtimeService` (Socket.io) — best-effort `incident.created` push to the ops dashboard |
@@ -83,7 +83,7 @@ Give every emergency one authoritative record from the moment it's reported, so 
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | A citizen or guest submits `POST /api/v1/incidents` from the mobile app (signed-in or guest) with category, intake answers, and location. | User Action |
+| 1 | A citizen or guest submits `POST /v1/incidents` from the mobile app (signed-in or guest) with category, intake answers, and location. | User Action |
 | 2 | The backend validates that latitude/longitude are supplied together and lie inside Bocaue; a guest report without GPS is rejected (Rule 14 still holds — only the location requirement differs by account). | Validation |
 | 3 | The backend checks `client_event_id` against existing incidents; a repeat of an already-saved key returns that same incident instead of creating a new one. | Validation |
 | 4 | The backend resolves the category from the intake answers, runs duplicate detection (MOD-26, advisory-only) and the priority recommendation (MOD-24). | Processing |
@@ -92,7 +92,7 @@ Give every emergency one authoritative record from the moment it's reported, so 
 | 7 | The backend emits `incident.created` to the Operations Center over Socket.io (best-effort; the saved record stands even if this fails). | Notification |
 | 8 | The backend fires emergency-contact SMS (MOD-16), the MDRRMO ops SMS and first SLA check (MOD-17/MOD-41), and barangay tagging (MOD-12) — all fire-and-forget; none can undo the saved incident. | Integration |
 | 9 | The reporter (if signed in) can later attach one photo or video (MOD-10), which links to the same incident record. | User Action |
-| 10 | Dispatchers list incidents through `GET /api/v1/incidents`, paginated and filterable by status; a citizen lists their own through `GET /api/v1/incidents/mine`. | Processing |
+| 10 | Dispatchers list incidents through `GET /v1/incidents`, paginated and filterable by status; a citizen lists their own through `GET /v1/incidents/mine`. | Processing |
 
 **TO-BE Outputs**
 
@@ -115,5 +115,5 @@ Give every emergency one authoritative record from the moment it's reported, so 
 4. List incidents from the Operations Center queue and confirm pagination and status filtering work.
 
 **Do not claim:**
-- Free-text search across incidents. `GET /api/v1/incidents` filters by status and paginates; there is no text-search endpoint.
+- Free-text search across incidents. `GET /v1/incidents` filters by status and paginates; there is no text-search endpoint.
 - A CAD/CRM integration. This is AGAP's own internal incident record.

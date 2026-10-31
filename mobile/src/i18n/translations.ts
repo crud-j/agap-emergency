@@ -487,6 +487,26 @@ export const en = {
       },
     },
   },
+  // Crew asks dispatch for more help (MOD-32, plan Phase 2 step 5). Dispatch decides.
+  helpRequest: {
+    linkLabel: 'Request help',
+    title: 'Request help',
+    subtitle: 'Dispatch decides what to send. This does not send a unit by itself.',
+    needs: {
+      AMBULANCE: 'Ambulance',
+      FIRE_UNIT: 'Fire unit',
+      RESCUE_UNIT: 'Rescue unit',
+      MORE_PERSONNEL: 'More personnel',
+    },
+    notePlaceholder: 'Note for dispatch (optional)',
+    noteHint: 'Only dispatchers see this note. Do not write names.',
+    send: 'Send request',
+    sent: 'Dispatch has been told',
+    alreadySent: 'Dispatch was already told a few minutes ago',
+    failed: 'Request not sent',
+    failedBody: 'Could not reach dispatch. Try again, or use the radio.',
+    cancel: 'Cancel',
+  },
 };
 
 export const fil: typeof en = {
@@ -975,6 +995,25 @@ export const fil: typeof en = {
         UNKNOWN: 'Hindi alam',
       },
     },
+  },
+  helpRequest: {
+    linkLabel: 'Humingi ng tulong',
+    title: 'Humingi ng tulong',
+    subtitle: 'Ang dispatch ang magpapasya kung ano ang ipapadala. Hindi ito kusang nagpapadala ng unit.',
+    needs: {
+      AMBULANCE: 'Ambulansya',
+      FIRE_UNIT: 'Fire unit',
+      RESCUE_UNIT: 'Rescue unit',
+      MORE_PERSONNEL: 'Dagdag na tauhan',
+    },
+    notePlaceholder: 'Tala para sa dispatch (opsyonal)',
+    noteHint: 'Mga dispatcher lang ang makakakita ng talang ito. Huwag maglagay ng pangalan.',
+    send: 'Ipadala ang kahilingan',
+    sent: 'Naabisuhan na ang dispatch',
+    alreadySent: 'Naabisuhan na ang dispatch ilang minuto pa lang ang nakalipas',
+    failed: 'Hindi naipadala ang kahilingan',
+    failedBody: 'Hindi maabot ang dispatch. Subukan muli, o gamitin ang radyo.',
+    cancel: 'Kanselahin',
   },
 };
 

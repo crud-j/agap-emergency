@@ -209,7 +209,7 @@ export default function LoginPage(): ReactElement {
       <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(0deg,rgba(3,16,19,0.46)_0%,transparent_24%,transparent_76%,rgba(3,16,19,0.12)_100%)]" />
 
       {/* ── All content sits above background ── */}
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col animate-in fade-in duration-700">
 
         {/* ── Top nav bar ── */}
         <header className="mx-auto flex w-full max-w-[1480px] shrink-0 items-center justify-between gap-4 px-5 py-3 sm:px-8 lg:px-10 xl:px-12">
@@ -236,22 +236,6 @@ export default function LoginPage(): ReactElement {
 
           {/* Right: Public Announcements + language toggle */}
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <button
-              type="button"
-              className="hidden items-center gap-2 rounded-full border border-white/20 bg-slate-950/20 px-4 py-2.5 text-xs font-medium text-white/90 shadow-sm backdrop-blur-xl transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 sm:flex sm:text-sm"
-            >
-              {/* Megaphone */}
-              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 shrink-0" aria-hidden="true">
-                <path d="M3 10v4a1 1 0 0 0 1 1h2l4 4V5L6 9H4a1 1 0 0 0-1 1Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-                <path d="M20 7c.83 1.37 1.25 2.87 1.25 5S20.83 15.63 20 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <path d="M17 9a5 5 0 0 1 0 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-              {t.login.publicAnnouncements}
-              {/* External link */}
-              <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
 
             {/* EN / FIL toggle */}
             <div className="flex items-center gap-0.5 rounded-full border border-white/20 bg-slate-950/20 p-1 shadow-sm backdrop-blur-xl">
@@ -261,8 +245,8 @@ export default function LoginPage(): ReactElement {
                 aria-pressed={language === 'en'}
                 className={
                   language === 'en'
-                    ? 'rounded-full bg-[#1B5E3B] px-3 py-1 text-xs font-semibold text-white transition-colors'
-                    : 'px-3 py-1 text-xs text-white/60 transition-colors hover:text-white/90'
+                    ? 'rounded-full bg-[#1B5E3B] px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all duration-200'
+                    : 'px-3 py-1 text-xs text-white/60 transition-all duration-200 hover:text-white/90 active:scale-[0.96]'
                 }
               >
                 EN
@@ -273,8 +257,8 @@ export default function LoginPage(): ReactElement {
                 aria-pressed={language === 'fil'}
                 className={
                   language === 'fil'
-                    ? 'rounded-full bg-[#1B5E3B] px-3 py-1 text-xs font-semibold text-white transition-colors'
-                    : 'px-3 py-1 text-xs text-white/60 transition-colors hover:text-white/90'
+                    ? 'rounded-full bg-[#1B5E3B] px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all duration-200'
+                    : 'px-3 py-1 text-xs text-white/60 transition-all duration-200 hover:text-white/90 active:scale-[0.96]'
                 }
               >
                 FIL
@@ -297,7 +281,7 @@ export default function LoginPage(): ReactElement {
               Sa Mas Ligtas
               <br />
               na{' '}
-              <span className="text-[#69E3A2]">Bocaue.</span>
+              <span className="text-[#69E3A2] drop-shadow-[0_2px_16px_rgba(105,227,162,0.3)]">Bocaue.</span>
             </h1>
 
             <p className="mx-auto mt-4 max-w-[410px] text-sm leading-6 text-white/80 sm:text-[15px] sm:leading-6 lg:mx-0">
@@ -306,8 +290,8 @@ export default function LoginPage(): ReactElement {
 
             {/* Compact service highlights */}
             <div className="mt-6 grid max-w-[440px] grid-cols-1 gap-2 text-left sm:grid-cols-3 lg:grid-cols-1 lg:gap-2">
-              <div className="flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200">
+              <div className="group flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md transition-all duration-300 hover:border-white/20 hover:bg-[#061C20]/60 hover:shadow-[0_8px_16px_-6px_rgba(0,0,0,0.3)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200 transition-transform duration-300 group-hover:scale-110">
                   <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                     <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
@@ -317,8 +301,8 @@ export default function LoginPage(): ReactElement {
                   <p className="mt-0.5 text-[11px] leading-4 text-white/70">From alert to dispatch, in minutes.</p>
                 </div>
               </div>
-              <div className="flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200">
+              <div className="group flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md transition-all duration-300 hover:border-white/20 hover:bg-[#061C20]/60 hover:shadow-[0_8px_16px_-6px_rgba(0,0,0,0.3)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200 transition-transform duration-300 group-hover:scale-110">
                   <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                     <path d="M12 3.5 20 7v5.2c0 4.2-3.2 7.2-8 8.8-4.8-1.6-8-4.6-8-8.8V7l8-3.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
                     <path d="m8.5 12 2.3 2.3 4.7-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
@@ -329,8 +313,8 @@ export default function LoginPage(): ReactElement {
                   <p className="mt-0.5 text-[11px] leading-4 text-white/70">Real-time location and incident data.</p>
                 </div>
               </div>
-              <div className="flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200">
+              <div className="group flex min-w-0 items-center gap-3 rounded-xl border border-white/12 bg-[#061C20]/35 px-3 py-2 backdrop-blur-md transition-all duration-300 hover:border-white/20 hover:bg-[#061C20]/60 hover:shadow-[0_8px_16px_-6px_rgba(0,0,0,0.3)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-400/12 text-emerald-200 transition-transform duration-300 group-hover:scale-110">
                   <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                     <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="1.5" />
@@ -346,16 +330,16 @@ export default function LoginPage(): ReactElement {
           </div>
 
           {/* ── Right: Login card ── */}
-          <div className="relative mx-auto w-full max-w-[420px] min-w-0 shrink-0 overflow-hidden rounded-[24px] border border-white/60 bg-white/[0.42] p-5 shadow-[0_22px_64px_rgba(2,12,18,0.24)] backdrop-blur-[32px] sm:p-6 lg:p-6 [@media(max-height:800px)]:p-4">
+          <div className="relative mx-auto w-full max-w-[420px] min-w-0 shrink-0 overflow-hidden rounded-[24px] border border-white/60 bg-white/40 p-5 shadow-[0_24px_48px_-12px_rgba(2,12,18,0.4),inset_0_0_0_1px_rgba(255,255,255,0.2)] backdrop-blur-2xl backdrop-saturate-[1.1] transition-all duration-500 hover:shadow-[0_32px_64px_-12px_rgba(2,12,18,0.5)] sm:p-6 lg:p-6 [@media(max-height:800px)]:p-4">
             {passkeyStage && <PasskeySignInOverlay state={passkeyStage} onCancel={cancelPasskey} />}
-            {/* Subtle glass highlights; intentionally restrained to keep the form readable. */}
+            {/* Subtle glass highlights */}
             <div aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[linear-gradient(135deg,rgba(255,255,255,0.32)_0%,rgba(255,255,255,0.08)_42%,rgba(222,239,232,0.10)_100%)]" />
             <div aria-hidden="true" className="pointer-events-none absolute inset-x-8 top-0 h-px bg-white/90" />
             <div className="relative">
 
             {/* AGAP icon */}
             <div className="mb-2 flex justify-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl transition-transform duration-500 hover:scale-105">
                 <Image
                   src={agapIcon}
                   alt="AGAP"
@@ -384,7 +368,7 @@ export default function LoginPage(): ReactElement {
               <div
                 role="alert"
                 aria-live="polite"
-                className="mb-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                className="mb-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-sm animate-in slide-in-from-top-2 fade-in duration-300"
               >
                 <svg viewBox="0 0 24 24" fill="none" className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true">
                   <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
@@ -423,7 +407,7 @@ export default function LoginPage(): ReactElement {
                   setError(null);
                   setView('picker');
                 }}
-                className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#1B5E3B] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1B5E3B]"
+                className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#1B5E3B] underline-offset-2 transition-all hover:underline active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1B5E3B]"
               >
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="m15 18-6-6 6-6" />
@@ -465,7 +449,7 @@ export default function LoginPage(): ReactElement {
                     autoComplete="username webauthn"
                     inputMode="email"
                     placeholder={t.login.emailPlaceholder}
-                    className="h-[46px] w-full rounded-xl border border-white/85 bg-white/58 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-colors placeholder:text-slate-400 hover:border-slate-300/90 hover:bg-white/78 focus:border-[#176B4B] focus:bg-white/90 focus:ring-4 focus:ring-[#176B4B]/10"
+                    className="h-[46px] w-full rounded-xl border border-white/85 bg-white/58 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-all duration-200 placeholder:text-slate-400 hover:border-slate-300 hover:bg-white/70 focus:border-[#176B4B] focus:bg-white focus:ring-4 focus:ring-[#176B4B]/15"
                   />
                 </div>
               </div>
@@ -493,13 +477,13 @@ export default function LoginPage(): ReactElement {
                     required
                     autoComplete="current-password"
                     placeholder={t.login.passwordPlaceholder}
-                    className="h-[46px] w-full rounded-xl border border-white/85 bg-white/58 pl-11 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-colors placeholder:text-slate-400 hover:border-slate-300/90 hover:bg-white/78 focus:border-[#176B4B] focus:bg-white/90 focus:ring-4 focus:ring-[#176B4B]/10"
+                    className="h-[46px] w-full rounded-xl border border-white/85 bg-white/58 pl-11 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-all duration-200 placeholder:text-slate-400 hover:border-slate-300 hover:bg-white/70 focus:border-[#176B4B] focus:bg-white focus:ring-4 focus:ring-[#176B4B]/15"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    className="absolute inset-y-0 right-3.5 flex items-center text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1B5E3B]"
+                    className="absolute inset-y-0 right-3.5 flex items-center text-slate-400 transition-colors hover:text-slate-600 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1B5E3B]"
                   >
                     {showPassword ? (
                       <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
@@ -520,7 +504,7 @@ export default function LoginPage(): ReactElement {
               <div className="flex items-center justify-end">
                 <Link
                   href="/login/forgot"
-                  className="text-sm text-[#1B5E3B] underline-offset-2 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1B5E3B] focus-visible:ring-offset-1"
+                  className="text-sm text-[#1B5E3B] underline-offset-2 transition-all hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1B5E3B]"
                 >
                   {t.login.forgotPassword}
                 </Link>
@@ -528,7 +512,7 @@ export default function LoginPage(): ReactElement {
 
                 </>
               ) : (
-                <div className="flex items-start gap-3 rounded-xl border border-emerald-900/[0.07] bg-emerald-50/60 px-3.5 py-3 text-[#1B5E3B]">
+                <div className="flex items-start gap-3 rounded-xl border border-emerald-900/[0.07] bg-emerald-50/60 px-3.5 py-3 text-[#1B5E3B] transition-colors hover:bg-emerald-50/90">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" /><path d="M14 13.12c0 2.38 0 6.38-1 8.88" /><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" /><path d="M2 12a10 10 0 0 1 18-6" /><path d="M2 16h.01" /><path d="M21.8 16c.2-2 .131-5.354 0-6" /><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" /><path d="M8.65 22c.21-.66.45-1.32.57-2" /><path d="M9 6.8a6 6 0 0 1 9 5.2v2" /></svg>
                   <p className="text-sm text-slate-600">{t.login.passkeyHint}</p>
                 </div>
@@ -536,7 +520,7 @@ export default function LoginPage(): ReactElement {
 
               {mode === 'passkey' ? (
                 <>
-                  <button type="submit" disabled={passkeyBusy || loading} className="mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#126247] text-sm font-semibold text-white shadow-[0_4px_12px_rgba(18,98,71,0.16)] transition-colors hover:bg-[#0F543D] active:bg-[#0C4935] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2">
+                  <button type="submit" disabled={passkeyBusy || loading} className="mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-[#157A58] to-[#126247] text-sm font-semibold text-white shadow-[0_4px_12px_rgba(18,98,71,0.16),inset_0_1px_0_rgba(255,255,255,0.2)] transition-all duration-200 hover:from-[#136A4C] hover:to-[#0F543D] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2">
                     {passkeyBusy ? (
                       <>
                         <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
@@ -556,7 +540,7 @@ export default function LoginPage(): ReactElement {
                       setError(null);
                       setMode('password');
                     }}
-                    className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#126247]/30 bg-white/60 text-sm font-semibold text-[#126247] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20"
+                    className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#126247]/30 bg-white/60 text-sm font-semibold text-[#126247] shadow-sm transition-all duration-200 hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2"
                   >
                     <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px] shrink-0" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
                     {t.login.usePasswordInstead}
@@ -564,7 +548,7 @@ export default function LoginPage(): ReactElement {
                 </>
               ) : (
                 <>
-                  <button type="submit" disabled={loading} className="mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#126247] text-sm font-semibold text-white shadow-[0_4px_12px_rgba(18,98,71,0.16)] transition-colors hover:bg-[#0F543D] active:bg-[#0C4935] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2">
+                  <button type="submit" disabled={loading} className="mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-[#157A58] to-[#126247] text-sm font-semibold text-white shadow-[0_4px_12px_rgba(18,98,71,0.16),inset_0_1px_0_rgba(255,255,255,0.2)] transition-all duration-200 hover:from-[#136A4C] hover:to-[#0F543D] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2">
                     {loading ? (
                       <>
                         <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
@@ -587,7 +571,7 @@ export default function LoginPage(): ReactElement {
                         setError(null);
                         setMode('passkey');
                       }}
-                      className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#126247]/30 bg-white/60 text-sm font-semibold text-[#126247] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20"
+                      className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#126247]/30 bg-white/60 text-sm font-semibold text-[#126247] shadow-sm transition-all duration-200 hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20 focus-visible:ring-offset-2"
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" /><path d="M14 13.12c0 2.38 0 6.38-1 8.88" /><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" /><path d="M2 12a10 10 0 0 1 18-6" /><path d="M2 16h.01" /><path d="M21.8 16c.2-2 .131-5.354 0-6" /><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" /><path d="M8.65 22c.21-.66.45-1.32.57-2" /><path d="M9 6.8a6 6 0 0 1 9 5.2v2" /></svg>
                       {t.login.usePasskeyInstead}
@@ -601,7 +585,7 @@ export default function LoginPage(): ReactElement {
             )}
 
             {/* Security note */}
-            <div className="mt-3 flex items-start gap-3 rounded-xl border border-emerald-900/[0.07] bg-emerald-50/60 px-3.5 py-2.5">
+            <div className="mt-3 flex items-start gap-3 rounded-xl border border-emerald-900/[0.07] bg-emerald-50/60 px-3.5 py-2.5 transition-colors hover:bg-emerald-50/90">
               <svg viewBox="0 0 24 24" fill="none" className="mt-0.5 h-4 w-4 shrink-0 text-[#1B5E3B]" aria-hidden="true">
                 <rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.5" />
                 <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

@@ -8,6 +8,8 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateMedicalProfileDto } from './dto/create-medical-profile.dto';
 import { UpdateMedicalProfileDto } from './dto/update-medical-profile.dto';
 import { MedicalCryptoService } from './medical-crypto.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction, UserRole } from '@agap/shared';
 
 const CONSENT_TYPE = 'MEDICAL_PROFILE';
 
@@ -16,6 +18,7 @@ export class MedicalProfilesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: MedicalCryptoService,
+    private readonly audit?: AuditService,
   ) {}
 
   async findMine(userId: string) {
@@ -96,7 +99,36 @@ export class MedicalProfilesService {
     ]);
   }
 
-  async findForResponder(targetUserId: string, accessorId: string) {
+  async findForResponder(targetUserId: string, accessorId: string, accessorRole: string = UserRole.RESPONDER) {
+    let incidentReference: string | null = null;
+    if (accessorRole === UserRole.RESPONDER) {
+      const crewed = await this.prisma.dispatches.findFirst({
+        where: {
+          status: { in: ['PENDING', 'SENT', 'ACCEPTED'] },
+          dispatch_crew: { some: { user_id: accessorId } },
+          incidents: {
+            OR: [
+              { incident_reporters: { user_id: targetUserId } },
+              { incident_patients: { some: { user_id: targetUserId } } },
+            ],
+          },
+        },
+        select: { incidents: { select: { id: true, public_reference: true } } },
+      });
+      if (!crewed) {
+        void this.audit?.log({
+          action: AuditAction.PERMISSION_DENIED,
+          actorId: accessorId,
+          actorRole: accessorRole,
+          entityType: 'medical_profile',
+          entityId: targetUserId,
+          moduleId: 'MOD-48',
+          newValues: { reason: 'RESPONDER_NOT_CREWED_ON_PATIENT_INCIDENT', targetUserId },
+        });
+        throw new ForbiddenException('You are not crewed on an incident involving this patient');
+      }
+      incidentReference = crewed.incidents.public_reference;
+    }
     const consent = await this.prisma.consent_records.findFirst({
       where: { user_id: targetUserId, consent_type: CONSENT_TYPE, status: 'GRANTED' },
       orderBy: { granted_at: 'desc' },
@@ -116,7 +148,7 @@ export class MedicalProfilesService {
         accessor_id: accessorId,
         data_type: 'MEDICAL_PROFILE',
         entity_id: profile.id,
-        purpose: 'Responder incident access',
+        purpose: incidentReference ? `Responder incident access ${incidentReference}` : 'Responder incident access',
       },
     });
 

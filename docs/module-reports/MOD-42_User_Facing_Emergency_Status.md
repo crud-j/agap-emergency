@@ -1,6 +1,6 @@
 # MOD-42 — User-Facing Emergency Status
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -48,7 +48,7 @@ Let the reporter see progress without having to call back, while keeping anythin
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
 | 1 | Telephone call back to the hotline | AGAP Citizen mobile app — Tracking screen (`mobile/app/tracking/[id].tsx`) and History screen (`mobile/app/history/`) |
-| 2 | Operator's memory or the paper logbook | NestJS REST API (`GET /api/v1/incidents/:id`, incident history/timeline endpoints) |
+| 2 | Operator's memory or the paper logbook | NestJS REST API (`GET /v1/incidents/:id`, incident history/timeline endpoints) |
 | 3 | | Socket.io client joined to the incident's room (`incident.status_changed`, `responder.location_updated`, `responder.eta_updated`) |
 | 4 | | PostgreSQL (incident, status history, notification and resolution records) |
 
@@ -80,8 +80,9 @@ Let the reporter see progress without having to call back, while keeping anythin
 | 3 | The Tracking screen shows a status pill, a map with the incident pin, and (once a responder is dispatched) the responder's position and an "estimate" ETA card. | Processing |
 | 4 | As dispatchers/responders change the incident's status or a responder's position/ETA updates, the screen updates live without a refresh. | Notification |
 | 5 | If the responder's last position is older than the signal-lost threshold, the screen shows "Responder signal lost" instead of a stale position. | Validation |
-| 6 | From History, the citizen can open the Overview, Timeline, Notifications, Location and Resolution tabs for a fuller record of the incident. | Processing |
-| 7 | Once the incident reaches RESOLVED or CLOSED, the Tracking screen shows "Response complete" instead of an ETA. | Processing |
+| 6 | When the crew starts transport, the Tracking screen replaces the responder ETA with a Transport card: "The patient is being taken to a hospital." The hospital name, route and position are not shown to the citizen. | Processing |
+| 7 | From History, the citizen can open the Overview, Timeline, Notifications, Location and Resolution tabs for a fuller record of the incident. | Processing |
+| 8 | Once the incident reaches RESOLVED or CLOSED, the Tracking screen shows "Response complete" instead of an ETA. | Processing |
 
 **TO-BE Outputs**
 
@@ -101,5 +102,6 @@ Let the reporter see progress without having to call back, while keeping anythin
 3. Open History and check each tab.
 
 **Do not claim:**
+- The citizen seeing which hospital the patient is taken to. It appears only for a crew-confirmed reporter-patient when `REPORTER_DESTINATION_SHARING_ENABLED=true` (off by default).
 - A dedicated `status.tsx` screen — the citizen-facing status view actually lives in `mobile/app/tracking/[id].tsx`, shared with MOD-43.
 - Status updates without the app open — the live view described here requires the Tracking/History screen to be open and connected; updates while the app is closed rely on MOD-16's push notifications, not this module.

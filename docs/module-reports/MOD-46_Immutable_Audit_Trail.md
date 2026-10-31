@@ -1,6 +1,6 @@
 # MOD-46 — Immutable Audit Trail
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -52,7 +52,7 @@ Give supervisors and system administrators a record they can trust when reviewin
 |---|---|---|
 | 1 | A supervisor's memory, verbal confirmation, or informal notes | `backend/src/audit/audit.service.ts` — `log()` (fire-and-forget) and `logInTransaction()` (transactional) write paths |
 | 2 | No searchable record at all | PostgreSQL `audit_log` table (insert-only; no update or delete path in the service) |
-| 3 | | NestJS REST API (`/api/v1/audit`), restricted to Supervisor and System Administrator (incident-scoped reads also open to Dispatcher) |
+| 3 | | NestJS REST API (`/v1/audit`), restricted to Supervisor and System Administrator (incident-scoped reads also open to Dispatcher) |
 | 4 | | Operations Center Audit page, `frontend/app/(ops)/audit` |
 
 ---

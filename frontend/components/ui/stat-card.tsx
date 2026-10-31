@@ -31,7 +31,7 @@ export function StatCard({
       className,
     )}>
       <div className="flex items-start justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-agap-textSub">{label}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">{label}</span>
         {icon && (
           <span className={cn('flex h-8 w-8 items-center justify-center rounded-lg', cfg.icon)}>
             {icon}
@@ -62,7 +62,7 @@ export function StatCard({
               {Math.abs(trend)}%
             </span>
           )}
-          {trendLabel && <span className="text-[11px] text-agap-textSub">{trendLabel}</span>}
+          {trendLabel && <span className="text-[11px] leading-snug text-slate-500">{trendLabel}</span>}
         </div>
       )}
     </div>

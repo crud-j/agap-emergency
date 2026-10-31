@@ -1,6 +1,6 @@
 # MOD-15 — Incident Lifecycle State Management
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -32,6 +32,7 @@ Keep the incident's status trustworthy for every other module (dispatch, trackin
 5. Appends an immutable `incident_events` row for every transition, recording the previous status, new status, actor and optional reason.
 6. Writes an audit-trail entry (MOD-46) for every status change, separate from the incident event.
 7. Notifies the Operations Center dashboard and the reporter's own status screen (MOD-42) of the change, best-effort.
+8. Records each unit's own en route, on scene and finish times on its dispatch, and moves the incident status forward only.
 
 ---
 
@@ -43,6 +44,7 @@ Keep the incident's status trustworthy for every other module (dispatch, trackin
 | 2 | Dispatcher's own memory of what's already been done for a case | Requested next status |
 | 3 | Radio call or hallway conversation about what happened next | Authenticated actor and role (JWT) |
 | 4 |  | Optional reason/notes for the transition |
+| 5 |  | The responder's dispatch (for status changes made from the responder app) |
 
 ---
 
@@ -53,8 +55,8 @@ Keep the incident's status trustworthy for every other module (dispatch, trackin
 | 1 | Logbook entries and a shared whiteboard | `IncidentStatusService.validateTransition` (`backend/src/incidents/incident-status/incident-status.service.ts`) |
 | 2 | Verbal handoffs between shifts | `INCIDENT_STATUS_TRANSITIONS` / `TERMINAL_INCIDENT_STATUSES` (`@agap/shared`) — one shared transition table used by the backend and, for display, the apps |
 | 3 | Operator's personal recollection of a case's history | `IncidentsController` role guards (`@Roles(...)`) per status-change endpoint |
-| 4 |  | `PATCH /api/v1/incidents/:id/status`, plus dedicated routes (`/acknowledge`, `/assess`, `/false-alert`, `/duplicate`, `/merge`, `/close`) |
-| 5 |  | PostgreSQL (`incident_events`, status timestamp columns on `incidents`) |
+| 4 |  | `PATCH /v1/incidents/:id/status`, plus dedicated routes (`/acknowledge`, `/assess`, `/false-alert`, `/duplicate`, `/merge`, `/close`) |
+| 5 |  | PostgreSQL (`incident_events`, status timestamp columns on `incidents`, per-unit progress times on `dispatches`) |
 | 6 |  | `AuditService` (MOD-46) and `RealtimeService` (Socket.io, best-effort) |
 
 ---
@@ -87,9 +89,11 @@ Keep the incident's status trustworthy for every other module (dispatch, trackin
 | 4 | The backend updates `incidents.status` and the matching timestamp column (e.g. `acknowledged_at` on ACKNOWLEDGED) in the same transaction. | Database |
 | 5 | The backend appends an `incident_events` row recording the previous status, new status, actor and optional reason — an immutable part of the incident's timeline. | Database |
 | 6 | A false-alert or duplicate transition additionally writes its own record (`false_alerts`, or `duplicate_of_id` on the incident) in the same transaction (MOD-08/MOD-26). | Database |
-| 7 | The backend writes an audit-trail entry for the status change (`AuditAction.STATUS_CHANGE`), separate from the incident event (MOD-46). | Processing |
-| 8 | The backend emits `incident.status_changed` (and, for milestone statuses, a dedicated lifecycle event) to the Operations Center and the incident's Socket.io room, best-effort. | Notification |
-| 9 | The backend notifies the reporter's status screen of the change, best-effort and never blocking the already-committed transition (MOD-42). | Notification |
+| 7 | For a responder's update, the backend locks the incident and saves the unit's own en route or on scene time on its dispatch. The incident status only moves forward, never back. Treated on scene can still move to Transporting if the patient then needs a hospital. | Validation |
+| 8 | When the crew marks the incident Resolved, the backend first refuses if a hospital transport is still open (arrival not yet recorded). Otherwise it completes the dispatch, releases the vehicle, and moves the incident to Resolved. | Database |
+| 9 | The backend writes an audit-trail entry for the status change (`AuditAction.STATUS_CHANGE`), separate from the incident event (MOD-46). | Processing |
+| 10 | The backend emits `incident.status_changed` (and, for milestone statuses, a dedicated lifecycle event) to the Operations Center and the incident's Socket.io room, best-effort. | Notification |
+| 11 | The backend notifies the reporter's status screen of the change, best-effort and never blocking the already-committed transition (MOD-42). | Notification |
 
 **TO-BE Outputs**
 
@@ -100,6 +104,7 @@ Keep the incident's status trustworthy for every other module (dispatch, trackin
 | 3 | Audit-trail entry attributing the change to its actor |
 | 4 | Real-time status update to the Operations Center and the reporter |
 | 5 | Rejected request (with the allowed next statuses) for an invalid or unauthorized transition |
+| 6 | Per-unit en route, on scene and finish times on each dispatch |
 
 ---
 
@@ -111,6 +116,9 @@ Keep the incident's status trustworthy for every other module (dispatch, trackin
 3. Close an incident, then try any further transition on it; confirm it's rejected as terminal.
 4. Run a valid sequence (acknowledge → assess → …) and confirm `incident_events` gains one row per step with the correct actor and timestamps.
 
+5. As a responder on a transport, try Mark Resolved before Arrived at hospital; it must be refused. Steps 7–8 come from the uncommitted Unit Field Flow work (Phase 1): commit it before printing.
+
 **Do not claim:**
+- Several units finishing one incident separately. The backend supports it (only the last active unit resolves the incident), but a second dispatch is refused once the incident is Dispatched (finding P3-F1), so no screen can reach it yet.
 - Automatic/timed lifecycle progression. Every transition is actor-triggered; nothing advances a status on its own.
 - Reopening a terminal incident. CLOSED, CANCELLED, FALSE_ALERT and DUPLICATE have no outgoing transitions.

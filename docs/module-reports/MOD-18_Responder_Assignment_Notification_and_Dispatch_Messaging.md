@@ -1,6 +1,6 @@
 # MOD-18 — Responder Assignment Notification and Dispatch Messaging
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -29,8 +29,9 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 2. Writes an audit entry (`MOD-31`) for the dispatch, every reassignment, cancellation, and crew add/remove.
 3. Broadcasts `incident.assigned`, `incident.status_changed`, `dispatch.created`, and `resource.status_changed` to the ops room and the incident's room.
 4. Notifies the reporter ("Help is on the way") through the in-app feed and a queued push job.
-5. Notifies the assigning dispatcher's console bell when the responder's own status changes (en route, on scene, transporting, resolved) — `IncidentStatusNotifier.notifyDispatcher`.
-6. Supports cancel, reassign (cancel + recreate against a new resource), and add/remove crew, each audited and broadcast.
+5. Sends a push notification to each crew member's phone for a new assignment, an added crew member, or a cancelled assignment. The push shows only the category and reference number, and tapping it opens the assignment.
+6. Notifies the assigning dispatcher's console bell when the responder's own status changes (en route, on scene, transporting, resolved) — `IncidentStatusNotifier.notifyDispatcher`.
+7. Supports cancel, reassign (cancel + recreate against a new resource), and add/remove crew, each audited and broadcast.
 
 ---
 
@@ -41,6 +42,7 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 | 1 | Dispatcher's verbal instruction over the radio to a specific unit | Incident ID, resource (unit) ID, optional crew IDs and dispatch notes |
 | 2 | Crew's verbal acknowledgement over the radio | Dispatcher's authenticated identity (JWT), confirming the assignment |
 | 3 | Responder's radioed status updates (en route, on scene, etc.) | Responder's own status-change actions from the mobile app (separate from this module, consumed by it) |
+| 4 | | Crew members' registered push tokens (saved when they sign in to the responder app) |
 
 ---
 
@@ -48,12 +50,13 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Two-way radio to the unit | `DispatchService.create` (`backend/src/dispatch/dispatch.service.ts`, 399 lines) — transactional dispatch creation with row-level locking on responder availability |
-| 2 | Verbal confirmation back to the dispatcher | `POST /api/v1/dispatch`, `PATCH /dispatch/:id/cancel`, `PATCH /dispatch/:id/reassign`, `POST/DELETE /dispatch/:id/crew` (`backend/src/dispatch/dispatch.controller.ts`) |
+| 1 | Two-way radio to the unit | `DispatchService.create` (`backend/src/dispatch/dispatch.service.ts`) — transactional dispatch creation with row-level locking on responder availability |
+| 2 | Verbal confirmation back to the dispatcher | `POST /v1/dispatch`, `PATCH /dispatch/:id/cancel`, `PATCH /dispatch/:id/reassign`, `POST/DELETE /dispatch/:id/crew` (`backend/src/dispatch/dispatch.controller.ts`) |
 | 3 | Dispatcher's memory/logbook of who is assigned where | `RealtimeService`/`AgapGateway` — `incidentAssigned`, `notifyIncidentStatusChanged`, `notifyDispatchCreated`, `resourceStatusChanged` emits |
 | 4 |  | `IncidentStatusNotifier` (`backend/src/notifications/incident-status-notifier.ts`) — reporter push + in-app feed row; dispatcher in-app bell on responder progress |
 | 5 |  | `AuditService` — one audit row per dispatch, cancel, reassign, crew change (`moduleId: 'MOD-31'`) |
-| 6 |  | Mobile: `mobile/app/responder/assignments.tsx` + `useResponderAssignments` hook — REST poll, `refetchInterval: 15_000` |
+| 6 |  | Redis + BullMQ notification queue and Firebase Cloud Messaging — assignment push on a high-priority "Responder assignments" Android channel (3 attempts) |
+| 7 |  | Mobile: `mobile/app/responder/assignments.tsx` + `useResponderAssignments` hook — REST poll every 15 seconds as the fallback |
 
 ---
 
@@ -85,9 +88,11 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 | 4 | An audit row (`MOD-31`, action `DISPATCH`) is written with the resource and crew IDs. | Database |
 | 5 | The backend emits `incident.assigned`, `incident.status_changed`, `dispatch.created`, and `resource.status_changed` to the ops room and the incident's room — best-effort, never blocking the dispatch itself if the emit fails. | Notification |
 | 6 | The reporter gets an in-app feed row and a queued push ("Help is on the way") via `IncidentStatusNotifier.notifyReporter`. | Notification |
-| 7 | As the assigned responder changes their own status (en route, on scene, transporting, resolved) elsewhere in the app, `IncidentStatusNotifier.notifyDispatcher` writes an in-app bell notification for the dispatcher who made the assignment. | Notification |
-| 8 | The dispatcher can cancel (frees the resource, broadcasts `dispatch.cancelled`), reassign (cancel + re-create against a new resource), or add/remove crew — each audited and broadcast the same way. | Processing |
-| 9 | On the responder's phone, the assignment surfaces in the Missions list, which polls `GET` assignments every 15 seconds and on pull-to-refresh. | Processing |
+| 7 | The backend queues one push per crew member: "New assignment — <category> · <reference>. Open AGAP to accept." It carries no address, patient or reporter details because it shows on the lock screen. A failed push never affects the dispatch. | Notification |
+| 8 | The responder taps the push and the app opens that assignment directly. | User Action |
+| 9 | As the assigned responder changes their own status (en route, on scene, transporting, resolved) elsewhere in the app, `IncidentStatusNotifier.notifyDispatcher` writes an in-app bell notification for the dispatcher who made the assignment. | Notification |
+| 10 | The dispatcher can cancel (frees the resource, broadcasts `dispatch.cancelled`, and pushes "Assignment cancelled" to the crew), reassign (cancel + re-create against a new resource), or add/remove crew (an added member gets the assignment push) — each audited and broadcast the same way. | Processing |
+| 11 | If a push doesn't arrive, the assignment still surfaces in the Missions list, which polls assignments every 15 seconds and on pull-to-refresh. | Processing |
 
 **TO-BE Outputs**
 
@@ -97,7 +102,8 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 | 2 | Live ops/incident-room broadcast of the assignment and resource status change |
 | 3 | Reporter push/in-app notice that responders are en route |
 | 4 | Dispatcher in-app notice as the responder's status progresses |
-| 5 | Responder's assignment visible in the mobile Missions list within 15 seconds |
+| 5 | Assignment (or cancellation) push notification on each crew member's phone |
+| 6 | Responder's assignment visible in the mobile Missions list within 15 seconds, even without the push |
 
 ---
 
@@ -105,10 +111,11 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 
 **Test before signing:**
 1. As a dispatcher, confirm a dispatch and check two open dispatcher browser windows both see the new assignment with no manual refresh (ops room broadcast).
-2. On the assigned responder's phone, time how long the new assignment takes to appear in Missions without pulling to refresh — it should be at most ~15 seconds.
+2. With the responder app in the background, confirm the "New assignment" push arrives within a few seconds and tapping it opens the assignment (not yet tried on a device). Then turn notifications off and confirm the assignment still appears in Missions within ~15 seconds.
 3. Advance the responder to En Route/On Scene and confirm the assigning dispatcher's notification bell picks it up.
 4. Try dispatching an already-`DISPATCHED` resource and confirm it's rejected (`Resource is not available`).
 
 **Do not claim:**
-- A push notification to the responder's phone for a brand-new assignment. `incidentAssigned` is broadcast only to the ops room and the incident's own Socket.io room — not to the responder's personal `user:{id}` room — and the mobile Missions screen has no socket listener for it at all; `useResponderAssignments` is a plain 15-second REST poll (`refetchInterval: 15_000` in `mobile/src/hooks/useResponderAssignments.ts`). A responder only learns of a new assignment when the app happens to poll next, or by manually pulling to refresh.
+- A live Socket.io update on the Missions screen. The phone learns of an assignment from the push or the 15-second poll, not from a socket event.
+- Dispatching a second unit to an incident that is already Dispatched. The backend accepts a dispatch only while the incident is Acknowledged, Assessed or Dispatch Pending (finding P3-F1 in the unit field-flow plan). Add crew to the existing dispatch instead.
 - Messaging to a unit or crew outside AGAP (no external-agency radio/CAD bridge) — assignment always targets an AGAP-registered resource and user.

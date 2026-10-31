@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   MapPin, User, Users, FileText, Image as ImageIcon, Activity, Sparkles,
   AlertTriangle, HeartPulse, CheckCircle2, ChevronDown, ChevronRight, Copy, Check,
-  Shield, ShieldCheck, ShieldAlert, Video, Play, Landmark, Ban,
+  Shield, ShieldCheck, ShieldAlert, Video, Play, Landmark, Ban, Flame, LifeBuoy,
 } from 'lucide-react';
 import { IncidentChatPanel } from './IncidentChatPanel';
 import { BarangayPanel, BARANGAY_REPORT, barangayHasNotReported } from './BarangayPanel';
@@ -18,7 +18,7 @@ import {
 } from '@/components/ui';
 import {
   useIncident, useUpdateIncidentStatus, useCreateResolution, useCloseIncident, useReporterStanding,
-  useIncidentTransports, useUpdateIncidentTransport, useRejectAttachment,
+  useIncidentTransports, useUpdateIncidentTransport, useRejectAttachment, useRescueSummary,
 } from '@/features/incidents/hooks';
 import { usePriorityRecommendation, useSetIncidentPriority } from '@/features/dispatch/hooks';
 import { useIncidentBarangay } from '@/hooks/useBarangay';
@@ -39,6 +39,8 @@ import type { Hospital } from '@/features/hospitals/api';
 import { isAtCapacity, receivingStatusBadge } from '@/features/hospitals/location';
 import { useIncidentAudit } from '@/features/audit/hooks';
 import { destinationHistory } from '@/features/incidents/transport-history';
+import { FIRE_TONE_BADGE, fireCardView, type FireReportLine } from '@/lib/fire-report-view';
+import { rescueCardView, type RescueTripLine } from '@/lib/rescue-trip-view';
 
 /** In-field statuses advanced by the responder app, not the dashboard. */
 const IN_FIELD = ['DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING'];
@@ -339,6 +341,10 @@ function Overview({ incident, onOpenBarangay }: { incident: IncidentDetail; onOp
       <TransportPanel incidentId={incident.id} transports={transports.data ?? []} />
 
       <ReferralPanel incident={incident} referrals={referrals.data ?? []} isLoading={referrals.isLoading} />
+
+      <FireCard reports={incident.fire_field_reports} />
+
+      <RescueCard incidentId={incident.id} />
 
       {latestAssessment && <Assessment assessment={latestAssessment} />}
 
@@ -1020,6 +1026,145 @@ function Assessment({
         {a.assessment_notes && <p className="mt-1.5 text-sm text-agap-textMain">{a.assessment_notes}</p>}
       </div>
     </Section>
+  );
+}
+
+/**
+ * MOD-36 (plan Phase 3): the fire crew's reports. The newest is the current picture;
+ * earlier ones are kept (append-only) and listed below it. Notes are shown here only,
+ * to staff: they are never in a live event or a notice.
+ */
+function FireCard({ reports }: { reports: IncidentDetail['fire_field_reports'] }): JSX.Element | null {
+  const [showHistory, setShowHistory] = useState(false);
+  const view = fireCardView(reports);
+  if (!view) return null;
+  const { latest, history } = view;
+
+  return (
+    <Section icon={Flame} title={`Fire · ${timeAgo(latest.reportedAt)}`}>
+      <div className="rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface/50 p-3" data-testid="fire-card">
+        <FireReportSummary line={latest} />
+        {history.length > 0 && (
+          <div className="mt-2 border-t border-[rgba(168,181,193,0.20)] pt-2">
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              className="flex items-center gap-1 text-xs font-semibold text-agap-textSub hover:text-agap-textMain"
+            >
+              {showHistory ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {history.length} earlier report{history.length === 1 ? '' : 's'}
+            </button>
+            {showHistory && (
+              <ol className="mt-2 space-y-2">
+                {history.map((line) => (
+                  <li key={line.id} className="rounded-lg bg-white/60 p-2">
+                    <FireReportSummary line={line} compact />
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function FireReportSummary({ line, compact }: { line: FireReportLine; compact?: boolean }): JSX.Element {
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={FIRE_TONE_BADGE[line.tone]}>{line.status}</Badge>
+        {line.alarm && <span className="text-xs font-semibold text-agap-textMain">{line.alarm}</span>}
+        {line.unit && <span className="text-xs text-agap-textSub">· {line.unit}</span>}
+        {compact && <span className="text-[11px] text-agap-textSub">· {timeAgo(line.reportedAt)}</span>}
+      </div>
+      {line.hazards.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {line.hazards.map((h) => <Badge key={h} variant="red">{h}</Badge>)}
+        </div>
+      )}
+      {line.counts.length > 0 && <p className="mt-1.5 text-xs tabular-nums text-agap-textMid">{line.counts.join(' · ')}</p>}
+      {line.flags.length > 0 && <p className="mt-1 text-xs text-agap-textMid">{line.flags.join(' · ')}</p>}
+      {line.notes && <p className="mt-1.5 text-sm text-agap-textMain">{line.notes}</p>}
+    </div>
+  );
+}
+
+/**
+ * MOD-32/52 (plan Phase 4): a rescue unit's trips. Totals come from the server; every
+ * trip is kept (append-only). Notes are shown here only, to staff: never in a live
+ * event or a notice.
+ */
+function RescueCard({ incidentId }: { incidentId: string }): JSX.Element | null {
+  const [showTrips, setShowTrips] = useState(false);
+  const { data } = useRescueSummary(incidentId);
+  const view = rescueCardView(data);
+  if (!view) return null;
+
+  return (
+    <Section icon={LifeBuoy} title={`Rescue · ${view.rescued} rescued`}>
+      <div className="rounded-xl border border-[rgba(168,181,193,0.20)] bg-agap-surface/50 p-3" data-testid="rescue-card">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="green">{view.rescued} rescued</Badge>
+          <span className="text-xs text-agap-textSub">{view.tripCount} trip{view.tripCount === 1 ? '' : 's'}</span>
+          {view.stillWaiting != null && (
+            <Badge variant={view.stillWaiting > 0 ? 'amber' : 'default'}>
+              {view.stillWaiting > 0 ? `~${view.stillWaiting} still waiting` : 'None waiting'}
+            </Badge>
+          )}
+        </div>
+        {view.parts.length > 0 && <p className="mt-1.5 text-xs tabular-nums text-agap-textMid">{view.parts.join(' · ')}</p>}
+        {view.destinations.length > 0 && (
+          <ul className="mt-2 space-y-0.5 text-xs text-agap-textMid">
+            {view.destinations.map((d) => (
+              <li key={d.key} className="tabular-nums">
+                {d.name}: {d.rescued} in {d.trips} trip{d.trips === 1 ? '' : 's'}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-2 border-t border-[rgba(168,181,193,0.20)] pt-2">
+          <button
+            type="button"
+            onClick={() => setShowTrips((v) => !v)}
+            className="flex items-center gap-1 text-xs font-semibold text-agap-textSub hover:text-agap-textMain"
+          >
+            {showTrips ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {view.tripCount} trip{view.tripCount === 1 ? '' : 's'}
+          </button>
+          {showTrips && (
+            <ol className="mt-2 space-y-2">
+              {view.trips.map((trip) => (
+                <li key={trip.id} className="rounded-lg bg-white/60 p-2">
+                  <RescueTripSummary trip={trip} />
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function RescueTripSummary({ trip }: { trip: RescueTripLine }): JSX.Element {
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-semibold text-agap-textMain">{trip.rescued != null ? `${trip.rescued} rescued` : 'Count not given'}</span>
+        {trip.destination && <span className="text-agap-textMid">→ {trip.destination}</span>}
+        {trip.unit && <span className="text-agap-textSub">· {trip.unit}</span>}
+        <span className="text-[11px] text-agap-textSub">· {timeAgo(trip.reportedAt)}</span>
+      </div>
+      {trip.parts.length > 0 && <p className="mt-1 text-xs tabular-nums text-agap-textMid">{trip.parts.join(' · ')}</p>}
+      {(trip.conditions.length > 0 || trip.stillWaiting != null) && (
+        <p className="mt-1 text-xs text-agap-textMid">
+          {[...trip.conditions, trip.stillWaiting != null ? `~${trip.stillWaiting} waiting` : null].filter(Boolean).join(' · ')}
+        </p>
+      )}
+      {trip.notes && <p className="mt-1 text-sm text-agap-textMain">{trip.notes}</p>}
+    </div>
   );
 }
 

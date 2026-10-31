@@ -32,6 +32,8 @@ function useOutboxFlush() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ['responder-assignment'] }),
       qc.invalidateQueries({ queryKey: ['incident-transports'] }),
+      qc.invalidateQueries({ queryKey: ['fire-reports'] }),
+      qc.invalidateQueries({ queryKey: ['rescue-summary'] }),
       qc.invalidateQueries({ queryKey: ['responder-assignments'] }),
       qc.invalidateQueries({ queryKey: ['responder-me'] }),
     ]);

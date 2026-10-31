@@ -1,6 +1,6 @@
 # MOD-04 — Accessibility and Multi-Language Support
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -54,7 +54,7 @@ Make the app usable for elderly residents, people with low vision and people who
 | 2 | Printed advisories and forms | English and Filipino translation file in the app |
 | 3 | Staff who can translate or repeat instructions | App-wide text component that applies text size and contrast |
 | 4 | | Zustand preference store and Expo Secure Store (on the phone) |
-| 5 | | NestJS REST API (`PATCH /api/v1/users/me`) with input validation |
+| 5 | | NestJS REST API (`PATCH /v1/users/me`) with input validation |
 | 6 | | PostgreSQL (`users` table: language, text size, contrast, motion) |
 
 ---

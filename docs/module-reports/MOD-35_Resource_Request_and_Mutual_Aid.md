@@ -1,6 +1,6 @@
 # MOD-35 — Resource Request and Mutual Aid
 
-Content for the [Individual Module Report template](../AGAP_Individual_Module_Report_Template.pdf). Each section below matches a section of the template, and the row counts fit its tables.
+Content for the [Individual Module Report template](../M_5.pdf). Each section below matches a section of the template, and the row counts fit its tables.
 
 ---
 
@@ -49,7 +49,7 @@ Turn mutual-aid requests — "we need another ambulance from the next barangay" 
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Telephone or radio call to the partner agency | NestJS REST API — `GET/POST /api/v1/resources/requests`, `PATCH /api/v1/resources/requests/:id/approve`\|`/deny` (`backend/src/resources`) |
+| 1 | Telephone or radio call to the partner agency | NestJS REST API — `GET/POST /v1/resources/requests`, `PATCH /v1/resources/requests/:id/approve`\|`/deny` (`backend/src/resources`) |
 | 2 | Verbal agreement, not recorded anywhere | PostgreSQL (resource-request table, linked to `organization` and `incident`) |
 | 3 | — | class-validator DTOs (`ResourceRequestDto`, `RequestDecisionDto`) |
 | 4 | — | Role-based access control (Dispatcher/Supervisor create; Org Administrator/System Administrator decide) |
