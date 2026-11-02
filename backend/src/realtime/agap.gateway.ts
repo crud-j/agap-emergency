@@ -92,15 +92,20 @@ export class AgapGateway
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
+  /**
+   * Joins the incident room. The return value is the acknowledgement for clients
+   * that pass one (`{ ok }`, never an `event` key, which Nest would emit instead);
+   * the `error` event stays for clients that don't.
+   */
   @SubscribeMessage('join:incident')
   async handleJoinIncident(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { incidentId: string },
-  ) {
+  ): Promise<{ ok: true } | { ok: false; reason: 'UNAUTHORIZED' | 'NOT_PARTICIPANT' }> {
     const user = client.data.user;
     if (!user) {
       client.emit('error', 'Unauthorized');
-      return;
+      return { ok: false, reason: 'UNAUTHORIZED' };
     }
 
     // Staff, the reporter, or an assigned crew member only. This keeps the
@@ -112,11 +117,12 @@ export class AgapGateway
     );
     if (!participation) {
       client.emit('error', 'Forbidden: not a participant of this incident');
-      return;
+      return { ok: false, reason: 'NOT_PARTICIPANT' };
     }
 
     client.join(`incident:${data.incidentId}`);
     this.logger.log(`Client ${client.id} joined incident:${data.incidentId}`);
+    return { ok: true };
   }
 
   @SubscribeMessage('join:ops')

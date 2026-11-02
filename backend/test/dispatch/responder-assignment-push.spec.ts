@@ -34,7 +34,11 @@ function build(opts: { crew?: string[]; queueFails?: boolean } = {}) {
   };
   const tx = {
     dispatches: { create: jest.fn().mockResolvedValue(dispatchRow), update: jest.fn().mockResolvedValue({ ...dispatchRow, status: 'CANCELLED' }) },
-    $queryRaw: jest.fn(async () => crew.map((user_id) => ({ user_id, status: 'AVAILABLE' }))),
+    // The incident row lock taken by create() (Phase 5), then the crew availability rows.
+    $queryRaw: jest.fn(async (sql: TemplateStringsArray | { sql?: string }) =>
+      (Array.isArray(sql) ? sql.join('') : String((sql as { sql?: string }).sql ?? '')).includes('FROM incidents')
+        ? [{ status: INCIDENT.status }]
+        : crew.map((user_id) => ({ user_id, status: 'AVAILABLE' }))),
     dispatch_crew: {
       createMany: jest.fn().mockResolvedValue({ count: crew.length }),
       create: jest.fn().mockResolvedValue({ dispatch_id: 'disp-1', user_id: 'resp-c' }),

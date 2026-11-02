@@ -16,6 +16,7 @@ import { ResourcesService } from './resources.service';
 import { CreateResourceDto } from './dto/create-resource.dto';
 import { UpdateResourceStatusDto } from './dto/update-resource-status.dto';
 import { AddCapabilityDto } from './dto/add-capability.dto';
+import { VerifyCapabilityDto } from './dto/verify-capability.dto';
 import { ResourceRequestDto } from './dto/resource-request.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -51,6 +52,13 @@ export class ResourcesController {
   @ApiOperation({ summary: 'List available resources' })
   async findAvailable() {
     return this.resourcesService.findAvailable();
+  }
+
+  @Get('capabilities')
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.ORG_ADMINISTRATOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'List the capability catalog (MOD-29)' })
+  async listCapabilities() {
+    return this.resourcesService.listCapabilities();
   }
 
   @Get('recommend/:incidentId')
@@ -91,7 +99,7 @@ export class ResourcesController {
     @Body() body: RequestDecisionDto,
     @Request() req: any,
   ) {
-    const providingOrgId = await this.resourcesService.resolveOrgForUser(req.user.id);
+    const providingOrgId = await this.resourcesService.resolveAnsweringOrg(req.user.id);
     return this.resourcesService.respondToRequest(id, true, body.notes, req.user.id, providingOrgId);
   }
 
@@ -103,6 +111,8 @@ export class ResourcesController {
     @Body() body: RequestDecisionDto,
     @Request() req: any,
   ) {
+    // Same 403 as approve for an actor with no organization; a denial sets no provider.
+    await this.resourcesService.resolveAnsweringOrg(req.user.id);
     return this.resourcesService.respondToRequest(id, false, body.notes, req.user.id);
   }
 
@@ -123,8 +133,10 @@ export class ResourcesController {
     @Body() body: RespondRequestDto,
     @Request() req: any,
   ) {
-    // Accepting makes the actor's organization the provider, as on /requests/:id/approve.
-    const providingOrgId = body.accept ? await this.resourcesService.resolveOrgForUser(req.user.id) : undefined;
+    // Accepting makes the actor's organization the provider, as on /requests/:id/approve;
+    // either answer needs an organization, as on /approve and /deny.
+    const answeringOrgId = await this.resourcesService.resolveAnsweringOrg(req.user.id);
+    const providingOrgId = body.accept ? answeringOrgId : undefined;
     return this.resourcesService.respondToRequest(id, body.accept, body.notes, req.user.id, providingOrgId);
   }
 
@@ -186,5 +198,18 @@ export class ResourcesController {
   ) {
     await this.resourcesService.removeCapability(id, capId, req.user);
     return { message: 'Capability removed' };
+  }
+
+  @Patch(':id/capabilities/:capId/verify')
+  // The organization that claims a capability is not the one that confirms it.
+  @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
+  @ApiOperation({ summary: 'Verify or unverify a capability assigned to a resource (MOD-29)' })
+  async verifyCapability(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('capId', ParseUUIDPipe) capId: string,
+    @Body() dto: VerifyCapabilityDto,
+    @Request() req: any,
+  ) {
+    return this.resourcesService.verifyCapability(id, capId, dto.verified, req.user);
   }
 }

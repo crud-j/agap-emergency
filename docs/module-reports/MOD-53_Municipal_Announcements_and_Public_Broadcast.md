@@ -102,7 +102,7 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 | 6 | On publish, the backend sets the status to Published, records who approved it and when, and writes an audit entry. A job that runs every minute releases scheduled notices when their time comes. | Database |
 | 7 | The backend broadcasts `announcement.published` over Socket.io so that open screens update immediately. | Integration |
 | 8 | The backend queues a push notification to registered phones (Firebase Cloud Messaging) with the title and summary. | Notification |
-| 9 | The backend queues an SMS through Textbee to every active subscriber: "AGAP: title. summary Reply STOP to opt out.", cut to 160 characters. The number sent is saved. Failed push or SMS never undoes the publish. | Notification |
+| 9 | The backend queues an SMS through Textbee to every active subscriber: "AGAP: title. summary Reply STOP to opt out.", cut to 160 characters. Each text gets a delivery record that is updated from Textbee's report (delivered, or failed with a reason), and the console shows the counts. Failed push or SMS never undoes the publish. | Notification |
 | 10 | Residents see the notice in the app's Announcements list (filterable by category) and open the full notice. Anyone can subscribe to SMS alerts with a phone number and an optional barangay. | User Action |
 | 11 | To stop the SMS, a resident taps Unsubscribe in the app and confirms, or replies STOP to an advisory. The backend reads replies to the gateway phone, matches the number in any of its three formats, marks the subscription inactive, writes an audit entry, and sends one confirmation SMS. A STOP from a barangay hotline is not treated as an unsubscribe. | Processing |
 | 12 | If a notice is wrong, the publisher cancels it with a correction note (5–1000 characters). The notice stays visible by link, marked cancelled with the reason. | Processing |
@@ -114,7 +114,7 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 |---|---|
 | 1 | Published official notice saved in PostgreSQL, with status history and audit entries |
 | 2 | Push notification on residents' phones |
-| 3 | SMS advisory (160 characters max) sent to subscribers, with the count recorded |
+| 3 | SMS advisory (160 characters max) sent to subscribers, with each text's delivery result (delivered or failed) recorded |
 | 4 | Notice shown in the app's Announcements list and in the public archive |
 | 5 | Cancellation with a correction note, or an archived record, in the console's History |
 | 6 | Deactivated SMS subscription with an audit entry, and a confirmation SMS for a STOP reply |
@@ -130,7 +130,7 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 4. Publish it and confirm it shows up in the app, with a push if the phone has a token.
 5. Schedule another notice 2 minutes ahead and confirm it releases by itself.
 6. Cancel one with a note, then archive it.
-7. Subscribe a number in the app. With Textbee loaded, confirm the SMS arrives.
+7. Subscribe a number in the app. With Textbee loaded, publish a notice and confirm the SMS arrives and the drawer's **SMS** row turns to "1 delivered" within a few minutes. With the gateway SIM out of load, the row shows "failed" instead (added 2026-11-02).
 8. Tap Unsubscribe in the app; the next advisory must skip that number.
 9. With "Receive SMS" on in the Textbee app, reply STOP from a subscribed phone; confirm one confirmation SMS and that the subscription is inactive. (Not yet tried with a real phone.)
 

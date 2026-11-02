@@ -7,7 +7,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
   type BadgeVariant, type Column,
 } from '@/components/ui';
-import { useAuthUser } from '@/lib/use-auth';
+import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { titleCase } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 import { useApproveMutualAid, useDenyMutualAid, useMutualAidRequests } from '@/features/incidents/command-hooks';
@@ -53,11 +53,13 @@ interface Pending {
 /**
  * Mutual-aid requests for the Org Administrator (MOD-35, role dashboards plan Phase 6).
  * Requests go to every organization; accepting makes this organization the provider.
- * The server refuses accepting your own request and answering one twice.
+ * The server refuses accepting your own request and answering one twice. The System
+ * Administrator can view requests; only an organization answers them (403 otherwise).
  */
 export function RequestsInbox(): JSX.Element {
   const user = useAuthUser();
   const ownOrgId = user?.orgId;
+  const viewOnly = hasRole(user, 'SYSTEM_ADMINISTRATOR') && !ownOrgId;
   const [view, setView] = useState<View>('open');
   const [pending, setPending] = useState<Pending | null>(null);
   const [notes, setNotes] = useState('');
@@ -141,8 +143,20 @@ export function RequestsInbox(): JSX.Element {
       header: '',
       cellClassName: 'text-right',
       headerClassName: 'text-right',
-      accessor: (row) =>
-        row.status === 'PENDING' && ownOrgId && row.requesting_org_id !== ownOrgId ? (
+      accessor: (row) => {
+        if (row.status !== 'PENDING') return null;
+        // Say why a Pending request can't be answered here instead of showing nothing.
+        if (ownOrgId && row.requesting_org_id === ownOrgId) {
+          return <span className="text-xs text-agap-textSub">Your organization made this request</span>;
+        }
+        if (!ownOrgId) {
+          return (
+            <span className="text-xs text-agap-textSub">
+              Only an Org Administrator of another organization can provide units.
+            </span>
+          );
+        }
+        return (
           <div className="flex items-center justify-end gap-1">
             <button
               type="button"
@@ -159,13 +173,19 @@ export function RequestsInbox(): JSX.Element {
               <XCircle size={11} /> Deny
             </button>
           </div>
-        ) : null,
+        );
+      },
     },
   ];
 
   return (
     <div className="space-y-4">
-      {!ownOrgId && (
+      {viewOnly && (
+        <p className="rounded-xl bg-agap-infoSoft px-4 py-3 text-sm text-agap-textMid">
+          You can view requests. An organization&apos;s administrator answers them.
+        </p>
+      )}
+      {!ownOrgId && !viewOnly && (
         <p className="rounded-xl bg-agap-amberSoft px-4 py-3 text-sm text-agap-amber">
           Your account is not linked to an organization, so you can view requests but not answer them.
           Ask the System Administrator to add you to your organization.

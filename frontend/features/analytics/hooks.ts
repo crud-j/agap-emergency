@@ -67,11 +67,15 @@ export function useMunicipalOverview() {
 }
 
 /** Dispatcher dashboard counts; SocketProvider invalidates on incident and dispatch events. */
-export function useDispatchSummary() {
+/**
+ * Socket events refresh the counts as they happen; the interval only rolls the 24 h
+ * windows forward. Callers pass a shorter one while the socket is down.
+ */
+export function useDispatchSummary(opts?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: ['dispatch-summary'],
     queryFn: fetchDispatchSummary,
     staleTime: 15_000,
-    refetchInterval: 60_000,
+    refetchInterval: opts?.refetchInterval ?? 60_000,
   });
 }

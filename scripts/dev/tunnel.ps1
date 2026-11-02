@@ -1,8 +1,10 @@
 <#
   Opens a Cloudflare quick tunnel to the web app and writes its address into
   backend/.env as PUBLIC_APP_URL, so the link in the barangay alert SMS opens on a phone.
+  The same link lets a teammate sign in to the whole console: in dev the web app serves
+  the API and Socket.io on its own origin (see next.config.mjs), so one tunnel is enough.
 
-  Usage (from the repo root):   pnpm tunnel
+  Usage (from the repo root):   pnpm tunnel   (or pnpm share)
                           or:   powershell -ExecutionPolicy Bypass -File scripts/dev/tunnel.ps1 [-Port 3001]
 
   What it does

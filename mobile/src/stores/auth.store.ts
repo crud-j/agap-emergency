@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import type { SafeUser, AuthTokens } from '../services/api/auth.api';
 import { useIncidentStore } from './incident.store';
+import { disconnectSocket } from '../services/websocket/agap-socket';
 
 // NOTE: expo-secure-store rejects keys that are not /^[\w.-]+$/ (alphanumeric,
 // "_", ".", "-"). Colons are INVALID and make setItemAsync throw, which would
@@ -56,8 +57,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (tokens, user) => {
     // A guest session or another account signing in must not inherit the previous
     // session's incident (e.g. a guest report's id on a shared phone). A token
-    // refresh calls login for the same user and keeps it.
-    if (get().user?.id !== user.id) useIncidentStore.getState().reset();
+    // refresh calls login for the same user and keeps it, and keeps the socket too.
+    // Another account must not reuse the previous user's socket and incident rooms.
+    if (get().user?.id !== user.id) {
+      useIncidentStore.getState().reset();
+      disconnectSocket();
+    }
     await Promise.all([
       SecureStore.setItemAsync(KEYS.accessToken, tokens.accessToken),
       SecureStore.setItemAsync(KEYS.refreshToken, tokens.refreshToken),
@@ -75,6 +80,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Close the realtime socket first, so it never outlives the session (even when
+    // revoking it doesn't reach the server) and the next account starts clean.
+    disconnectSocket();
     await Promise.all([
       SecureStore.deleteItemAsync(KEYS.accessToken),
       SecureStore.deleteItemAsync(KEYS.refreshToken),

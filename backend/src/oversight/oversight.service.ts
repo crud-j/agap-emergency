@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, incident_status, user_role } from '@prisma/client';
+import { Prisma, incident_status, user_role, user_status } from '@prisma/client';
 import { ACTIVE_INCIDENT_STATUSES, ACTIVE_RESPONSE_INCIDENT_STATUSES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { BLOCKED_ACCOUNT_STATUSES } from '../auth/account-status';
 import { AnalyticsService, IncidentPerformance, UnitCounts, manilaMidnight } from '../analytics/analytics.service';
 
 const MINUTE_MS = 60_000;
@@ -206,7 +207,11 @@ export class OversightService {
     const staff = await this.prisma.user.findMany({
       where: {
         role: { in: STAFF_ROLES },
-        OR: [{ status: 'ACTIVE' }, { id: { in: [...openBy.keys()] } }],
+        // Staff who can sign in (account-status.ts), plus anyone still holding open incidents.
+        OR: [
+          { status: { notIn: [...BLOCKED_ACCOUNT_STATUSES] as user_status[] } },
+          { id: { in: [...openBy.keys()] } },
+        ],
       },
       select: { id: true, full_name: true, role: true },
     });

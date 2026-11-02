@@ -11,6 +11,7 @@ import { useIncidentTracking } from '@/src/hooks/useIncidentTracking';
 import { useRouteLine } from '@/src/hooks/useRouteLine';
 import { useTranslations } from '@/src/hooks/useAccessibility';
 import { formatDuration } from '@/src/lib/transport-target';
+import { otherSceneUnits } from '@/src/lib/incident-tracking';
 import { MDRRMO_HOTLINE, MDRRMO_HOTLINE_DISPLAY } from '@/src/config/hotlines';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
@@ -107,6 +108,11 @@ export default function TrackingScreen() {
         updatedAt: unitPosition.updatedAt,
       }
     : null;
+  // A second unit on the incident (MOD-30/31) gets its own marker; the camera keeps following one.
+  const otherUnits = otherSceneUnits(
+    live.units,
+    hospitalLeg ? transportUnit?.dispatchId ?? null : live.responderDispatchId,
+  );
   const destination = transportUnit?.destination;
   const destinationMarker =
     destinationVisible && destination && destination.latitude != null && destination.longitude != null
@@ -191,6 +197,7 @@ export default function TrackingScreen() {
                 styleUrl={styleUrl}
                 incident={incidentPoint}
                 responder={responderPoint}
+                otherUnits={otherUnits}
                 routeGeometry={routeGeometry}
                 destination={destinationMarker}
                 responderIcon="ambulance"

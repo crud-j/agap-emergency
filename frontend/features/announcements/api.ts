@@ -132,6 +132,16 @@ export function fetchAnnouncement(id: string): Promise<Announcement> {
   return api.get(`/announcements/publisher/${id}`, getToken());
 }
 
+export interface AnnouncementDeliveryStat {
+  status: 'PENDING' | 'SENT' | 'DELIVERED' | 'FAILED' | 'RETRYING' | 'CANCELLED';
+  count: number;
+}
+
+/** SMS results per status, as Textbee reports them. Empty for notices published before tracking. */
+export function fetchAnnouncementDelivery(id: string): Promise<AnnouncementDeliveryStat[]> {
+  return api.get(`/announcements/${id}/delivery`, getToken());
+}
+
 export function createAnnouncement(body: CreateAnnouncementBody): Promise<Announcement> {
   return api.post('/announcements', body, getToken());
 }

@@ -344,3 +344,78 @@ describe('ResourceMatchingService.getRecommendations', () => {
     expect(first.requiredCapabilities).toEqual(CAPABILITY_MATRIX['FLOOD'] ?? []);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MOD-29 — unverified capabilities are named, never counted
+// ---------------------------------------------------------------------------
+
+describe('unverified capabilities (MOD-29)', () => {
+  let service: ResourceMatchingService;
+
+  beforeEach(() => {
+    service = new ResourceMatchingService(mockPrisma as any, mockAudit as any);
+    jest.clearAllMocks();
+    mockPrisma.resource_recommendations.deleteMany.mockResolvedValue({});
+    mockPrisma.resource_recommendations.createMany.mockResolvedValue({});
+  });
+
+  it('buildRationale notes unverified required capabilities only when there are any', () => {
+    const base = {
+      category: 'RESCUE',
+      requiredCaps: ['SEARCH_AND_RESCUE', 'ROPE_RESCUE'],
+      matchedCaps: ['SEARCH_AND_RESCUE'],
+      resourceType: 'RESCUE_BOAT',
+      distanceMeters: null,
+      typeAffinity: true,
+    };
+    expect(buildRationale({ ...base, unverifiedCaps: 1 })).toMatch(
+      'Capability match: 1/2 required (SEARCH_AND_RESCUE) (1 unverified not counted)',
+    );
+    expect(buildRationale({ ...base, unverifiedCaps: 0 })).not.toMatch('unverified');
+    expect(buildRationale(base)).not.toMatch('unverified');
+  });
+
+  async function bravoRanking(ropeRescueVerified: boolean) {
+    mockPrisma.incident.findUnique.mockResolvedValue({ id: 'inc-r', category: 'RESCUE', incident_locations: null });
+    mockPrisma.resources.findMany
+      .mockResolvedValueOnce([{ id: 'bravo-1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 'bravo-1',
+          name: 'Rescue Boat',
+          call_sign: 'BRAVO-1',
+          resource_type: 'RESCUE_BOAT',
+          organization_id: 'org-1',
+          status: 'AVAILABLE',
+          resource_capability_assignments: [
+            { is_verified: true, resource_capabilities: { name: 'SEARCH_AND_RESCUE' } },
+            { is_verified: ropeRescueVerified, resource_capabilities: { name: 'ROPE_RESCUE' } },
+            // Unverified but not required for RESCUE: not mentioned.
+            { is_verified: false, resource_capabilities: { name: 'HAZMAT' } },
+          ],
+        },
+      ]);
+    const [rec] = await service.getRecommendations('inc-r', 'dispatcher-1', 'DISPATCHER');
+    return rec!;
+  }
+
+  it('loads every assignment and scores only the verified ones', async () => {
+    const unverified = await bravoRanking(false);
+
+    expect(mockPrisma.resources.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      include: { resource_capability_assignments: { include: { resource_capabilities: true } } },
+    }));
+    expect(unverified.matchedCapabilities).toEqual(['SEARCH_AND_RESCUE']);
+    expect(unverified.rationale).toMatch('1/2 required (SEARCH_AND_RESCUE) (1 unverified not counted)');
+  });
+
+  it('verifying the capability raises the capability match and drops the note', async () => {
+    const before = await bravoRanking(false);
+    const after = await bravoRanking(true);
+
+    expect(after.matchedCapabilities).toEqual(['SEARCH_AND_RESCUE', 'ROPE_RESCUE']);
+    expect(after.score).toBeGreaterThan(before.score);
+    expect(after.rationale).toMatch('2/2 required');
+    expect(after.rationale).not.toMatch('unverified');
+  });
+});

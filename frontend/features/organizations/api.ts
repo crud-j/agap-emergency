@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, asPaginated } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import type { PaginatedResult } from '@agap/shared';
 
@@ -33,16 +33,22 @@ export type UpdateOrgBody = Partial<CreateOrgBody> & { isActive?: boolean };
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
-export function fetchOrganizations(params?: {
+/**
+ * GET /organizations returns a plain array of active organizations
+ * (organizations.service.ts findAll); wrap it so callers keep the PaginatedResult shape.
+ */
+export async function fetchOrganizations(params?: {
   orgType?: string;
   page?: number;
   perPage?: number;
 }): Promise<PaginatedResult<Organization>> {
   const qs = new URLSearchParams();
+  // The backend ignores orgType, page and perPage today; no caller relies on them.
   if (params?.orgType)  qs.set('orgType', params.orgType);
   if (params?.page)     qs.set('page', String(params.page));
   if (params?.perPage)  qs.set('perPage', String(params.perPage));
-  return api.get(`/organizations?${qs}`, getToken());
+  const body = await api.get<Organization[] | PaginatedResult<Organization>>(`/organizations?${qs}`, getToken());
+  return asPaginated(body);
 }
 
 export function fetchOrganization(id: string): Promise<Organization> {

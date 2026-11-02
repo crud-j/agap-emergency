@@ -1,8 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString } from 'class-validator';
+import { IsUUID } from 'class-validator';
 
 export class AddCapabilityDto {
-  @ApiProperty()
-  @IsString()
+  @ApiProperty({ description: 'A capability id from GET /resources/capabilities' })
+  @IsUUID()
   capabilityId!: string;
 }

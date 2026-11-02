@@ -233,4 +233,38 @@ describe('multi-unit responder progress proof (Phase 0)', () => {
       where: expect.objectContaining({ id: 'resource-fire' }),
     }));
   });
+
+  it('two dispatched units finishing: the first leaves the incident open, the last resolves it (testing-errors Phase 5)', async () => {
+    const { tx, responders } = createHarness(IncidentStatus.ON_SCENE);
+    tx.transportRecord.findFirst.mockResolvedValue(null);
+
+    // The fire unit finishes first while the ambulance is still active.
+    await expect(
+      responders.updateStatus(FIRE_DISPATCH, FIRE_CREW, { status: 'RESOLVED' } as any),
+    ).resolves.toEqual(expect.objectContaining({ incidentStatus: IncidentStatus.ON_SCENE }));
+    expect(tx.incident.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: IncidentStatus.RESOLVED }) }),
+    );
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ to_status: IncidentStatus.ON_SCENE, notes: 'FIRE-1 finished field work' }),
+    });
+
+    // Now the ambulance is the last active unit; its finish resolves the incident.
+    tx.dispatches.findMany.mockResolvedValue([
+      { id: AMBULANCE_DISPATCH, resource_id: 'resource-ambulance', status: 'ACCEPTED' },
+    ]);
+    tx.dispatches.update.mockResolvedValue({
+      id: AMBULANCE_DISPATCH,
+      resource_id: 'resource-ambulance',
+      status: 'COMPLETED',
+      field_done_at: new Date('2026-11-02T00:00:00Z'),
+    });
+
+    await expect(
+      responders.updateStatus(AMBULANCE_DISPATCH, AMBULANCE_CREW, { status: 'RESOLVED' } as any),
+    ).resolves.toEqual(expect.objectContaining({ incidentStatus: IncidentStatus.RESOLVED }));
+    expect(tx.incident.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: IncidentStatus.RESOLVED }) }),
+    );
+  });
 });

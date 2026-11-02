@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, incident_priority, incident_status, resource_status } from '@prisma/client';
-import { ACTIVE_INCIDENT_STATUSES } from '@agap/shared';
+import { ACTIVE_INCIDENT_STATUSES, DEPLOYED_RESOURCE_STATUSES, UNAVAILABLE_RESOURCE_STATUSES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -13,8 +13,9 @@ const TREND_DAYS = 7;
 const ACTIVE = [...ACTIVE_INCIDENT_STATUSES] as incident_status[];
 const NOT_REPORTED: incident_status[] = ['DRAFT', 'DUPLICATE'];
 const PRIORITIES: incident_priority[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-const DEPLOYED_UNITS: resource_status[] = ['DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'TRANSPORTING', 'RETURNING', 'RESERVED'];
-const UNAVAILABLE_UNITS: resource_status[] = ['OUT_OF_SERVICE', 'OFFLINE'];
+// Shared with the Fleet board's readiness filters, so both group units the same way.
+const DEPLOYED_UNITS = [...DEPLOYED_RESOURCE_STATUSES] as resource_status[];
+const UNAVAILABLE_UNITS = [...UNAVAILABLE_RESOURCE_STATUSES] as resource_status[];
 const DEFAULT_ANALYTICS_DAYS = 30;
 
 export interface AnalyticsDateRange {

@@ -38,7 +38,7 @@ export function useLiveIncidentRefresh(): void {
       }
     };
 
-    const socket = connectSocket(token);
+    const socket = connectSocket();
     const onNotification = (env: AgapWebSocketEvent<NotificationCreatedPayload>) =>
       refresh(env?.data?.incidentId);
     socket.on('notification.created', onNotification);

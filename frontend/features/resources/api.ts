@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, asPaginated } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import type { PaginatedResult } from '@agap/shared';
 
@@ -15,7 +15,22 @@ export interface Resource {
   base_lng: number | null;
   organization_id: string;
   organization?: { id: string; name: string; short_name?: string | null };
-  capabilities?: string[];
+  capabilities?: ResourceCapability[];
+}
+
+/** A capability assigned to a unit (MOD-29). Only verified ones count in recommendations. */
+export interface ResourceCapability {
+  id: string;
+  name: string;
+  category: string | null;
+  is_verified: boolean;
+}
+
+export interface CapabilityCatalogItem {
+  id: string;
+  name: string;
+  category: string | null;
+  description: string | null;
 }
 
 export interface FleetItem extends Resource {
@@ -56,11 +71,7 @@ export async function fetchResources(params?: ResourceListParams): Promise<Pagin
   if (params?.resource_type)   qs.set('type', params.resource_type);
   if (params?.organization_id) qs.set('orgId', params.organization_id);
   const body = await api.get<Resource[] | PaginatedResult<Resource>>(`/resources?${qs}`, getToken());
-  if (!Array.isArray(body)) return body;
-  return {
-    data: body,
-    meta: { total: body.length, page: 1, perPage: body.length, totalPages: 1, hasNext: false, hasPrev: false },
-  };
+  return asPaginated(body);
 }
 
 export function fetchResource(id: string): Promise<Resource> {
@@ -81,6 +92,24 @@ export function updateResource(id: string, body: Partial<CreateResourceBody>): P
 
 export function updateResourceStatus(id: string, status: string): Promise<Resource> {
   return api.patch(`/resources/${id}/status`, { status }, getToken());
+}
+
+// ─── Capabilities (MOD-29) ────────────────────────────────────────────────────
+
+export function fetchCapabilityCatalog(): Promise<CapabilityCatalogItem[]> {
+  return api.get('/resources/capabilities', getToken());
+}
+
+export function addResourceCapability(resourceId: string, capabilityId: string): Promise<unknown> {
+  return api.post(`/resources/${resourceId}/capabilities`, { capabilityId }, getToken());
+}
+
+export function removeResourceCapability(resourceId: string, capabilityId: string): Promise<unknown> {
+  return api.delete(`/resources/${resourceId}/capabilities/${capabilityId}`, getToken());
+}
+
+export function verifyResourceCapability(resourceId: string, capabilityId: string, verified: boolean): Promise<unknown> {
+  return api.patch(`/resources/${resourceId}/capabilities/${capabilityId}/verify`, { verified }, getToken());
 }
 
 export function fetchFleet(params?: ResourceListParams): Promise<PaginatedResult<FleetItem>> {

@@ -104,3 +104,48 @@ export function mergeTransportUpdate(
     return { ...unit, destination, ...(sameHospital ? {} : { route: null }) };
   });
 }
+
+/** The unit the tracking screen follows: the most recent position, else the first seeded unit. */
+export function selectPrimaryUnit(units: LatestUnitPosition[]): LatestUnitPosition | null {
+  return (
+    units.filter((unit) => unit.position).sort((a, b) =>
+      Date.parse(b.position?.updatedAt ?? '') - Date.parse(a.position?.updatedAt ?? ''),
+    )[0] ??
+    units[0] ??
+    null
+  );
+}
+
+export interface ExtraUnitMarker {
+  dispatchId: string;
+  label: string | null;
+  lat: number;
+  lng: number;
+  heading?: number;
+  updatedAt: string;
+}
+
+/**
+ * Every other unit on the scene leg with a known position, for a map that already draws
+ * `primaryDispatchId`. Hospital-leg units are left out: whether the reporter sees one is
+ * decided only by the transport view (C17).
+ */
+export function otherSceneUnits(
+  units: LatestUnitPosition[],
+  primaryDispatchId: string | null,
+): ExtraUnitMarker[] {
+  const markers: ExtraUnitMarker[] = [];
+  for (const unit of units) {
+    if (unit.dispatchId === primaryDispatchId || !unit.position) continue;
+    if (unit.leg === 'TO_FACILITY' || unit.leg === 'AT_FACILITY') continue;
+    markers.push({
+      dispatchId: unit.dispatchId,
+      label: unit.callSign ?? unit.unitName,
+      lat: unit.position.lat,
+      lng: unit.position.lng,
+      ...(unit.position.heading != null ? { heading: unit.position.heading } : {}),
+      updatedAt: unit.position.updatedAt,
+    });
+  }
+  return markers;
+}

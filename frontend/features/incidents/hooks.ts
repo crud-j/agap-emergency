@@ -24,12 +24,13 @@ import {
   fetchRescueSummary,
 } from './api';
 
-export function useIncidents(params?: IncidentListParams, opts?: { enabled?: boolean }) {
+export function useIncidents(params?: IncidentListParams, opts?: { enabled?: boolean; refetchInterval?: number | false }) {
   return useQuery({
     queryKey: ['incidents', params],
     queryFn: () => fetchIncidents(params),
     staleTime: 30_000,
     enabled: opts?.enabled ?? true,
+    refetchInterval: opts?.refetchInterval ?? false,
   });
 }
 

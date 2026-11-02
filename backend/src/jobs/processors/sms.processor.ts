@@ -5,6 +5,7 @@ import { Job, Queue, UnrecoverableError } from 'bullmq';
 import axios from 'axios';
 import { QUEUE_NAMES } from '@agap/shared';
 import { BARANGAY_FOLLOWUP_JOB, BarangayNotifyService } from '../../barangay-coordination/barangay-notify.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
 
 export interface SmsJobData {
   phone: string;
@@ -12,6 +13,8 @@ export interface SmsJobData {
   incidentId?: string;
   /** Barangay alert (MOD-17): the delivery result is written back to this notice. */
   noticeId?: string;
+  /** Announcement SMS (MOD-53): the delivery result is written back to this announcement_deliveries row. */
+  announcementDeliveryId?: string;
   /**
    * Retry through BullMQ instead of swallowing the error. Enqueue with `attempts`
    * and backoff. Non-critical jobs (OTP, notifications) keep the swallow behaviour.
@@ -27,12 +30,18 @@ export class SmsProcessor extends WorkerHost {
     private readonly config: ConfigService,
     @Optional() private readonly barangayNotify?: BarangayNotifyService,
     @Optional() @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue?: Queue,
+    @Optional() private readonly prisma?: PrismaService,
   ) {
     super();
   }
 
-  async process(job: Job<SmsJobData | DeliveryCheckData | { noticeId: string }>): Promise<void> {
+  async process(
+    job: Job<SmsJobData | DeliveryCheckData | AnnouncementDeliveryCheckData | { noticeId: string }>,
+  ): Promise<void> {
     if (job.name === DELIVERY_CHECK_JOB) return this.checkDelivery(job as Job<DeliveryCheckData>);
+    if (job.name === ANNOUNCEMENT_DELIVERY_CHECK_JOB) {
+      return this.checkAnnouncementDelivery(job as Job<AnnouncementDeliveryCheckData>);
+    }
     if (job.name === BARANGAY_FOLLOWUP_JOB) {
       return this.barangayNotify?.sendFollowup((job.data as { noticeId: string }).noticeId);
     }
@@ -41,6 +50,7 @@ export class SmsProcessor extends WorkerHost {
 
   private async processSms(job: Job<SmsJobData>): Promise<void> {
     if (job.data.critical) return this.processCritical(job);
+    if (job.data.announcementDeliveryId) return this.processAnnouncement(job);
 
     this.logger.log(`Processing SMS job ${job.id} to ${job.data.phone}`);
     try {
@@ -148,6 +158,82 @@ export class SmsProcessor extends WorkerHost {
     );
   }
 
+  /**
+   * Announcement SMS (MOD-53). Best-effort like other notices (no BullMQ retry), but the
+   * outcome goes on the delivery row so the console shows failures, not only the queue count.
+   */
+  private async processAnnouncement(job: Job<SmsJobData>): Promise<void> {
+    const deliveryId = job.data.announcementDeliveryId!;
+    let batchId: string | undefined;
+    try {
+      batchId = await this.send(job.data);
+    } catch (err) {
+      this.logger.error(`Announcement SMS job ${job.id} failed: ${describe(err)}`);
+      const reason =
+        err instanceof SmsNotConfiguredError ? 'SMS gateway not configured' : `Gateway refused the request (${describe(err)})`;
+      return this.recordAnnouncementDelivery(deliveryId, 'FAILED', reason);
+    }
+
+    // Accepted is not delivered (no load, no signal): confirm with the same polling as barangay alerts.
+    await this.recordAnnouncementDelivery(deliveryId, 'SENT');
+    if (!batchId || !this.smsQueue) return;
+    try {
+      await this.smsQueue.add(
+        ANNOUNCEMENT_DELIVERY_CHECK_JOB,
+        { deliveryId, batchId, polls: 0 } satisfies AnnouncementDeliveryCheckData,
+        { delay: DELIVERY_POLL_MS, removeOnComplete: true, attempts: 1 },
+      );
+    } catch (err) {
+      this.logger.error(`Queueing announcement delivery check failed: ${String(err)}. Left as SENT.`);
+    }
+  }
+
+  /** delivered → DELIVERED, failed → FAILED; `sent` at the end of the window stays SENT (no receipt). */
+  private async checkAnnouncementDelivery(job: Job<AnnouncementDeliveryCheckData>): Promise<void> {
+    const { deliveryId, batchId, polls } = job.data;
+    let status: string | undefined;
+    try {
+      status = await this.fetchMessageStatus(batchId);
+    } catch (err) {
+      this.logger.warn(`Delivery check for batch ${batchId} failed: ${describe(err)}`);
+    }
+
+    if (status === 'delivered') return this.recordAnnouncementDelivery(deliveryId, 'DELIVERED');
+    if (status === 'failed') {
+      return this.recordAnnouncementDelivery(deliveryId, 'FAILED', 'Failed on the gateway phone (check its load and signal)');
+    }
+    if (polls + 1 >= DELIVERY_MAX_POLLS) {
+      if (status === 'sent') return;
+      return this.recordAnnouncementDelivery(deliveryId, 'FAILED', 'Not sent by the gateway phone within 6 minutes');
+    }
+    await this.smsQueue?.add(
+      ANNOUNCEMENT_DELIVERY_CHECK_JOB,
+      { ...job.data, polls: polls + 1 } satisfies AnnouncementDeliveryCheckData,
+      { delay: DELIVERY_POLL_MS, removeOnComplete: true, attempts: 1 },
+    );
+  }
+
+  private async recordAnnouncementDelivery(
+    deliveryId: string,
+    status: 'SENT' | 'DELIVERED' | 'FAILED',
+    failureReason?: string,
+  ): Promise<void> {
+    const now = new Date();
+    try {
+      await this.prisma?.announcement_deliveries.update({
+        where: { id: deliveryId },
+        data: {
+          status,
+          ...(status === 'SENT' && { sent_at: now }),
+          ...(status === 'DELIVERED' && { delivered_at: now }),
+          ...(status === 'FAILED' && { failed_at: now, failure_reason: failureReason ?? null }),
+        },
+      });
+    } catch (err) {
+      this.logger.error(`Recording announcement SMS ${status} for delivery ${deliveryId} failed: ${String(err)}`);
+    }
+  }
+
   private async fetchMessageStatus(batchId: string): Promise<string | undefined> {
     const apiKey = this.config.get<string>('TEXTBEE_API_KEY');
     if (!apiKey) return undefined;
@@ -189,7 +275,14 @@ interface DeliveryCheckData {
   incidentId?: string | undefined;
 }
 
+interface AnnouncementDeliveryCheckData {
+  deliveryId: string;
+  batchId: string;
+  polls: number;
+}
+
 const DELIVERY_CHECK_JOB = 'barangay-sms-delivery-check';
+const ANNOUNCEMENT_DELIVERY_CHECK_JOB = 'announcement-sms-delivery-check';
 const DELIVERY_POLL_MS = 15_000;
 /** 24 × 15 s = 6 min; a no-load failure showed up on the device after about 2 min. */
 const DELIVERY_MAX_POLLS = 24;

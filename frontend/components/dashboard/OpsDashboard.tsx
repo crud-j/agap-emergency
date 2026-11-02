@@ -1,6 +1,6 @@
 'use client';
 
-import type { JSX, ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle, AlertOctagon, CheckCircle2, ChevronRight, Hourglass, Navigation, Truck, RefreshCw,
@@ -17,8 +17,13 @@ import { useIncidents } from '@/features/incidents/hooks';
 import { useDispatchSummary } from '@/features/analytics/hooks';
 import { categoryIcon, timeAgo, titleCase } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
+import { arrivedIds } from '@/features/incidents/live-patch';
 
 const RECENT_LIMIT = 8;
+// Socket events keep the page current; while the socket is down, poll instead.
+const OFFLINE_POLL_MS = 15_000;
+// How long a changed count or a newly arrived report stays highlighted.
+const HIGHLIGHT_MS = 4_000;
 
 const PRIORITY_STRIP: Record<string, string> = {
   CRITICAL: 'border-l-[3px] border-l-red-500',
@@ -44,11 +49,16 @@ export function OpsDashboard(): JSX.Element {
   // Counts are computed in the database (GET /analytics/dispatch-summary) with the
   // same active-status list as the Incident Queue; the list below is only the newest
   // few reports for display, never the source of a count.
-  const summaryQuery   = useDispatchSummary();
-  const incidentsQuery = useIncidents({ perPage: RECENT_LIMIT });
+  const live = wsState === 'connected';
+  const summaryQuery   = useDispatchSummary(live ? undefined : { refetchInterval: OFFLINE_POLL_MS });
+  const incidentsQuery = useIncidents(
+    { perPage: RECENT_LIMIT },
+    { refetchInterval: live ? false : OFFLINE_POLL_MS },
+  );
 
   const summary = summaryQuery.data;
-  const recent: IncidentListItem[] = incidentsQuery.data?.data ?? [];
+  const recent = useMemo<IncidentListItem[]>(() => incidentsQuery.data?.data ?? [], [incidentsQuery.data]);
+  const arrived = useArrivals(recent, incidentsQuery.isSuccess);
 
   const failures = [
     { label: 'dashboard counts', q: summaryQuery },
@@ -75,7 +85,10 @@ export function OpsDashboard(): JSX.Element {
           </p>
         </div>
         <div className="flex items-center gap-3 pt-0.5">
-          <UpdatedAgo at={summaryQuery.dataUpdatedAt} fetching={summaryQuery.isFetching} />
+          <UpdatedAgo
+            at={Math.max(summaryQuery.dataUpdatedAt, incidentsQuery.dataUpdatedAt)}
+            fetching={summaryQuery.isFetching || incidentsQuery.isFetching}
+          />
           <ConnectionIndicator state={wsState} />
         </div>
       </div>
@@ -282,7 +295,7 @@ export function OpsDashboard(): JSX.Element {
             <ul className="divide-y divide-agap-track/15">
               {recent.map((inc) => (
                 <li key={inc.id}>
-                  <IncidentRow incident={inc} />
+                  <IncidentRow incident={inc} arrived={arrived.has(inc.id)} />
                 </li>
               ))}
             </ul>
@@ -307,9 +320,51 @@ function countDetail(count: number | undefined, label: string, none: string): st
   return count === 0 ? none : `${count} ${label}`;
 }
 
+/** True for a few seconds after `value` changes (not on the first load), to draw the eye. */
+function useChangePulse(value: number | undefined): boolean {
+  const previous = useRef(value);
+  const [pulse, setPulse] = useState(false);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = value;
+    if (before === undefined || value === undefined || before === value) return;
+    setPulse(true);
+    const timer = setTimeout(() => setPulse(false), HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [value]);
+  return pulse;
+}
+
+/**
+ * Reports that appeared in the list since the last load, for a few seconds. The first
+ * load highlights nothing. The timer lives in a ref, so a status patch to the list
+ * while a row is highlighted doesn't cancel its fade.
+ */
+function useArrivals(list: IncidentListItem[], loaded: boolean): ReadonlySet<string> {
+  const seen = useRef<Set<string> | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [arrived, setArrived] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    if (!loaded) return;
+    const ids = arrivedIds(seen.current, list);
+    seen.current = new Set(list.map((item) => item.id));
+    if (ids.length === 0) return;
+    setArrived(new Set(ids));
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setArrived(new Set()), HIGHLIGHT_MS);
+  }, [list, loaded]);
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  return arrived;
+}
+
 /** How fresh the counts are — the dashboard must never look live when it is not. */
 function UpdatedAgo({ at, fetching }: { at: number; fetching: boolean }): JSX.Element | null {
-  const now = useNow(10_000);
+  const now = useNow(1_000);
   if (!at) return null;
   const seconds = Math.max(0, Math.round((now - at) / 1000));
   const text = seconds < 15 ? 'just now' : seconds < 60 ? `${seconds}s ago` : `${Math.round(seconds / 60)} min ago`;
@@ -335,11 +390,15 @@ function KpiLink({
   destination: string;
   children: JSX.Element;
 }): JSX.Element {
+  // A count that just changed gets a green ring for a few seconds (no motion).
+  const changed = useChangePulse(value);
   return (
     <Link
       href={href}
       aria-label={`${label}: ${value ?? 'loading'}. Open ${destination}.`}
-      className={`group rounded-xl transition-transform active:scale-[0.99] motion-reduce:transform-none [&>div]:h-full [&:hover>div]:border-agap-green/30 ${FOCUS_RING} focus-visible:ring-offset-2`}
+      className={`group rounded-xl transition-transform active:scale-[0.99] motion-reduce:transform-none [&>div]:h-full [&>div]:transition-shadow [&>div]:duration-500 [&:hover>div]:border-agap-green/30 ${
+        changed ? '[&>div]:ring-2 [&>div]:ring-agap-green/50' : ''
+      } ${FOCUS_RING} focus-visible:ring-offset-2`}
     >
       {children}
     </Link>
@@ -393,7 +452,13 @@ function ActionRow({
 
 // ─── Incident row ────────────────────────────────────────────────────────────
 
-function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element {
+/** "5m ago" that keeps counting while the list itself hasn't changed. */
+function ReportedAgo({ iso }: { iso: string }): JSX.Element {
+  useNow(30_000);
+  return <>{timeAgo(iso)}</>;
+}
+
+function IncidentRow({ incident, arrived }: { incident: IncidentListItem; arrived: boolean }): JSX.Element {
   const Icon = categoryIcon(incident.category);
   const location =
     incident.incident_locations?.barangay ??
@@ -404,7 +469,9 @@ function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element 
   return (
     <Link
       href={`/operations/incidents?focus=${incident.id}`}
-      className={`${ROW_GRID} min-h-14 px-4 py-3 transition-colors hover:bg-agap-surface/60 sm:px-5 focus-visible:bg-agap-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-agap-green/60 ${strip}`}
+      className={`${ROW_GRID} min-h-14 px-4 py-3 transition-colors duration-700 motion-reduce:transition-none hover:bg-agap-surface/60 sm:px-5 focus-visible:bg-agap-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-agap-green/60 ${strip} ${
+        arrived ? 'bg-agap-greenSoft/70' : ''
+      }`}
     >
       <span className="flex min-w-0 items-center gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-agap-surface text-agap-textMid">
@@ -416,6 +483,11 @@ function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element 
               {incident.public_reference}
             </span>
             <span className="truncate text-xs text-agap-textMid">{titleCase(incident.category)}</span>
+            {arrived && (
+              <span className="shrink-0 rounded-full bg-agap-green px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-white">
+                New
+              </span>
+            )}
           </span>
           <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-slate-500">
             <MapPin size={11} aria-hidden="true" className="shrink-0" />
@@ -431,7 +503,7 @@ function IncidentRow({ incident }: { incident: IncidentListItem }): JSX.Element 
         <StatusChip status={incident.status} />
       </span>
       <span className="text-right font-mono text-[11px] text-slate-500 tabular-nums">
-        {timeAgo(incident.submitted_at)}
+        <ReportedAgo iso={incident.submitted_at} />
       </span>
     </Link>
   );

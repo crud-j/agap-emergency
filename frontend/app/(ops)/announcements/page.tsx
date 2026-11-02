@@ -18,6 +18,7 @@ import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { cn } from '@/lib/utils';
 import {
   useAnnouncements,
+  useAnnouncementDelivery,
   useAnnouncementImage,
   usePublishAnnouncement,
   useScheduleAnnouncement,
@@ -27,7 +28,7 @@ import {
   useSubmitAnnouncement,
   useWithdrawAnnouncement,
 } from '@/features/announcements/hooks';
-import type { Announcement } from '@/features/announcements/api';
+import type { Announcement, AnnouncementDeliveryStat } from '@/features/announcements/api';
 import { AnnouncementPreview } from '@/components/announcements/AnnouncementPreview';
 import {
   categoryLabel, severityMeta, statusMeta, fmtManila, LANGUAGE_LABELS,
@@ -67,6 +68,20 @@ function areaOf(a: Announcement) {
   return a.scope === 'MUNICIPALITY_WIDE' || a.target_barangays.length === 0
     ? 'All of Bocaue'
     : `Brgy. ${a.target_barangays.join(', ')}`;
+}
+
+/** "2 delivered · 1 failed". Notices published before delivery tracking only have the queued count. */
+function smsDeliverySummary(queued: number, stats: AnnouncementDeliveryStat[] | undefined): string {
+  if (!stats?.length) return `${queued} queued`;
+  const count = (s: AnnouncementDeliveryStat['status']) => stats.find((x) => x.status === s)?.count ?? 0;
+  const parts = [
+    `${count('DELIVERED')} delivered`,
+    count('SENT') > 0 && `${count('SENT')} sent, no receipt yet`,
+    count('PENDING') > 0 && `${count('PENDING')} waiting`,
+    count('FAILED') > 0 && `${count('FAILED')} failed`,
+  ].filter(Boolean);
+  const hint = count('FAILED') > 0 ? ' — check the Textbee phone’s load and signal' : '';
+  return parts.join(' · ') + hint;
 }
 
 function SeverityCell({ severity }: { severity: string }) {
@@ -214,6 +229,8 @@ function DetailDrawer({
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const image = useAnnouncementImage(item?.id ?? null, !!item?.image_storage_key, item?.updated_at);
+  const sentOut = item?.status === 'PUBLISHED' || item?.status === 'CANCELLED';
+  const delivery = useAnnouncementDelivery(item?.id ?? null, sentOut);
 
   if (!item) {
     return <Drawer open={false} onOpenChange={() => undefined}><DrawerContent /></Drawer>;
@@ -245,7 +262,7 @@ function DetailDrawer({
     ...(item.approved_at ? [['Approved', `${fmtManila(item.approved_at)}${item.approverName ? ` · ${item.approverName}` : ''}`] as [string, string]] : []),
     ...(item.scheduled_at && item.status === 'SCHEDULED' ? [['Goes out', fmtManila(item.scheduled_at)] as [string, string]] : []),
     ...(item.published_at ? [['Published', fmtManila(item.published_at)] as [string, string]] : []),
-    ...(item.status === 'PUBLISHED' || item.status === 'CANCELLED' ? [['SMS queued', String(item.sms_sent_count ?? 0)] as [string, string]] : []),
+    ...(sentOut ? [['SMS', smsDeliverySummary(item.sms_sent_count ?? 0, delivery.data)] as [string, string]] : []),
     ...(item.cancelled_at ? [['Cancelled', fmtManila(item.cancelled_at)] as [string, string]] : []),
   ];
 

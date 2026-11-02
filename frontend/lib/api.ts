@@ -1,3 +1,4 @@
+import type { PaginatedResult } from '@agap/shared';
 import { getToken } from './auth';
 import { redirectToLogin, refreshSession } from './session';
 
@@ -104,3 +105,15 @@ export const api = {
     request<T>(path, { method: 'DELETE', headers: authHeaders(token) }),
 
 };
+
+/**
+ * Some list endpoints return a plain array (no paging). Wrap it so callers keep the
+ * PaginatedResult shape; a body that is already paginated is returned unchanged.
+ */
+export function asPaginated<T>(body: T[] | PaginatedResult<T>): PaginatedResult<T> {
+  if (!Array.isArray(body)) return body;
+  return {
+    data: body,
+    meta: { total: body.length, page: 1, perPage: body.length, totalPages: 1, hasNext: false, hasPrev: false },
+  };
+}

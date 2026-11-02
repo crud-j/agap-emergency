@@ -67,7 +67,12 @@ function makeService(opts: { flag: boolean; rows?: Row[] }) {
       }),
       update: jest.fn(async ({ where, data }: any) => Object.assign(rows.get(where.id)!, data)),
     },
-    sms_subscribers: { findMany: jest.fn().mockResolvedValue([{ phone_number: '+639170000001' }]) },
+    sms_subscribers: { findMany: jest.fn().mockResolvedValue([{ id: 'sub-1', phone_number: '+639170000001' }]) },
+    announcement_deliveries: {
+      createManyAndReturn: jest.fn(async ({ data }: any) =>
+        data.map((d: any, i: number) => ({ id: `del-${i + 1}`, recipient_phone: d.recipient_phone })),
+      ),
+    },
     user: { findMany: jest.fn().mockResolvedValue([{ id: SUPERVISOR }, { id: SUPERVISOR_2 }]) },
   };
   const realtime = { announcementPublished: jest.fn() };
@@ -121,6 +126,20 @@ describe('approval flag off', () => {
     await service.publish('ann-1', OFFICER);
     expect(rows.get('ann-1')).toMatchObject({ status: 'PUBLISHED', approved_by_id: OFFICER });
     expect(smsQueue.add).toHaveBeenCalledTimes(1);
+  });
+
+  it('records one SMS delivery row per subscriber and passes its id to the SMS job', async () => {
+    const { service, prisma, smsQueue } = makeService({ flag: false });
+    await service.publish('ann-1', OFFICER);
+    expect(prisma.announcement_deliveries.createManyAndReturn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [{ announcement_id: 'ann-1', channel: 'SMS', recipient_phone: '+639170000001', sms_subscriber_id: 'sub-1' }],
+      }),
+    );
+    expect(smsQueue.add).toHaveBeenCalledWith(
+      'announcement-sms',
+      expect.objectContaining({ phone: '+639170000001', announcementDeliveryId: 'del-1' }),
+    );
   });
 
   it('schedules a CRITICAL advisory directly', async () => {

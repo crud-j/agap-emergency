@@ -12,6 +12,7 @@ import {
   resource_status,
   resource_type,
   user_role,
+  user_status,
 } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcryptjs';
@@ -41,6 +42,7 @@ async function main() {
       email: process.env['INITIAL_ADMIN_EMAIL'] ?? 'admin@agap.local',
       password_hash: adminHash,
       role: user_role.SYSTEM_ADMINISTRATOR,
+      status: user_status.ACTIVE,
       must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
@@ -56,6 +58,7 @@ async function main() {
       phone_number: '+639171234001',
       password_hash: devHash,
       role: user_role.DISPATCHER,
+      status: user_status.ACTIVE,
       must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
@@ -71,6 +74,7 @@ async function main() {
       phone_number: '+639171234002',
       password_hash: devHash,
       role: user_role.DISPATCHER,
+      status: user_status.ACTIVE,
       must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
@@ -86,6 +90,7 @@ async function main() {
       phone_number: '+639171234003',
       password_hash: devHash,
       role: user_role.SUPERVISOR,
+      status: user_status.ACTIVE,
       must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
@@ -101,6 +106,7 @@ async function main() {
       phone_number: '+639171234004',
       password_hash: devHash,
       role: user_role.RESPONDER,
+      status: user_status.ACTIVE,
       is_email_verified: true,
       barangay: 'Lolomboy',
     },
@@ -115,6 +121,7 @@ async function main() {
       phone_number: '+639171234005',
       password_hash: devHash,
       role: user_role.RESPONDER,
+      status: user_status.ACTIVE,
       is_email_verified: true,
       barangay: 'Bunlo',
     },
@@ -129,6 +136,7 @@ async function main() {
       phone_number: '+639171234006',
       password_hash: devHash,
       role: user_role.RESPONDER,
+      status: user_status.ACTIVE,
       is_email_verified: true,
       barangay: 'Bundukan',
     },
@@ -143,6 +151,7 @@ async function main() {
       phone_number: '+639171234007',
       password_hash: devHash,
       role: user_role.HOSPITAL_USER,
+      status: user_status.ACTIVE,
       must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
@@ -160,6 +169,7 @@ async function main() {
       phone_number: '+639171234008',
       password_hash: devHash,
       role: user_role.ANNOUNCEMENTS_PUBLISHER,
+      status: user_status.ACTIVE,
       must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
@@ -175,6 +185,42 @@ async function main() {
       phone_number: '+639171234009',
       password_hash: devHash,
       role: user_role.ORG_ADMINISTRATOR,
+      status: user_status.ACTIVE,
+      must_change_password: true,
+      is_email_verified: true,
+      barangay: 'Poblacion',
+    },
+  });
+
+  // Org Administrators of the partner organizations, so a mutual-aid request from
+  // MDRRMO has someone to Provide it (MOD-35) and a hospital org can register its
+  // own facilities (MOD-39).
+  const bfpOrgAdmin = await prisma.user.upsert({
+    where: { email: 'orgadmin@bfp.bocaue.gov.ph' },
+    update: {},
+    create: {
+      full_name: 'Ramon Cruz',
+      email: 'orgadmin@bfp.bocaue.gov.ph',
+      phone_number: '+639171234010',
+      password_hash: devHash,
+      role: user_role.ORG_ADMINISTRATOR,
+      status: user_status.ACTIVE,
+      must_change_password: true,
+      is_email_verified: true,
+      barangay: 'Poblacion',
+    },
+  });
+
+  const hospitalOrgAdmin = await prisma.user.upsert({
+    where: { email: 'orgadmin@bocauehospital.gov.ph' },
+    update: {},
+    create: {
+      full_name: 'Teresa Lim',
+      email: 'orgadmin@bocauehospital.gov.ph',
+      phone_number: '+639171234011',
+      password_hash: devHash,
+      role: user_role.ORG_ADMINISTRATOR,
+      status: user_status.ACTIVE,
       must_change_password: true,
       is_email_verified: true,
       barangay: 'Poblacion',
@@ -268,7 +314,9 @@ async function main() {
     { org: mdrrmo.id, user: responder2.id },
     { org: mdrrmo.id, user: orgAdmin.id },
     { org: bfp.id, user: responder3.id },
+    { org: bfp.id, user: bfpOrgAdmin.id },
     { org: hospitalOrg.id, user: hospitalUser.id },
+    { org: hospitalOrg.id, user: hospitalOrgAdmin.id },
   ];
 
   for (const m of memberships) {
@@ -1069,6 +1117,8 @@ async function main() {
   console.log('    RESPONDER              : responder1@mdrrmo.bocaue.gov.ph');
   console.log('    HOSPITAL_USER          : receiving@bocauehospital.gov.ph');
   console.log('    ORG_ADMINISTRATOR      : orgadmin@mdrrmo.bocaue.gov.ph');
+  console.log('    ORG_ADMINISTRATOR      : orgadmin@bfp.bocaue.gov.ph (BFP Bocaue, answers mutual aid)');
+  console.log('    ORG_ADMINISTRATOR      : orgadmin@bocauehospital.gov.ph (Bocaue General Hospital)');
   console.log('    ANNOUNCEMENTS_PUBLISHER: announcements@lgu.bocaue.gov.ph');
   console.log('    CITIZEN                : citizen@demo.agap');
   console.log('    BYSTANDER              : bystander@demo.agap');

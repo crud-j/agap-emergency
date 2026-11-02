@@ -10,6 +10,7 @@
     "test": "pnpm -r test",
     "test:e2e": "pnpm -r test:e2e",
     "tunnel": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/tunnel.ps1",
+    "share": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/tunnel.ps1",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "prepare": "node -e \"try { require('husky').install() } catch (e) {}\""
   },

@@ -65,12 +65,20 @@ describe('IncidentHandoverService — MOD-44', () => {
     it.each([
       ['a citizen', { role: 'CITIZEN', status: 'ACTIVE' }],
       ['a deactivated dispatcher', { role: 'DISPATCHER', status: 'DEACTIVATED' }],
+      ['a suspended supervisor', { role: 'SUPERVISOR', status: 'SUSPENDED' }],
       ['an unknown user', null],
-    ])('refuses %s', async (_label, recipient) => {
+    ])('refuses %s with the same message', async (_label, recipient) => {
       mockPrisma.user.findUnique.mockResolvedValue(recipient);
       await expect(service.create(INCIDENT_ID, { toUserId: TO_USER, situationSummary: 'x' }, FROM_USER))
-        .rejects.toThrow(/active Dispatcher or Supervisor/);
+        .rejects.toThrow('The incoming operator must be an active Dispatcher or Supervisor.');
       expect(mockPrisma.incident_handovers.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts a PENDING_VERIFICATION dispatcher (staff accounts that can sign in)', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'DISPATCHER', status: 'PENDING_VERIFICATION' });
+      mockPrisma.incident_handovers.create.mockResolvedValue(mockHandover());
+      await expect(service.create(INCIDENT_ID, { toUserId: TO_USER, situationSummary: 'x' }, FROM_USER))
+        .resolves.toMatchObject({ id: HANDOVER_ID });
     });
 
     it('refuses a handover to yourself', async () => {
@@ -78,12 +86,24 @@ describe('IncidentHandoverService — MOD-44', () => {
         .rejects.toThrow(/someone else/);
     });
 
-    it('lists active dispatchers and supervisors except the caller', async () => {
-      mockPrisma.user.findMany.mockResolvedValue([]);
-      await service.recipients(FROM_USER);
-      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { role: { in: ['DISPATCHER', 'SUPERVISOR'] }, status: 'ACTIVE', id: { not: FROM_USER } },
-      }));
+    it('lists dispatchers and supervisors who can sign in, except the caller', async () => {
+      const users = [
+        { id: FROM_USER, full_name: 'Caller',  role: 'SUPERVISOR', status: 'ACTIVE' },
+        { id: 'u-pend',  full_name: 'Juan',    role: 'DISPATCHER', status: 'PENDING_VERIFICATION' },
+        { id: 'u-act',   full_name: 'Maria',   role: 'SUPERVISOR', status: 'ACTIVE' },
+        { id: 'u-susp',  full_name: 'Susp',    role: 'DISPATCHER', status: 'SUSPENDED' },
+        { id: 'u-deac',  full_name: 'Deac',    role: 'DISPATCHER', status: 'DEACTIVATED' },
+        { id: 'u-resp',  full_name: 'Jose',    role: 'RESPONDER',  status: 'ACTIVE' },
+      ];
+      // Apply the where clause the service builds to the fixture users.
+      mockPrisma.user.findMany.mockImplementation(async ({ where }) =>
+        users.filter((u) =>
+          where.role.in.includes(u.role) && !where.status.notIn.includes(u.status) && u.id !== where.id.not,
+        ),
+      );
+
+      const result = await service.recipients(FROM_USER);
+      expect(result.map((u: { id: string }) => u.id)).toEqual(['u-pend', 'u-act']);
     });
   });
 

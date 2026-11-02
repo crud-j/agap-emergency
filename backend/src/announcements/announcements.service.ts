@@ -443,21 +443,33 @@ export class AnnouncementsService {
     try {
       const subscribers = await this.prisma.sms_subscribers.findMany({
         where: { is_active: true },
-        select: { phone_number: true },
+        select: { id: true, phone_number: true },
       });
 
       const title = published.title.slice(0, 50);
       const smsText = `AGAP: ${title}. ${shortText.slice(0, 130)} Reply STOP to opt out.`.slice(0, 160);
 
+      // One delivery row per subscriber; the SMS worker writes Textbee's result back to it.
+      const deliveries = await this.prisma.announcement_deliveries.createManyAndReturn({
+        data: subscribers.map((sub) => ({
+          announcement_id: published.id,
+          channel: 'SMS' as const,
+          recipient_phone: sub.phone_number,
+          sms_subscriber_id: sub.id,
+        })),
+        select: { id: true, recipient_phone: true },
+      });
+
       const BATCH_SIZE = 100;
-      for (let i = 0; i < subscribers.length; i += BATCH_SIZE) {
-        const batch = subscribers.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < deliveries.length; i += BATCH_SIZE) {
+        const batch = deliveries.slice(i, i + BATCH_SIZE);
         await Promise.all(
-          batch.map((sub) =>
+          batch.map((d) =>
             this.smsQueue.add('announcement-sms', {
-              phone: sub.phone_number,
+              phone: d.recipient_phone!,
               message: smsText,
-            }),
+              announcementDeliveryId: d.id,
+            } satisfies SmsJobData),
           ),
         );
       }

@@ -179,5 +179,52 @@ describe('Org Administrator access (Phase 6)', () => {
       );
       expect(prisma.resourceRequest.updateMany).not.toHaveBeenCalled();
     });
+
+    describe('answering needs an organization (Phase 3)', () => {
+      let controller: ResourcesController;
+      const req = (user: { id: string }) => ({ user });
+
+      beforeEach(() => {
+        controller = new ResourcesController(resources);
+        prisma.resourceRequest.findUnique.mockResolvedValue(pendingRequest);
+        prisma.resourceRequest.updateMany.mockResolvedValue({ count: 1 });
+      });
+
+      it.each([
+        ['approve', (c: ResourcesController) => c.approveRequest('req-1', {}, req(SYS_ADMIN))],
+        ['deny', (c: ResourcesController) => c.denyRequest('req-1', {}, req(SYS_ADMIN))],
+        ['legacy accept', (c: ResourcesController) => c.respondToRequestLegacy('req-1', { accept: true }, req(SYS_ADMIN))],
+        ['legacy reject', (c: ResourcesController) => c.respondToRequestLegacy('req-1', { accept: false }, req(SYS_ADMIN))],
+      ])('refuses a System Administrator without membership on %s with 403', async (_label, call) => {
+        prisma.organization_memberships.findFirst.mockResolvedValueOnce(null);
+
+        const err = await call(controller).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ForbiddenException);
+        expect((err as ForbiddenException).message).toBe("Only an organization's administrator can provide units");
+        expect(prisma.resourceRequest.updateMany).not.toHaveBeenCalled();
+        expect(audit.log).not.toHaveBeenCalled();
+      });
+
+      it("approves as the Org Administrator's own organization", async () => {
+        prisma.organization_memberships.findFirst.mockResolvedValueOnce({ organization_id: OWN_ORG });
+
+        await controller.approveRequest('req-1', {}, req(ORG_ADMIN));
+
+        expect(prisma.resourceRequest.updateMany).toHaveBeenCalledWith({
+          where: { id: 'req-1', status: 'PENDING' },
+          data: expect.objectContaining({ status: 'ACCEPTED', providing_org_id: OWN_ORG }),
+        });
+      });
+
+      it('a denial sets no provider', async () => {
+        prisma.organization_memberships.findFirst.mockResolvedValueOnce({ organization_id: OWN_ORG });
+
+        await controller.denyRequest('req-1', {}, req(ORG_ADMIN));
+
+        const { data } = prisma.resourceRequest.updateMany.mock.calls[0][0];
+        expect(data.status).toBe('REJECTED');
+        expect(data).not.toHaveProperty('providing_org_id');
+      });
+    });
   });
 });

@@ -215,6 +215,22 @@ describe('OversightService.getWorkload()', () => {
       { userId: 'u-3', name: 'Cara', role: 'DISPATCHER', openDispatches: 0, openIncidents: 0, actionsLastHour: 0 },
     ]);
   });
+
+  it('lists staff who can sign in (PENDING_VERIFICATION included) plus anyone holding open incidents', async () => {
+    const { service, prisma } = makeMocks({
+      workloadOpen: [{ dispatcher_id: 'u-susp', open_dispatches: 1, open_incidents: 1 }],
+    });
+    await service.getWorkload(NOW);
+
+    const where = prisma.user.findMany.mock.calls[0][0].where;
+    expect(where.role).toEqual({ in: ['DISPATCHER', 'SUPERVISOR'] });
+    expect(where.OR).toEqual([
+      { status: { notIn: ['SUSPENDED', 'DEACTIVATED'] } },
+      { id: { in: ['u-susp'] } },
+    ]);
+    // A PENDING_VERIFICATION dispatcher passes the status clause; ACTIVE alone is no longer required.
+    expect(where.OR[0].status.notIn).not.toContain('PENDING_VERIFICATION');
+  });
 });
 
 describe('OversightService.getActivity()', () => {

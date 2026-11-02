@@ -78,6 +78,8 @@ describe('role-access', () => {
     expect(canOpen(ROLE.ORG_ADMIN, '/administration')).toBe(false);
     expect(canOpen(ROLE.ORG_ADMIN, '/resources/requests')).toBe(true);
     expect(canOpen(ROLE.DISPATCHER, '/resources/requests')).toBe(false);
+    // The System Administrator views mutual-aid requests read-only (answering is 403 server-side).
+    expect(canOpen(ROLE.SYS_ADMIN, '/resources/requests')).toBe(true);
     expect(canOpen(ROLE.ORG_ADMIN, '/organizations')).toBe(true);
     expect(canOpen(ROLE.ORG_ADMIN, '/operations/fleet')).toBe(true);
     // Hospital organizations register their own hospitals (pending MDRRMO review).
@@ -131,7 +133,7 @@ describe('role-access', () => {
       'Account Security',
     ]);
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
-      'Dashboard', 'Organizations', 'Fleet & Units', 'Hospitals & Facilities',
+      'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Hospitals & Facilities',
       'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'Risk Areas', 'Audit Log',
       'Security Events', 'Integrations', 'Configuration',
       'Account Security',

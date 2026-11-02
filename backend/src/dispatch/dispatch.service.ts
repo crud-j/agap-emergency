@@ -14,6 +14,7 @@ import { AuditService } from '../audit/audit.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
 import { addAgencyParticipant } from '../incidents/agency-participants';
+import { ACTIVE_DISPATCH_STATUSES } from '../incidents/field-report-access';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
 import {
@@ -23,6 +24,7 @@ import {
   assignmentPushJobId,
 } from './assignment-push';
 import {
+  ACTIVE_RESPONSE_INCIDENT_STATUSES,
   AuditAction,
   IncidentStatus,
   QUEUE_NAMES,
@@ -32,7 +34,10 @@ import {
 } from '@agap/shared';
 import { Prisma } from '@prisma/client';
 
+/** First unit: the dispatch moves the incident to DISPATCHED. */
 const DISPATCHABLE_STATUSES = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
+/** Additional unit: a unit is already responding, so the incident status is kept. */
+const ADDITIONAL_DISPATCH_STATUSES: readonly string[] = ACTIVE_RESPONSE_INCIDENT_STATUSES;
 
 type AvailabilityRow = { user_id: string; status: string };
 
@@ -78,6 +83,10 @@ export class DispatchService {
   /**
    * Authorize and create a dispatch. Dispatch is never autonomous — the
    * authenticated dispatcher's identity is attached to the record.
+   *
+   * The first unit moves the incident to DISPATCHED. An additional unit (the
+   * incident is already DISPATCHED … ASSISTING) keeps the incident status and adds
+   * a timeline note; the responder side resolves only when the last unit finishes.
    */
   async create(dto: CreateDispatchDto, dispatcherId: string) {
     const incident = await this.prisma.incident.findUnique({
@@ -85,7 +94,8 @@ export class DispatchService {
       include: { incident_reporters: true },
     });
     if (!incident) throw new NotFoundException('Incident not found');
-    if (!DISPATCHABLE_STATUSES.includes(incident.status)) {
+    // For the error message only; the status that decides is re-read under the lock.
+    if (!DISPATCHABLE_STATUSES.includes(incident.status) && !ADDITIONAL_DISPATCH_STATUSES.includes(incident.status)) {
       throw new BadRequestException(
         `Incident status ${incident.status} is not dispatchable`,
       );
@@ -99,7 +109,20 @@ export class DispatchService {
       throw new BadRequestException('Resource is not available');
     }
 
-    const dispatch = await this.prisma.$transaction(async (tx) => {
+    const { created: dispatch, previousStatus, additionalUnit } = await this.prisma.$transaction(async (tx) => {
+      // Lock the incident so a dispatch can't race a resolve, or another first dispatch.
+      const [lockedIncident] = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT status::text AS status FROM incidents WHERE id = ${dto.incidentId}::uuid FOR UPDATE`;
+      if (!lockedIncident) throw new NotFoundException('Incident not found');
+      const previousStatus = lockedIncident.status;
+      const additionalUnit = ADDITIONAL_DISPATCH_STATUSES.includes(previousStatus);
+      if (!additionalUnit && !DISPATCHABLE_STATUSES.includes(previousStatus)) {
+        throw new ConflictException({
+          code: 'INCIDENT_STATUS_CHANGED',
+          message: `Incident status ${previousStatus} is not dispatchable`,
+        });
+      }
+
       const created = await tx.dispatches.create({
         data: {
           incident_id: dto.incidentId,
@@ -134,6 +157,19 @@ export class DispatchService {
           throw new ConflictException('RESPONDER_NOT_AVAILABLE');
         }
 
+        // Availability has no "busy" state, so a responder already on this incident's
+        // first unit is still AVAILABLE. They can't also crew the additional unit.
+        if (additionalUnit) {
+          const alreadyCrewed = await tx.dispatch_crew.findFirst({
+            where: {
+              user_id: { in: sorted },
+              dispatches: { incident_id: dto.incidentId, status: { in: ACTIVE_DISPATCH_STATUSES as any[] } },
+            },
+            select: { user_id: true },
+          });
+          if (alreadyCrewed) throw new ConflictException('RESPONDER_ALREADY_ON_INCIDENT');
+        }
+
         await tx.dispatch_crew.createMany({
           data: sorted.map((uid) => ({ dispatch_id: created.id, user_id: uid })),
           skipDuplicates: true,
@@ -145,6 +181,22 @@ export class DispatchService {
         data: { status: 'DISPATCHED', current_incident_id: dto.incidentId },
       });
 
+      if (additionalUnit) {
+        // Same status, note only (as "… finished field work"): no status change and
+        // no dispatched_at overwrite, so the first unit's timings stay as they were.
+        await tx.incidentEvent.create({
+          data: {
+            incident_id: dto.incidentId,
+            from_status: previousStatus as any,
+            to_status: previousStatus as any,
+            triggered_by_id: dispatcherId,
+            triggered_by_role: 'DISPATCHER',
+            notes: `Additional unit ${resource.call_sign ?? resource.name} dispatched`,
+          },
+        });
+        return { created, previousStatus, additionalUnit };
+      }
+
       await tx.incident.update({
         where: { id: dto.incidentId },
         data: { status: IncidentStatus.DISPATCHED as any, dispatched_at: new Date() },
@@ -153,14 +205,14 @@ export class DispatchService {
       await tx.incidentEvent.create({
         data: {
           incident_id: dto.incidentId,
-          from_status: incident.status as any,
+          from_status: previousStatus as any,
           to_status: IncidentStatus.DISPATCHED as any,
           triggered_by_id: dispatcherId,
           triggered_by_role: 'DISPATCHER',
         },
       });
 
-      return created;
+      return { created, previousStatus, additionalUnit };
     });
 
     this.logger.log(`Dispatch ${dispatch.id} created by ${dispatcherId}`);
@@ -173,7 +225,11 @@ export class DispatchService {
       entityType: 'dispatch',
       moduleId: 'MOD-31',
       incidentId: dto.incidentId,
-      newValues: { resourceId: dto.resourceId, crewIds: dto.initialCrewIds ?? [] },
+      newValues: {
+        resourceId: dto.resourceId,
+        crewIds: dto.initialCrewIds ?? [],
+        ...(additionalUnit && { additionalUnit: true }),
+      },
     });
 
     // MOD-34 (decision D5): the unit's organization joins the incident's agencies, with
@@ -194,10 +250,10 @@ export class DispatchService {
       }
     }
 
-    // persist → commit → emit (best-effort). The incident was transitioned to
-    // DISPATCHED inside the transaction above, so fan out: the assignment, the
-    // status change (which also carries the dedicated incident.dispatched
-    // milestone), and the dispatch record. A WS failure never affects dispatch.
+    // persist → commit → emit (best-effort). Fan out the assignment, the status
+    // change when the first unit moved the incident to DISPATCHED (it also carries
+    // the dedicated incident.dispatched milestone), and the dispatch record. A WS
+    // failure never affects dispatch.
     try {
       const assignedAt = (dispatch.created_at ?? new Date()).toISOString();
       this.realtime.incidentAssigned({
@@ -207,13 +263,15 @@ export class DispatchService {
         responseUnitId: dispatch.resource_id,
         assignedAt,
       });
-      this.realtime.notifyIncidentStatusChanged({
-        incidentId: dispatch.incident_id,
-        previousStatus: incident.status as unknown as IncidentStatus,
-        newStatus: IncidentStatus.DISPATCHED,
-        changedAt: assignedAt,
-        changedBy: dispatcherId,
-      });
+      if (!additionalUnit) {
+        this.realtime.notifyIncidentStatusChanged({
+          incidentId: dispatch.incident_id,
+          previousStatus: previousStatus as unknown as IncidentStatus,
+          newStatus: IncidentStatus.DISPATCHED,
+          changedAt: assignedAt,
+          changedBy: dispatcherId,
+        });
+      }
       this.realtime.notifyDispatchCreated(dispatch.incident_id, {
         dispatchId: dispatch.id,
         resourceId: dispatch.resource_id,
@@ -244,6 +302,10 @@ export class DispatchService {
     } catch (err) {
       this.logger.error(`Responder push enqueue failed: ${String(err)}. Dispatch unaffected.`);
     }
+
+    // The reporter and their emergency contacts heard "help is on the way" with the
+    // first unit; an additional unit changes no status, so they aren't told again.
+    if (additionalUnit) return dispatch;
 
     // "Help is on the way" to the reporter: feed row + push, deduplicated per status.
     void this.statusNotifier?.notifyReporter(incident.id, IncidentStatus.DISPATCHED);

@@ -10,6 +10,10 @@ import {
   updateResourceStatus,
   fetchFleet,
   fetchFleetUnit,
+  fetchCapabilityCatalog,
+  addResourceCapability,
+  removeResourceCapability,
+  verifyResourceCapability,
   type ResourceListParams,
   type CreateResourceBody,
 } from './api';
@@ -89,5 +93,54 @@ export function useUpdateResourceStatus() {
       qc.invalidateQueries({ queryKey: ['fleet'] });
       qc.invalidateQueries({ queryKey: ['available-units'] });
     },
+  });
+}
+
+// ─── Capabilities (MOD-29) ────────────────────────────────────────────────────
+
+export function useCapabilityCatalog(opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['capability-catalog'],
+    queryFn: fetchCapabilityCatalog,
+    staleTime: 5 * 60_000,
+    enabled: opts?.enabled ?? true,
+  });
+}
+
+/** Chips on the registry and fleet board, and the recommender's ranking, all change. */
+function useInvalidateCapabilities() {
+  const qc = useQueryClient();
+  return (resourceId: string) => {
+    qc.invalidateQueries({ queryKey: ['resources'] });
+    qc.invalidateQueries({ queryKey: ['resource', resourceId] });
+    qc.invalidateQueries({ queryKey: ['fleet'] });
+    qc.invalidateQueries({ queryKey: ['dispatch-recommendations'] });
+  };
+}
+
+export function useAddCapability() {
+  const invalidate = useInvalidateCapabilities();
+  return useMutation({
+    mutationFn: ({ resourceId, capabilityId }: { resourceId: string; capabilityId: string }) =>
+      addResourceCapability(resourceId, capabilityId),
+    onSuccess: (_data, { resourceId }) => invalidate(resourceId),
+  });
+}
+
+export function useRemoveCapability() {
+  const invalidate = useInvalidateCapabilities();
+  return useMutation({
+    mutationFn: ({ resourceId, capabilityId }: { resourceId: string; capabilityId: string }) =>
+      removeResourceCapability(resourceId, capabilityId),
+    onSuccess: (_data, { resourceId }) => invalidate(resourceId),
+  });
+}
+
+export function useVerifyCapability() {
+  const invalidate = useInvalidateCapabilities();
+  return useMutation({
+    mutationFn: ({ resourceId, capabilityId, verified }: { resourceId: string; capabilityId: string; verified: boolean }) =>
+      verifyResourceCapability(resourceId, capabilityId, verified),
+    onSuccess: (_data, { resourceId }) => invalidate(resourceId),
   });
 }

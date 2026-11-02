@@ -87,14 +87,17 @@ export function buildRationale(opts: {
   resourceType: string;
   distanceMeters: number | null;
   typeAffinity: boolean;
+  /** Required capabilities the unit holds but nobody has verified yet (MOD-29). */
+  unverifiedCaps?: number;
 }): string {
   const parts: string[] = [];
 
   if (opts.requiredCaps.length > 0) {
     const capDetail =
       opts.matchedCaps.length > 0 ? ` (${opts.matchedCaps.join(', ')})` : '';
+    const unverified = opts.unverifiedCaps ? ` (${opts.unverifiedCaps} unverified not counted)` : '';
     parts.push(
-      `Capability match: ${opts.matchedCaps.length}/${opts.requiredCaps.length} required${capDetail}`,
+      `Capability match: ${opts.matchedCaps.length}/${opts.requiredCaps.length} required${capDetail}${unverified}`,
     );
   }
 
@@ -154,12 +157,12 @@ export class ResourceMatchingService {
 
     if (candidateDistances.size === 0) return [];
 
-    // Step 2 — load resource details + verified capability assignments
+    // Step 2 — load resource details + capability assignments. Only verified ones
+    // score; unverified required ones are named in the rationale (MOD-29).
     const resources = await this.prisma.resources.findMany({
       where: { id: { in: [...candidateDistances.keys()] } },
       include: {
         resource_capability_assignments: {
-          where: { is_verified: true },
           include: { resource_capabilities: true },
         },
       },
@@ -168,10 +171,16 @@ export class ResourceMatchingService {
     // Step 3 — score and rank
     const scored = resources.map((resource) => {
       const distanceMeters = candidateDistances.get(resource.id) ?? null;
-      const assignedCaps = resource.resource_capability_assignments.map(
-        (a) => a.resource_capabilities.name.toUpperCase(),
-      );
+      const capNames = (verified: boolean) =>
+        resource.resource_capability_assignments
+          .filter((a) => a.is_verified === verified)
+          .map((a) => a.resource_capabilities.name.toUpperCase());
+      const assignedCaps = capNames(true);
+      const unverifiedCaps = capNames(false);
       const matchedCaps = requiredCaps.filter((c) => assignedCaps.includes(c));
+      const unverifiedRequired = requiredCaps.filter(
+        (c) => !assignedCaps.includes(c) && unverifiedCaps.includes(c),
+      ).length;
       const typeAffinity = (TYPE_AFFINITY[category] ?? []).includes(
         resource.resource_type,
       );
@@ -197,6 +206,7 @@ export class ResourceMatchingService {
           resourceType: resource.resource_type,
           distanceMeters,
           typeAffinity,
+          unverifiedCaps: unverifiedRequired,
         }),
       };
     });

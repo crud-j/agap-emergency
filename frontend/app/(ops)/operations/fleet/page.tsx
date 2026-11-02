@@ -4,9 +4,10 @@ import { Suspense, useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Truck, Flame, Waves, Users, Package,
-  Search, CheckCircle2, Radio, MapPin, AlertCircle, Wrench,
+  Search, CheckCircle2, Radio, MapPin, AlertCircle, Wrench, Undo2, Clock, WifiOff,
   UserCheck, UserX, UserMinus, X, RefreshCw,
 } from 'lucide-react';
+import { DEPLOYED_RESOURCE_STATUSES, ResourceStatus, UNAVAILABLE_RESOURCE_STATUSES } from '@agap/shared';
 import type { LucideIcon } from 'lucide-react';
 import {
   Button,
@@ -20,6 +21,8 @@ import { useResources, useUpdateResourceStatus } from '@/features/resources/hook
 import { useResponders } from '@/features/responders/hooks';
 import { useOrganizations } from '@/features/organizations/hooks';
 import type { Resource } from '@/features/resources/api';
+import { capabilityChipLabel } from '@/features/resources/capabilities';
+import { resourceStatusLabel } from '@/features/resources/status';
 import type { Responder } from '@/features/responders/api';
 import { cn } from '@/lib/utils';
 import { RegistryTab } from '@/components/resources/RegistryTab';
@@ -31,17 +34,17 @@ const RESOURCE_TYPES = [
   'FLOOD_RESPONSE_UNIT', 'SEARCH_AND_RESCUE_UNIT', 'PERSONNEL', 'EQUIPMENT', 'OTHER',
 ] as const;
 
-const RESOURCE_STATUSES = [
-  'AVAILABLE', 'DISPATCHED', 'EN_ROUTE', 'ON_SCENE', 'OUT_OF_SERVICE', 'MAINTENANCE',
-] as const;
+// Exactly the database's resource_status values (shared enum). The select lists all of
+// them, so a unit the system put in TRANSPORTING still shows its current status.
+const RESOURCE_STATUSES = Object.values(ResourceStatus);
 
 const ALL = 'ALL';
 
-/** Readiness groups shown as the quick filters above each grid. */
+/** Readiness groups shown as the quick filters above each grid; the dashboard counts the same way. */
 const UNIT_GROUPS: Record<string, readonly string[]> = {
-  AVAILABLE:   ['AVAILABLE'],
-  ACTIVE:      ['DISPATCHED', 'EN_ROUTE', 'ON_SCENE'],
-  UNAVAILABLE: ['OUT_OF_SERVICE', 'MAINTENANCE'],
+  AVAILABLE:   [ResourceStatus.AVAILABLE],
+  ACTIVE:      DEPLOYED_RESOURCE_STATUSES,
+  UNAVAILABLE: UNAVAILABLE_RESOURCE_STATUSES,
 };
 
 const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green/60 focus-visible:ring-offset-1';
@@ -71,13 +74,16 @@ interface StatusStyle {
 
 function resourceStatusStyle(status: string): StatusStyle {
   switch (status) {
-    case 'AVAILABLE':      return { badge: 'bg-agap-greenSoft text-agap-green ring-agap-green/20', accent: 'bg-agap-green', icon: CheckCircle2, label: 'Available' };
-    case 'DISPATCHED':     return { badge: 'bg-amber-50 text-amber-800 ring-amber-200',            accent: 'bg-amber-500',  icon: Radio,        label: 'Dispatched' };
-    case 'EN_ROUTE':       return { badge: 'bg-blue-50 text-blue-700 ring-blue-200',               accent: 'bg-blue-500',   icon: MapPin,       label: 'En route' };
-    case 'ON_SCENE':       return { badge: 'bg-purple-50 text-purple-700 ring-purple-200',         accent: 'bg-purple-500', icon: MapPin,       label: 'On scene' };
-    case 'OUT_OF_SERVICE': return { badge: 'bg-red-50 text-red-700 ring-red-200',                  accent: 'bg-red-500',    icon: AlertCircle,  label: 'Out of service' };
-    case 'MAINTENANCE':    return { badge: 'bg-slate-100 text-slate-700 ring-slate-200',           accent: 'bg-slate-400',  icon: Wrench,       label: 'Maintenance' };
-    default:               return { badge: 'bg-slate-100 text-slate-700 ring-slate-200',           accent: 'bg-slate-300',  icon: Package,      label: titleCase(status) };
+    case 'AVAILABLE':      return { badge: 'bg-agap-greenSoft text-agap-green ring-agap-green/20', accent: 'bg-agap-green', icon: CheckCircle2, label: resourceStatusLabel(status) };
+    case 'DISPATCHED':     return { badge: 'bg-amber-50 text-amber-800 ring-amber-200',            accent: 'bg-amber-500',  icon: Radio,        label: resourceStatusLabel(status) };
+    case 'EN_ROUTE':       return { badge: 'bg-blue-50 text-blue-700 ring-blue-200',               accent: 'bg-blue-500',   icon: MapPin,       label: resourceStatusLabel(status) };
+    case 'ON_SCENE':       return { badge: 'bg-purple-50 text-purple-700 ring-purple-200',         accent: 'bg-purple-500', icon: MapPin,       label: resourceStatusLabel(status) };
+    case 'TRANSPORTING':   return { badge: 'bg-indigo-50 text-indigo-700 ring-indigo-200',         accent: 'bg-indigo-500', icon: Truck,        label: resourceStatusLabel(status) };
+    case 'RETURNING':      return { badge: 'bg-sky-50 text-sky-700 ring-sky-200',                  accent: 'bg-sky-500',    icon: Undo2,        label: resourceStatusLabel(status) };
+    case 'RESERVED':       return { badge: 'bg-amber-50 text-amber-800 ring-amber-200',            accent: 'bg-amber-400',  icon: Clock,        label: resourceStatusLabel(status) };
+    case 'OUT_OF_SERVICE': return { badge: 'bg-red-50 text-red-700 ring-red-200',                  accent: 'bg-red-500',    icon: Wrench,       label: resourceStatusLabel(status) };
+    case 'OFFLINE':        return { badge: 'bg-slate-100 text-slate-700 ring-slate-200',           accent: 'bg-slate-400',  icon: WifiOff,      label: resourceStatusLabel(status) };
+    default:               return { badge: 'bg-slate-100 text-slate-700 ring-slate-200',           accent: 'bg-slate-300',  icon: Package,      label: resourceStatusLabel(status) };
   }
 }
 
@@ -179,7 +185,7 @@ function SearchField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={label}
-        className="h-10 w-full rounded-xl border border-agap-track bg-white pl-9 pr-9 text-sm text-agap-textMain placeholder:text-slate-500 focus:border-agap-green/50 focus:outline-none focus:ring-2 focus:ring-agap-green/20 [&::-webkit-search-cancel-button]:hidden"
+        className="h-11 w-full rounded-xl border border-agap-textSub bg-white pl-9 pr-9 text-sm text-agap-textMain placeholder:text-slate-500 focus:border-agap-green/50 focus:outline-none focus:ring-2 focus:ring-agap-green/20 [&::-webkit-search-cancel-button]:hidden"
       />
       {value && (
         <button
@@ -281,8 +287,16 @@ function UnitCard({ resource, canChangeStatus }: { resource: Resource; canChange
       {capabilities.length > 0 && (
         <ul aria-label="Capabilities" className="flex flex-wrap gap-1.5">
           {capabilities.slice(0, 4).map((c) => (
-            <li key={c} className="rounded-md bg-agap-surface px-2 py-0.5 text-[11px] font-semibold text-agap-textMid">
-              {c}
+            <li
+              key={c.id}
+              className={cn(
+                'rounded-md px-2 py-0.5 text-[11px] font-semibold',
+                c.is_verified
+                  ? 'bg-agap-surface text-agap-textMid'
+                  : 'border border-dashed border-agap-amber/60 bg-white text-agap-amber',
+              )}
+            >
+              {capabilityChipLabel(c)}
             </li>
           ))}
           {capabilities.length > 4 && (
@@ -299,7 +313,7 @@ function UnitCard({ resource, canChangeStatus }: { resource: Resource; canChange
             onValueChange={(s) => updateStatus.mutate({ id: resource.id, status: s })}
             disabled={updateStatus.isPending}
           >
-            <SelectTrigger aria-label={`Change status of ${resource.name}`} className="h-10 w-full text-sm">
+            <SelectTrigger aria-label={`Change status of ${resource.name}`} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -439,7 +453,7 @@ function FleetUnitsView(): JSX.Element {
               <SearchField value={unitSearch} onChange={setUnitSearch} placeholder="Name, call sign or organization" label="Search units" />
               {orgs.length > 0 && (
                 <Select value={orgFilter} onValueChange={setOrgFilter}>
-                  <SelectTrigger aria-label="Filter by organization" className="h-10 w-full sm:w-52"><SelectValue placeholder="All organizations" /></SelectTrigger>
+                  <SelectTrigger aria-label="Filter by organization" className="w-full sm:w-52"><SelectValue placeholder="All organizations" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL}>All organizations</SelectItem>
                     {orgs.map((o) => (
@@ -449,7 +463,7 @@ function FleetUnitsView(): JSX.Element {
                 </Select>
               )}
               <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger aria-label="Filter by unit type" className="h-10 w-full sm:w-48"><SelectValue placeholder="All types" /></SelectTrigger>
+                <SelectTrigger aria-label="Filter by unit type" className="w-full sm:w-48"><SelectValue placeholder="All types" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL}>All types</SelectItem>
                   {RESOURCE_TYPES.map((t) => (
@@ -586,7 +600,11 @@ function FleetAndUnits(): JSX.Element {
         <div className="min-w-0">
           <h1 className="text-[22px] font-bold leading-tight tracking-tight text-agap-textMain">Fleet &amp; Units</h1>
           <p className="mt-1 text-[13px] text-slate-600">
-            {registryOnly ? 'Response units registered to your organizations' : 'Unit readiness and responder availability'}
+            {!registryOnly
+              ? 'Unit readiness and responder availability'
+              : hasRole(user, 'ORG_ADMINISTRATOR')
+                ? "Register and maintain your organization's response units and their capabilities"
+                : "Every organization's registered response units"}
           </p>
         </div>
         {!registryOnly && <ConnectionIndicator state={wsState} />}

@@ -23,6 +23,7 @@ import type {
   AiSuggestionCreatedPayload,
 } from '@agap/shared';
 import type { IncidentListItem, IncidentTransport } from '@/features/incidents/api';
+import { patchIncidentInList } from '@/features/incidents/live-patch';
 import type { LatestUnitPosition, LiveResponderPosition } from '@/features/map/api';
 import {
   applyEtaUpdate, applyRouteUpdate, applyTransportUpdate, mergeResponderLocations, transportUpdateNotices,
@@ -98,14 +99,7 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
         startTransition(() => {
           qc.setQueriesData<{ data: IncidentListItem[] } | IncidentListItem[]>(
             { queryKey: ['incidents'], exact: false },
-            (old) => {
-              if (!old) return old;
-              const list: IncidentListItem[] = Array.isArray(old) ? old : (old as { data: IncidentListItem[] }).data ?? [];
-              const updated = list.map((inc) =>
-                inc.id === incidentId ? { ...inc, status: newStatus } : inc,
-              );
-              return Array.isArray(old) ? updated : { ...(old as object), data: updated };
-            },
+            (old) => patchIncidentInList(old, incidentId, { status: newStatus }),
           );
 
           const patchStatus = (old: unknown) =>
@@ -190,12 +184,26 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
     );
 
     // ─── incident.updated ────────────────────────────────────────────────────
-    const offUpdated = onIncidentEvent<{ incidentId: string }>(
+    const offUpdated = onIncidentEvent<{ incidentId: string; priority?: string }>(
       'incident.updated',
-      ({ incidentId }) => {
+      ({ incidentId, priority }) => {
         startTransition(() => {
           qc.invalidateQueries({ queryKey: ['incident', incidentId] });
           qc.invalidateQueries({ queryKey: ['dispatch-incident', incidentId] });
+          // A triage priority change: the queue and dashboard chips flip now, and the
+          // Critical count is recounted by the server.
+          if (priority) {
+            qc.setQueriesData<{ data: IncidentListItem[] } | IncidentListItem[]>(
+              { queryKey: ['incidents'], exact: false },
+              (old) => patchIncidentInList(old, incidentId, { priority }),
+            );
+            qc.setQueriesData<{ data: IncidentListItem[] }>(
+              { queryKey: ['dispatch-incidents'], exact: false },
+              (old) => patchIncidentInList(old, incidentId, { priority }),
+            );
+            qc.invalidateQueries({ queryKey: ['dispatch-summary'] });
+            qc.invalidateQueries({ queryKey: ['oversight'] });
+          }
         });
       },
     );

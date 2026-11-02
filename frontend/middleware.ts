@@ -30,6 +30,9 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
+// v1/ and socket.io/ are the API and Socket.io endpoints next.config.mjs forwards to the backend,
+// which checks each request's own token. They must not reach middleware at all: Next also runs
+// middleware on WebSocket upgrades, and that drops the Socket.io connection.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api|v1/|socket\\.io/).*)'],
 };

@@ -14,10 +14,38 @@ describe('ResourcesService.findAll — registry Organization column (MOD-27)', (
     const [row] = await service.findAll({});
 
     expect(prisma.resources.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      include: { organizations: { select: { id: true, name: true, short_name: true } } },
+      include: {
+        organizations: { select: { id: true, name: true, short_name: true } },
+        resource_capability_assignments: { include: { resource_capabilities: true }, orderBy: { assigned_at: 'asc' } },
+      },
     }));
-    expect(row).toMatchObject({ organization: org });
+    expect(row).toMatchObject({ organization: org, capabilities: [] });
     expect(row).not.toHaveProperty('organizations');
+  });
+
+  it('returns each unit with its capabilities and whether each is verified (MOD-29)', async () => {
+    const prisma = {
+      resources: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'unit-1',
+          organization_id: 'org-1',
+          organizations: { id: 'org-1', name: 'MDRRMO', short_name: null },
+          resource_capability_assignments: [
+            { is_verified: true, resource_capabilities: { id: 'cap-1', name: 'WATER_RESCUE', category: 'FLOOD', description: 'x' } },
+            { is_verified: false, resource_capabilities: { id: 'cap-2', name: 'ROPE_RESCUE', category: 'RESCUE', description: 'y' } },
+          ],
+        }]),
+      },
+    };
+    const service = new ResourcesService(prisma as any, {} as any);
+
+    const [row] = await service.findAll({});
+
+    expect(row!.capabilities).toEqual([
+      { id: 'cap-1', name: 'WATER_RESCUE', category: 'FLOOD', is_verified: true },
+      { id: 'cap-2', name: 'ROPE_RESCUE', category: 'RESCUE', is_verified: false },
+    ]);
+    expect(row).not.toHaveProperty('resource_capability_assignments');
   });
 });
 

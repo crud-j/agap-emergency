@@ -17,7 +17,8 @@ function build(opts: { existing?: boolean; createFails?: boolean } = {}) {
   };
   const tx = {
     dispatches: { create: jest.fn().mockResolvedValue(dispatchRow) },
-    $queryRaw: jest.fn(),
+    // The incident row lock taken by create() (Phase 5).
+    $queryRaw: jest.fn().mockResolvedValue([{ status: 'ASSESSED' }]),
     dispatch_crew: { createMany: jest.fn() },
     resources: { update: jest.fn() },
     incident: { update: jest.fn() },

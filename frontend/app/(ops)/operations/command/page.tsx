@@ -9,7 +9,7 @@ import {
 import {
   Button, Badge, DataTable,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
   Skeleton, EmptyState,
   type Column,
 } from '@/components/ui';
@@ -23,11 +23,14 @@ import {
   useAddIcsPosition,
   useRemoveIcsPosition,
   useHandovers,
-  useCreateHandover,
   useAcknowledgeHandover,
+  useHandoverRecipients,
 } from '@/features/incidents/command-hooks';
+import { useResponders } from '@/features/responders/hooks';
+import { buildIcsCandidates } from '@/features/incidents/ics-candidates';
 import type { IcsAssignment, HandoverRecord } from '@/features/incidents/command';
 import { cn } from '@/lib/utils';
+import { CreateHandoverDialog } from '@/components/command/CreateHandoverDialog';
 import {
   AgencyCoordinationPanel,
   CommandBriefPanel,
@@ -152,24 +155,44 @@ function AddPositionDialog({
   incidentId,
   open,
   onClose,
+  assignments,
 }: {
   incidentId: string;
   open: boolean;
   onClose: () => void;
+  /** Current (not relieved) assignments, to show who already holds a position. */
+  assignments: IcsAssignment[];
 }): JSX.Element {
   const [position, setPosition] = useState('');
   const [userId, setUserId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const add = useAddIcsPosition();
 
+  // Pick by name instead of typing a user UUID: active Dispatchers and Supervisors
+  // (the handover list) plus Responders, with the signed-in Supervisor first.
+  const user = useAuthUser();
+  const staff = useHandoverRecipients(open);
+  const responders = useResponders(undefined, { enabled: open });
+  const loadingPeople = staff.isLoading || responders.isLoading;
+  const groups = buildIcsCandidates({
+    self: user,
+    staff: staff.data ?? [],
+    responders: responders.data ?? [],
+  });
+  const heldBy = new Map<string, string[]>();
+  for (const a of assignments) {
+    if (!a.users) continue;
+    heldBy.set(a.users.id, [...(heldBy.get(a.users.id) ?? []), positionLabel(a.position)]);
+  }
+
   async function handleConfirm() {
-    if (!position || !userId.trim()) {
-      setError('Position and User ID are required.');
+    if (!position || !userId) {
+      setError(!position ? 'Choose a position.' : 'Choose who will hold this position.');
       return;
     }
     try {
       setError(null);
-      await add.mutateAsync({ incidentId, data: { position, userId: userId.trim() } });
+      await add.mutateAsync({ incidentId, data: { position, userId } });
       setPosition('');
       setUserId('');
       onClose();
@@ -189,11 +212,11 @@ function AddPositionDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
-              Position <span className="text-agap-danger">*</span>
+            <label id="ics-position-label" className="block text-xs font-semibold text-agap-textMid uppercase tracking-wide mb-1.5">
+              Position <span className="text-agap-danger" aria-hidden="true">*</span>
             </label>
-            <Select value={position} onValueChange={setPosition}>
-              <SelectTrigger>
+            <Select value={position} onValueChange={(v) => { setPosition(v); setError(null); }}>
+              <SelectTrigger aria-labelledby="ics-position-label">
                 <SelectValue placeholder="Select position" />
               </SelectTrigger>
               <SelectContent>
@@ -204,18 +227,46 @@ function AddPositionDialog({
             </Select>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
-              User ID <span className="text-agap-danger">*</span>
+            <label id="ics-person-label" className="block text-xs font-semibold text-agap-textMid uppercase tracking-wide mb-1.5">
+              Assign to <span className="text-agap-danger" aria-hidden="true">*</span>
             </label>
-            <input
-              type="text"
+            <Select
               value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              placeholder="User UUID"
-              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green font-mono"
-            />
+              onValueChange={(v) => { setUserId(v); setError(null); }}
+              disabled={loadingPeople || groups.length === 0}
+            >
+              <SelectTrigger aria-labelledby="ics-person-label" aria-describedby="ics-person-help">
+                <SelectValue
+                  placeholder={
+                    loadingPeople ? 'Loading people…'
+                    : groups.length === 0 ? 'No one available to assign'
+                    : 'Select a person'
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {groups.map((group) => (
+                  <SelectGroup key={group.label}>
+                    <SelectLabel>{group.label}</SelectLabel>
+                    {group.people.map((p) => {
+                      const held = heldBy.get(p.id);
+                      return (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name} · {p.detail}{held ? ` — now ${held.join(', ')}` : ''}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
+            </Select>
+            <p id="ics-person-help" className="mt-1.5 text-xs text-slate-500">
+              {staff.isError || responders.isError
+                ? "Part of the list couldn't load. Close and reopen to try again."
+                : 'Supervisors, dispatchers and responders who can sign in.'}
+            </p>
           </div>
-          {error && <p className="text-xs text-agap-danger">{error}</p>}
+          {error && <p role="alert" className="text-xs text-agap-danger">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -399,110 +450,9 @@ function IcsPanel({ incidentId }: { incidentId: string }): JSX.Element {
         incidentId={incidentId}
         open={addPosOpen}
         onClose={() => setAddPosOpen(false)}
+        assignments={ics.ics_assignments.filter((a) => !a.relieved_at)}
       />
     </div>
-  );
-}
-
-// ─── Create Handover dialog (MOD-44) ───────────────────────────────────────────
-
-function CreateHandoverDialog({
-  incidentId,
-  open,
-  onClose,
-}: {
-  incidentId: string;
-  open: boolean;
-  onClose: () => void;
-}): JSX.Element {
-  const [toUserId, setToUserId] = useState('');
-  const [summary, setSummary] = useState('');
-  const [actionsText, setActionsText] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const create = useCreateHandover();
-
-  async function handleConfirm() {
-    if (!toUserId.trim() || !summary.trim()) {
-      setError('Incoming operator and situation summary are required.');
-      return;
-    }
-    const pendingActions = actionsText.split('\n').map((s) => s.trim()).filter(Boolean);
-    try {
-      setError(null);
-      await create.mutateAsync({
-        incidentId,
-        data: {
-          toUserId: toUserId.trim(),
-          situationSummary: summary.trim(),
-          ...(pendingActions.length > 0 && { pendingActions }),
-        },
-      });
-      setToUserId(''); setSummary(''); setActionsText('');
-      onClose();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Handover failed.');
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ArrowRightLeft size={16} className="text-agap-green" />
-            Hand Over Incident
-          </DialogTitle>
-          <DialogDescription>
-            Transfer this incident to the incoming operator with a situation summary and open actions.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
-              Incoming operator (User ID) <span className="text-agap-danger">*</span>
-            </label>
-            <input
-              type="text"
-              value={toUserId}
-              onChange={(e) => setToUserId(e.target.value)}
-              placeholder="User UUID"
-              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
-              Situation summary <span className="text-agap-danger">*</span>
-            </label>
-            <textarea
-              rows={3}
-              value={summary}
-              onChange={(e) => setSummary(e.target.value)}
-              placeholder="Current status, patient condition, agencies on scene…"
-              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green resize-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
-              Pending actions <span className="text-agap-textSub font-normal normal-case">(one per line, optional)</span>
-            </label>
-            <textarea
-              rows={3}
-              value={actionsText}
-              onChange={(e) => setActionsText(e.target.value)}
-              placeholder="Confirm ETA with receiving hospital.&#10;Request additional rescue boat."
-              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green resize-none"
-            />
-          </div>
-          {error && <p className="text-xs text-agap-danger">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={create.isPending} onClick={handleConfirm}>
-            Hand over
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

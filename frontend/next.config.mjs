@@ -19,9 +19,22 @@ try {
   // Non-fatal: e.g. in CI environments where node_modules may be absent.
 }
 
+const backendUrl = process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:3000';
+
+// In dev (and with PROXY_API=true) the browser calls the API and Socket.io on the web app's
+// own origin, and Next forwards them to the backend. One address then works from
+// localhost and through a tunnel (scripts/dev/share.ps1) at the same time. It has to be
+// one origin: the web refresh cookie is SameSite=Strict, and two tunnel hostnames are two sites.
+// A production build keeps using NEXT_PUBLIC_API_URL / NEXT_PUBLIC_WS_URL.
+const proxyApi = process.env.NODE_ENV !== 'production' || process.env.PROXY_API === 'true';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Empty base URL = same origin. Overrides any NEXT_PUBLIC_API_URL from .env files.
+  ...(proxyApi ? { env: { NEXT_PUBLIC_API_URL: '', NEXT_PUBLIC_WS_URL: '' } } : {}),
+  // Socket.io's path ends in a slash (/socket.io/?EIO=4…); Next would redirect it away.
+  ...(proxyApi ? { skipTrailingSlashRedirect: true } : {}),
   transpilePackages: ['@agap/shared'],
   images: {
     domains: [],
@@ -51,8 +64,15 @@ const nextConfig = {
       // of the API is exposed through it.
       {
         source: '/v1/public/barangay/:path*',
-        destination: `${process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:3000'}/v1/public/barangay/:path*`,
+        destination: `${backendUrl}/v1/public/barangay/:path*`,
       },
+      ...(proxyApi
+        ? [
+            { source: '/v1/:path*', destination: `${backendUrl}/v1/:path*` },
+            // Exact path: a :path* rule would drop the trailing slash Socket.io requires.
+            { source: '/socket.io/', destination: `${backendUrl}/socket.io/` },
+          ]
+        : []),
     ];
   },
 

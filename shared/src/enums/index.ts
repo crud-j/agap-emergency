@@ -10,3 +10,4 @@ export * from './notification-channel.enum';
 export * from './audit-action.enum';
 export * from './reporter-type.enum';
 export * from './user-sex.enum';
+export * from './resource-status.enum';

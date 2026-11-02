@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -25,10 +32,33 @@ export class ResourcesService {
     const rows = await this.prisma.resources.findMany({
       where,
       orderBy: { created_at: 'desc' },
-      include: { organizations: { select: { id: true, name: true, short_name: true } } },
+      include: {
+        organizations: { select: { id: true, name: true, short_name: true } },
+        resource_capability_assignments: {
+          include: { resource_capabilities: true },
+          orderBy: { assigned_at: 'asc' },
+        },
+      },
     });
-    // The registry and fleet board read `organization` (MOD-27).
-    return rows.map(({ organizations, ...resource }) => ({ ...resource, organization: organizations }));
+    // The registry and fleet board read `organization` (MOD-27) and `capabilities` (MOD-29).
+    return rows.map(({ organizations, resource_capability_assignments, ...resource }) => ({
+      ...resource,
+      organization: organizations,
+      capabilities: (resource_capability_assignments ?? []).map((a) => ({
+        id: a.resource_capabilities.id,
+        name: a.resource_capabilities.name,
+        category: a.resource_capabilities.category,
+        is_verified: a.is_verified,
+      })),
+    }));
+  }
+
+  /** MOD-29 capability catalog, for the registry's Capabilities dialog. */
+  async listCapabilities() {
+    return this.prisma.resource_capabilities.findMany({
+      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      select: { id: true, name: true, category: true, description: true },
+    });
   }
 
   async findAvailable() {
@@ -112,24 +142,96 @@ export class ResourcesService {
     return updated;
   }
 
+  // ── MOD-29 capability assignments ────────────────────────────────────────────
+  // An organization claims a capability for its own unit (unverified); a Supervisor or
+  // System Administrator verifies it. The recommender counts verified ones only.
+
   async addCapability(resourceId: string, capabilityId: string, actor: OrgActor) {
     const resource = await this.findById(resourceId);
     await assertCanManageOrg(this.prisma, actor, resource.organization_id);
+    const capability = await this.prisma.resource_capabilities.findUnique({ where: { id: capabilityId } });
+    if (!capability) throw new NotFoundException('Capability not found');
     const existing = await this.prisma.resource_capability_assignments.findFirst({
       where: { resource_id: resourceId, capability_id: capabilityId },
     });
     if (existing) throw new BadRequestException('Capability already assigned');
-    return this.prisma.resource_capability_assignments.create({
+    const assignment = await this.prisma.resource_capability_assignments.create({
       data: { resource_id: resourceId, capability_id: capabilityId },
     });
+
+    void this.audit.log({
+      action: AuditAction.CREATE,
+      actorId: actor.id,
+      actorRole: actor.role,
+      entityType: 'resource_capability',
+      entityId: assignment.id,
+      moduleId: 'MOD-29',
+      newValues: {
+        resource_id: resourceId,
+        call_sign: resource.call_sign ?? resource.name,
+        capability: capability.name,
+        is_verified: false,
+      },
+    });
+    return assignment;
   }
 
   async removeCapability(resourceId: string, capabilityId: string, actor: OrgActor) {
     const resource = await this.findById(resourceId);
     await assertCanManageOrg(this.prisma, actor, resource.organization_id);
-    await this.prisma.resource_capability_assignments.deleteMany({
-      where: { resource_id: resourceId, capability_id: capabilityId },
+    const assignment = await this.findAssignment(resourceId, capabilityId);
+    await this.prisma.resource_capability_assignments.delete({ where: { id: assignment.id } });
+
+    void this.audit.log({
+      action: AuditAction.DELETE,
+      actorId: actor.id,
+      actorRole: actor.role,
+      entityType: 'resource_capability',
+      entityId: assignment.id,
+      moduleId: 'MOD-29',
+      oldValues: {
+        resource_id: resourceId,
+        call_sign: resource.call_sign ?? resource.name,
+        capability: assignment.resource_capabilities.name,
+        is_verified: assignment.is_verified,
+      },
     });
+  }
+
+  /** Not org-scoped: the verifier is deliberately not the organization that claimed it. */
+  async verifyCapability(resourceId: string, capabilityId: string, verified: boolean, actor: OrgActor) {
+    const resource = await this.findById(resourceId);
+    const assignment = await this.findAssignment(resourceId, capabilityId);
+    const updated = await this.prisma.resource_capability_assignments.update({
+      where: { id: assignment.id },
+      data: { is_verified: verified },
+    });
+
+    void this.audit.log({
+      action: AuditAction.UPDATE,
+      actorId: actor.id,
+      actorRole: actor.role,
+      entityType: 'resource_capability',
+      entityId: assignment.id,
+      moduleId: 'MOD-29',
+      oldValues: { is_verified: assignment.is_verified },
+      newValues: {
+        resource_id: resourceId,
+        call_sign: resource.call_sign ?? resource.name,
+        capability: assignment.resource_capabilities.name,
+        is_verified: verified,
+      },
+    });
+    return updated;
+  }
+
+  private async findAssignment(resourceId: string, capabilityId: string) {
+    const assignment = await this.prisma.resource_capability_assignments.findFirst({
+      where: { resource_id: resourceId, capability_id: capabilityId },
+      include: { resource_capabilities: true },
+    });
+    if (!assignment) throw new NotFoundException('Capability is not assigned to this unit');
+    return assignment;
   }
 
   async recommend(incidentId: string) {
@@ -251,12 +353,30 @@ export class ResourcesService {
 
   /** Resolve the actor's primary organization for outbound resource requests. */
   async resolveOrgForUser(userId: string): Promise<string> {
+    const orgId = await this.findOrgIdForUser(userId);
+    if (!orgId) {
+      throw new BadRequestException('Actor is not a member of any organization');
+    }
+    return orgId;
+  }
+
+  /**
+   * The organization answering a mutual-aid request (approve, deny, legacy respond).
+   * An actor with no organization, usually the System Administrator, gets a 403:
+   * only an organization can provide units, and Super Admin access is read-only here.
+   */
+  async resolveAnsweringOrg(userId: string): Promise<string> {
+    const orgId = await this.findOrgIdForUser(userId);
+    if (!orgId) {
+      throw new ForbiddenException("Only an organization's administrator can provide units");
+    }
+    return orgId;
+  }
+
+  private async findOrgIdForUser(userId: string): Promise<string | null> {
     const membership = await this.prisma.organization_memberships.findFirst({
       where: { user_id: userId, is_active: true },
     });
-    if (!membership) {
-      throw new BadRequestException('Actor is not a member of any organization');
-    }
-    return membership.organization_id;
+    return membership?.organization_id ?? null;
   }
 }

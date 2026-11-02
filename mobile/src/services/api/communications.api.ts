@@ -1,4 +1,5 @@
-import { apiFetch } from './http';
+import { authedFetch } from './authed-fetch';
+import { readJson } from './http';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -17,20 +18,17 @@ export interface IncidentMessage {
   sender_label: string;
 }
 
-export function getIncidentMessages(incidentId: string, token: string): Promise<IncidentMessage[]> {
-  return apiFetch(`${API_BASE}/v1/communications/${incidentId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+// authedFetch refreshes an expired access token, so an open chat keeps working
+// past the 15-minute token lifetime.
+export async function getIncidentMessages(incidentId: string): Promise<IncidentMessage[]> {
+  return readJson(await authedFetch(`${API_BASE}/v1/communications/${incidentId}`));
 }
 
-export function sendIncidentMessage(
-  incidentId: string,
-  messageText: string,
-  token: string,
-): Promise<IncidentMessage> {
-  return apiFetch(`${API_BASE}/v1/communications/${incidentId}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ messageText }),
-  });
+export async function sendIncidentMessage(incidentId: string, messageText: string): Promise<IncidentMessage> {
+  return readJson(
+    await authedFetch(`${API_BASE}/v1/communications/${incidentId}`, {
+      method: 'POST',
+      body: JSON.stringify({ messageText }),
+    }),
+  );
 }

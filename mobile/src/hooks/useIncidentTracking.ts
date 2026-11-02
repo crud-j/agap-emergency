@@ -9,9 +9,9 @@ import type {
   ResponderRouteUpdatedPayload,
 } from '@agap/shared';
 import { useAuthStore } from '@/src/stores/auth.store';
-import { connectSocket } from '@/src/services/websocket/agap-socket';
+import { DISCONNECTED_POLL_MS, connectSocket, watchIncidentRoom } from '@/src/services/websocket/agap-socket';
 import { getLatestTrackingPositions, type LatestUnitPosition } from '@/src/services/api/locations.api';
-import { mergeRouteUpdate, mergeTrackingLocation, mergeTransportUpdate } from '@/src/lib/incident-tracking';
+import { mergeRouteUpdate, mergeTrackingLocation, mergeTransportUpdate, selectPrimaryUnit } from '@/src/lib/incident-tracking';
 import { deriveTransportView, type TransportView } from '@/src/lib/transport-view';
 import type { DestinationNotice } from '@/src/lib/transport-target';
 
@@ -27,6 +27,8 @@ export interface IncidentTrackingState {
   connected: boolean;
   status: string | null;
   responder: ResponderPosition | null;
+  /** The dispatch `responder` belongs to; the map draws the other units beside it. */
+  responderDispatchId: string | null;
   hasAcceptedDispatch: boolean;
   callSign: string | null;
   unitName: string | null;
@@ -44,14 +46,6 @@ export interface IncidentTrackingState {
 }
 
 const trackingQueryKey = (incidentId: string) => ['incident-tracking-latest', incidentId] as const;
-/** REST poll while the socket is down (plan §19); none while it is connected. */
-const DISCONNECTED_POLL_MS = 15_000;
-/**
- * How many mounted hooks watch each incident on the shared socket. The room is left
- * only when the last one unmounts, so closing one screen (e.g. the assignment detail)
- * does not stop another (the responder Map tab) from receiving the incident's events.
- */
-const roomWatchers = new Map<string, number>();
 
 /**
  * Live incident tracking (MOD-13 / MOD-42 / MOD-43). Joins the incident's room,
@@ -68,6 +62,7 @@ export function useIncidentTracking(
     connected: false,
     status: initialStatus ?? null,
     responder: null,
+    responderDispatchId: null,
     hasAcceptedDispatch: false,
     callSign: null,
     unitName: null,
@@ -88,18 +83,20 @@ export function useIncidentTracking(
     },
     enabled: !!incidentId && !!token,
     refetchOnReconnect: true,
+    // REST poll while the socket is down (plan §19); none while it is connected.
     refetchInterval: state.connected ? false : DISCONNECTED_POLL_MS,
   });
 
   useEffect(() => {
     if (!incidentId || !token) return;
 
-    const socket = connectSocket(token);
-    roomWatchers.set(incidentId, (roomWatchers.get(incidentId) ?? 0) + 1);
+    // The shared socket joins the room once per connect and leaves it only when the
+    // last screen watching this incident (e.g. the chat over Tracking) releases it.
+    const release = watchIncidentRoom(incidentId);
+    const socket = connectSocket();
 
     const join = () => {
       setState((s) => ({ ...s, connected: true }));
-      socket.emit('join:incident', { incidentId });
       void refetch();
     };
     const onDisconnect = () => setState((s) => ({ ...s, connected: false }));
@@ -168,13 +165,7 @@ export function useIncidentTracking(
     socket.on('incident.status_changed', onStatus);
 
     return () => {
-      const watchers = (roomWatchers.get(incidentId) ?? 1) - 1;
-      if (watchers > 0) {
-        roomWatchers.set(incidentId, watchers);
-      } else {
-        roomWatchers.delete(incidentId);
-        socket.emit('leave:incident', { incidentId });
-      }
+      release();
       socket.off('connect', join);
       socket.off('disconnect', onDisconnect);
       socket.off('responder.location_updated', onResponderLocation);
@@ -186,12 +177,7 @@ export function useIncidentTracking(
   }, [incidentId, token, queryClient, refetch]);
 
   const units = seededUnits ?? [];
-  const selectedUnit =
-    units.filter((unit) => unit.position).sort((a, b) =>
-      Date.parse(b.position?.updatedAt ?? '') - Date.parse(a.position?.updatedAt ?? ''),
-    )[0] ??
-    units[0] ??
-    null;
+  const selectedUnit = selectPrimaryUnit(units);
   const position = selectedUnit?.position ?? null;
   const transport = deriveTransportView(state.status ?? initialStatus, units);
 
@@ -205,6 +191,7 @@ export function useIncidentTracking(
           updatedAt: position.updatedAt,
         }
       : null,
+    responderDispatchId: selectedUnit?.dispatchId ?? null,
     hasAcceptedDispatch: units.length > 0,
     callSign: selectedUnit?.callSign ?? null,
     unitName: selectedUnit?.unitName ?? null,

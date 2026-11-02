@@ -7,7 +7,13 @@ import type {
   TransportDestinationView,
 } from '@agap/shared';
 import type { LatestUnitPosition } from '@/src/services/api/locations.api';
-import { mergeRouteUpdate, mergeTrackingLocation, mergeTransportUpdate } from '../incident-tracking';
+import {
+  mergeRouteUpdate,
+  mergeTrackingLocation,
+  mergeTransportUpdate,
+  otherSceneUnits,
+  selectPrimaryUnit,
+} from '../incident-tracking';
 
 const seededUnit: LatestUnitPosition = {
   dispatchId: 'dispatch-1',
@@ -163,5 +169,45 @@ describe('mergeTransportUpdate (incident.transport_updated)', () => {
 
   it('does nothing before the seed has loaded', () => {
     expect(mergeTransportUpdate(undefined, changed(malolos))).toBeUndefined();
+  });
+});
+
+describe('several units on one incident (MOD-30/31 second unit)', () => {
+  const at = (minute: number) => `2026-10-18T01:0${minute}:00.000Z`;
+  const unit = (dispatchId: string, minute: number | null, extra: Partial<LatestUnitPosition> = {}): LatestUnitPosition => ({
+    ...seededUnit,
+    dispatchId,
+    callSign: dispatchId.toUpperCase(),
+    position: minute === null ? null : { ...seededUnit.position!, updatedAt: at(minute) },
+    ...extra,
+  });
+
+  it('follows the unit with the most recent position', () => {
+    expect(selectPrimaryUnit([unit('a', 1), unit('b', 3), unit('c', null)])?.dispatchId).toBe('b');
+  });
+
+  it('falls back to the first unit when none has a position, and to null when there are none', () => {
+    expect(selectPrimaryUnit([unit('a', null), unit('b', null)])?.dispatchId).toBe('a');
+    expect(selectPrimaryUnit([])).toBeNull();
+  });
+
+  it('marks every other positioned unit with its call sign', () => {
+    const markers = otherSceneUnits([unit('a', 1), unit('b', 3), unit('c', null)], 'b');
+    expect(markers).toEqual([
+      expect.objectContaining({ dispatchId: 'a', label: 'A', lat: 14.5, lng: 120.9, heading: 90, updatedAt: at(1) }),
+    ]);
+  });
+
+  it('never draws a hospital-leg unit beside the followed one (C17)', () => {
+    const markers = otherSceneUnits(
+      [unit('a', 1, { leg: 'TO_FACILITY' }), unit('b', 2, { leg: 'AT_FACILITY' }), unit('c', 3, { leg: 'TO_SCENE' })],
+      null,
+    );
+    expect(markers.map((m) => m.dispatchId)).toEqual(['c']);
+  });
+
+  it('labels a unit without a call sign by its name', () => {
+    const [marker] = otherSceneUnits([unit('a', 1, { callSign: null, unitName: 'Rescue Boat' })], null);
+    expect(marker?.label).toBe('Rescue Boat');
   });
 });

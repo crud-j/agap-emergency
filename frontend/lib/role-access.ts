@@ -47,8 +47,9 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/operations/fleet', roles: [DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
   // Old Registry route; redirects to the Fleet & Units Registry tab.
   { prefix: '/resources', roles: [DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
-  // Mutual-aid requests to answer for the Org Administrator's organization.
-  { prefix: '/resources/requests', roles: [ORG_ADMIN] },
+  // Mutual-aid requests to answer for the Org Administrator's organization. The System
+  // Administrator can view them read-only (GET /resources/requests already allows it).
+  { prefix: '/resources/requests', roles: [ORG_ADMIN, SYS_ADMIN] },
   // Org Administrators of hospital organizations register their own hospitals (MOD-39).
   { prefix: '/hospitals', roles: [HOSPITAL_USER, DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
 
@@ -141,7 +142,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/organizations', label: 'Organizations', roles: [ORG_ADMIN, SYS_ADMIN] },
       { href: '/operations/fleet', label: 'Fleet & Units', roles: [DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
-      { href: '/resources/requests', label: 'Requests', roles: [ORG_ADMIN] },
+      { href: '/resources/requests', label: 'Requests', roles: [ORG_ADMIN, SYS_ADMIN] },
       { href: '/hospitals', label: 'Hospitals & Facilities', roles: [HOSPITAL_USER, DISPATCHER, SUPERVISOR, ORG_ADMIN, SYS_ADMIN] },
     ],
   },

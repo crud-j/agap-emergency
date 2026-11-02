@@ -69,7 +69,14 @@ export async function apiFetch<T = unknown>(
   } catch (err) {
     throw new NetworkError(err);
   }
+  return readJson<T>(res);
+}
 
+/**
+ * Parse a response the way apiFetch does: the server's message as an ApiError on a
+ * non-2xx status, the JSON body otherwise. For authedFetch callers too.
+ */
+export async function readJson<T = unknown>(res: Response): Promise<T> {
   if (!res.ok) {
     let body: unknown = {};
     try { body = await res.json(); } catch { /* non-JSON error body */ }

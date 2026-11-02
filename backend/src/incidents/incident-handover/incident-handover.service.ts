@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { RealtimeService } from '../../realtime/realtime.service';
+import { BLOCKED_ACCOUNT_STATUSES, isAccountBlocked } from '../../auth/account-status';
 import { AuditAction } from '@agap/shared';
 
 import { CreateHandoverDto } from './dto/create-handover.dto';
@@ -34,7 +35,7 @@ export class IncidentHandoverService {
       where: { id: dto.toUserId },
       select: { role: true, status: true },
     });
-    if (!recipient || recipient.status !== 'ACTIVE' || !(HANDOVER_ROLES as readonly string[]).includes(recipient.role)) {
+    if (!recipient || isAccountBlocked(recipient.status) || !(HANDOVER_ROLES as readonly string[]).includes(recipient.role)) {
       throw new BadRequestException('The incoming operator must be an active Dispatcher or Supervisor.');
     }
 
@@ -73,10 +74,18 @@ export class IncidentHandoverService {
     return handover;
   }
 
-  /** Active dispatchers and supervisors who can receive a handover, except the caller. */
+  /**
+   * Dispatchers and supervisors who can receive a handover, except the caller.
+   * "Can sign in" (account-status.ts), not `status = ACTIVE`: staff accounts stay
+   * PENDING_VERIFICATION, so an ACTIVE-only filter listed nobody.
+   */
   async recipients(callerId: string) {
     return this.prisma.user.findMany({
-      where: { role: { in: [...HANDOVER_ROLES] }, status: 'ACTIVE', id: { not: callerId } },
+      where: {
+        role: { in: [...HANDOVER_ROLES] },
+        status: { notIn: [...BLOCKED_ACCOUNT_STATUSES] as any[] },
+        id: { not: callerId },
+      },
       select: { id: true, full_name: true, role: true },
       orderBy: [{ role: 'asc' }, { full_name: 'asc' }],
     });

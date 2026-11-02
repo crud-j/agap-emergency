@@ -243,6 +243,12 @@ npx expo start --dev-client --tunnel --clear
 ~/.config/agap-object-storage/start-garage
 curl -H "ngrok-skip-browser-warning: 1" https://await-endearing-prevail.ngrok-free.dev/.well-known/assetlinks.json
 
+$login = Invoke-RestMethod -Method Post -Uri http://localhost:3000/v1/auth/login `
+  -ContentType 'application/json' `
+  -Body '{"identifier":"zz-test-citizen-a@agap.test","password":"AgapTest2026!"}'
+$token = $login.accessToken
+$token   # paste this into Swagger's Authorize box
+
 Keep-alive (PowerShell): Start-Process wsl -ArgumentList '-d','Ubuntu','--','sleep','infinity' -WindowStyle Hidden #Redis starts on its own.
 Garage, in its own terminal: wsl -d Ubuntu, then ~/.config/agap-object-storage/start-garage
 # All dispatchers: password back to AgapDev2026!, forced change at next login
@@ -255,7 +261,7 @@ pnpm dev:reset-dispatcher --mfa
 pnpm dev:reset-dispatcher dispatcher1@mdrrmo.bocaue.gov.ph --mfa
 
 
-node "C:\Users\Zionne\AppData\Local\Temp\claude\c--Users-Zionne-Music-agap-emergency\f4c4d684-af85-437f-a61b-a59d42d84835\scratchpad\reset-password.js" announcements@lgu.bocaue.gov.ph
+node "C:\Users\Zionne\AppData\Local\Temp\claude\c--Users-Zionne-Music-agap-emergency\f4c4d684-af85-437f-a61b-a59d42d84835\scratchpad\reset-password.js" dispatcher1@mdrrmo.bocaue.gov.ph
 
 
 

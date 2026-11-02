@@ -18,7 +18,7 @@ import {
 } from '@/features/dispatch/hooks';
 import { useResponders } from '@/features/responders/hooks';
 import { useIncident, useUpdateIncidentStatus } from '@/features/incidents/hooks';
-import { isRouteLastKnown } from '@agap/shared';
+import { ACTIVE_RESPONSE_INCIDENT_STATUSES, isRouteLastKnown } from '@agap/shared';
 import { useIncidentUnits, useLiveResponders, useRouteLine } from '@/features/map/hooks';
 import {
   destinationFacilities, formatEta, legChip, trackingPhase, unitRoutePlan,
@@ -34,6 +34,10 @@ import type { IncidentDetail } from '@/features/incidents/api';
 
 const PRIORITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const DISPATCHABLE = ['ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
+/** A unit is already responding: "Dispatch another unit" keeps the incident status (MOD-31). */
+const ADDITIONAL_DISPATCH: readonly string[] = ACTIVE_RESPONSE_INCIDENT_STATUSES;
+/** Dispatches still holding a unit on the incident. */
+const ACTIVE_DISPATCH = ['PENDING', 'SENT', 'ACCEPTED'];
 const PRE_DISPATCH = ['SUBMITTED', 'RECEIVED', 'ACKNOWLEDGED', 'ASSESSED', 'DISPATCH_PENDING'];
 
 const LIFECYCLE_ORDER = [
@@ -606,6 +610,8 @@ function DispatchDetail({
 }): JSX.Element {
   const { data: incident, isLoading } = useIncident(incidentId);
   const [tab, setTab] = useState<'dispatch' | 'route'>('dispatch');
+  // Which incident the "Dispatch another unit" panel is open for; selecting another closes it.
+  const [addingUnitFor, setAddingUnitFor] = useState<string | null>(null);
 
   if (isLoading || !incident) {
     return (
@@ -622,6 +628,9 @@ function DispatchDetail({
   const phase = trackingPhase(incident.dispatches);
   const hasDispatch = phase !== 'none';
   const dispatchable = DISPATCHABLE.includes(incident.status);
+  const canAddUnit = hasDispatch && ADDITIONAL_DISPATCH.includes(incident.status);
+  const addingUnit = canAddUnit && addingUnitFor === incident.id;
+  const activeUnits = (incident.dispatches ?? []).filter((d) => ACTIVE_DISPATCH.includes(d.status)).length;
   const unitLabel = phase === 'accepted' ? 'Unit accepted — tracking live' : phase === 'awaiting' ? 'Awaiting crew acceptance' : phase === 'closed' ? 'No active unit' : null;
 
   return (
@@ -641,6 +650,11 @@ function DispatchDetail({
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <PriorityBadge priority={incident.priority} />
             <StatusChip status={incident.status} />
+            {activeUnits > 0 && (
+              <Badge variant="blue">
+                <Truck size={11} aria-hidden="true" /> {activeUnits} unit{activeUnits === 1 ? '' : 's'}
+              </Badge>
+            )}
           </div>
         </div>
         {/* Closing is the "Dispatch queue" back button above; this opens the full page. */}
@@ -684,7 +698,23 @@ function DispatchDetail({
               <span className="text-[13px] font-medium text-slate-700 leading-relaxed">{address}</span>
             </div>
             {hasDispatch ? (
-              <UnitTrackingCard incidentId={incident.id} dispatches={incident.dispatches} trackedDispatchId={trackedDispatchId} follow={followUnit} onToggleFollow={onToggleFollow} onFit={onFit} />
+              <div className="space-y-4">
+                <UnitTrackingCard incidentId={incident.id} dispatches={incident.dispatches} trackedDispatchId={trackedDispatchId} follow={followUnit} onToggleFollow={onToggleFollow} onFit={onFit} />
+                {addingUnit ? (
+                  <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[13px] font-bold text-slate-900">Dispatch another unit</p>
+                      <Button variant="secondary" size="sm" onClick={() => setAddingUnitFor(null)}>Cancel</Button>
+                    </div>
+                    {/* Closing this view keeps the tracking card; the incident status doesn't change. */}
+                    <RecommendationPanel incidentId={incident.id} onDispatched={() => setAddingUnitFor(null)} />
+                  </div>
+                ) : canAddUnit ? (
+                  <Button variant="secondary" className="w-full" onClick={() => setAddingUnitFor(incident.id)}>
+                    <Truck size={16} aria-hidden="true" /> Dispatch another unit
+                  </Button>
+                ) : null}
+              </div>
             ) : dispatchable ? (
               <RecommendationPanel incidentId={incident.id} onDispatched={onDispatched} />
             ) : (

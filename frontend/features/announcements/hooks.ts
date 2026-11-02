@@ -6,6 +6,7 @@ import {
   fetchAnnouncementsForPublisher,
   fetchPublishedAnnouncements,
   fetchAnnouncement,
+  fetchAnnouncementDelivery,
   fetchAnnouncementImageBlob,
   createAnnouncement,
   publishAnnouncement,
@@ -48,6 +49,17 @@ export function useAnnouncement(id: string | null) {
     queryKey: ['announcement', id],
     queryFn: () => fetchAnnouncement(id!),
     enabled: !!id,
+  });
+}
+
+/** SMS delivery results; re-checks every 15 s while texts are still waiting on the gateway phone. */
+export function useAnnouncementDelivery(id: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['announcement-delivery', id],
+    queryFn: () => fetchAnnouncementDelivery(id!),
+    enabled: !!id && enabled,
+    refetchInterval: (q) =>
+      q.state.data?.some((s) => s.status === 'PENDING' || s.status === 'SENT') ? 15_000 : false,
   });
 }
 

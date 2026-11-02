@@ -21,6 +21,7 @@ import { BocaueBarangayBoundaryLayer } from './bocaue-boundary-layer';
 import { isSignalLost, isWestbound, priorityRingColor, toLngLat } from '@agap/shared';
 import { AMBULANCE_ICON, citizenIconFor } from '@/src/lib/map-icons';
 import { SERVICE_AREA_BOUNDS, needsServiceAreaBounds } from '@/src/lib/transport-target';
+import type { ExtraUnitMarker } from '@/src/lib/incident-tracking';
 import { colors } from '@/src/theme/tokens';
 
 export interface LatLngLite {
@@ -80,10 +81,13 @@ export function LiveTrackingMap({
   destination = null,
   incidentDimmed = false,
   routeDimmed = false,
+  otherUnits = [],
 }: {
   styleUrl: string;
   incident: LatLngLite | null;
   responder: (LatLngLite & { heading?: number; updatedAt?: string }) | null;
+  /** Further units on the same incident; drawn with their call sign, never followed. */
+  otherUnits?: ExtraUnitMarker[];
   routeGeometry?: Array<[number, number]> | null;
   responderIcon?: 'ambulance';
   citizenSex?: 'MALE' | 'FEMALE' | null;
@@ -203,6 +207,7 @@ export function LiveTrackingMap({
   function fitRoute() {
     const pts: LatLngLite[] = [];
     if (responder) pts.push(responder);
+    pts.push(...otherUnits);
     // During transport frame the responder and the hospital, not the scene behind them.
     if (destination) pts.push(destination);
     else if (incident) pts.push(incident);
@@ -348,6 +353,24 @@ export function LiveTrackingMap({
             </View>
           </Marker>
         )}
+
+        {otherUnits.map((unit) => {
+          const lost = isSignalLost(unit.updatedAt, now);
+          return (
+            <Marker key={unit.dispatchId} id={`unit-${unit.dispatchId}`} lngLat={[unit.lng, unit.lat]}>
+              <View style={styles.responderMarkerWrap} accessibilityLabel={unit.label ?? 'Responding unit'}>
+                <View style={[styles.otherUnitMarker, lost && styles.responderSignalLost]}>
+                  <Ionicons name="medkit" size={14} color={lost ? colors.textSub : colors.primary} />
+                </View>
+                <View style={styles.unitLabel}>
+                  <Text style={styles.unitLabelText} numberOfLines={1}>
+                    {lost ? `${unit.label ?? 'Unit'} · signal lost` : unit.label ?? 'Unit'}
+                  </Text>
+                </View>
+              </View>
+            </Marker>
+          );
+        })}
 
         {responder && (
           <Marker id="responder" lngLat={[responder.lng, responder.lat]}>
@@ -515,6 +538,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  otherUnitMarker: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.white,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unitLabel: {
+    marginTop: 3,
+    maxWidth: 140,
+    backgroundColor: colors.white,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  unitLabelText: { fontSize: 10, fontWeight: '700', color: colors.primary },
   responderSignalLost: { backgroundColor: '#E5E7EB', borderColor: colors.textSub },
   responderFallback: { backgroundColor: colors.primary },
   ambulanceImage: { width: 40, height: 40 },

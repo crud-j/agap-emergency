@@ -22,6 +22,17 @@ async function doRefresh(): Promise<boolean> {
 }
 
 /**
+ * Exchange the refresh token once, shared by every caller waiting at the same time
+ * (concurrent 401s and the realtime socket). Resolves false after logging out.
+ */
+export function refreshAccessToken(): Promise<boolean> {
+  if (!pendingRefresh) {
+    pendingRefresh = doRefresh().finally(() => { pendingRefresh = null; });
+  }
+  return pendingRefresh;
+}
+
+/**
  * Drop-in fetch wrapper for authenticated endpoints. Reads the access token
  * from the auth store, injects the Authorization header (plus the ngrok bypass
  * header so dev tunnels don't intercept the request), and on 401 attempts one
@@ -52,11 +63,7 @@ export async function authedFetch(url: string, init: RequestInit = {}): Promise<
 
   if (res.status !== 401) return res;
 
-  if (!pendingRefresh) {
-    pendingRefresh = doRefresh().finally(() => { pendingRefresh = null; });
-  }
-
-  const refreshed = await pendingRefresh;
+  const refreshed = await refreshAccessToken();
   if (!refreshed) throw new Error('Session expired. Please log in again.');
 
   try {
