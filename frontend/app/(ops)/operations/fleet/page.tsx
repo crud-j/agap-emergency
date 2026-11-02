@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Truck, Flame, Waves, Users, Package,
+  Truck, Users, Package,
   Search, CheckCircle2, Radio, MapPin, AlertCircle, Wrench, Undo2, Clock, WifiOff,
   UserCheck, UserX, UserMinus, X, RefreshCw,
 } from 'lucide-react';
@@ -26,13 +26,10 @@ import { resourceStatusLabel } from '@/features/resources/status';
 import type { Responder } from '@/features/responders/api';
 import { cn } from '@/lib/utils';
 import { RegistryTab } from '@/components/resources/RegistryTab';
+import { resourceTypeIcon } from '@/components/resources/resource-type-icon';
+import { RESOURCE_TYPES, resourceTypeLabel } from '@/features/resources/resource-type';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-
-const RESOURCE_TYPES = [
-  'AMBULANCE', 'FIRE_TRUCK', 'RESCUE_BOAT', 'RESCUE_VEHICLE',
-  'FLOOD_RESPONSE_UNIT', 'SEARCH_AND_RESCUE_UNIT', 'PERSONNEL', 'EQUIPMENT', 'OTHER',
-] as const;
 
 // Exactly the database's resource_status values (shared enum). The select lists all of
 // them, so a unit the system put in TRANSPORTING still shows its current status.
@@ -51,19 +48,6 @@ const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visibl
 const PANEL = 'rounded-2xl border border-agap-track/50 bg-white shadow-card';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function resourceTypeIcon(type: string): LucideIcon {
-  switch (type) {
-    case 'AMBULANCE':              return Truck;
-    case 'FIRE_TRUCK':             return Flame;
-    case 'RESCUE_BOAT':            return Waves;
-    case 'RESCUE_VEHICLE':         return Truck;
-    case 'FLOOD_RESPONSE_UNIT':    return Waves;
-    case 'SEARCH_AND_RESCUE_UNIT': return Users;
-    case 'PERSONNEL':              return Users;
-    default:                       return Package;
-  }
-}
 
 interface StatusStyle {
   badge: string;
@@ -257,7 +241,7 @@ function UnitCard({ resource, canChangeStatus }: { resource: Resource; canChange
   const style = resourceStatusStyle(resource.status);
   const TypeIcon = resourceTypeIcon(resource.resource_type);
   const capabilities = resource.capabilities ?? [];
-  const meta = [titleCase(resource.resource_type), resource.base_barangay].filter(Boolean).join(' · ');
+  const meta = [resourceTypeLabel(resource.resource_type), resource.base_barangay].filter(Boolean).join(' · ');
 
   return (
     <article className={cn('relative flex flex-col gap-3 overflow-hidden p-4', PANEL)}>
@@ -467,7 +451,7 @@ function FleetUnitsView(): JSX.Element {
                 <SelectContent>
                   <SelectItem value={ALL}>All types</SelectItem>
                   {RESOURCE_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{titleCase(t)}</SelectItem>
+                    <SelectItem key={t} value={t}>{resourceTypeLabel(t)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

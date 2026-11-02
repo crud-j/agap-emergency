@@ -20,7 +20,8 @@ import { cn } from '@/lib/utils';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ORG_TYPES = ['MDRRMO', 'BFP', 'HOSPITAL', 'BARANGAY', 'NGO', 'OTHER'] as const;
+// Exactly the database's organization_type values; BARANGAY (not one of them) failed on save.
+const ORG_TYPES = ['MDRRMO', 'BFP', 'PNP', 'HOSPITAL', 'EMS_PROVIDER', 'LGU', 'NGO', 'OTHER'] as const;
 const ALL = 'ALL';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ function orgTypeClasses(type: string): string {
     case 'MDRRMO':   return 'bg-agap-greenSoft text-agap-green';
     case 'BFP':      return 'bg-red-50 text-red-700';
     case 'HOSPITAL': return 'bg-agap-infoSoft text-agap-info';
-    case 'BARANGAY': return 'bg-agap-amberSoft text-agap-amber';
+    case 'LGU':      return 'bg-agap-amberSoft text-agap-amber';
     default:         return 'bg-agap-surface text-agap-textMid';
   }
 }
@@ -53,34 +54,31 @@ interface OrgFormDialogProps {
   editing: Organization | null;
 }
 
+/**
+ * The page remounts this dialog (a new key) every time it opens, so the form starts from
+ * the organization being edited. Radix never calls onOpenChange(true) for a dialog its
+ * parent opens, and filling the form there left Edit blank.
+ */
 function OrgFormDialog({ open, onOpenChange, editing }: OrgFormDialogProps): JSX.Element {
-  const [form, setForm] = useState<CreateOrgBody>(EMPTY_FORM);
+  const [form, setForm] = useState<CreateOrgBody>(() =>
+    editing
+      ? {
+          name: editing.name,
+          shortName: editing.short_name ?? '',
+          organizationType: editing.organization_type,
+          barangay: editing.barangay ?? '',
+          contactNumber: editing.contact_number ?? '',
+          email: editing.email ?? '',
+          address: editing.address ?? '',
+        }
+      : EMPTY_FORM,
+  );
   const [error, setError] = useState<string | null>(null);
 
   const create = useCreateOrganization();
   const update = useUpdateOrganization();
 
   const pending = create.isPending || update.isPending;
-
-  function handleOpen(next: boolean) {
-    if (next) {
-      setError(null);
-      setForm(
-        editing
-          ? {
-              name: editing.name,
-              shortName: editing.short_name ?? '',
-              organizationType: editing.organization_type,
-              barangay: editing.barangay ?? '',
-              contactNumber: editing.contact_number ?? '',
-              email: editing.email ?? '',
-              address: editing.address ?? '',
-            }
-          : EMPTY_FORM,
-      );
-    }
-    onOpenChange(next);
-  }
 
   function set(key: keyof CreateOrgBody, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -115,7 +113,7 @@ function OrgFormDialog({ open, onOpenChange, editing }: OrgFormDialogProps): JSX
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{editing ? 'Edit Organization' : 'New Organization'}</DialogTitle>
@@ -259,6 +257,8 @@ export default function OrganizationsPage(): JSX.Element {
   const [typeFilter, setTypeFilter] = useState(ALL);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  // A new key each time the form opens, so it starts from the organization being edited.
+  const [formKey, setFormKey] = useState(0);
   const [editing, setEditing] = useState<Organization | null>(null);
 
   const rows = useMemo<OrgRow[]>(() => {
@@ -286,6 +286,7 @@ export default function OrganizationsPage(): JSX.Element {
 
   function openCreate() {
     setEditing(null);
+    setFormKey((k) => k + 1);
     setDialogOpen(true);
   }
 
@@ -296,6 +297,7 @@ export default function OrganizationsPage(): JSX.Element {
       if (org?.id !== user?.orgId) return;
     }
     setEditing(org);
+    setFormKey((k) => k + 1);
     setDialogOpen(true);
   }
 
@@ -432,6 +434,7 @@ export default function OrganizationsPage(): JSX.Element {
       )}
 
       <OrgFormDialog
+        key={formKey}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}

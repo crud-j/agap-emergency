@@ -471,11 +471,13 @@ Run this once first. Most of the per-module checks below reuse it.
 **Sign in as:** admin · dispatcher1 · orgadmin (MDRRMO)
 **Go to:** 🖥️ **Fleet & Units → Registry** tab · **Organizations**
 
-1. 🖥️ (admin) **Registry → Add Resource**: add a unit under MDRRMO. Edit one (pencil icon).
-2. 🖥️ (dispatcher1) **Registry** has **no** Add or Edit buttons.
-3. 🖥️ (orgadmin) editing a BFP unit (CHARLIE-1) is refused; editing an MDRRMO unit is allowed. The server enforces this.
-4. 🖥️ **Organizations** lists MDRRMO, BFP and the hospital.
-5. 🖥️ (admin) **Add Resource**: the Organization dropdown lists MDRRMO, BFP and the hospital, and the Registry organization filter has the same three. (orgadmin) The dropdown shows only MDRRMO.
+1. 🖥️ (admin) **Registry → Add resource**: pick MDRRMO, choose the **Rescue truck** type card, name it, type a call sign in lower case (it shows in capitals) → **Add resource**. A green "… was added to …" line appears and the unit is in the table.
+2. 🖥️ (admin) **Edit** on that unit: the form opens filled in (name, call sign, type selected), and the organization is shown locked, not as a dropdown. Change the name and clear the call sign → **Save changes**. The table shows the new name and no call sign.
+3. 🖥️ (dispatcher1) **Registry** has **no** Add or Edit buttons.
+4. 🖥️ (orgadmin) BFP units (CHARLIE-1) show "View only"; MDRRMO units have **Capabilities** and **Edit**. Editing ALPHA-1 saves. The server refuses a BFP edit (403).
+5. 🖥️ (orgadmin) **Add resource**: the organization is shown locked as MDRRMO. (admin) it is a dropdown listing MDRRMO, BFP and the hospital, the same as the Registry organization filter.
+6. 🖥️ The type cards and the Type filter list Ambulance, Fire truck, Rescue truck, Rescue boat, Clearing equipment, Motorcycle responder, Command vehicle and Other (the database's types).
+7. 🖥️ (admin) **Organizations**: lists MDRRMO, BFP and the hospital. **Edit** on one opens the form filled in; save a change to its contact number. The type list is MDRRMO, BFP, PNP, Hospital, EMS provider, LGU, NGO and Other.
 
 #### MOD-27 Response Unit Availability and Readiness · 🖥️ + 📱
 **Purpose:** Shows which units are available, busy or out of service, updated live from the dispatcher and from the crews' phones.
@@ -489,15 +491,15 @@ Run this once first. Most of the per-module checks below reuse it.
 #### MOD-28 Incident-to-Response Capability Matrix · 🖥️
 **Purpose:** Records what each unit can do (water rescue, firefighting…). An organization claims a capability; a Supervisor verifies it. Only verified ones count in dispatch recommendations.
 **Sign in as:** dispatcher1 · orgadmin (MDRRMO) · supervisor
-**Go to:** 🖥️ **Fleet & Units → Registry** (capability chips; the shield icon opens the **Capabilities** dialog) · **Dispatch**
+**Go to:** 🖥️ **Fleet & Units → Registry** (capability chips; the **Capabilities** button on a row opens the dialog) · **Dispatch**
 **Before you start:** BRAVO-1 must be Available. You need an Assessed Rescue incident for steps 4–5.
 
 1. 🖥️ **Registry**: the seeded units show capability chips. Verified ones are filled; unverified ones are outlined and say "unverified".
 2. 🖥️ **Dispatch** on a Fire incident (for example `DEMO06` Industrial Assessed, or a new Assessed Fire). The BFP truck shows "Capability match: n/m required".
-3. **Add.** 🖥️ (orgadmin) **Registry** → shield icon on BRAVO-1 → **Add a capability** → Rescue → Rope Rescue → **Add**. It shows as **Unverified**, and the table chip reads "Rope Rescue · unverified".
+3. **Add.** 🖥️ (orgadmin) **Registry** → **Capabilities** on BRAVO-1 → under **Add a capability**, Rescue, tap **+ Rope Rescue**. It moves to **Assigned** as **Unverified**, the row's Capabilities button shows an amber 1, and the table chip reads "Rope Rescue · unverified".
 4. 🖥️ (dispatcher1) **Dispatch** on the Assessed **Rescue** incident. BRAVO-1's reason reads "Capability match: 1/2 required (SEARCH_AND_RESCUE) (1 unverified not counted)". The ranking is the same as before step 3.
-5. **Verify.** 🖥️ (supervisor) **Fleet & Units → Registry** → shield icon on BRAVO-1 → **Verify** on Rope Rescue. Back on the same Rescue incident in **Dispatch**, BRAVO-1 now shows "2/2 required" and a higher score.
-6. **Other organization.** 🖥️ (orgadmin) CHARLIE-1 (BFP) has no shield or edit icon. 🔌 `POST /v1/resources/<CHARLIE-1 id>/capabilities` as orgadmin returns 403.
+5. **Verify.** 🖥️ (supervisor) **Fleet & Units → Registry** → **Capabilities** on BRAVO-1 → **Verify** on Rope Rescue. Back on the same Rescue incident in **Dispatch**, BRAVO-1 now shows "2/2 required" and a higher score.
+6. **Other organization.** 🖥️ (orgadmin) CHARLIE-1 (BFP) has no Capabilities or Edit button ("View only"). 🔌 `POST /v1/resources/<CHARLIE-1 id>/capabilities` as orgadmin returns 403.
 7. 🖥️ (orgadmin) The dialog has no **Verify** button. 🔌 `PATCH …/capabilities/<id>/verify` as orgadmin returns 403.
 8. 🖥️ (admin) **Audit Log**, entity `resource_capability`, module `MOD-29`: one row each for the add (`CREATE`), the verify (`UPDATE`, `is_verified` false → true) and, after you remove Rope Rescue again with the **X**, the remove (`DELETE`). Each names BRAVO-1 and ROPE_RESCUE.
 

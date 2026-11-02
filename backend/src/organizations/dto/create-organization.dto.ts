@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
+import { organization_type } from '@prisma/client';
 
 export class CreateOrganizationDto {
   @ApiProperty({ example: 'Bocaue MDRRMO' })
@@ -11,9 +12,11 @@ export class CreateOrganizationDto {
   @IsString()
   shortName?: string;
 
-  @ApiProperty({ example: 'MDRRMO' })
-  @IsString()
-  organizationType!: string;
+  // An unknown type (the web form once offered BARANGAY) is a 400 naming the allowed
+  // ones, not a Prisma error from the database enum.
+  @ApiProperty({ enum: organization_type, example: organization_type.MDRRMO })
+  @IsEnum(organization_type)
+  organizationType!: organization_type;
 
   @ApiPropertyOptional()
   @IsOptional()

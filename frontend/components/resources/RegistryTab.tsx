@@ -1,15 +1,14 @@
 'use client';
 
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import {
-  Package, Truck, Flame, Waves, Users, Search, Plus, Pencil, ShieldCheck, X, Lock, Info,
+  Search, Plus, Pencil, ShieldCheck, X, Lock, Info, Building2, Check, CheckCircle2, Loader2,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { DEPLOYED_RESOURCE_STATUSES, ResourceStatus, UNAVAILABLE_RESOURCE_STATUSES } from '@agap/shared';
 import {
   Badge, Button, DataTable,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   type Column,
 } from '@/components/ui';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
@@ -24,17 +23,22 @@ import {
   useVerifyCapability,
 } from '@/features/resources/hooks';
 import { useOrganizations } from '@/features/organizations/hooks';
-import type { Resource, CreateResourceBody, ResourceCapability } from '@/features/resources/api';
+import type { Resource, ResourceCapability } from '@/features/resources/api';
 import { capabilityChipLabel, groupAddableCapabilities } from '@/features/resources/capabilities';
 import { resourceStatusLabel } from '@/features/resources/status';
+import { RESOURCE_TYPES, resourceTypeHint, resourceTypeLabel } from '@/features/resources/resource-type';
+import {
+  resourceCreateBody,
+  resourceFormFor,
+  resourceUpdateBody,
+  validateResourceForm,
+  type ResourceFormErrors,
+  type ResourceFormState,
+} from '@/features/resources/resource-form';
+import { resourceTypeIcon } from './resource-type-icon';
 import { cn } from '@/lib/utils';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-
-const RESOURCE_TYPES = [
-  'AMBULANCE', 'FIRE_TRUCK', 'RESCUE_BOAT', 'RESCUE_VEHICLE',
-  'FLOOD_RESPONSE_UNIT', 'SEARCH_AND_RESCUE_UNIT', 'PERSONNEL', 'EQUIPMENT', 'OTHER',
-] as const;
 
 // Exactly the database's resource_status values (shared enum).
 const RESOURCE_STATUSES = Object.values(ResourceStatus);
@@ -47,21 +51,9 @@ const inputCls =
 
 const labelCls = 'block text-sm font-medium text-agap-textMain';
 const filterLabelCls = 'block text-xs font-semibold text-agap-textMid';
+const helpCls = 'text-xs text-slate-600';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function resourceTypeIcon(type: string): LucideIcon {
-  switch (type) {
-    case 'AMBULANCE':             return Truck;
-    case 'FIRE_TRUCK':            return Flame;
-    case 'RESCUE_BOAT':           return Waves;
-    case 'RESCUE_VEHICLE':        return Truck;
-    case 'FLOOD_RESPONSE_UNIT':   return Waves;
-    case 'SEARCH_AND_RESCUE_UNIT': return Users;
-    case 'PERSONNEL':             return Users;
-    default:                      return Package;
-  }
-}
 
 function resourceStatusClasses(status: string): string {
   switch (status) {
@@ -82,156 +74,214 @@ function FieldError({ id, message }: { id: string; message: string | undefined }
   return <p id={id} className="text-xs font-medium text-agap-danger">{message}</p>;
 }
 
-// ─── Form ────────────────────────────────────────────────────────────────────
-
-interface ResourceFormState {
-  organizationId: string;
-  name: string;
-  callSign: string;
-  resourceType: string;
-  vehicleId: string;
+/** A value the user can see but not change here, in place of a disabled dropdown. */
+function ReadOnlyField({ labelId, value, help }: { labelId: string; value: string; help: string }): JSX.Element {
+  return (
+    <>
+      <div
+        role="group"
+        aria-labelledby={labelId}
+        className="flex min-h-11 items-center gap-3 rounded-xl border border-agap-track bg-agap-surface px-3 py-2"
+      >
+        <Building2 size={16} aria-hidden="true" className="shrink-0 text-agap-textMid" />
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-agap-textMain">{value}</span>
+        <Lock size={14} aria-hidden="true" className="shrink-0 text-slate-500" />
+      </div>
+      <p className={helpCls}>{help}</p>
+    </>
+  );
 }
 
-type RequiredField = 'organizationId' | 'name' | 'resourceType';
-
-const EMPTY_FORM: ResourceFormState = {
-  organizationId: '',
-  name: '',
-  callSign: '',
-  resourceType: '',
-  vehicleId: '',
-};
+// ─── Form ────────────────────────────────────────────────────────────────────
 
 interface ResourceFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing: Resource | null;
   defaultOrgId?: string | undefined;
+  onSaved: (message: string) => void;
 }
 
-function ResourceFormDialog({ open, onOpenChange, editing, defaultOrgId }: ResourceFormDialogProps): JSX.Element {
-  const [form, setForm] = useState<ResourceFormState>(EMPTY_FORM);
+/**
+ * The parent remounts this dialog (a new key) every time it opens, so the form starts
+ * from the unit being edited. Radix never calls onOpenChange(true) for a dialog its
+ * parent opens, and filling the form there left Edit blank with the organization locked.
+ */
+function ResourceFormDialog({ open, onOpenChange, editing, defaultOrgId, onSaved }: ResourceFormDialogProps): JSX.Element {
+  const [form, setForm] = useState<ResourceFormState>(() => resourceFormFor(editing, defaultOrgId));
   // Each required field shows its own message under it; a server error shows at the bottom.
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<RequiredField, string>>>({});
+  const [fieldErrors, setFieldErrors] = useState<ResourceFormErrors>({});
   const [error, setError] = useState<string | null>(null);
+  const orgTriggerRef = useRef<HTMLButtonElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const typeGroupRef = useRef<HTMLFieldSetElement>(null);
 
   const user = useAuthUser();
+  const isSysAdmin = hasRole(user, 'SYSTEM_ADMINISTRATOR');
   const { data: orgsData } = useOrganizations({ perPage: 200 });
+  const allOrgs = orgsData?.data ?? [];
   // The server only accepts the Org Administrator's own organization (org-scope.ts).
-  const orgs = (orgsData?.data ?? []).filter(
-    (o) => !hasRole(user, 'ORG_ADMINISTRATOR') || o.id === user?.orgId,
-  );
+  const orgs = isSysAdmin ? allOrgs : allOrgs.filter((o) => o.id === user?.orgId);
+  // Fixed when editing (a unit can't move) and for an Org Administrator (own organization only).
+  const orgLocked = !!editing || !isSysAdmin;
+  const orgName =
+    allOrgs.find((o) => o.id === form.organizationId)?.name ??
+    editing?.organization?.name ??
+    'Your organization';
 
   const create = useCreateResource();
   const update = useUpdateResource();
   const pending = create.isPending || update.isPending;
 
-  function handleOpen(next: boolean) {
-    if (next) {
-      setError(null);
-      setFieldErrors({});
-      setForm(
-        editing
-          ? {
-              organizationId: editing.organization_id,
-              name: editing.name,
-              callSign: editing.call_sign ?? '',
-              resourceType: editing.resource_type,
-              vehicleId: '',
-            }
-          : { ...EMPTY_FORM, organizationId: defaultOrgId ?? '' },
-      );
-    }
-    onOpenChange(next);
-  }
-
-  function set(key: keyof ResourceFormState, value: string) {
+  function set<K extends keyof ResourceFormState>(key: K, value: ResourceFormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
-    if (key in fieldErrors) setFieldErrors((e) => ({ ...e, [key]: undefined }));
+    setFieldErrors((e) => (e[key as keyof ResourceFormErrors] ? { ...e, [key]: undefined } : e));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const missing: Partial<Record<RequiredField, string>> = {};
-    if (!form.organizationId) missing.organizationId = 'Choose the organization that owns this unit.';
-    if (!form.name.trim())    missing.name = 'Enter a name, for example "Ambulance 1".';
-    if (!form.resourceType)   missing.resourceType = 'Choose the unit type.';
+    const missing = validateResourceForm(form);
     setFieldErrors(missing);
-    if (Object.keys(missing).length > 0) return;
-
-    const body: CreateResourceBody = {
-      organizationId: form.organizationId,
-      name: form.name.trim(),
-      resourceType: form.resourceType,
-      ...(form.callSign.trim()  && { callSign: form.callSign.trim() }),
-      ...(form.vehicleId.trim() && { vehicleId: form.vehicleId.trim() }),
-    };
+    // Move focus to the first field that needs attention.
+    if (missing.organizationId) { orgTriggerRef.current?.focus(); return; }
+    if (missing.resourceType)   { typeGroupRef.current?.querySelector('input')?.focus(); return; }
+    if (missing.name)           { nameRef.current?.focus(); return; }
 
     try {
       if (editing) {
-        await update.mutateAsync({ id: editing.id, body: { ...body } });
+        await update.mutateAsync({ id: editing.id, body: resourceUpdateBody(form) });
+        onSaved(`Saved changes to ${form.name.trim()}.`);
       } else {
-        await create.mutateAsync(body);
+        await create.mutateAsync(resourceCreateBody(form));
+        onSaved(`${form.name.trim()} was added to ${orgName}.`);
       }
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.');
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogContent className="max-w-lg">
+    <Dialog open={open} onOpenChange={(next) => { if (!pending) onOpenChange(next); }}>
+      <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{editing ? 'Edit Resource' : 'Add Resource'}</DialogTitle>
-          <DialogDescription>
-            {editing ? 'Update resource details.' : 'Register a new unit or equipment in the fleet.'}
+          <DialogTitle>{editing ? `Edit ${editing.call_sign ?? editing.name}` : 'Add resource'}</DialogTitle>
+          <DialogDescription className="text-slate-600">
+            {editing
+              ? 'Change the unit’s name, call sign or type. Status is set on the Fleet board.'
+              : 'Register a unit so dispatchers can see it and assign it to incidents.'}
           </DialogDescription>
         </DialogHeader>
 
-        <form id="resource-form" noValidate onSubmit={(e) => void handleSubmit(e)} className="space-y-4 py-2">
+        <form id="resource-form" noValidate onSubmit={(e) => void handleSubmit(e)} className="space-y-5">
           {/* Organization */}
           <div className="space-y-1.5">
-            <label id="resource-org-label" className={labelCls}>
-              Organization <span className="text-agap-danger" aria-hidden="true">*</span>
-            </label>
-            {/* A unit's organization can't be changed after creation (the API ignores it). */}
-            <Select value={form.organizationId} onValueChange={(v) => set('organizationId', v)} disabled={!!editing}>
-              <SelectTrigger
-                aria-labelledby="resource-org-label"
-                aria-invalid={!!fieldErrors.organizationId}
-                aria-describedby={fieldErrors.organizationId ? 'resource-org-error' : 'resource-org-help'}
-                className={cn(fieldErrors.organizationId && 'border-agap-danger')}
-              >
-                <SelectValue placeholder="Select organization" />
-              </SelectTrigger>
-              <SelectContent>
-                {orgs.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {fieldErrors.organizationId ? (
-              <FieldError id="resource-org-error" message={fieldErrors.organizationId} />
+            <span id="resource-org-label" className={labelCls}>
+              Organization {!orgLocked && <span className="text-agap-danger" aria-hidden="true">*</span>}
+            </span>
+            {orgLocked ? (
+              <ReadOnlyField
+                labelId="resource-org-label"
+                value={orgName}
+                help={
+                  editing
+                    ? 'A unit stays with the organization that registered it.'
+                    : 'You register units for your own organization.'
+                }
+              />
             ) : (
-              <p id="resource-org-help" className="text-xs text-slate-500">
-                {editing ? "A unit's organization can't be changed." : 'You can only register units for organizations you manage.'}
-              </p>
+              <>
+                <Select value={form.organizationId} onValueChange={(v) => set('organizationId', v)}>
+                  <SelectTrigger
+                    ref={orgTriggerRef}
+                    aria-labelledby="resource-org-label"
+                    aria-invalid={!!fieldErrors.organizationId}
+                    aria-describedby={fieldErrors.organizationId ? 'resource-org-error' : undefined}
+                    className={cn(fieldErrors.organizationId && 'border-agap-danger')}
+                  >
+                    <SelectValue placeholder="Select organization" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {orgs.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldError id="resource-org-error" message={fieldErrors.organizationId} />
+              </>
             )}
           </div>
 
+          {/* Type: every option visible, one tap to choose */}
+          <fieldset
+            ref={typeGroupRef}
+            className="min-w-0 space-y-1.5"
+            aria-describedby={fieldErrors.resourceType ? 'resource-type-error' : undefined}
+          >
+            <legend className={labelCls}>
+              Type <span className="text-agap-danger" aria-hidden="true">*</span>
+            </legend>
+            <div className="grid grid-cols-1 gap-2 pt-1.5 min-[440px]:grid-cols-2">
+              {RESOURCE_TYPES.map((type) => {
+                const Icon = resourceTypeIcon(type);
+                const checked = form.resourceType === type;
+                return (
+                  <label
+                    key={type}
+                    className={cn(
+                      'flex min-h-14 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2',
+                      'transition-colors duration-150 motion-reduce:transition-none',
+                      'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-agap-green has-[:focus-visible]:ring-offset-1',
+                      checked
+                        ? 'border-agap-green bg-agap-greenSoft'
+                        : fieldErrors.resourceType
+                          ? 'border-agap-danger/60 bg-white hover:border-agap-danger'
+                          : 'border-agap-track bg-white hover:border-agap-textMid',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="resource-type"
+                      value={type}
+                      checked={checked}
+                      onChange={() => set('resourceType', type)}
+                      className="sr-only"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+                        checked ? 'bg-agap-green text-white' : 'bg-agap-surface text-agap-textMid',
+                      )}
+                    >
+                      <Icon size={17} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-agap-textMain">{resourceTypeLabel(type)}</span>
+                      <span className="block text-xs text-slate-600">{resourceTypeHint(type)}</span>
+                    </span>
+                    {checked && <Check size={16} aria-hidden="true" className="shrink-0 text-agap-green" />}
+                  </label>
+                );
+              })}
+            </div>
+            <FieldError id="resource-type-error" message={fieldErrors.resourceType} />
+          </fieldset>
+
           {/* Name + Call sign */}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label htmlFor="resource-name" className={labelCls}>
                 Name <span className="text-agap-danger" aria-hidden="true">*</span>
               </label>
               <input
+                ref={nameRef}
                 id="resource-name"
                 value={form.name}
                 onChange={(e) => set('name', e.target.value)}
-                placeholder="e.g. Ambulance 1"
+                placeholder="e.g. Ambulance 3"
+                autoComplete="off"
                 aria-required="true"
                 aria-invalid={!!fieldErrors.name}
                 aria-describedby={fieldErrors.name ? 'resource-name-error' : undefined}
@@ -240,54 +290,27 @@ function ResourceFormDialog({ open, onOpenChange, editing, defaultOrgId }: Resou
               <FieldError id="resource-name-error" message={fieldErrors.name} />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="resource-callsign" className={labelCls}>Call sign</label>
+              <label htmlFor="resource-callsign" className={labelCls}>
+                Call sign <span className="font-normal text-slate-600">(optional)</span>
+              </label>
               <input
                 id="resource-callsign"
                 value={form.callSign}
-                onChange={(e) => set('callSign', e.target.value)}
-                placeholder="e.g. ALPHA-1"
-                className={cn(inputCls, 'font-mono uppercase placeholder:normal-case placeholder:font-sans')}
+                onChange={(e) => set('callSign', e.target.value.toUpperCase())}
+                placeholder="e.g. ALPHA-3"
+                autoComplete="off"
+                maxLength={50}
+                aria-describedby="resource-callsign-help"
+                className={cn(inputCls, 'font-mono placeholder:font-sans')}
               />
-            </div>
-          </div>
-
-          {/* Type + Vehicle ID */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label id="resource-type-label" className={labelCls}>
-                Type <span className="text-agap-danger" aria-hidden="true">*</span>
-              </label>
-              <Select value={form.resourceType} onValueChange={(v) => set('resourceType', v)}>
-                <SelectTrigger
-                  aria-labelledby="resource-type-label"
-                  aria-invalid={!!fieldErrors.resourceType}
-                  aria-describedby={fieldErrors.resourceType ? 'resource-type-error' : undefined}
-                  className={cn(fieldErrors.resourceType && 'border-agap-danger')}
-                >
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {RESOURCE_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{titleCase(t)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FieldError id="resource-type-error" message={fieldErrors.resourceType} />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="resource-vehicle" className={labelCls}>Vehicle / asset ID</label>
-              <input
-                id="resource-vehicle"
-                value={form.vehicleId}
-                onChange={(e) => set('vehicleId', e.target.value)}
-                placeholder="Plate or serial number"
-                className={inputCls}
-              />
+              <p id="resource-callsign-help" className={helpCls}>Shown on the dispatch board and the crew’s phone.</p>
             </div>
           </div>
 
           {error && (
-            <p role="alert" className="rounded-xl bg-agap-dangerSoft px-4 py-2.5 text-sm text-agap-danger">{error}</p>
+            <p role="alert" className="rounded-xl border border-agap-danger/25 bg-agap-dangerSoft px-4 py-2.5 text-sm text-agap-danger">
+              {error}
+            </p>
           )}
         </form>
 
@@ -330,137 +353,171 @@ interface CapabilitiesDialogProps {
 }
 
 function CapabilitiesDialog({ resource, onOpenChange, canManage, canVerify }: CapabilitiesDialogProps): JSX.Element {
-  const [selected, setSelected] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const { data: catalog = [], isLoading: catalogLoading } = useCapabilityCatalog({ enabled: !!resource && canManage });
+  const catalogQuery = useCapabilityCatalog({ enabled: !!resource });
+  const catalog = catalogQuery.data ?? [];
   const add = useAddCapability();
   const remove = useRemoveCapability();
   const verify = useVerifyCapability();
 
   const capabilities = resource?.capabilities ?? [];
   const addable = groupAddableCapabilities(catalog, capabilities);
+  const descriptionOf = new Map(catalog.map((c) => [c.id, c.description]));
   const unitLabel = resource ? resource.call_sign ?? resource.name : '';
+  const busy = add.isPending || remove.isPending || verify.isPending;
 
   async function run(action: () => Promise<unknown>) {
     setError(null);
     try {
       await action();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.');
     }
   }
 
   function handleOpen(next: boolean) {
-    if (!next) {
-      setSelected('');
-      setError(null);
-    }
+    if (!next) setError(null);
     onOpenChange(next);
   }
 
   return (
     <Dialog open={!!resource} onOpenChange={handleOpen}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>Capabilities · {unitLabel}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-slate-600">
             Dispatch recommendations count verified capabilities only. A Supervisor or System Administrator verifies them.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          {capabilities.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-agap-track px-4 py-3 text-sm text-slate-600">
-              No capabilities recorded for this unit yet.
-            </p>
-          ) : (
-            <ul className="divide-y divide-agap-track/60 rounded-xl border border-agap-track">
-              {capabilities.map((c) => (
-                <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="text-sm font-semibold text-agap-textMain">{titleCase(c.name)}</span>
-                    <Badge variant={c.is_verified ? 'green' : 'amber'}>{c.is_verified ? 'Verified' : 'Unverified'}</Badge>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {canVerify && (
-                      <Button
-                        variant="secondary"
-                        className="h-11"
-                        loading={verify.isPending && verify.variables?.capabilityId === c.id}
-                        onClick={() => void run(() => verify.mutateAsync({ resourceId: resource!.id, capabilityId: c.id, verified: !c.is_verified }))}
-                      >
-                        {c.is_verified ? 'Unverify' : 'Verify'}
-                      </Button>
-                    )}
-                    {canManage && (
-                      <Button
-                        variant="ghost"
-                        className="h-11 w-11 px-0"
-                        aria-label={`Remove ${titleCase(c.name)}`}
-                        title={`Remove ${titleCase(c.name)}`}
-                        loading={remove.isPending && remove.variables?.capabilityId === c.id}
-                        onClick={() => void run(() => remove.mutateAsync({ resourceId: resource!.id, capabilityId: c.id }))}
-                      >
-                        <X size={16} aria-hidden="true" />
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+        <div className="space-y-5">
+          {/* Assigned */}
+          <section aria-labelledby="capabilities-assigned" className="space-y-2">
+            <h3 id="capabilities-assigned" className="text-sm font-semibold text-agap-textMain">
+              Assigned <span className="font-normal text-slate-600">({capabilities.length})</span>
+            </h3>
+            {capabilities.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-agap-track px-4 py-3 text-sm text-slate-600">
+                No capabilities recorded for this unit yet.
+              </p>
+            ) : (
+              <ul className="divide-y divide-agap-track/60 rounded-xl border border-agap-track">
+                {capabilities.map((c) => {
+                  const description = descriptionOf.get(c.id);
+                  return (
+                    <li key={c.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-agap-textMain">{titleCase(c.name)}</span>
+                          <Badge variant={c.is_verified ? 'green' : 'amber'}>{c.is_verified ? 'Verified' : 'Unverified'}</Badge>
+                        </div>
+                        {description && <p className="mt-0.5 text-xs text-slate-600">{description}</p>}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {canVerify && (
+                          <Button
+                            variant={c.is_verified ? 'secondary' : 'outline'}
+                            className="h-11"
+                            disabled={busy}
+                            loading={verify.isPending && verify.variables?.capabilityId === c.id}
+                            onClick={() => void run(() => verify.mutateAsync({ resourceId: resource!.id, capabilityId: c.id, verified: !c.is_verified }))}
+                          >
+                            {c.is_verified ? 'Unverify' : 'Verify'}
+                          </Button>
+                        )}
+                        {canManage && (
+                          <Button
+                            variant="ghost"
+                            className="h-11 w-11 px-0 hover:text-agap-danger"
+                            aria-label={`Remove ${titleCase(c.name)}`}
+                            title={`Remove ${titleCase(c.name)}`}
+                            disabled={busy}
+                            loading={remove.isPending && remove.variables?.capabilityId === c.id}
+                            onClick={() => void run(() => remove.mutateAsync({ resourceId: resource!.id, capabilityId: c.id }))}
+                          >
+                            <X size={16} aria-hidden="true" />
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
 
+          {/* Add: every addable capability is a button, grouped by category (no dropdown) */}
           {canManage && (
-            <div className="space-y-1.5">
-              <label id="capability-add-label" className={labelCls}>Add a capability</label>
-              <div className="flex gap-2">
-                <Select value={selected} onValueChange={setSelected} disabled={catalogLoading || addable.length === 0}>
-                  <SelectTrigger aria-labelledby="capability-add-label" aria-describedby="capability-add-help">
-                    <SelectValue
-                      placeholder={
-                        catalogLoading ? 'Loading capabilities…'
-                        : addable.length === 0 ? 'Every capability is assigned'
-                        : 'Select capability'
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {addable.map((group) => (
-                      <SelectGroup key={group.category}>
-                        <SelectLabel>{titleCase(group.category)}</SelectLabel>
-                        {group.items.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>{titleCase(item.name)}</SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="primary"
-                  className="h-11 shrink-0"
-                  disabled={!selected}
-                  loading={add.isPending}
-                  onClick={() =>
-                    void run(async () => {
-                      await add.mutateAsync({ resourceId: resource!.id, capabilityId: selected });
-                      setSelected('');
-                    })
-                  }
-                >
-                  <Plus size={16} aria-hidden="true" /> Add
-                </Button>
+            <section aria-labelledby="capabilities-add" className="space-y-2">
+              <div>
+                <h3 id="capabilities-add" className="text-sm font-semibold text-agap-textMain">Add a capability</h3>
+                <p className={helpCls}>Tap one to add it. New capabilities start unverified.</p>
               </div>
-              <p id="capability-add-help" className="text-xs text-slate-500">New capabilities start unverified.</p>
-            </div>
+
+              {catalogQuery.isLoading ? (
+                <p role="status" className="flex items-center gap-2 text-sm text-slate-600">
+                  <Loader2 size={15} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />
+                  Loading capabilities…
+                </p>
+              ) : catalogQuery.isError ? (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-agap-danger/25 bg-agap-dangerSoft px-4 py-2.5">
+                  <p className="text-sm text-agap-danger">Could not load the capability list.</p>
+                  <Button variant="secondary" className="h-11" onClick={() => void catalogQuery.refetch()}>Retry</Button>
+                </div>
+              ) : addable.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-agap-track px-4 py-3 text-sm text-slate-600">
+                  {catalog.length === 0
+                    ? 'The capability catalog is empty. A System Administrator adds capabilities to it.'
+                    : 'This unit already has every capability in the catalog.'}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {addable.map((group) => (
+                    <div key={group.category} role="group" aria-label={titleCase(group.category)}>
+                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        {titleCase(group.category)}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {group.items.map((item) => {
+                          const adding = add.isPending && add.variables?.capabilityId === item.id;
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              disabled={busy}
+                              title={item.description ?? undefined}
+                              aria-label={`Add ${titleCase(item.name)}`}
+                              onClick={() => void run(() => add.mutateAsync({ resourceId: resource!.id, capabilityId: item.id }))}
+                              className={cn(
+                                'inline-flex min-h-11 items-center gap-1.5 rounded-full border border-agap-track bg-white px-3.5 text-sm font-medium text-agap-textMain',
+                                'transition-colors duration-150 motion-reduce:transition-none',
+                                'hover:border-agap-green hover:bg-agap-greenSoft hover:text-agap-green',
+                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green focus-visible:ring-offset-1',
+                                'disabled:cursor-not-allowed disabled:opacity-60',
+                              )}
+                            >
+                              {adding
+                                ? <Loader2 size={15} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />
+                                : <Plus size={15} aria-hidden="true" />}
+                              {titleCase(item.name)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           )}
 
           {error && (
-            <p role="alert" className="rounded-xl bg-agap-dangerSoft px-4 py-2.5 text-sm text-agap-danger">{error}</p>
+            <p role="alert" className="rounded-xl border border-agap-danger/25 bg-agap-dangerSoft px-4 py-2.5 text-sm text-agap-danger">{error}</p>
           )}
         </div>
 
         <DialogFooter>
-          <Button variant="secondary" className="h-11" onClick={() => handleOpen(false)}>Close</Button>
+          <Button variant="secondary" className="h-11" onClick={() => handleOpen(false)}>Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -510,6 +567,7 @@ interface ResourceRow {
 
 export function RegistryTab(): JSX.Element {
   const user = useAuthUser();
+  const isSysAdmin = hasRole(user, 'SYSTEM_ADMINISTRATOR');
   const canEdit = hasRole(user, 'ORG_ADMINISTRATOR', 'SYSTEM_ADMINISTRATOR');
   // MOD-29: the organization claims a capability; a Supervisor or System Administrator verifies it.
   const canVerify = hasRole(user, 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
@@ -518,6 +576,7 @@ export function RegistryTab(): JSX.Element {
   // Org Administrator: reads every organization's units, edits its own (decision D6).
   // The list opens on its own organization; the server enforces the edit rule.
   const ownOrgDefault = isOrgAdmin ? user?.orgId : undefined;
+  const canEditUnit = (organizationId: string) => isSysAdmin || (isOrgAdmin && organizationId === user?.orgId);
 
   const { data: orgsData } = useOrganizations({ perPage: 200 });
   const orgs = orgsData?.data ?? [];
@@ -532,7 +591,10 @@ export function RegistryTab(): JSX.Element {
   const [statusFilter, setStatusFilter] = useState(ALL);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  // A new key each time the form opens, so it starts from the unit being edited.
+  const [formKey, setFormKey] = useState(0);
   const [editing, setEditing] = useState<Resource | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   // By id, so the dialog re-reads the unit after each change refetches the list.
   const [capabilitiesId, setCapabilitiesId] = useState<string | null>(null);
   const capabilitiesUnit = resources.find((r) => r.id === capabilitiesId) ?? null;
@@ -592,13 +654,10 @@ export function RegistryTab(): JSX.Element {
     setStatusFilter(ALL);
   }
 
-  function openCreate() {
-    setEditing(null);
-    setDialogOpen(true);
-  }
-
-  function openEdit(id: string) {
-    setEditing(resources.find((r) => r.id === id) ?? null);
+  function openForm(unit: Resource | null) {
+    setNotice(null);
+    setEditing(unit);
+    setFormKey((k) => k + 1);
     setDialogOpen(true);
   }
 
@@ -627,7 +686,7 @@ export function RegistryTab(): JSX.Element {
       key: 'type',
       header: 'Type',
       accessor: (r) => (
-        <span className="whitespace-nowrap text-sm text-agap-textMid">{titleCase(r.resource_type)}</span>
+        <span className="whitespace-nowrap text-sm text-agap-textMid">{resourceTypeLabel(r.resource_type)}</span>
       ),
     },
     {
@@ -676,35 +735,40 @@ export function RegistryTab(): JSX.Element {
       header: 'Actions',
       headerClassName: 'text-right',
       accessor: (r: ResourceRow) => {
-        const isOwnOrg = r.organization_id === user?.orgId;
-        const canEditThis = hasRole(user, 'SYSTEM_ADMINISTRATOR') || (canEdit && isOwnOrg);
-        if (!canEditThis && !canVerify) {
+        const editable = canEditUnit(r.organization_id);
+        if (!editable && !canVerify) {
           return (
             <span className="flex items-center justify-end gap-1.5 whitespace-nowrap text-xs text-slate-600">
               <Lock size={13} aria-hidden="true" /> View only
             </span>
           );
         }
+        const pendingReview = r.capabilities.filter((c) => !c.is_verified).length;
         return (
           <div className="flex items-center justify-end gap-1">
             <Button
               variant="ghost"
-              className="h-11 w-11 px-0"
+              className="h-11 whitespace-nowrap px-3"
               onClick={(e) => { e.stopPropagation(); setCapabilitiesId(r.id); }}
-              aria-label={`Capabilities of ${r.name}`}
-              title="Capabilities"
+              aria-label={`Capabilities of ${r.name}${pendingReview ? `, ${pendingReview} unverified` : ''}`}
             >
-              <ShieldCheck size={17} aria-hidden="true" />
+              <ShieldCheck size={16} aria-hidden="true" />
+              Capabilities
+              {pendingReview > 0 && (
+                <span aria-hidden="true" className="rounded-full bg-agap-amberSoft px-1.5 text-[11px] font-bold tabular-nums text-agap-amber">
+                  {pendingReview}
+                </span>
+              )}
             </Button>
-            {canEditThis && (
+            {editable && (
               <Button
                 variant="ghost"
-                className="h-11 w-11 px-0"
-                onClick={(e) => { e.stopPropagation(); openEdit(r.id); }}
+                className="h-11 whitespace-nowrap px-3"
+                onClick={(e) => { e.stopPropagation(); openForm(resources.find((u) => u.id === r.id) ?? null); }}
                 aria-label={`Edit ${r.name}`}
-                title="Edit"
               >
-                <Pencil size={16} aria-hidden="true" />
+                <Pencil size={15} aria-hidden="true" />
+                Edit
               </Button>
             )}
           </div>
@@ -726,9 +790,22 @@ export function RegistryTab(): JSX.Element {
           </p>
         </div>
         {canEdit && (
-          <Button variant="primary" className="h-11 w-full sm:w-auto" onClick={openCreate}>
+          <Button variant="primary" className="h-11 w-full sm:w-auto" onClick={() => openForm(null)}>
             <Plus size={16} aria-hidden="true" /> Add resource
           </Button>
+        )}
+      </div>
+
+      {/* Result of the last add or edit */}
+      <div role="status" aria-live="polite">
+        {notice && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-agap-green/25 bg-agap-greenSoft py-1 pl-4 pr-1 text-sm text-agap-green">
+            <CheckCircle2 size={16} aria-hidden="true" className="shrink-0" />
+            <span className="min-w-0 flex-1 font-medium">{notice}</span>
+            <Button variant="ghost" className="h-11 w-11 shrink-0 px-0 text-agap-green" aria-label="Dismiss" onClick={() => setNotice(null)}>
+              <X size={15} aria-hidden="true" />
+            </Button>
+          </div>
         )}
       </div>
 
@@ -788,7 +865,7 @@ export function RegistryTab(): JSX.Element {
               <SelectContent>
                 <SelectItem value={ALL}>All types</SelectItem>
                 {RESOURCE_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>{titleCase(t)}</SelectItem>
+                  <SelectItem key={t} value={t}>{resourceTypeLabel(t)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -845,20 +922,18 @@ export function RegistryTab(): JSX.Element {
       )}
 
       <ResourceFormDialog
+        key={formKey}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
         defaultOrgId={user?.orgId}
+        onSaved={setNotice}
       />
 
       <CapabilitiesDialog
         resource={capabilitiesUnit}
         onOpenChange={(open) => { if (!open) setCapabilitiesId(null); }}
-        canManage={
-          !!capabilitiesUnit &&
-          (hasRole(user, 'SYSTEM_ADMINISTRATOR') ||
-            (isOrgAdmin && capabilitiesUnit.organization_id === user?.orgId))
-        }
+        canManage={!!capabilitiesUnit && canEditUnit(capabilitiesUnit.organization_id)}
         canVerify={canVerify}
       />
     </div>

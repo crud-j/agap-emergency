@@ -85,8 +85,8 @@ export class ResourcesService {
       data: {
         organization_id: dto.organizationId,
         name: dto.name,
-        call_sign: dto.callSign ?? null,
-        resource_type: dto.resourceType as any,
+        call_sign: dto.callSign?.trim() || null,
+        resource_type: dto.resourceType,
         vehicle_id: dto.vehicleId ?? null,
       },
     });
@@ -100,8 +100,9 @@ export class ResourcesService {
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.callSign !== undefined && { call_sign: dto.callSign }),
-        ...(dto.resourceType !== undefined && { resource_type: dto.resourceType as any }),
+        // An empty call sign clears it.
+        ...(dto.callSign !== undefined && { call_sign: dto.callSign.trim() || null }),
+        ...(dto.resourceType !== undefined && { resource_type: dto.resourceType }),
         ...(dto.vehicleId !== undefined && { vehicle_id: dto.vehicleId }),
       },
     });

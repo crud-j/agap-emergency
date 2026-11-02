@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ResourceType } from '@agap/shared';
 
 export class CreateResourceDto {
   @ApiProperty()
@@ -15,12 +16,15 @@ export class CreateResourceDto {
   @IsString()
   callSign?: string;
 
-  @ApiProperty({ example: 'AMBULANCE' })
-  @IsString()
-  resourceType!: string;
+  // An unknown type (the Registry once offered RESCUE_VEHICLE) is a 400 naming the
+  // allowed ones, not a Prisma error from the database enum.
+  @ApiProperty({ enum: ResourceType, example: ResourceType.AMBULANCE })
+  @IsEnum(ResourceType)
+  resourceType!: ResourceType;
 
-  @ApiPropertyOptional()
+  // vehicles.id, not a plate number: the column is a foreign key.
+  @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
-  @IsString()
+  @IsUUID()
   vehicleId?: string;
 }

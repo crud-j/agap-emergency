@@ -36,13 +36,10 @@ import type {
 } from '@/features/incidents/command';
 import { cn } from '@/lib/utils';
 import { CreateHandoverDialog } from '@/components/command/CreateHandoverDialog';
+import { RESOURCE_TYPES, resourceTypeLabel } from '@/features/resources/resource-type';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const RESOURCE_TYPES = [
-  'AMBULANCE', 'RESCUE_BOAT', 'FIRE_TRUCK', 'RESCUE_TRUCK',
-  'CLEARING_EQUIPMENT', 'MOTORCYCLE_RESPONDER', 'COMMAND_VEHICLE', 'OTHER',
-] as const;
 
 const REQUEST_STATUSES = ['ALL', 'PENDING', 'OFFERED', 'ACCEPTED', 'REJECTED', 'CANCELLED', 'FULFILLED'] as const;
 
@@ -345,7 +342,7 @@ function CreateRequestDialog({
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {RESOURCE_TYPES.map((t) => <SelectItem key={t} value={t}>{titleCase(t)}</SelectItem>)}
+                  {RESOURCE_TYPES.map((t) => <SelectItem key={t} value={t}>{resourceTypeLabel(t)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
