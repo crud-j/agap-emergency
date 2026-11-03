@@ -10,7 +10,8 @@
   What it does
     1. Finds cloudflared (PATH, then the winget install folder).
     2. Starts `cloudflared tunnel --url http://localhost:<Port>` and waits for the address.
-    3. Sets PUBLIC_APP_URL=<address> in backend/.env.
+    3. Sets PUBLIC_APP_URL=<address> in backend/.env, and puts the tunnel host in
+       WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN in place of the previous quick tunnel's.
     4. Keeps running. Press Ctrl+C to stop: it closes the tunnel and blanks PUBLIC_APP_URL.
 
   After step 3, RESTART THE BACKEND: it reads .env only at startup, and the quick-tunnel
@@ -51,6 +52,39 @@ function Set-PublicAppUrl([string]$value) {
   [IO.File]::WriteAllText($envFile, $text, (New-Object Text.UTF8Encoding($false)))
 }
 
+# A passkey only works on the host the browser is on, so the tunnel host has to be in
+# WEBAUTHN_RP_ID (bare host) and WEBAUTHN_ORIGIN (https://host). The previous quick-tunnel
+# entry is replaced where it was, keeping the order (the first RP ID is the mobile app's).
+function Set-PasskeyTunnelHost([string]$tunnelHost) {
+  $text = [IO.File]::ReadAllText($envFile)
+  $updates = @(
+    @{ Key = 'WEBAUTHN_RP_ID';  Entry = $tunnelHost },
+    @{ Key = 'WEBAUTHN_ORIGIN'; Entry = "https://$tunnelHost" }
+  )
+  foreach ($u in $updates) {
+    $m = [regex]::Match($text, "(?m)^$($u.Key)=([^\r\n]*)")
+    if (-not $m.Success) {
+      Write-Host "$($u.Key) is not in backend\.env; add $($u.Entry) to it to use passkeys on the tunnel." -ForegroundColor Yellow
+      continue
+    }
+    $entries = New-Object System.Collections.Generic.List[string]
+    $placed = $false
+    foreach ($e in ($m.Groups[1].Value -split ',')) {
+      $e = $e.Trim()
+      if (-not $e) { continue }
+      if ($e -match '\.trycloudflare\.com$') {
+        if (-not $placed) { $entries.Add($u.Entry); $placed = $true }
+        continue
+      }
+      $entries.Add($e)
+    }
+    if (-not $placed) { $entries.Add($u.Entry) }
+    $line = "$($u.Key)=$($entries -join ',')"
+    $text = $text.Substring(0, $m.Index) + $line + $text.Substring($m.Index + $m.Length)
+  }
+  [IO.File]::WriteAllText($envFile, $text, (New-Object Text.UTF8Encoding($false)))
+}
+
 $exe = Find-Cloudflared
 if (-not $exe) {
   Write-Host 'cloudflared is not installed. Install it with:' -ForegroundColor Yellow
@@ -87,10 +121,11 @@ try {
   if (-not $url) { throw "No tunnel address after 30 s. See $log" }
 
   Set-PublicAppUrl $url
+  Set-PasskeyTunnelHost ([Uri]$url).Host
   Write-Host ''
   Write-Host "Tunnel:  $url" -ForegroundColor Green
-  Write-Host "Wrote PUBLIC_APP_URL to backend\.env"
-  Write-Host 'NOW RESTART THE BACKEND so new alert SMS carry this link.' -ForegroundColor Yellow
+  Write-Host "Wrote PUBLIC_APP_URL and the passkey host (WEBAUTHN_RP_ID, WEBAUTHN_ORIGIN) to backend\.env"
+  Write-Host 'NOW RESTART THE BACKEND so new alert SMS carry this link and passkeys work on it.' -ForegroundColor Yellow
   Write-Host 'Press Ctrl+C to close the tunnel (PUBLIC_APP_URL is blanked on exit).'
   Write-Host ''
 
