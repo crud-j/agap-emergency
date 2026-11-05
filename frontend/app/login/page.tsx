@@ -189,7 +189,7 @@ export default function LoginPage(): ReactElement {
   }
 
   return (
-    <main className="relative isolate flex h-[100svh] min-h-0 flex-col overflow-hidden bg-[#071510]">
+    <main className="relative isolate flex h-dvh min-h-0 flex-col overflow-hidden bg-[#071510]">
 
       {/* ── Background ── */}
       <Image
@@ -212,7 +212,7 @@ export default function LoginPage(): ReactElement {
       <div className="relative z-10 flex min-h-0 flex-1 flex-col animate-in fade-in duration-700">
 
         {/* ── Top nav bar ── */}
-        <header className="mx-auto flex w-full max-w-[1480px] shrink-0 items-center justify-between gap-4 px-5 py-3 sm:px-8 lg:px-10 xl:px-12">
+        <header className="mx-auto flex w-full max-w-[1480px] shrink-0 items-center justify-between gap-3 px-4 py-3 sm:gap-4 sm:px-8 lg:px-10 xl:px-12">
 
           {/* Left: Bocaue logo + divider + portal label */}
           <div className="flex min-w-0 items-center gap-3 sm:gap-5">
@@ -221,7 +221,7 @@ export default function LoginPage(): ReactElement {
               alt="Bocaue RiverTown Wonders"
               width={bocaueLogo.width}
               height={bocaueLogo.height}
-              className="h-11 w-auto object-contain drop-shadow-sm sm:h-12 lg:h-14"
+              className="h-9 w-auto object-contain drop-shadow-sm sm:h-12 lg:h-14"
             />
             <div className="hidden h-10 w-px bg-white/25 sm:block" />
             <div>
@@ -245,8 +245,8 @@ export default function LoginPage(): ReactElement {
                 aria-pressed={language === 'en'}
                 className={
                   language === 'en'
-                    ? 'rounded-full bg-[#1B5E3B] px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all duration-200'
-                    : 'px-3 py-1 text-xs text-white/60 transition-all duration-200 hover:text-white/90 active:scale-[0.96]'
+                    ? 'min-h-11 min-w-11 rounded-full bg-[#1B5E3B] px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#071510]'
+                    : 'min-h-11 min-w-11 rounded-full px-3 py-1 text-xs text-white/80 transition-all duration-200 hover:text-white active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#071510]'
                 }
               >
                 EN
@@ -257,8 +257,8 @@ export default function LoginPage(): ReactElement {
                 aria-pressed={language === 'fil'}
                 className={
                   language === 'fil'
-                    ? 'rounded-full bg-[#1B5E3B] px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all duration-200'
-                    : 'px-3 py-1 text-xs text-white/60 transition-all duration-200 hover:text-white/90 active:scale-[0.96]'
+                    ? 'min-h-11 min-w-11 rounded-full bg-[#1B5E3B] px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#071510]'
+                    : 'min-h-11 min-w-11 rounded-full px-3 py-1 text-xs text-white/80 transition-all duration-200 hover:text-white active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#071510]'
                 }
               >
                 FIL
@@ -268,7 +268,7 @@ export default function LoginPage(): ReactElement {
         </header>
 
         {/* ── Main row: hero left + card right ── */}
-        <div className="mx-auto grid min-h-0 w-full max-w-[1360px] flex-1 grid-cols-1 content-center items-center gap-7 overflow-hidden px-5 py-3 sm:px-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-14 lg:px-10 xl:grid-cols-[minmax(0,1fr)_420px] xl:gap-20 xl:px-12 max-[1100px]:gap-8 max-[800px]:py-2">
+        <div className="mx-auto grid min-h-0 w-full max-w-[1360px] flex-1 grid-cols-1 content-center items-center gap-4 overflow-hidden px-4 py-2 sm:gap-7 sm:px-8 sm:py-4 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-14 lg:px-10 xl:grid-cols-[minmax(0,1fr)_420px] xl:gap-20 xl:px-12 max-[1100px]:gap-8">
 
           {/* ── Left: Hero ── */}
           <div className="hidden w-full max-w-[480px] min-w-0 text-center lg:block lg:text-left">
@@ -330,7 +330,7 @@ export default function LoginPage(): ReactElement {
           </div>
 
           {/* ── Right: Login card ── */}
-          <div className="relative mx-auto w-full max-w-[420px] min-w-0 shrink-0 overflow-hidden rounded-[24px] border border-white/60 bg-white/40 p-5 shadow-[0_24px_48px_-12px_rgba(2,12,18,0.4),inset_0_0_0_1px_rgba(255,255,255,0.2)] backdrop-blur-2xl backdrop-saturate-[1.1] transition-all duration-500 hover:shadow-[0_32px_64px_-12px_rgba(2,12,18,0.5)] sm:p-6 lg:p-6 [@media(max-height:800px)]:p-4">
+          <div className="relative mx-auto w-full max-w-[420px] min-w-0 shrink-0 overflow-hidden rounded-[24px] border border-white/80 bg-white/95 p-4 shadow-[0_24px_48px_-12px_rgba(2,12,18,0.4)] backdrop-blur-2xl backdrop-saturate-[1.1] transition-shadow duration-300 sm:p-6 lg:p-6 [@media(max-height:800px)]:p-4 [@media(max-height:700px)]:p-3">
             {passkeyStage && <PasskeySignInOverlay state={passkeyStage} onCancel={cancelPasskey} />}
             {/* Subtle glass highlights */}
             <div aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[linear-gradient(135deg,rgba(255,255,255,0.32)_0%,rgba(255,255,255,0.08)_42%,rgba(222,239,232,0.10)_100%)]" />
@@ -352,13 +352,13 @@ export default function LoginPage(): ReactElement {
 
             {/* Card heading */}
             <div className="mb-4 text-center">
-              <p className="text-[10px] font-bold tracking-[0.22em] text-emerald-800/70">
+              <p className="text-xs font-bold tracking-[0.16em] text-emerald-900">
                 BOCAUE MDRRMO
               </p>
-              <h2 className="mt-1.5 text-[1.55rem] font-semibold tracking-[-0.035em] text-slate-950">
+              <h2 className="mt-1.5 text-2xl font-bold tracking-[-0.03em] text-slate-950 sm:text-[1.7rem]">
                 {view === 'picker' ? t.login.pickerHeading : t.login.cardHeading}
               </h2>
-              <p className="mt-1 text-sm leading-5 text-slate-500">
+              <p className="mt-1 text-[15px] leading-5 text-slate-600">
                 {view === 'picker' ? t.login.pickerSubheading : t.login.cardSubheading}
               </p>
             </div>
@@ -430,7 +430,7 @@ export default function LoginPage(): ReactElement {
 
               {/* Work Email */}
               <div>
-                <label htmlFor="email" className="mb-2 block text-[13px] font-semibold text-slate-700">
+                <label htmlFor="email" className="mb-2 block text-sm font-semibold text-slate-800">
                   {t.login.emailLabel}
                 </label>
                 <div className="relative">
@@ -449,7 +449,7 @@ export default function LoginPage(): ReactElement {
                     autoComplete="username webauthn"
                     inputMode="email"
                     placeholder={t.login.emailPlaceholder}
-                    className="h-[46px] w-full rounded-xl border border-white/85 bg-white/58 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-all duration-200 placeholder:text-slate-400 hover:border-slate-300 hover:bg-white/70 focus:border-[#176B4B] focus:bg-white focus:ring-4 focus:ring-[#176B4B]/15"
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 text-base text-slate-950 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-500 hover:border-slate-400 focus:border-[#176B4B] focus:ring-4 focus:ring-[#176B4B]/15"
                   />
                 </div>
               </div>
@@ -458,7 +458,7 @@ export default function LoginPage(): ReactElement {
                 <>
               {/* Password */}
               <div>
-                <label htmlFor="password" className="mb-2 block text-[13px] font-semibold text-slate-700">
+                <label htmlFor="password" className="mb-2 block text-sm font-semibold text-slate-800">
                   {t.login.passwordLabel}
                 </label>
                 <div className="relative">
@@ -477,13 +477,13 @@ export default function LoginPage(): ReactElement {
                     required
                     autoComplete="current-password"
                     placeholder={t.login.passwordPlaceholder}
-                    className="h-[46px] w-full rounded-xl border border-white/85 bg-white/58 pl-11 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-all duration-200 placeholder:text-slate-400 hover:border-slate-300 hover:bg-white/70 focus:border-[#176B4B] focus:bg-white focus:ring-4 focus:ring-[#176B4B]/15"
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-12 text-base text-slate-950 shadow-sm outline-none transition-all duration-200 placeholder:text-slate-500 hover:border-slate-400 focus:border-[#176B4B] focus:ring-4 focus:ring-[#176B4B]/15"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    className="absolute inset-y-0 right-3.5 flex items-center text-slate-400 transition-colors hover:text-slate-600 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1B5E3B]"
+                    className="absolute inset-y-0 right-1 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-slate-500 transition-colors hover:text-slate-700 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1B5E3B]"
                   >
                     {showPassword ? (
                       <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">

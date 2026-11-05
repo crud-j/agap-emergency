@@ -67,6 +67,7 @@ export function OnboardingShell({
   title,
   subtitle,
   aside,
+  fixedViewport = false,
   children,
 }: {
   current: OnboardingStep;
@@ -76,6 +77,8 @@ export function OnboardingShell({
   subtitle: string;
   /** Extra left-column content (e.g. how-to steps). Switches the shell to a two-column layout. */
   aside?: ReactNode;
+  /** Keep this onboarding view within the viewport instead of allowing page scrolling. */
+  fixedViewport?: boolean;
   children: ReactNode;
 }): JSX.Element {
   const t = useTranslations().setup;
@@ -90,43 +93,43 @@ export function OnboardingShell({
   const compact = Boolean(aside || eyebrow);
 
   return (
-    <main className="grid min-h-[100svh] w-full animate-in fade-in duration-700 bg-[#F6F8F7] md:grid-cols-[4fr_6fr] lg:grid-cols-[3.5fr_6.5fr]">
+    <main className={`grid w-full animate-in fade-in duration-700 bg-[#F3F6F4] motion-reduce:animate-none md:grid-cols-[4fr_6fr] lg:grid-cols-[3.5fr_6.5fr] ${fixedViewport ? 'h-dvh min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-rows-[minmax(0,1fr)]' : 'min-h-[100svh]'}`}>
       
       {/* Left pane: context & progress. */}
-      <aside className="relative flex flex-col justify-between overflow-hidden bg-[#051610] px-6 py-8 text-white sm:px-10 sm:py-10 md:sticky md:top-0 md:h-[100svh] md:px-12 md:py-12">
+      <aside className={`relative flex flex-col justify-between overflow-hidden border-b border-emerald-950/10 bg-[linear-gradient(145deg,#061A12_0%,#08251B_55%,#0A3023_100%)] text-white md:sticky md:top-0 md:h-[100svh] md:border-b-0 md:border-r md:border-white/5 ${fixedViewport ? 'max-h-[34svh] justify-start px-5 py-3 sm:px-8 md:max-h-none md:justify-between md:px-12 md:py-10' : 'px-5 py-7 sm:px-10 sm:py-10 md:px-12 md:py-12'}`}>
         
         {/* Restrained, premium lighting effects */}
         <div aria-hidden="true" className="pointer-events-none absolute -left-1/4 -top-1/4 h-[70%] w-[120%] rounded-full bg-emerald-500/10 blur-[120px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-1/4 -right-1/4 h-[60%] w-[100%] rounded-full bg-[#126247]/20 blur-[100px]" />
 
-        <div className="relative z-10 flex h-full flex-col md:overflow-y-auto">
+        <div className={`relative z-10 flex h-full flex-col ${fixedViewport ? 'overflow-hidden' : 'md:overflow-y-auto'}`}>
           {/* Brand Header */}
           <div className="animate-in slide-in-from-left-2 fade-in duration-500">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-400/20">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-300/20 bg-emerald-400/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
                 <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-emerald-400" aria-hidden="true">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </div>
-              <p className="text-[11px] font-bold tracking-[0.2em] text-emerald-300/80">
+              <p className="text-xs font-bold tracking-[0.18em] text-emerald-200">
                 AGAP SECURITY
               </p>
             </div>
           </div>
 
           {/* Mobile Progress Bar (Sleek pill design) */}
-          <div className="mt-8 flex items-center justify-between md:hidden animate-in slide-in-from-top-2 fade-in duration-500 delay-150 fill-mode-both">
-            <div className="flex gap-1.5">
+          <div role="status" aria-label={`${t.stepsLabel}: ${labels[current]}`} className={`flex items-center justify-between md:hidden animate-in slide-in-from-top-2 fade-in duration-500 delay-150 fill-mode-both ${fixedViewport ? 'mt-3' : 'mt-7'}`}>
+            <div className="flex gap-2" aria-hidden="true">
               {STEP_ORDER.map((step, index) => (
                 <div 
                   key={step} 
                   className={`h-1.5 rounded-full transition-all duration-700 ease-out ${
-                    index === currentIndex ? 'w-6 bg-emerald-400' : index < currentIndex ? 'w-2 bg-emerald-400/40' : 'w-2 bg-white/10'
+                    index === currentIndex ? 'w-8 bg-emerald-300' : index < currentIndex ? 'w-2 bg-emerald-300/70' : 'w-2 bg-white/25'
                   }`}
                 />
               ))}
             </div>
-            <span className="text-[11px] font-medium tracking-wide text-emerald-100/60">
+            <span className="text-xs font-semibold tracking-wide text-emerald-50/85">
               STEP {currentIndex + 1} OF {STEP_ORDER.length}
             </span>
           </div>
@@ -147,7 +150,7 @@ export function OnboardingShell({
                           ? 'bg-emerald-400/10 text-emerald-400 ring-1 ring-inset ring-emerald-400/30'
                           : active
                             ? 'bg-emerald-400 ring-4 ring-emerald-400/20'
-                            : 'bg-transparent ring-1 ring-inset ring-white/20'
+                            : 'bg-transparent ring-1 ring-inset ring-white/35'
                       }`}
                     >
                       {done && (
@@ -162,7 +165,7 @@ export function OnboardingShell({
                     )}
                   </div>
                   <span className={`pl-5 pt-0.5 text-[14px] transition-all duration-500 ${
-                    active ? 'font-semibold text-white translate-x-1' : done ? 'text-emerald-50/70 font-medium' : 'text-white/30'
+                    active ? 'translate-x-1 font-semibold text-white' : done ? 'font-medium text-emerald-50/85' : 'text-white/60'
                   }`}>
                     {labels[step]}
                   </span>
@@ -172,31 +175,31 @@ export function OnboardingShell({
           </ol>
 
           {/* Dynamic Content Area */}
-          <div className="relative mt-8 animate-in slide-in-from-bottom-4 fade-in duration-500 delay-300 fill-mode-both md:mt-auto md:pt-10">
+          <div className={`relative animate-in slide-in-from-bottom-4 fade-in duration-500 delay-300 fill-mode-both ${fixedViewport ? 'mt-3 md:mt-auto md:pt-8' : 'mt-8 md:mt-auto md:pt-10'}`}>
             {eyebrow && (
-              <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-300">{eyebrow}</p>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-emerald-300">{eyebrow}</p>
             )}
             <h1
               className={`font-semibold leading-[1.15] tracking-tight text-white ${
-                compact ? 'text-2xl sm:text-[1.75rem]' : 'text-3xl sm:text-[2.25rem]'
+                fixedViewport ? 'text-xl leading-tight sm:text-2xl md:text-[1.75rem]' : compact ? 'text-2xl sm:text-[1.75rem]' : 'text-3xl sm:text-[2.25rem]'
               }`}
             >
               {title}
             </h1>
-            <p className={`max-w-md text-[15px] leading-relaxed text-emerald-50/70 ${compact ? 'mt-3' : 'mt-4'}`}>
+            <p className={`max-w-md leading-relaxed text-emerald-50/80 ${fixedViewport ? 'mt-1.5 text-sm md:mt-3 md:text-base' : `text-base ${compact ? 'mt-3' : 'mt-4'}`}`}>
               {subtitle}
             </p>
-            {aside && <div className="mt-6 max-w-md text-sm text-emerald-50/80">{aside}</div>}
+            {aside && <div className={`mt-6 max-w-md text-sm text-emerald-50/80 ${fixedViewport ? 'hidden md:block' : ''}`}>{aside}</div>}
           </div>
         </div>
       </aside>
 
       {/* Right pane: Action area */}
-      <section className="relative flex items-center justify-center p-4 sm:p-6 md:p-12 lg:p-16">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white/60 via-transparent to-transparent" />
+      <section className={`relative flex items-center justify-center bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.9),transparent_55%)] ${fixedViewport ? 'min-h-0 overflow-hidden p-3 sm:p-4 md:p-8' : 'px-4 py-8 sm:p-6 md:p-12 lg:p-16'}`}>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(20,120,78,0.04),transparent_48%)]" />
         
         {/* Canvas container for the child forms */}
-        <div className="w-full max-w-md animate-in zoom-in-[0.98] fade-in duration-700 delay-[400ms] fill-mode-both relative z-10">
+        <div className={`relative z-10 w-full max-w-md animate-in zoom-in-[0.98] fade-in duration-700 delay-[400ms] fill-mode-both motion-reduce:animate-none ${fixedViewport ? 'max-h-full' : ''}`}>
           {children}
         </div>
       </section>

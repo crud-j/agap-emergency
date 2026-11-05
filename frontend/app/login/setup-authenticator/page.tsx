@@ -11,7 +11,7 @@ import { landingForRole, safeNextPath } from '@/lib/post-login';
 const focusRing = 'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#176B4B]/20';
 const primaryButton = `flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#126247] px-4 text-sm font-semibold text-white shadow-sm transition-[background-color,transform] duration-150 hover:bg-[#0F543D] active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none disabled:active:scale-100 motion-reduce:transform-none ${focusRing}`;
 const outlineButton = `flex h-11 w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-[background-color,transform] duration-150 hover:bg-slate-50 active:scale-[0.98] motion-reduce:transform-none ${focusRing}`;
-const card = 'auth-in rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200 sm:p-7';
+const card = 'auth-in rounded-2xl bg-white p-3 shadow-card ring-1 ring-slate-200 sm:p-4';
 
 type Phase = 'scan' | 'codes' | 'done';
 
@@ -76,7 +76,7 @@ export default function SetupAuthenticatorPage(): JSX.Element {
   // Session restore + security status: show progress instead of a blank screen.
   if (!user || !status) {
     return (
-      <main className="grid min-h-[100svh] place-items-center bg-[#F6F8F7] p-4">
+      <main className="grid h-dvh min-h-0 place-items-center overflow-hidden bg-[#F6F8F7] p-4">
         <p role="status" className="flex items-center gap-3 text-sm font-medium text-slate-600">
           <svg className="h-5 w-5 animate-spin text-[#126247] motion-reduce:animate-none" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -95,6 +95,7 @@ export default function SetupAuthenticatorPage(): JSX.Element {
     return (
       <OnboardingShell
         current="authenticator"
+        fixedViewport
         title={t.codesHeading}
         subtitle={t.codesLead}
         eyebrow={t.authEyebrow}
@@ -126,6 +127,7 @@ export default function SetupAuthenticatorPage(): JSX.Element {
     return (
       <OnboardingShell
         current="authenticator"
+        fixedViewport
         title={t.successHeading}
         subtitle={t.successBody}
         eyebrow={t.authEyebrow}
@@ -162,6 +164,7 @@ export default function SetupAuthenticatorPage(): JSX.Element {
   return (
     <OnboardingShell
       current="authenticator"
+      fixedViewport
       title={t.authTitle}
       subtitle={t.totpSubheading}
       eyebrow={t.authEyebrow}
@@ -186,6 +189,7 @@ export default function SetupAuthenticatorPage(): JSX.Element {
         ) : enrolling ? (
           <TotpEnrollment
             autoStart
+            compact
             onCancel={() => setEnrolling(false)}
             onConfirmed={({ backupCodes: codes }) => {
               setAcknowledged(false);

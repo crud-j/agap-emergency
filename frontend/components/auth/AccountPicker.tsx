@@ -147,6 +147,12 @@ export function AccountPicker({
         </p>
       )}
 
+      <div
+        role="region"
+        aria-label={t.pickerHeading}
+        tabIndex={0}
+        className="max-h-[min(38svh,22rem)] overflow-y-auto overscroll-contain rounded-2xl pr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#126247]/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
       <ul className="flex flex-col gap-2.5">
         {accounts.map((account, index) => {
           const open = openEmail === account.email;
@@ -174,13 +180,13 @@ export function AccountPicker({
                     {initialsOf(account.name)}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-slate-900">{account.name}</span>
-                    <span className="block truncate text-xs text-slate-500">{account.email}</span>
+                    <span className="block truncate text-[15px] font-semibold text-slate-950">{account.name}</span>
+                    <span className="block truncate text-[13px] text-slate-600">{account.email}</span>
                   </span>
                   <span
                     className={`inline-flex flex-none items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-opacity ${
                       editing ? 'opacity-0' : ''
-                    } ${isActive ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}
+                      } ${isActive ? 'bg-emerald-50 text-emerald-900' : 'bg-slate-100 text-slate-700'}`}
                   >
                     <i className="h-1.5 w-1.5 rounded-full bg-current" />
                     {isActive ? t.pickerSignedIn : t.pickerSignedOut}
@@ -317,6 +323,7 @@ export function AccountPicker({
           </button>
         </li>
       </ul>
+      </div>
 
       <div className="mt-4 text-center">
         <button
@@ -330,7 +337,7 @@ export function AccountPicker({
         >
           {editing ? t.pickerDone : t.pickerRemove}
         </button>
-        <p className="mt-2 text-[11px] text-slate-400">{t.pickerPrivacy}</p>
+        <p className="mt-2 text-xs text-slate-600">{t.pickerPrivacy}</p>
       </div>
     </div>
   );

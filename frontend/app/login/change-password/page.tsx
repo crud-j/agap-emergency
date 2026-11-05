@@ -21,12 +21,9 @@ function PasswordInput({
   show: boolean; onToggleShow: () => void; hasError?: boolean; shake?: boolean; onShakeEnd?: () => void;
 }): JSX.Element {
   return (
-    <div className="group relative">
-      <label htmlFor={id} className="sr-only">{label}</label>
-      <div 
-        className={`relative ${shake ? 'animate-ml-shake' : ''}`}
-        onAnimationEnd={onShakeEnd}
-      >
+    <div className="space-y-2">
+      <label htmlFor={id} className="block text-sm font-semibold text-slate-800">{label}</label>
+      <div className={`group relative ${shake ? 'animate-ml-shake' : ''}`} onAnimationEnd={onShakeEnd}>
         <span className={`pointer-events-none absolute inset-y-0 left-4 flex items-center transition-colors ${hasError ? 'text-red-400 group-focus-within:text-red-500' : 'text-slate-400 group-focus-within:text-[#126247]'}`} aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]">
             <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
@@ -42,15 +39,15 @@ function PasswordInput({
           required
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={label}
-          className={`h-[48px] w-full rounded-full border bg-white pl-11 pr-12 text-sm shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 ${hasError ? 'border-red-500 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20' : 'border-slate-300 text-slate-900 hover:border-slate-400 focus:border-[#126247] focus:ring-4 focus:ring-[#126247]/15'}`}
+          aria-invalid={hasError || undefined}
+          className={`h-12 w-full rounded-xl border bg-white pl-12 pr-12 text-base text-slate-950 shadow-sm outline-none transition-all duration-200 ${hasError ? 'border-red-500 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20' : 'border-slate-300 hover:border-slate-400 focus:border-[#126247] focus:ring-4 focus:ring-[#126247]/15'}`}
         />
         
         <button
           type="button"
           onClick={onToggleShow}
           aria-label={show ? 'Hide password' : 'Show password'}
-          className={`absolute inset-y-0 right-3 flex items-center px-2 transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset ${hasError ? 'text-red-400 hover:text-red-600 focus-visible:ring-red-500' : 'text-slate-400 hover:text-slate-600 focus-visible:ring-[#126247]'}`}
+          className={`absolute inset-y-0 right-1 flex min-h-11 min-w-11 items-center justify-center rounded-lg transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset ${hasError ? 'text-red-500 hover:text-red-700 focus-visible:ring-red-500' : 'text-slate-500 hover:text-slate-700 focus-visible:ring-[#126247]'}`}
         >
           {show ? (
             <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
@@ -122,10 +119,10 @@ export default function ChangePasswordPage(): JSX.Element {
   };
 
   const getTextColor = () => {
-    if (strength === 1) return 'text-[#D92D20]';
-    if (strength === 2) return 'text-[#C77700]';
+    if (strength === 1) return 'text-[#B42318]';
+    if (strength === 2) return 'text-[#8A4B00]';
     if (strength === 3) return 'text-[#0050C8]';
-    if (strength === 4) return 'text-[#12893C]';
+    if (strength === 4) return 'text-[#067647]';
     return 'text-slate-500';
   };
 
@@ -208,7 +205,8 @@ export default function ChangePasswordPage(): JSX.Element {
   }
 
   return (
-    <main className="flex min-h-[100svh] items-center justify-center bg-agap-pearl p-4 sm:p-6">
+    <main className="relative flex min-h-[100svh] items-center justify-center overflow-hidden bg-[#f3f7f4] px-4 py-8 sm:px-6 sm:py-10">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(22,120,83,0.12),transparent_38%),radial-gradient(ellipse_at_bottom_right,rgba(15,75,56,0.08),transparent_42%)]" />
       {/* BrewedOps Keyframes Injection */}
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes ml-shake {
@@ -221,16 +219,19 @@ export default function ChangePasswordPage(): JSX.Element {
         .animate-ml-shake {
           animation: ml-shake 420ms cubic-bezier(.36,.07,.19,.97);
         }
+        @media (prefers-reduced-motion: reduce) {
+          .animate-ml-shake { animation: none; }
+        }
       `}} />
 
-      <section className="w-full max-w-[420px] animate-in fade-in zoom-in-95 duration-500 rounded-3xl border border-agap-track/60 bg-white p-6 shadow-card sm:p-8">
+      <section className="relative w-full max-w-[460px] animate-in fade-in zoom-in-95 duration-500 rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-30px_rgba(15,45,32,0.32)] sm:p-8">
         
         {state !== 'ready' ? (
           <div className="flex flex-col items-center justify-center py-6 text-center animate-in fade-in duration-300">
             {state === 'checking' ? (
               <>
                 <svg className="mb-4 h-8 w-8 animate-spin text-[#126247]" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-                <p className="text-sm font-medium text-slate-700">Restoring your session…</p>
+                <p className="text-base font-medium text-slate-800">Restoring your session…</p>
               </>
             ) : (
               <>
@@ -239,8 +240,8 @@ export default function ChangePasswordPage(): JSX.Element {
                     <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
-                <p className="text-[1.1rem] font-semibold text-slate-900">Cannot reach the server</p>
-                <p className="mt-1.5 text-sm text-slate-500">Reconnect to change your password.</p>
+                <p className="text-xl font-semibold text-slate-950">Cannot reach the server</p>
+                <p className="mt-1.5 text-[15px] text-slate-600">Reconnect to change your password.</p>
                 <button
                   type="button"
                   onClick={() => {
@@ -256,7 +257,7 @@ export default function ChangePasswordPage(): JSX.Element {
                       else setState('unavailable');
                     });
                   }}
-                  className="mt-6 flex h-[48px] w-full items-center justify-center rounded-full bg-slate-900 px-4 text-sm font-semibold text-white transition-all active:scale-[0.98] hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/20"
+                  className="mt-6 flex h-12 w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition-all active:scale-[0.98] hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/20"
                 >
                   Retry Connection
                 </button>
@@ -265,21 +266,21 @@ export default function ChangePasswordPage(): JSX.Element {
           </div>
         ) : (
           <>
-            <div className="mb-8 flex flex-col items-center text-center">
-              <div className="mb-5 flex h-[72px] w-[72px] items-center justify-center rounded-full bg-slate-900 text-white shadow-md">
+            <div className="mb-7 flex flex-col items-center text-center sm:mb-8">
+              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-[#126247] ring-1 ring-emerald-900/10">
                 <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8" aria-hidden="true">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   <rect x="9" y="11" width="6" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" fill="currentColor"/>
                   <path d="M10 11V9a2 2 0 1 1 4 0v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                 </svg>
               </div>
-              <p className="text-[10px] font-bold tracking-[0.22em] text-[#126247]/80">
+              <p className="text-xs font-bold tracking-[0.16em] text-emerald-900">
                 AGAP · ACCOUNT SECURITY
               </p>
-              <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-slate-900">
+              <h1 className="mt-2 text-[1.75rem] font-bold tracking-tight text-slate-950 sm:text-3xl">
                 Change Password
               </h1>
-              <p className="mt-1.5 text-[13px] leading-5 text-slate-500">
+              <p className="mt-2 text-[15px] leading-6 text-slate-600">
                 Enter your current and new password below.
               </p>
             </div>
@@ -307,18 +308,18 @@ export default function ChangePasswordPage(): JSX.Element {
                 
                 {/* BrewedOps Motion Library Password Strength Meter */}
                 <div className="px-1 mt-3">
-                  <div className="grid grid-cols-4 gap-1.5" aria-hidden="true">
+                  <div className="grid grid-cols-4 gap-1.5" role="meter" aria-label="Password strength" aria-valuemin={0} aria-valuemax={4} aria-valuenow={strength} aria-valuetext={statusLabels[strength]}>
                     {[1, 2, 3, 4].map((index) => (
                       <div key={index} className="relative h-1.5 w-full overflow-hidden rounded-full bg-[#EBF0F7]">
                         <div className={`absolute inset-0 origin-left transition-all duration-[420ms] ease-[cubic-bezier(0.32,0.72,0,1)] rounded-full ${getBarColor(index)}`} />
                       </div>
                     ))}
                   </div>
-                  <div className="mt-2.5 flex justify-between text-[12px] font-semibold">
+                  <div className="mt-2.5 flex justify-between gap-3 text-sm font-semibold">
                     <span aria-live="polite" className={`transition-colors duration-300 ${getTextColor()}`}>
                       {statusLabels[strength]}
                     </span>
-                    <span className="font-medium text-slate-500">
+                    <span className="text-right font-medium text-slate-600">
                       12+ characters required
                     </span>
                   </div>
@@ -338,23 +339,23 @@ export default function ChangePasswordPage(): JSX.Element {
                 onShakeEnd={() => setShakeConfirm(false)}
               />
 
-              <div className="my-5 pl-2 space-y-2.5">
-                <div className={`flex items-center gap-2.5 text-[13px] transition-colors duration-300 ${isLengthValid ? 'text-slate-900' : 'text-slate-500'}`}>
-                  <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors duration-300 ${isLengthValid ? 'bg-[#73b916] text-white' : 'bg-slate-200 text-transparent'}`}>
+              <div className="my-5 space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className={`flex items-center gap-2.5 text-sm transition-colors duration-300 ${isLengthValid ? 'text-slate-900' : 'text-slate-600'}`}>
+                  <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors duration-300 ${isLengthValid ? 'bg-[#126247] text-white' : 'bg-slate-200 text-transparent'}`}>
                     <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
                   Must be between 12 and 128 characters
                 </div>
                 
-                <div className={`flex items-center gap-2.5 text-[13px] transition-colors duration-300 ${isSecurityValid ? 'text-slate-900' : 'text-slate-500'}`}>
-                  <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors duration-300 ${isSecurityValid ? 'bg-[#73b916] text-white' : 'bg-slate-200 text-transparent'}`}>
+                <div className={`flex items-center gap-2.5 text-sm transition-colors duration-300 ${isSecurityValid ? 'text-slate-900' : 'text-slate-600'}`}>
+                  <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors duration-300 ${isSecurityValid ? 'bg-[#126247] text-white' : 'bg-slate-200 text-transparent'}`}>
                     <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
                   Must not contain your name, AGAP, or Bocaue
                 </div>
 
-                <div className={`flex items-center gap-2.5 text-[13px] transition-colors duration-300 ${isMatchValid ? 'text-slate-900' : 'text-slate-500'}`}>
-                  <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors duration-300 ${isMatchValid ? 'bg-[#73b916] text-white' : 'bg-slate-200 text-transparent'}`}>
+                <div className={`flex items-center gap-2.5 text-sm transition-colors duration-300 ${isMatchValid ? 'text-slate-900' : 'text-slate-600'}`}>
+                  <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors duration-300 ${isMatchValid ? 'bg-[#126247] text-white' : 'bg-slate-200 text-transparent'}`}>
                     <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
                   New passwords must match
@@ -376,7 +377,7 @@ export default function ChangePasswordPage(): JSX.Element {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex h-[48px] w-full items-center justify-center gap-2 rounded-full bg-[#126247] text-[15px] font-semibold text-white shadow-md transition-all duration-200 hover:bg-[#0F543D] active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#126247]/20 focus-visible:ring-offset-2"
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#126247] text-base font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#0F543D] active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#126247]/20 focus-visible:ring-offset-2"
                 >
                   {saving ? (
                     <>
@@ -399,7 +400,7 @@ export default function ChangePasswordPage(): JSX.Element {
                   onClick={() => {
                     void logout().then(() => router.replace('/login'));
                   }}
-                  className="flex h-[48px] w-full items-center justify-center rounded-full text-sm font-medium text-slate-500 transition-colors hover:text-slate-800 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+                  className="flex h-12 w-full items-center justify-center rounded-xl text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-950 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2"
                 >
                   Sign out instead
                 </button>

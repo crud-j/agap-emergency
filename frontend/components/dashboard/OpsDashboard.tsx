@@ -72,19 +72,19 @@ export function OpsDashboard(): JSX.Element {
   const loading = summaryQuery.isLoading;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6 pb-2">
 
       {/* ── Page header ──────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <div className="flex flex-col gap-4 border-b border-agap-track/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-[22px] font-bold text-agap-textMain leading-tight tracking-tight">
+          <h1 className="text-2xl font-bold leading-tight tracking-tight text-agap-textMain sm:text-[1.75rem]">
             Operations Dashboard
           </h1>
-          <p className="mt-0.5 text-[13px] text-slate-500">
+          <p className="mt-1 text-sm text-agap-textMid">
             Bocaue MDRRMO · live emergency operations overview
           </p>
         </div>
-        <div className="flex items-center gap-3 pt-0.5">
+        <div className="flex min-h-11 flex-wrap items-center gap-3 rounded-xl border border-agap-track/70 bg-white px-3 py-2 shadow-card sm:shrink-0">
           <UpdatedAgo
             at={Math.max(summaryQuery.dataUpdatedAt, incidentsQuery.dataUpdatedAt)}
             fetching={summaryQuery.isFetching || incidentsQuery.isFetching}
@@ -116,7 +116,7 @@ export function OpsDashboard(): JSX.Element {
       )}
 
       {/* ── KPI grid — most urgent first ─────────────────────────────────── */}
-      <section aria-label="Live counts" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <section aria-label="Live counts" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6 xl:gap-3 [&>a>div]:min-h-[148px] [&>a>div]:rounded-2xl [&>a>div]:border-agap-track/60 [&>a>div]:p-4 [&>a>div>div:first-child>span:first-child]:text-xs [&>a>div>div:last-child>span:last-child]:text-xs">
         <KpiLink href="/operations/incidents" label="Critical incidents" value={summary?.critical} destination="incident queue">
           <StatCard
             label="Critical"
@@ -183,15 +183,15 @@ export function OpsDashboard(): JSX.Element {
       </section>
 
       {/* ── Work area: next actions beside the newest reports ─────────────── */}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-6">
 
         {/* Next actions — first in reading order; moves to the right column on wide screens. */}
         <section
           aria-labelledby="ops-next-actions"
-          className="h-fit rounded-xl border border-agap-track/40 bg-white shadow-card xl:order-2"
+          className="h-fit rounded-2xl border border-agap-track/60 bg-white shadow-card xl:order-2"
         >
-          <div className="border-b border-agap-track/30 px-5 py-3.5">
-            <h2 id="ops-next-actions" className="text-[13px] font-bold text-agap-textMain">Next actions</h2>
+          <div className="border-b border-agap-track/50 bg-agap-surface/35 px-5 py-4">
+            <h2 id="ops-next-actions" className="text-[15px] font-bold text-agap-textMain">Next actions</h2>
           </div>
           {/* Existing screens only (no incident form, broadcast or SMS). */}
           <ul className="divide-y divide-agap-track/20 p-1.5">
@@ -229,19 +229,19 @@ export function OpsDashboard(): JSX.Element {
         {/* Recent incidents */}
         <section
           aria-labelledby="ops-recent"
-          className="min-w-0 overflow-hidden rounded-xl border border-agap-track/40 bg-white shadow-card xl:order-1"
+          className="min-w-0 overflow-hidden rounded-2xl border border-agap-track/60 bg-white shadow-card xl:order-1"
         >
-          <div className="flex items-center justify-between gap-3 border-b border-agap-track/30 px-4 py-3.5 sm:px-5">
+          <div className="flex items-center justify-between gap-3 border-b border-agap-track/50 bg-white px-4 py-4 sm:px-5">
             <div className="flex items-center gap-2">
               <Activity size={15} aria-hidden="true" className="text-agap-green" />
-              <h2 id="ops-recent" className="text-[13px] font-bold text-agap-textMain">Recent incidents</h2>
+              <h2 id="ops-recent" className="text-[15px] font-bold text-agap-textMain">Recent incidents</h2>
               {recent.length > 0 && (
                 <span className="text-xs text-slate-500">· newest {recent.length}</span>
               )}
             </div>
             <Link
               href="/operations/incidents"
-              className={`-mr-2 inline-flex h-9 items-center gap-1 rounded-lg px-2 text-[13px] font-semibold text-agap-green transition-colors hover:bg-agap-greenSoft ${FOCUS_RING}`}
+              className={`-mr-2 inline-flex min-h-10 items-center gap-1 rounded-lg px-2.5 text-sm font-semibold text-agap-green transition-colors hover:bg-agap-greenSoft ${FOCUS_RING}`}
             >
               View all <ArrowRight size={14} aria-hidden="true" />
             </Link>
@@ -251,7 +251,7 @@ export function OpsDashboard(): JSX.Element {
           {!incidentsQuery.isLoading && !incidentsQuery.isError && recent.length > 0 && (
             <div
               aria-hidden="true"
-              className={`${ROW_GRID} border-b border-agap-track/20 bg-agap-surface/40 py-2 pl-[calc(1rem+3px)] pr-4 text-[10.5px] font-semibold uppercase tracking-wider text-slate-500 sm:pl-[calc(1.25rem+3px)] sm:pr-5`}
+              className={`${ROW_GRID} border-b border-agap-track/30 bg-agap-surface/50 py-2.5 pl-[calc(1rem+3px)] pr-4 text-xs font-semibold uppercase tracking-wide text-agap-textMid sm:pl-[calc(1.25rem+3px)] sm:pr-5`}
             >
               <span>Incident</span>
               <span>Priority</span>
@@ -423,17 +423,17 @@ function ActionRow({
     <li>
       <Link
         href={href}
-        className={`group flex min-h-14 items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-agap-surface/70 ${FOCUS_RING}`}
+        className={`group flex min-h-16 items-center gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-agap-surface/70 ${FOCUS_RING}`}
       >
-        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tile}`}>{icon}</span>
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tile}`}>{icon}</span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-semibold text-agap-textMain">{title}</span>
+          <span className="block text-sm font-semibold text-agap-textMain">{title}</span>
           {loading ? (
             <span className="mt-1 block h-2.5 w-28 animate-pulse rounded bg-agap-track/70 motion-reduce:animate-none" />
           ) : detail ? (
             <span
               className={`block truncate text-xs ${
-                tone === 'warning' ? 'font-medium text-agap-amber' : tone === 'primary' ? 'font-medium text-agap-green' : 'text-slate-500'
+                tone === 'warning' ? 'font-medium text-[#8A4B00]' : tone === 'primary' ? 'font-medium text-agap-green' : 'text-agap-textMid'
               }`}
             >
               {detail}
@@ -469,7 +469,7 @@ function IncidentRow({ incident, arrived }: { incident: IncidentListItem; arrive
   return (
     <Link
       href={`/operations/incidents?focus=${incident.id}`}
-      className={`${ROW_GRID} min-h-14 px-4 py-3 transition-colors duration-700 motion-reduce:transition-none hover:bg-agap-surface/60 sm:px-5 focus-visible:bg-agap-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-agap-green/60 ${strip} ${
+      className={`${ROW_GRID} min-h-16 px-4 py-3.5 transition-colors duration-700 motion-reduce:transition-none hover:bg-agap-surface/60 sm:px-5 focus-visible:bg-agap-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-agap-green/60 ${strip} ${
         arrived ? 'bg-agap-greenSoft/70' : ''
       }`}
     >
@@ -482,14 +482,14 @@ function IncidentRow({ incident, arrived }: { incident: IncidentListItem; arrive
             <span className="font-mono text-[12px] font-semibold text-agap-textMain tabular-nums">
               {incident.public_reference}
             </span>
-            <span className="truncate text-xs text-agap-textMid">{titleCase(incident.category)}</span>
+            <span className="truncate text-[13px] text-agap-textMid">{titleCase(incident.category)}</span>
             {arrived && (
               <span className="shrink-0 rounded-full bg-agap-green px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-white">
                 New
               </span>
             )}
           </span>
-          <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-slate-500">
+          <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-agap-textMid">
             <MapPin size={11} aria-hidden="true" className="shrink-0" />
             <span className={`truncate ${location ? '' : 'italic'}`}>{location ?? 'Location pending'}</span>
           </span>
@@ -502,7 +502,7 @@ function IncidentRow({ incident, arrived }: { incident: IncidentListItem; arrive
       <span className="hidden sm:block">
         <StatusChip status={incident.status} />
       </span>
-      <span className="text-right font-mono text-[11px] text-slate-500 tabular-nums">
+      <span className="text-right font-mono text-xs text-agap-textMid tabular-nums">
         <ReportedAgo iso={incident.submitted_at} />
       </span>
     </Link>

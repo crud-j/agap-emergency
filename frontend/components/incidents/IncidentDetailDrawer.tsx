@@ -114,12 +114,12 @@ export function IncidentDetailDrawer({ incidentId, open, onOpenChange }: Inciden
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent width="w-[520px]">
-        <DrawerHeader>
-          <DrawerTitle>Incident Detail</DrawerTitle>
+      <DrawerContent width="w-full sm:w-[520px]" className="border-l-0 bg-agap-pearl sm:border-l">
+        <DrawerHeader className="border-b border-agap-track/70 bg-white px-4 py-4 shadow-sm sm:px-6 [&>button]:min-h-11 [&>button]:min-w-11 [&>button]:justify-center">
+          <DrawerTitle className="text-lg font-bold tracking-tight">Incident detail</DrawerTitle>
         </DrawerHeader>
 
-        <DrawerBody>
+        <DrawerBody className="bg-[#F4F7F6] px-4 py-4 sm:px-6 sm:py-5">
           {isLoading ? (
             <div className="space-y-4">
               <Skeleton className="h-16 w-full" />
@@ -153,24 +153,28 @@ export function IncidentDetailBody({ incident }: { incident: IncidentDetail }): 
   const barangayAttention = useBarangayAttention(incident.id);
 
   return (
-    <div className="space-y-4">
-      <SummaryHeader incident={incident} />
-      <LifecycleTracker status={incident.status} />
+    <div className="space-y-5">
+      <div className="space-y-4 rounded-2xl border border-agap-track/70 bg-white p-4 shadow-card">
+        <SummaryHeader incident={incident} />
+        <LifecycleTracker status={incident.status} />
+      </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="barangay" className="gap-1.5">
+        <TabsList className="grid min-h-12 w-full grid-cols-4 gap-1 rounded-xl border border-agap-track/70 bg-white p-1.5 shadow-card">
+          <TabsTrigger value="overview" className="min-h-11 px-1.5 text-xs sm:text-sm">
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="barangay" className="min-h-11 gap-1 px-1.5 text-xs sm:text-sm">
             Barangay
             {barangayAttention && (
               <span className="h-2 w-2 rounded-full bg-agap-danger" aria-label="Needs attention" />
             )}
           </TabsTrigger>
-          <TabsTrigger value="timeline" className="gap-1.5">
+          <TabsTrigger value="timeline" className="min-h-11 gap-1 px-1.5 text-xs sm:text-sm">
             Timeline
             {events.length > 0 && <span className="text-[11px] font-medium text-agap-textSub">{events.length}</span>}
           </TabsTrigger>
-          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="chat" className="min-h-11 px-1.5 text-xs sm:text-sm">Chat</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -211,19 +215,19 @@ function useBarangayAttention(incidentId: string): boolean {
 function SummaryHeader({ incident }: { incident: IncidentDetail }): JSX.Element {
   const Icon = categoryIcon(incident.category);
   return (
-    <div className="flex items-start gap-3">
-      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-agap-greenSoft text-agap-green">
+    <div className="flex min-w-0 items-start gap-3.5">
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-agap-greenSoft text-agap-green ring-1 ring-inset ring-agap-green/10">
         <Icon size={22} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="truncate text-lg font-extrabold text-agap-textMain">{titleCase(incident.category)}</h2>
+          <h2 className="truncate text-xl font-bold tracking-tight text-agap-textMain">{titleCase(incident.category)}</h2>
           <PriorityBadge priority={incident.priority} />
         </div>
-        <p className="font-mono text-xs text-agap-textSub">
+        <p className="mt-1 font-mono text-[13px] font-medium text-agap-textMid">
           {incident.public_reference} · reported {timeAgo(incident.submitted_at)}
         </p>
-        <div className="mt-1.5">
+        <div className="mt-2">
           <StatusChip status={incident.status} />
         </div>
       </div>
@@ -247,7 +251,7 @@ function LifecycleTracker({ status }: { status: string }): JSX.Element {
   const ended = ENDED_EARLY[status];
   if (ended) {
     return (
-      <div className="flex items-center gap-2 rounded-xl bg-agap-surface px-3 py-2 text-sm text-agap-textMid">
+      <div className="flex items-center gap-2 rounded-xl border border-agap-track/70 bg-white px-3 py-2.5 text-sm text-agap-textMid">
         {status === 'REFERRED' ? <Landmark size={15} /> : <Ban size={15} />}
         <span className="font-semibold">{ended}</span>
       </div>
@@ -1226,22 +1230,22 @@ export function StatusActionFooter({ incident }: { incident: IncidentDetail }): 
   }, [incident.status]);
 
   return (
-    <DrawerFooter className="flex-col items-stretch gap-2">
-      <p className="text-xs text-agap-textSub">
-        <span className="font-semibold text-agap-textMid">Next: </span>
-        {hint}
+    <DrawerFooter className="flex-col items-stretch gap-2 border-t border-agap-track/70 bg-white px-4 py-3.5 shadow-[0_-8px_24px_rgba(15,28,45,0.06)] sm:px-6">
+      <p className="rounded-xl bg-agap-surface/70 px-3 py-2 text-sm leading-snug text-agap-textMid">
+        <span className="font-bold text-agap-textMain">Next: </span>{hint}
       </p>
       {update.isError && (
-        <p className="text-xs text-agap-danger">
+        <p role="alert" className="rounded-lg bg-agap-dangerSoft px-3 py-2 text-sm font-medium text-agap-danger">
           {(update.error as Error)?.message ?? 'Action failed. The change may not be allowed.'}
         </p>
       )}
       {(action || falseAlert || incident.status === 'DISPATCH_PENDING') && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {falseAlert && (
             <Button
               variant={armFalseAlert ? 'danger' : 'ghost'}
               size="sm"
+              className="min-h-11"
               loading={update.isPending && update.variables?.status === 'FALSE_ALERT'}
               onClick={() => {
                 if (!armFalseAlert) { setArmFalseAlert(true); return; }
@@ -1252,14 +1256,14 @@ export function StatusActionFooter({ incident }: { incident: IncidentDetail }): 
               {armFalseAlert ? 'Confirm false alert' : 'False alert'}
             </Button>
           )}
-          <span className="flex-1" />
+          <span className="hidden flex-1 sm:block" />
           {incident.status === 'DISPATCH_PENDING' && (
             <Link href="/operations/dispatch">
-              <Button variant="primary" size="sm">Open dispatch console</Button>
+              <Button variant="primary" size="sm" className="min-h-11">Open dispatch console</Button>
             </Link>
           )}
           {action && incident.status === 'RESOLVED' && (
-            <Button variant="primary" size="sm" onClick={() => setResolveOpen(true)}>
+            <Button variant="primary" size="sm" className="min-h-11" onClick={() => setResolveOpen(true)}>
               <CheckCircle2 size={14} /> {action.label}
             </Button>
           )}
@@ -1267,6 +1271,7 @@ export function StatusActionFooter({ incident }: { incident: IncidentDetail }): 
             <Button
               variant="primary"
               size="sm"
+              className="min-h-11"
               loading={update.isPending && update.variables?.status === action.to}
               onClick={() => update.mutate({ id: incident.id, status: action.to })}
             >
@@ -1815,9 +1820,11 @@ function Section({
 }): JSX.Element {
   return (
     <div>
-      <div className="mb-1.5 flex items-center gap-1.5">
-        <Icon size={14} className="text-agap-textSub" />
-        <span className="text-xs font-semibold uppercase tracking-wide text-agap-textSub">{title}</span>
+      <div className="mb-2 flex items-center gap-2">
+        <span className="grid h-7 w-7 place-items-center rounded-lg bg-agap-greenSoft text-agap-green">
+          <Icon size={15} aria-hidden="true" />
+        </span>
+        <span className="text-xs font-bold uppercase tracking-[0.1em] text-agap-textMid">{title}</span>
       </div>
       {children}
     </div>
@@ -1837,7 +1844,7 @@ function Collapsible({
   const [open, setOpen] = useState(false);
   return (
     <div
-      className={`rounded-xl border ${
+      className={`rounded-2xl border bg-white shadow-sm ${
         tone === 'info' ? 'border-agap-infoSoft bg-agap-infoSoft/50' : 'border-[rgba(168,181,193,0.25)]'
       }`}
     >
@@ -1845,11 +1852,11 @@ function Collapsible({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
+        className="flex min-h-11 w-full items-center gap-2 rounded-2xl px-3 py-2.5 text-left transition-colors hover:bg-agap-surface/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-agap-green"
       >
-        <Icon size={14} className="shrink-0 text-agap-textSub" />
-        <span className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-wide text-agap-textSub">{title}</span>
-        {summary && !open && <span className="shrink-0 text-xs text-agap-textSub">{summary}</span>}
+        <Icon size={15} className="shrink-0 text-agap-green" />
+        <span className="min-w-0 flex-1 text-sm font-semibold text-agap-textMain">{title}</span>
+        {summary && !open && <span className="shrink-0 text-xs text-agap-textMid">{summary}</span>}
         <ChevronDown size={14} className={`shrink-0 text-agap-textSub transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && <div className="px-3 pb-3">{children}</div>}

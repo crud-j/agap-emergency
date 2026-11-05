@@ -15,6 +15,8 @@ interface TotpEnrollmentProps {
   mfaToken?: string;
   /** Start straight away instead of waiting for the button. */
   autoStart?: boolean;
+  /** Reduce vertical space when embedded in a fixed-height onboarding view. */
+  compact?: boolean;
   onConfirmed: (result: TotpConfirmed) => void;
   /** The server says the sign-in is gone (expired/killed token). */
   onExpired?: () => void;
@@ -35,6 +37,7 @@ function groupSecret(secret: string): string {
 export function TotpEnrollment({
   mfaToken,
   autoStart = false,
+  compact = false,
   onConfirmed,
   onExpired,
   onCancel,
@@ -114,11 +117,11 @@ export function TotpEnrollment({
 
   if (phase === 'starting') {
     return (
-      <div aria-busy="true" className="space-y-4">
+      <div aria-busy="true" className={compact ? 'space-y-3' : 'space-y-4'}>
         <p role="status" className="text-sm text-slate-700">
           {t.enrollStarting}
         </p>
-        <div className="mx-auto aspect-square w-full max-w-[232px] animate-pulse rounded-2xl bg-slate-100 ring-1 ring-slate-200 motion-reduce:animate-none" />
+        <div className={`mx-auto aspect-square w-full ${compact ? 'max-w-[min(48vw,180px)] sm:max-w-[210px]' : 'max-w-[232px]'} animate-pulse rounded-2xl bg-slate-100 ring-1 ring-slate-200 motion-reduce:animate-none`} />
         <div className="h-[68px] animate-pulse rounded-xl bg-slate-100 motion-reduce:animate-none" />
         {onCancel && (
           <button type="button" onClick={onCancel} className={`${cancelButton} w-full`}>
@@ -156,16 +159,16 @@ export function TotpEnrollment({
   const verified = phase === 'verified';
 
   return (
-    <form onSubmit={(event) => void confirm(event)} className="auth-in space-y-4">
+    <form onSubmit={(event) => void confirm(event)} className={`auth-in ${compact ? 'space-y-3' : 'space-y-4'}`}>
       <p className="text-sm text-slate-700">{t.enrollScan}</p>
       {enrollment && (
         <>
-          <div className="relative mx-auto aspect-square w-full max-w-[232px] overflow-hidden rounded-2xl bg-slate-50 p-3.5 ring-1 ring-slate-200">
+          <div className={`relative mx-auto aspect-square w-full ${compact ? 'max-w-[min(48vw,180px)] sm:max-w-[210px] md:max-w-[232px]' : 'max-w-[232px]'} overflow-hidden rounded-2xl bg-slate-50 p-3.5 ring-1 ring-slate-200`}>
             {/* A data: URL from our own server — next/image would add nothing here. */}
             <img src={enrollment.qrDataUrl} alt={t.qrAlt} className="h-full w-full rounded-lg bg-white p-2" />
             <i aria-hidden="true" className="auth-scan-line pointer-events-none absolute inset-0" />
           </div>
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-white p-3 pl-4 shadow-card ring-1 ring-slate-200">
+          <div className={`flex items-center justify-between gap-3 rounded-xl bg-white ${compact ? 'p-2.5 pl-3' : 'p-3 pl-4'} shadow-card ring-1 ring-slate-200`}>
             <p className="min-w-0">
               <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500">{setup.setupKey}</span>
               <code className="mt-0.5 block select-all break-all font-mono text-sm font-semibold tracking-wide text-slate-900">
