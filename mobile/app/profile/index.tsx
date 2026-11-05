@@ -215,6 +215,13 @@ export default function ProfileScreen() {
             <MenuRow icon="information-circle-outline" label={t.profile.about} sub={t.profile.aboutSub} last onPress={() => router.push('/profile/about')} />
           </View>
 
+          {/* ── Dev only: PhilHealth ID scan spike (Phase 0). Remove with app/dev/id-scan-spike.tsx in Phase 3. */}
+          {__DEV__ && (
+            <View style={styles.group}>
+              <MenuRow icon="scan-outline" label="PhilHealth scan spike" sub="Dev build only" last onPress={() => router.push('/dev/id-scan-spike' as never)} />
+            </View>
+          )}
+
           {/* ── Sign out ──────────────────────────────────────────────── */}
           <TouchableOpacity style={styles.signOutBtn} activeOpacity={0.85} onPress={confirmSignOut}>
             <Ionicons name="log-out-outline" size={18} color="#EF4444" style={{ marginRight: 8 }} />

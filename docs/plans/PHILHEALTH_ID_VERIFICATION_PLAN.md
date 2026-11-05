@@ -401,13 +401,118 @@ person or a phone.
 
 | Phase | Status | Date | Notes |
 |---|---|---|---|
-| 0. Spike and samples | Not started | | |
+| 0. Spike and samples | Tools installed; waiting on phone + sample runs | 2026-11-05 | Agent part done. The user still fills in the layout notes below |
 | 1. Shared rules | Not started | | |
 | 2. Backend | Not started | | |
 | 3. Mobile | Not started | | |
 | 4. Admin review | Not started | | |
 | 5. Labels and seed | Not started | | |
 | 6. Docs and defense readiness | Not started | | |
+
+### Phase 0 — 2026-11-05
+
+**Added**
+- `mobile/app/dev/id-scan-spike.tsx`: dev-only screen (renders `null` unless `__DEV__`). Scans 1 page, runs on-device text
+  reading, and shows only: PIN pattern found (yes/no), number of text lines, image size, reading time. If the scanner fails it
+  shows the error and the stage (`scanner` / `image` / `text`). It never shows or logs the text, and it deletes the scanned
+  file from the cache in a `finally`. To be deleted in Phase 3.
+- `backend/scripts/ocr-spike.ts`: runs local tesseract.js on every `.jpg`/`.jpeg`/`.png` in a folder and prints the raw text,
+  confidence and time per file. It writes nothing to disk and refuses a folder inside the repo.
+
+**Changed**
+- `mobile/app.json`: `NSCameraUsageDescription` now also covers scanning the PhilHealth ID. Added the
+  `react-native-document-scanner-plugin` config plugin with the same text as `cameraPermission`. The plugin only sets that iOS
+  string and changes nothing on Android.
+- `pnpm-workspace.yaml`: `tesseract.js: false` under `allowBuilds`. Its only install script is `opencollective-postinstall`
+  (a donation banner), and pnpm refuses to finish the install until a choice is recorded.
+- `mobile/package.json`, `backend/package.json`, `pnpm-lock.yaml`: the dependencies below.
+
+**Dependencies (exact versions)**
+
+| Package | Version | Where | Notes |
+|---|---|---|---|
+| `react-native-document-scanner-plugin` | 2.0.4 | mobile | TurboModule (codegen). Android: `play-services-mlkit-document-scanner:16.0.0`. iOS: VisionKit. |
+| `@react-native-ml-kit/text-recognition` | 2.0.0 | mobile | Old-style bridge module (`NativeModules`). App has `newArchEnabled=true`, so it relies on RN's interop layer. Confirm in the phone build. |
+| `tesseract.js` | 7.0.0 | backend | |
+| `@tesseract.js-data/eng` | 1.0.0 | backend | English data bundled on disk (`4.0.0_best_int/eng.traineddata.gz`, about 14 MB unpacked across both variants) |
+
+**Scanner options (step 1 finding)**
+- **1-page limit:** `maxNumDocuments: 1`. **Android only.** It maps to ML Kit's `setPageLimit`. On iOS the plugin has no page
+  limit, so take the first page and ignore the rest.
+- **Gallery import off:** **not available** as a plugin option. The plugin never calls ML Kit's `setGalleryImportAllowed`, and ML
+  Kit's default is "not allowed". So on Android gallery import should already be off. Confirm on the phone: the scanner screen
+  should have no "Import" button. iOS VisionKit has no gallery import. No patch needed unless the phone shows an Import button.
+- Other options: `croppedImageQuality` (0–100, default 100) and `responseType` (`imageFilePath` | `base64`). The plugin always
+  runs ML Kit in `SCANNER_MODE_FULL`, which adds the cleaning and filter tools. There is no option to change that.
+- If the phone has no Google Play services, `scanDocument` rejects with the error message ML Kit gives (from
+  `getStartScanIntent` failing). The spike screen shows that message so it can be recorded below.
+
+**Tesseract settings for Phase 2 to reuse**
+`createWorker('eng', OEM.LSTM_ONLY, { langPath: <dir of @tesseract.js-data/eng>/4.0.0_best_int, gzip: true, cacheMethod: 'none' })`.
+`cacheMethod: 'none'` stops tesseract writing `eng.traineddata` into the working directory.
+A **synthetic** test card (invented name, PIN `00-000000001-0`, generated outside the repo) read back exactly: worker ready in
+about 0.75 s, then 0.67 s per image, with confidence 94. No real card was used. This shows the bundled data loads offline. It
+says nothing about accuracy on real cards.
+
+**Inventory:** nothing from Phase 0 existed before this run (no `mobile/app/dev/`, no `ocr-spike.ts`, none of the four packages).
+
+**Tests:** backend before: 99 suites, 1585–1586 of 1587 pass across two runs. The 1–2 failures were in
+`test/auth/auth-phase3.spec.ts`, the known timeout under full-suite load. Backend after: 1587 of 1587 pass, and
+`auth-phase3.spec.ts` alone passes 59 of 59. Mobile: 15 suites / 182 tests, before and after.
+Mobile, backend and `scripts/ocr-spike.ts` all typecheck clean.
+
+**Deviations**
+- `mobile/android/` is committed, so `npx expo run:android` does **not** re-run prebuild, and `app.json` plugin changes don't
+  reach Android. That's fine here: both modules autolink through Gradle, and neither needs Android manifest changes (the ML Kit
+  scanner runs in Google Play services and needs no `CAMERA` permission). The iOS string applies on the next iOS prebuild.
+- The spike screen sits under `/dev`, which the root `AuthGuard` treats as a protected route, so sign in first.
+  `_layout.tsx` was left unchanged. There's no USB cable for `adb`, so `mobile/app/profile/index.tsx` gained a
+  `__DEV__`-only "PhilHealth scan spike" row (Profile → bottom, above Sign out) that opens the screen. Remove that row
+  together with the spike screen in Phase 3.
+
+**Phone results (development build, phone with Google Play services, 2026-11-05)**
+- 1 PhilHealth ID scanned from Profile → PhilHealth scan spike: scanner opened, **PIN pattern found: yes**, 8 text lines,
+  image 2478 × 1733 px, on-device reading 385 ms.
+- So `@react-native-ml-kit/text-recognition` loads through the New Architecture interop layer, and the ML Kit scanner works.
+- The spike only checks the PIN pattern. Whether the *name* reads correctly on the phone is checked in Phase 1/3 with the
+  shared parser.
+
+**Follow-ups for later phases**
+- Phase 3: the scanner returns about 2500 px on the long edge, even at quality 85. Downscale to about 1600 px before upload
+  (§4.1) to stay under the 2 MB limit of the scan endpoint.
+- Phase 3: the text-recognition module bundles the Chinese, Devanagari, Japanese and Korean models next to Latin, which makes
+  the APK bigger. Consider excluding them in Gradle.
+- Phase 3: the spike's PIN regex is throwaway. The real one goes in `shared/src/validation/philhealth-id.ts` (Phase 1).
+
+**Needs a person or a phone**
+1. Rebuild the dev client and run the spike screen on a phone with Google Play services, then on one without (for example a newer Huawei).
+2. Run `ocr-spike.ts` on the 5–10 sample cards (stored outside the repo).
+3. Fill in the layout notes below. **No real names or numbers.**
+4. Delete the sample scans when Phase 0 ends.
+
+#### Layout notes (filled in by the user)
+
+Written from one card's server OCR output; patterns only, no real values.
+
+- Heading text found on the card: `REPUBLIC OF THE PHILIPPINES`, then `PhilHealth` (mixed case), then
+  `Philippine Health Insurance Corporation` (mixed case) on the next line. OCR adds stray symbols around them.
+- Name line format (e.g. `LAST, FIRST MIDDLE`): `LAST, FIRST MIDDLE` on **one line**, all caps, comma after the surname.
+  The middle name is printed **in full**, not as an initial. The line comes right after the PIN line. OCR left junk
+  *before* it (one stray letter and `~~`), so the parser must drop leading non-word tokens and single stray letters.
+- Where the PIN appears and its grouping: on its own line **between the heading and the name**, printed
+  `NN-NNNNNNNNN-N` (2-9-1, with dashes). OCR may put stray characters before it.
+- After the name: date of birth as `MONTH DD, YYYY` followed by the sex (`- MALE` / `- FEMALE`), then the address over two
+  lines, ending in municipality, province and ZIP. The parser must ignore these lines (§5.1: not extracted). OCR slips seen in
+  these lines: `,` read as `.`, and `E` read as `F`, the kind of slip the §6 one-edit tolerance covers.
+- Cards read correctly by phone (n/10): 1 scanned so far. The PIN pattern was found; the spike doesn't check the name.
+- Cards read correctly by server (n/10): 1/1 **after cropping to the card** (confidence 57, 1.4 s). The same card as an
+  uncropped 3024 × 4032 phone photo, re-compressed by a chat app, was unreadable (confidence 28, 8.3 s).
+  **Below the Phase 0 target of 8 of 10 cards:** only 1 card tested so far.
+- Scanner on a phone without Google Play services (works / fails with: ...): not tested yet.
+
+**Finding:** the server OCR only works on a card that is cropped and upright. The ML Kit scanner already returns that.
+The Phase 3 fallback camera (§4.3) must crop to its card-shaped frame before upload, and Phase 2's OCR service should
+downscale large images. Never send a raw full-frame photo.
 
 ---
 

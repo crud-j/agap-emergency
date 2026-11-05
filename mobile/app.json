@@ -34,7 +34,7 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "AGAP needs your location to report your emergency accurately.",
         "NSLocationAlwaysUsageDescription": "AGAP uses your location in the background for responder tracking.",
-        "NSCameraUsageDescription": "AGAP uses the camera to capture evidence at the incident scene.",
+        "NSCameraUsageDescription": "AGAP uses the camera to capture evidence at the incident scene and to scan your PhilHealth ID to verify your account.",
         "NSPhotoLibraryUsageDescription": "AGAP needs photo library access to attach images to incidents.",
         "LSApplicationQueriesSchemes": [
           "waze",
@@ -52,7 +52,13 @@
       "@maplibre/maplibre-react-native",
       "expo-audio",
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      [
+        "react-native-document-scanner-plugin",
+        {
+          "cameraPermission": "AGAP uses the camera to capture evidence at the incident scene and to scan your PhilHealth ID to verify your account."
+        }
+      ]
     ],
     "extra": {
       "eas": {
