@@ -1,5 +1,6 @@
 import { IncidentType } from '../enums/incident-type.enum';
 import { IncidentPriority, PRIORITY_WEIGHTS } from '../enums/incident-priority.enum';
+import { ResourceType } from '../enums/resource-type.enum';
 
 /**
  * MOD-09 — Caller intake catalog for the three citizen-facing Bocaue categories
@@ -326,4 +327,60 @@ export function recommendIntakePriority(
     priority: PRIORITY_WEIGHTS[IncidentPriority.CRITICAL] > PRIORITY_WEIGHTS[base] ? IncidentPriority.CRITICAL : base,
     reasons,
   };
+}
+
+export interface UnitNeed {
+  resourceType: ResourceType;
+  /** How many units of this type. 1 unless a caller answer asks for more. */
+  count: number;
+  /** Why the unit is suggested, e.g. "Fire report" or "People trapped by the fire". */
+  reasons: string[];
+  /** Types that can stand in when none of `resourceType` is available, best first. */
+  alternatives: ResourceType[];
+}
+
+/** The unit each category always needs. OTHER has none: the dispatcher decides. */
+const CATEGORY_BASE_UNIT: Partial<Record<IncidentType, { type: ResourceType; reason: string; alternatives?: ResourceType[] }>> = {
+  [IncidentType.MEDICAL]: { type: ResourceType.AMBULANCE, reason: 'Medical report' },
+  [IncidentType.ROAD_ACCIDENT]: { type: ResourceType.AMBULANCE, reason: 'Road incident' },
+  [IncidentType.FIRE]: { type: ResourceType.FIRE_TRUCK, reason: 'Fire report' },
+  [IncidentType.INDUSTRIAL]: { type: ResourceType.FIRE_TRUCK, reason: 'Industrial hazard' },
+  [IncidentType.FLOOD]: { type: ResourceType.RESCUE_BOAT, reason: 'Flood report', alternatives: [ResourceType.RESCUE_TRUCK] },
+  [IncidentType.RESCUE]: { type: ResourceType.RESCUE_TRUCK, reason: 'Rescue report' },
+  [IncidentType.NATURAL_DISASTER]: { type: ResourceType.RESCUE_TRUCK, reason: 'Natural disaster report' },
+  [IncidentType.DEBRIS]: { type: ResourceType.CLEARING_EQUIPMENT, reason: 'Debris report', alternatives: [ResourceType.RESCUE_TRUCK] },
+};
+
+/**
+ * MOD-29/30 — the unit types (and how many) a report needs, from its category
+ * plus caller answers, so the dispatch console can pre-select them. Each type
+ * starts at 1; only the answers named in `reasons` add units. Assistive only:
+ * the dispatcher reviews the selection and authorizes the dispatch (rule 8).
+ */
+export function recommendUnitsNeeded(type: IncidentType | string, answers: IntakeAnswers): UnitNeed[] {
+  const has = (key: string, value: string) => (answers[key] ?? []).includes(value);
+  const needs: UnitNeed[] = [];
+  const need = (resourceType: ResourceType, count: number, reason: string, alternatives: ResourceType[] = []) => {
+    const existing = needs.find((n) => n.resourceType === resourceType);
+    if (!existing) {
+      needs.push({ resourceType, count, reasons: [reason], alternatives });
+      return;
+    }
+    existing.count = Math.max(existing.count, count);
+    if (!existing.reasons.includes(reason)) existing.reasons.push(reason);
+  };
+
+  const base = CATEGORY_BASE_UNIT[type as IncidentType];
+  if (base) need(base.type, 1, base.reason, base.alternatives);
+
+  if (type === IncidentType.INDUSTRIAL) need(ResourceType.AMBULANCE, 1, 'Industrial hazard');
+  if (has('pinned', 'yes')) need(ResourceType.RESCUE_TRUCK, 1, 'Person pinned in a vehicle');
+  if (has('fuel', 'yes')) need(ResourceType.FIRE_TRUCK, 1, 'Fuel leak or fire at the crash');
+  if (has('trapped', 'yes')) need(ResourceType.AMBULANCE, 1, 'People trapped by the fire');
+  if (has('burning', 'fireworks')) need(ResourceType.FIRE_TRUCK, 2, 'Fireworks shop or factory involved');
+  if (has('explosions', 'yes')) need(ResourceType.FIRE_TRUCK, 2, 'Explosions heard');
+  if (has('spreading', 'yes')) need(ResourceType.FIRE_TRUCK, 2, 'Fire spreading to nearby structures');
+  if (has('injured', 'yes')) need(ResourceType.AMBULANCE, 1, 'Injured people');
+
+  return needs;
 }

@@ -246,23 +246,29 @@ export class ResourceMatchingService {
     hasLocation: boolean,
   ): Promise<Map<string, number | null>> {
     if (hasLocation) {
+      // A unit with no recorded base location stays a candidate with an unknown
+      // distance (neutral proximity score), so it is ranked rather than dropped.
       const rows = await this.prisma.$queryRaw<RawProximityRow[]>(
         Prisma.sql`
           SELECT r.id,
-                 ST_Distance(r.base_location::geography, il.point::geography)::int
-                   AS distance_meters
+                 CASE WHEN r.base_location IS NULL OR il.point IS NULL THEN NULL
+                      ELSE ST_Distance(r.base_location::geography, il.point::geography)::int
+                 END AS distance_meters
           FROM   resources r
           CROSS  JOIN incident_locations il
           WHERE  il.incident_id   = ${incidentId}::uuid
             AND  r.status         = 'AVAILABLE'
             AND  r.is_active      = true
-            AND  r.base_location  IS NOT NULL
-            AND  ST_DWithin(
-                   r.base_location::geography,
-                   il.point::geography,
-                   ${MAX_RANGE_METERS}
+            AND  (
+                   r.base_location IS NULL
+                   OR il.point IS NULL
+                   OR ST_DWithin(
+                        r.base_location::geography,
+                        il.point::geography,
+                        ${MAX_RANGE_METERS}
+                      )
                  )
-          ORDER  BY distance_meters ASC
+          ORDER  BY distance_meters ASC NULLS LAST
           LIMIT  50
         `,
       );

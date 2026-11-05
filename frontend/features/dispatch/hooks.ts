@@ -100,6 +100,8 @@ export function useCreateDispatch() {
       qc.invalidateQueries({ queryKey: ['available-units'] });
       // The unit just sent is no longer AVAILABLE; "Dispatch another unit" must not offer it.
       qc.invalidateQueries({ queryKey: ['dispatch-recommendations', body.incidentId] });
+      // The units-needed pre-selection subtracts units already responding.
+      qc.invalidateQueries({ queryKey: ['incident-dispatches', body.incidentId] });
       qc.invalidateQueries({ queryKey: ['responders'] });
       qc.invalidateQueries({ queryKey: ['incidents'] });
       qc.invalidateQueries({ queryKey: ['incident', body.incidentId] });

@@ -61,11 +61,25 @@ export class ResourcesService {
     });
   }
 
+  /**
+   * Staff-only route (DISPATCHER/SUPERVISOR/SYSTEM_ADMINISTRATOR). `crew` is each
+   * unit's home crew, which the dispatch console pre-fills when it pre-selects the unit.
+   */
   async findAvailable() {
-    return this.prisma.resources.findMany({
+    const rows = await this.prisma.resources.findMany({
       where: { status: 'AVAILABLE', is_active: true },
       orderBy: { created_at: 'asc' },
+      include: {
+        resource_crew_members: {
+          orderBy: { created_at: 'asc' },
+          select: { users: { select: { id: true, full_name: true } } },
+        },
+      },
     });
+    return rows.map(({ resource_crew_members, ...resource }) => ({
+      ...resource,
+      crew: resource_crew_members.map((m) => m.users),
+    }));
   }
 
   async findById(id: string) {

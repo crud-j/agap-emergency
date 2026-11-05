@@ -87,6 +87,7 @@ model User {
   resource_status_log                                                      resource_status_log[]
   responder_availability_changes                                           ResponderAvailability[]        @relation("responderAvailabilityChangedBy")
   responder_availability_user                                              ResponderAvailability?         @relation("responderAvailabilityUser")
+  resource_crew_membership                                                 resource_crew_members?
   sensitive_data_access_log                                                sensitive_data_access_log[]
   sms_subscribers                                                          sms_subscribers[]
   surge_incidents                                                          surge_incidents[]
@@ -1261,6 +1262,7 @@ model resources {
   dispatches                      dispatches[]
   location_history                location_history[]
   resource_capability_assignments resource_capability_assignments[]
+  resource_crew_members           resource_crew_members[]
   resource_recommendations        resource_recommendations[]
   resource_status_log             resource_status_log[]
   incidents                       Incident?                         @relation(fields: [current_incident_id], references: [id], onUpdate: NoAction)
@@ -1270,6 +1272,19 @@ model resources {
   @@index([organization_id], map: "idx_resources_org")
   @@index([status], map: "idx_resources_status")
   @@index([resource_type], map: "idx_resources_type")
+}
+
+/// MOD-27/31 — a responder's home unit (one unit per responder). Dispatching the unit
+/// pre-fills this crew on the dispatch console; the dispatcher can still change it.
+model resource_crew_members {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  resource_id String    @db.Uuid
+  user_id     String    @unique @db.Uuid
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  resources   resources @relation(fields: [resource_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users       User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([resource_id], map: "idx_resource_crew_members_resource")
 }
 
 model ResponderAvailability {

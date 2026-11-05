@@ -6,7 +6,7 @@ import Link from 'next/link';
 import {
   Siren, Truck, MapPin, Users, Sparkles, CheckCircle2, ExternalLink,
   Search, X, Navigation, UserCheck, ChevronDown, ChevronUp,
-  Wifi, ArrowLeft, ChevronLeft, ChevronRight,
+  Wifi, ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, AlertTriangle,
 } from 'lucide-react';
 import {
   Button, PriorityBadge, StatusChip, Badge, Skeleton,
@@ -14,11 +14,15 @@ import {
 import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
 import { useWsState } from '@/lib/use-ws-state';
 import {
-  useDispatchQueue, useDispatchRecommendations, useAvailableUnits, useCreateDispatch,
+  useDispatchQueue, useDispatchRecommendations, useAvailableUnits, useCreateDispatch, useIncidentDispatches,
 } from '@/features/dispatch/hooks';
+import { homeCrew, planUnitSelection, type CandidateUnit, type UnitSelectionPlan } from '@/features/dispatch/unit-selection';
+import { resourceTypeLabel } from '@/features/resources/resource-type';
 import { useResponders } from '@/features/responders/hooks';
 import { useIncident, useUpdateIncidentStatus } from '@/features/incidents/hooks';
-import { ACTIVE_RESPONSE_INCIDENT_STATUSES, isRouteLastKnown } from '@agap/shared';
+import {
+  ACTIVE_RESPONSE_INCIDENT_STATUSES, isRouteLastKnown, recommendUnitsNeeded, sanitizeIntakeAnswers,
+} from '@agap/shared';
 import { useIncidentUnits, useLiveResponders, useRouteLine } from '@/features/map/hooks';
 import {
   destinationFacilities, formatEta, legChip, trackingPhase, unitRoutePlan,
@@ -612,6 +616,10 @@ function DispatchDetail({
   const [tab, setTab] = useState<'dispatch' | 'route'>('dispatch');
   // Which incident the "Dispatch another unit" panel is open for; selecting another closes it.
   const [addingUnitFor, setAddingUnitFor] = useState<string | null>(null);
+  // Keeps the dispatch panel open while its units go out one by one (the first one
+  // already gives the incident a dispatch), and keeps a partial failure in view after.
+  const [sendingUnits, setSendingUnits] = useState(false);
+  const [dispatchIssue, setDispatchIssue] = useState<string | null>(null);
 
   if (isLoading || !incident) {
     return (
@@ -697,8 +705,17 @@ function DispatchDetail({
               <MapPin size={16} className="mt-0.5 shrink-0 text-emerald-500" />
               <span className="text-[13px] font-medium text-slate-700 leading-relaxed">{address}</span>
             </div>
-            {hasDispatch ? (
+            {hasDispatch && !sendingUnits ? (
               <div className="space-y-4">
+                {dispatchIssue && (
+                  <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-800">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    <span className="flex-1">{dispatchIssue}</span>
+                    <button type="button" onClick={() => setDispatchIssue(null)} aria-label="Dismiss" className={`shrink-0 rounded text-amber-700 hover:text-amber-900 ${FOCUS_RING}`}>
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
                 <UnitTrackingCard incidentId={incident.id} dispatches={incident.dispatches} trackedDispatchId={trackedDispatchId} follow={followUnit} onToggleFollow={onToggleFollow} onFit={onFit} />
                 {addingUnit ? (
                   <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -707,7 +724,11 @@ function DispatchDetail({
                       <Button variant="secondary" size="sm" onClick={() => setAddingUnitFor(null)}>Cancel</Button>
                     </div>
                     {/* Closing this view keeps the tracking card; the incident status doesn't change. */}
-                    <RecommendationPanel incidentId={incident.id} onDispatched={() => setAddingUnitFor(null)} />
+                    <RecommendationPanel
+                      incidentId={incident.id}
+                      onDispatched={() => { setDispatchIssue(null); setAddingUnitFor(null); }}
+                      onPartialDispatch={setDispatchIssue}
+                    />
                   </div>
                 ) : canAddUnit ? (
                   <Button variant="secondary" className="w-full" onClick={() => setAddingUnitFor(incident.id)}>
@@ -715,8 +736,13 @@ function DispatchDetail({
                   </Button>
                 ) : null}
               </div>
-            ) : dispatchable ? (
-              <RecommendationPanel incidentId={incident.id} onDispatched={onDispatched} />
+            ) : dispatchable || sendingUnits ? (
+              <RecommendationPanel
+                incidentId={incident.id}
+                onDispatched={onDispatched}
+                onBusyChange={setSendingUnits}
+                onPartialDispatch={setDispatchIssue}
+              />
             ) : (
               <PreDispatchActions incidentId={incident.id} status={incident.status} />
             )}
@@ -769,24 +795,144 @@ function PreDispatchActions({ incidentId, status }: { incidentId: string; status
 
 // ─── MOD-29/30 recommendation panel ─────────────────────────────────────────
 
-function RecommendationPanel({ incidentId, onDispatched }: { incidentId: string; onDispatched: () => void; }): JSX.Element {
-  const { data: recommendations, isLoading, isError, refetch } = useDispatchRecommendations(incidentId);
-  const { data: availableUnits } = useAvailableUnits();
+function RecommendationPanel({
+  incidentId, onDispatched, onBusyChange, onPartialDispatch,
+}: {
+  incidentId: string;
+  onDispatched: () => void;
+  /** True while the selected units are being sent, one dispatch each. */
+  onBusyChange?: (busy: boolean) => void;
+  /** Some units went out and one failed; the message outlives this panel. */
+  onPartialDispatch?: (message: string) => void;
+}): JSX.Element {
+  const { data: incident } = useIncident(incidentId);
+  const { data: incidentDispatches, isFetching: dispatchesFetching } = useIncidentDispatches(incidentId);
+  const { data: recommendations, isLoading, isFetching: recommendationsFetching, isError, refetch } = useDispatchRecommendations(incidentId);
+  const { data: availableUnits, isFetching: unitsFetching } = useAvailableUnits();
   const { data: responders = [], isLoading: respondersLoading, isError: respondersError, refetch: refetchResponders } = useResponders({ perPage: 100 });
   const createDispatch = useCreateDispatch();
-  const [unitId, setUnitId] = useState<string | null>(null);
-  const [crewIds, setCrewIds] = useState<string[]>([]);
+  const [plan, setPlan] = useState<UnitSelectionPlan | null>(null);
+  const [unitIds, setUnitIds] = useState<string[]>([]);
+  const [crewByUnit, setCrewByUnit] = useState<Record<string, string[]>>({});
+  const [crewTarget, setCrewTarget] = useState<string | null>(null);
   const [showCrew, setShowCrew] = useState(false);
   const [notes, setNotes] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const availableResponders = useMemo(() => responders.filter((r) => r.availability_status === 'AVAILABLE'), [responders]);
-  function toggleCrew(id: string) { setCrewIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]); }
-  function authorize() {
-    if (!unitId) return;
-    createDispatch.mutate(
-      { incidentId, resourceId: unitId, ...(crewIds.length ? { initialCrewIds: crewIds } : {}), ...(notes.trim() ? { dispatchNotes: notes.trim() } : {}) },
-      { onSuccess: () => onDispatched() }
-    );
+  const availableResponderIds = useMemo(() => new Set(availableResponders.map((r) => r.id)), [availableResponders]);
+  const activeDispatches = useMemo(() => (incidentDispatches ?? []).filter((d) => ACTIVE_DISPATCH.includes(d.status)), [incidentDispatches]);
+  // A responder on a unit already responding can't also crew a new one (RESPONDER_ALREADY_ON_INCIDENT).
+  const busyResponderIds = useMemo(() => new Set(activeDispatches.flatMap((d) => d.dispatch_crew.map((c) => c.user_id))), [activeDispatches]);
+
+  const needs = useMemo(
+    () => incident ? recommendUnitsNeeded(incident.category, sanitizeIntakeAnswers(incident.category, incident.incident_details?.caller_answers)) : [],
+    [incident],
+  );
+
+  // Ranked recommendations first, then any other AVAILABLE unit; each with its home crew.
+  const units = useMemo(() => {
+    const byId = new Map<string, CandidateUnit & { label: string }>();
+    const crewOf = new Map((availableUnits ?? []).map((u) => [u.id, (u.crew ?? []).map((c) => c.id)]));
+    for (const r of recommendations ?? []) {
+      byId.set(r.resourceId, { id: r.resourceId, resourceType: r.resourceType, crewIds: crewOf.get(r.resourceId) ?? [], label: r.callSign ?? r.resourceName });
+    }
+    for (const u of availableUnits ?? []) {
+      if (!byId.has(u.id)) byId.set(u.id, { id: u.id, resourceType: u.resource_type, crewIds: crewOf.get(u.id) ?? [], label: u.call_sign ?? u.name });
+    }
+    return byId;
+  }, [recommendations, availableUnits]);
+  const crewNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const u of availableUnits ?? []) for (const c of u.crew ?? []) names.set(c.id, c.full_name);
+    for (const r of responders) names.set(r.id, r.full_name);
+    return names;
+  }, [availableUnits, responders]);
+  const unitLabel = (id: string) => units.get(id)?.label ?? 'Unit';
+
+  // Pre-select once everything the plan reads is fresh (a cached list could miss a
+  // unit sent moments ago). Later refetches never overwrite the dispatcher's changes.
+  const ready = !!incident && !recommendationsFetching && !unitsFetching && !respondersLoading && !dispatchesFetching;
+  useEffect(() => {
+    if (!ready || plan) return;
+    const next = planUnitSelection({
+      needs,
+      candidates: [...units.values()],
+      respondingTypes: activeDispatches.map((d) => d.resources?.resource_type ?? ''),
+      availableResponderIds,
+      busyResponderIds,
+    });
+    setPlan(next);
+    setUnitIds(next.unitIds);
+    setCrewByUnit(next.crewByUnit);
+  }, [ready, plan, needs, units, activeDispatches, availableResponderIds, busyResponderIds]);
+
+  function toggleUnit(id: string) {
+    setError(null);
+    if (unitIds.includes(id)) {
+      setUnitIds((prev) => prev.filter((x) => x !== id));
+      setCrewByUnit(({ [id]: _removed, ...rest }) => rest);
+      if (crewTarget === id) setCrewTarget(null);
+      return;
+    }
+    const unit = units.get(id);
+    const used = new Set([...busyResponderIds, ...Object.values(crewByUnit).flat()]);
+    const crew = unit ? homeCrew(unit, availableResponderIds, used) : [];
+    setUnitIds((prev) => [...prev, id]);
+    setCrewByUnit((prev) => ({ ...prev, [id]: crew }));
+  }
+
+  // Manual crew picks go to one selected unit; a responder rides one unit only.
+  const target = crewTarget && unitIds.includes(crewTarget) ? crewTarget : unitIds[0] ?? null;
+  const crewIds = target ? crewByUnit[target] ?? [] : [];
+  function toggleCrew(id: string) {
+    if (!target) return;
+    setCrewByUnit((prev) => {
+      const onTarget = (prev[target] ?? []).includes(id);
+      const next: Record<string, string[]> = {};
+      for (const [unit, crew] of Object.entries(prev)) next[unit] = crew.filter((x) => x !== id);
+      next[target] = onTarget ? next[target] ?? [] : [...(next[target] ?? []), id];
+      return next;
+    });
+  }
+
+  async function authorize() {
+    if (!unitIds.length || sending) return;
+    setSending(true);
+    setError(null);
+    onBusyChange?.(true);
+    const sent: string[] = [];
+    let failure: string | null = null;
+    for (const id of unitIds) {
+      const crew = crewByUnit[id] ?? [];
+      try {
+        await createDispatch.mutateAsync({
+          incidentId,
+          resourceId: id,
+          ...(crew.length ? { initialCrewIds: crew } : {}),
+          ...(notes.trim() ? { dispatchNotes: notes.trim() } : {}),
+        });
+        sent.push(id);
+      } catch (err) {
+        failure = `${unitLabel(id)}: ${(err as Error)?.message ?? 'Dispatch failed'}`;
+        break;
+      }
+    }
+    setSending(false);
+    onBusyChange?.(false);
+    if (!failure) {
+      onDispatched();
+      return;
+    }
+    // Units already sent stay sent; the rest stay selected so the dispatcher can retry.
+    setUnitIds((prev) => prev.filter((x) => !sent.includes(x)));
+    setError(`${failure} — try another unit.`);
+    if (sent.length) {
+      onPartialDispatch?.(
+        `Dispatched ${sent.map(unitLabel).join(', ')}. Not dispatched — ${failure}. Use “Dispatch another unit” to send the rest.`,
+      );
+    }
   }
 
   const ranked = recommendations ?? [];
@@ -794,6 +940,8 @@ function RecommendationPanel({ incidentId, onDispatched }: { incidentId: string;
 
   return (
     <div className="space-y-4">
+      <UnitsNeeded plan={plan} unitLabel={unitLabel} />
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Sparkles size={16} className="text-amber-500 shrink-0" />
@@ -812,11 +960,21 @@ function RecommendationPanel({ incidentId, onDispatched }: { incidentId: string;
           <Button variant="secondary" size="sm" className="mt-3 bg-white" onClick={() => void refetch()}>Retry Loading</Button>
         </div>
       ) : showFallback ? (
-        <FallbackUnits units={availableUnits ?? []} selectedId={unitId} onSelect={setUnitId} />
+        <FallbackUnits units={availableUnits ?? []} selectedIds={unitIds} onToggle={toggleUnit} />
       ) : (
         <div className="space-y-2">
-          {ranked.map((r) => <RecommendationRow key={r.resourceId} rec={r} selected={unitId === r.resourceId} onSelect={() => setUnitId(r.resourceId)} />)}
+          {ranked.map((r) => <RecommendationRow key={r.resourceId} rec={r} selected={unitIds.includes(r.resourceId)} onSelect={() => toggleUnit(r.resourceId)} />)}
         </div>
+      )}
+
+      {unitIds.length > 0 && (
+        <SelectedUnits
+          unitIds={unitIds}
+          crewByUnit={crewByUnit}
+          unitLabel={unitLabel}
+          crewName={(id) => crewNames.get(id) ?? 'Responder'}
+          homeCrewCount={(id) => units.get(id)?.crewIds.length ?? 0}
+        />
       )}
 
       {/* Crew selection */}
@@ -842,7 +1000,27 @@ function RecommendationPanel({ incidentId, onDispatched }: { incidentId: string;
 
         {showCrew && (
           <div id="dispatch-crew-list" className="p-3 space-y-2 max-h-64 overflow-y-auto scrollbar-thin bg-slate-50/50">
-            {respondersLoading ? (
+            {unitIds.length > 1 && target && (
+              <div role="group" aria-label="Add crew to unit" className="flex flex-wrap items-center gap-1.5 pb-1">
+                <span className="text-[11px] font-semibold text-slate-500">Add crew to:</span>
+                {unitIds.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setCrewTarget(id)}
+                    aria-pressed={id === target}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${FOCUS_RING} ${
+                      id === target ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {unitLabel(id)}
+                  </button>
+                ))}
+              </div>
+            )}
+            {!target ? (
+              <p className="py-5 text-center text-[12px] font-medium text-slate-500">Select a unit first.</p>
+            ) : respondersLoading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-[12px] font-medium text-slate-500">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-emerald-500" />
                 Loading availability…
@@ -902,17 +1080,17 @@ function RecommendationPanel({ incidentId, onDispatched }: { incidentId: string;
           rows={2}
           className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] font-medium text-slate-900 shadow-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-all"
         />
-        {createDispatch.isError && <p role="alert" className="text-[13px] font-semibold text-red-600">{(createDispatch.error as Error)?.message ?? 'Dispatch failed — try another unit.'}</p>}
-        
+        {error && <p role="alert" className="text-[13px] font-semibold text-red-600">{error}</p>}
+
         <Button
           variant="primary"
           className="w-full h-12 text-[14px] font-bold shadow-md transition-all active:scale-[0.98] mt-2 bg-gradient-to-b from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border border-emerald-800/20"
-          disabled={!unitId}
-          loading={createDispatch.isPending}
-          onClick={authorize}
+          disabled={unitIds.length === 0}
+          loading={sending}
+          onClick={() => void authorize()}
         >
           <Siren size={16} aria-hidden="true" />
-          Authorize Dispatch
+          {unitIds.length > 1 ? `Authorize Dispatch (${unitIds.length} units)` : 'Authorize Dispatch'}
         </Button>
       </div>
     </div>
@@ -966,7 +1144,7 @@ function RecommendationRow({ rec, selected, onSelect }: { rec: ResourceRecommend
   );
 }
 
-function FallbackUnits({ units, selectedId, onSelect }: { units: { id: string; name: string; call_sign: string | null; resource_type: string; base_barangay: string | null }[]; selectedId: string | null; onSelect: (id: string) => void; }): JSX.Element {
+function FallbackUnits({ units, selectedIds, onToggle }: { units: { id: string; name: string; call_sign: string | null; resource_type: string; base_barangay: string | null }[]; selectedIds: string[]; onToggle: (id: string) => void; }): JSX.Element {
   if (units.length === 0) {
     return <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-800">No units available right now.</div>;
   }
@@ -977,10 +1155,10 @@ function FallbackUnits({ units, selectedId, onSelect }: { units: { id: string; n
         <button
           key={u.id}
           type="button"
-          onClick={() => onSelect(u.id)}
-          aria-pressed={selectedId === u.id}
+          onClick={() => onToggle(u.id)}
+          aria-pressed={selectedIds.includes(u.id)}
           className={`flex min-h-12 w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border p-3 text-left transition-all ${FOCUS_RING} ${
-            selectedId === u.id ? 'border-emerald-500 bg-emerald-50 shadow-sm' : 'border-transparent hover:bg-white hover:border-slate-200 hover:shadow-sm'
+            selectedIds.includes(u.id) ? 'border-emerald-500 bg-emerald-50 shadow-sm' : 'border-transparent hover:bg-white hover:border-slate-200 hover:shadow-sm'
           }`}
         >
           <span className="flex items-center gap-2 text-[13px] font-bold text-slate-900">
@@ -992,6 +1170,95 @@ function FallbackUnits({ units, selectedId, onSelect }: { units: { id: string; n
           </span>
         </button>
       ))}
+    </div>
+  );
+}
+
+// ─── MOD-29/30 units needed (pre-selection) ─────────────────────────────────
+
+function UnitsNeeded({ plan, unitLabel }: { plan: UnitSelectionPlan | null; unitLabel: (id: string) => string }): JSX.Element {
+  return (
+    <section aria-label="Units needed" className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ClipboardList size={16} className="shrink-0 text-emerald-600" aria-hidden="true" />
+          <h3 className="text-[14px] font-bold text-slate-900">Units Needed</h3>
+        </div>
+        <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">Auto-selected</span>
+      </div>
+
+      {!plan ? (
+        <Skeleton className="mt-3 h-10 w-full rounded-lg" />
+      ) : plan.needs.length === 0 ? (
+        <p className="mt-2 text-[12px] font-medium text-slate-600">No unit type suggested for this report. Choose the units below.</p>
+      ) : (
+        <ul className="mt-3 space-y-2.5">
+          {plan.needs.map((n) => {
+            const wanted = Math.max(0, n.need.count - n.responding);
+            return (
+              <li key={n.need.resourceType} className="text-[13px]">
+                <p className="font-bold text-slate-900">
+                  {n.need.count} × {resourceTypeLabel(n.need.resourceType)}
+                  <span className="ml-1.5 font-medium text-slate-500">— {n.need.reasons.join(' · ')}</span>
+                </p>
+                <p className="mt-0.5 text-[12px] font-medium">
+                  {n.responding > 0 && <span className="text-blue-700">{n.responding} already responding. </span>}
+                  {n.unitIds.length > 0 && <span className="text-emerald-700">Selected: {n.unitIds.map(unitLabel).join(', ')}. </span>}
+                  {n.alternativeUsed && (
+                    <span className="text-amber-700">
+                      No {resourceTypeLabel(n.need.resourceType).toLowerCase()} available, using {resourceTypeLabel(n.alternativeUsed).toLowerCase()}.{' '}
+                    </span>
+                  )}
+                  {n.short > 0 && (
+                    <span className={n.unitIds.length ? 'text-amber-700' : 'text-red-700'}>
+                      {n.unitIds.length ? `Only ${n.unitIds.length} of ${wanted} available.` : 'None available right now.'}
+                    </span>
+                  )}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="mt-3 text-[11px] font-medium text-slate-500">
+        Suggested from the report. Review the units and crew, then authorize.
+      </p>
+    </section>
+  );
+}
+
+function SelectedUnits({
+  unitIds, crewByUnit, unitLabel, crewName, homeCrewCount,
+}: {
+  unitIds: string[];
+  crewByUnit: Record<string, string[]>;
+  unitLabel: (id: string) => string;
+  crewName: (id: string) => string;
+  homeCrewCount: (id: string) => number;
+}): JSX.Element {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-[13px] font-bold text-slate-900">
+        Selected ({unitIds.length} unit{unitIds.length === 1 ? '' : 's'})
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {unitIds.map((id) => {
+          const crew = crewByUnit[id] ?? [];
+          return (
+            <li key={id} className="flex flex-wrap items-baseline gap-x-2 text-[12px]">
+              <span className="font-bold text-slate-800">{unitLabel(id)}</span>
+              {crew.length > 0 ? (
+                <span className="font-medium text-slate-600">Crew: {crew.map(crewName).join(', ')}</span>
+              ) : (
+                <span className="flex items-center gap-1 font-medium text-amber-700">
+                  <AlertTriangle size={12} aria-hidden="true" />
+                  {homeCrewCount(id) > 0 ? 'Home crew not on duty. Assign crew or the unit gets no alert.' : 'No crew assigned. Assign crew or the unit gets no alert.'}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

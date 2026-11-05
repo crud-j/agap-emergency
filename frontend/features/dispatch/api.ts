@@ -25,6 +25,8 @@ export interface ResourceSummary {
   status: string;
   base_barangay: string | null;
   organization_id: string;
+  /** Home crew, from GET /resources/available only (staff-only route). */
+  crew?: Array<{ id: string; full_name: string }>;
 }
 
 /**

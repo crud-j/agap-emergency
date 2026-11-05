@@ -314,6 +314,32 @@ describe('ResourceMatchingService.getRecommendations', () => {
     );
   });
 
+  it('ranks a unit with no base location for a located incident (distance unknown)', async () => {
+    mockPrisma.incident.findUnique.mockResolvedValue({
+      id: 'inc-gps',
+      category: 'MEDICAL',
+      incident_locations: { latitude: 14.79, longitude: 120.92 },
+    });
+    mockPrisma.$queryRaw.mockResolvedValueOnce([{ id: 'amb-3', distance_meters: null }]);
+    mockPrisma.resources.findMany.mockResolvedValueOnce([
+      {
+        id: 'amb-3',
+        name: 'MDRRMO Ambulance 3',
+        call_sign: 'ALPHA-3',
+        resource_type: 'AMBULANCE',
+        organization_id: 'org-mdrrmo',
+        status: 'AVAILABLE',
+        resource_capability_assignments: [],
+      },
+    ]);
+
+    const [rec] = await service.getRecommendations('inc-gps', 'user-1', 'DISPATCHER');
+
+    expect(rec).toMatchObject({ resourceId: 'amb-3', distanceMeters: null });
+    const sql = mockPrisma.$queryRaw.mock.calls[0]![0] as { strings: string[] };
+    expect(sql.strings.join('?')).toContain('r.base_location IS NULL');
+  });
+
   it('includes response is assistive note (rationale present)', async () => {
     mockPrisma.incident.findUnique.mockResolvedValue({
       id: 'inc-3',

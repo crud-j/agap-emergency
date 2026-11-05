@@ -142,6 +142,53 @@ async function main() {
     },
   });
 
+  // Crew accounts for MDRRMO Ambulance 2 and 3 and BFP Fire Truck 2, so every
+  // ambulance and fire truck has someone to receive its assignment (home units below).
+  const responder4 = await prisma.user.upsert({
+    where: { email: 'responder4@mdrrmo.bocaue.gov.ph' },
+    update: {},
+    create: {
+      full_name: 'Mark Navarro',
+      email: 'responder4@mdrrmo.bocaue.gov.ph',
+      phone_number: '+639171234012',
+      password_hash: devHash,
+      role: user_role.RESPONDER,
+      status: user_status.ACTIVE,
+      is_email_verified: true,
+      barangay: 'Lolomboy',
+    },
+  });
+
+  const responder5 = await prisma.user.upsert({
+    where: { email: 'responder5@mdrrmo.bocaue.gov.ph' },
+    update: {},
+    create: {
+      full_name: 'Grace Torres',
+      email: 'responder5@mdrrmo.bocaue.gov.ph',
+      phone_number: '+639171234013',
+      password_hash: devHash,
+      role: user_role.RESPONDER,
+      status: user_status.ACTIVE,
+      is_email_verified: true,
+      barangay: 'Igulot',
+    },
+  });
+
+  const responder6 = await prisma.user.upsert({
+    where: { email: 'responder6@bfp.bocaue.gov.ph' },
+    update: {},
+    create: {
+      full_name: 'Paolo Ramos',
+      email: 'responder6@bfp.bocaue.gov.ph',
+      phone_number: '+639171234014',
+      password_hash: devHash,
+      role: user_role.RESPONDER,
+      status: user_status.ACTIVE,
+      is_email_verified: true,
+      barangay: 'Bundukan',
+    },
+  });
+
   const hospitalUser = await prisma.user.upsert({
     where: { email: 'receiving@bocauehospital.gov.ph' },
     update: {},
@@ -312,8 +359,11 @@ async function main() {
     { org: mdrrmo.id, user: supervisor.id },
     { org: mdrrmo.id, user: responder1.id },
     { org: mdrrmo.id, user: responder2.id },
+    { org: mdrrmo.id, user: responder4.id },
+    { org: mdrrmo.id, user: responder5.id },
     { org: mdrrmo.id, user: orgAdmin.id },
     { org: bfp.id, user: responder3.id },
+    { org: bfp.id, user: responder6.id },
     { org: bfp.id, user: bfpOrgAdmin.id },
     { org: hospitalOrg.id, user: hospitalUser.id },
     { org: hospitalOrg.id, user: hospitalOrgAdmin.id },
@@ -496,6 +546,22 @@ async function main() {
     },
   });
 
+  const amb3 = await prisma.vehicle.upsert({
+    where: { plate_number: 'AGB-1003' },
+    update: {},
+    create: {
+      organization_id: mdrrmo.id,
+      plate_number: 'AGB-1003',
+      unit_code: 'MDRRMO-AMB-03',
+      resource_type: resource_type.AMBULANCE,
+      make: 'Toyota',
+      model: 'Hi-Ace Ambulance',
+      year: 2023,
+      capacity_persons: 4,
+      is_active: true,
+    },
+  });
+
   const boat1 = await prisma.vehicle.upsert({
     where: { plate_number: 'RB-BOC-01' },
     update: {},
@@ -523,6 +589,22 @@ async function main() {
       make: 'Isuzu',
       model: 'Forward Fire Truck',
       year: 2020,
+      capacity_persons: 6,
+      is_active: true,
+    },
+  });
+
+  const ft2 = await prisma.vehicle.upsert({
+    where: { plate_number: 'BFP-BOC-03' },
+    update: {},
+    create: {
+      organization_id: bfp.id,
+      plate_number: 'BFP-BOC-03',
+      unit_code: 'BFP-FT-02',
+      resource_type: resource_type.FIRE_TRUCK,
+      make: 'Isuzu',
+      model: 'Forward Fire Truck',
+      year: 2022,
       capacity_persons: 6,
       is_active: true,
     },
@@ -623,6 +705,36 @@ async function main() {
     },
   });
 
+  await prisma.resources.upsert({
+    where: { id: '00000000-0000-0000-0003-000000000006' },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0003-000000000006',
+      organization_id: mdrrmo.id,
+      vehicle_id: amb3.id,
+      name: 'MDRRMO Ambulance 3',
+      call_sign: 'ALPHA-3',
+      resource_type: resource_type.AMBULANCE,
+      base_barangay: 'Igulot',
+      is_active: true,
+    },
+  });
+
+  await prisma.resources.upsert({
+    where: { id: '00000000-0000-0000-0003-000000000007' },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0003-000000000007',
+      organization_id: bfp.id,
+      vehicle_id: ft2.id,
+      name: 'BFP Fire Truck 2',
+      call_sign: 'CHARLIE-3',
+      resource_type: resource_type.FIRE_TRUCK,
+      base_barangay: 'Bundukan',
+      is_active: true,
+    },
+  });
+
   console.log('  Resources done');
 
   // ── Resource Capabilities (MOD-29 capability matrix) ─────────────────────────
@@ -663,13 +775,17 @@ async function main() {
   const RES_BRAVO1 = '00000000-0000-0000-0003-000000000003';
   const RES_CHARLIE1 = '00000000-0000-0000-0003-000000000004';
   const RES_CHARLIE2 = '00000000-0000-0000-0003-000000000005';
+  const RES_ALPHA3 = '00000000-0000-0000-0003-000000000006';
+  const RES_CHARLIE3 = '00000000-0000-0000-0003-000000000007';
 
   const capabilityAssignments: Array<{ resource: string; caps: string[] }> = [
     { resource: RES_ALPHA1,   caps: ['MEDICAL_RESPONSE', 'FIRST_AID', 'PATIENT_TRANSPORT'] },
     { resource: RES_ALPHA2,   caps: ['MEDICAL_RESPONSE', 'FIRST_AID', 'PATIENT_TRANSPORT', 'ROAD_RESCUE'] },
+    { resource: RES_ALPHA3,   caps: ['MEDICAL_RESPONSE', 'FIRST_AID', 'PATIENT_TRANSPORT', 'ROAD_RESCUE'] },
     { resource: RES_BRAVO1,   caps: ['WATER_RESCUE', 'BOAT_OPERATION', 'SEARCH_AND_RESCUE'] },
     { resource: RES_CHARLIE1, caps: ['FIREFIGHTING', 'FIRE_SUPPRESSION', 'RESCUE', 'HAZMAT'] },
     { resource: RES_CHARLIE2, caps: ['SEARCH_AND_RESCUE', 'ROPE_RESCUE', 'ROAD_RESCUE', 'RESCUE'] },
+    { resource: RES_CHARLIE3, caps: ['FIREFIGHTING', 'FIRE_SUPPRESSION', 'RESCUE', 'HAZMAT'] },
   ];
 
   for (const assignment of capabilityAssignments) {
@@ -693,7 +809,30 @@ async function main() {
     }
   }
 
-  console.log('  Resource capabilities done (13 capabilities, 5 units mapped — MOD-29)');
+  console.log('  Resource capabilities done (13 capabilities, 7 units mapped — MOD-29)');
+
+  // ── Home units (crew the dispatch console pre-fills) ───────────────────────
+  // One home unit per responder (user_id is unique). `update: {}` keeps a home
+  // unit an admin changed later.
+
+  const homeUnits: Array<{ user: string; resource: string }> = [
+    { user: responder1.id, resource: RES_ALPHA1 },
+    { user: responder4.id, resource: RES_ALPHA2 },
+    { user: responder5.id, resource: RES_ALPHA3 },
+    { user: responder2.id, resource: RES_BRAVO1 },
+    { user: responder3.id, resource: RES_CHARLIE1 },
+    { user: responder6.id, resource: RES_CHARLIE3 },
+  ];
+
+  for (const h of homeUnits) {
+    await prisma.resource_crew_members.upsert({
+      where: { user_id: h.user },
+      update: {},
+      create: { user_id: h.user, resource_id: h.resource },
+    });
+  }
+
+  console.log(`  Home units done (${homeUnits.length} responders linked to their unit)`);
 
   // ── SLA Policies ───────────────────────────────────────────────────────────
 
@@ -1106,15 +1245,20 @@ async function main() {
   console.log('  Admin:', process.env['INITIAL_ADMIN_EMAIL'] ?? 'admin@agap.local');
   console.log('  Dev password (all other users):', DEV_PASSWORD);
   console.log('  Organizations: MDRRMO Bocaue, BFP Bocaue, Bocaue General Hospital');
-  console.log('  Resources: 2 ambulances, 1 rescue boat, 1 fire truck, 1 rescue truck');
-  console.log('  Capabilities: 13 (MOD-29) assigned to all 5 units');
+  console.log('  Resources: 3 ambulances, 1 rescue boat, 2 fire trucks, 1 rescue truck');
+  console.log('  Capabilities: 13 (MOD-29) assigned to all 7 units');
   console.log('  Facilities: BGH + 4 evacuation centers (Lolomboy, Bambang, Bunlo, Igulot)');
   console.log('  Incidents: 8 demo incidents spanning every category + lifecycle stage');
   console.log('\n  One account per role (dev password above unless noted):');
   console.log('    SYSTEM_ADMINISTRATOR   : admin@agap.local (INITIAL_ADMIN_PASSWORD)');
   console.log('    DISPATCHER             : dispatcher1@mdrrmo.bocaue.gov.ph');
   console.log('    SUPERVISOR             : supervisor@mdrrmo.bocaue.gov.ph');
-  console.log('    RESPONDER              : responder1@mdrrmo.bocaue.gov.ph');
+  console.log('    RESPONDER              : responder1@mdrrmo.bocaue.gov.ph (ALPHA-1, MDRRMO Ambulance 1)');
+  console.log('    RESPONDER              : responder4@mdrrmo.bocaue.gov.ph (ALPHA-2, MDRRMO Ambulance 2)');
+  console.log('    RESPONDER              : responder5@mdrrmo.bocaue.gov.ph (ALPHA-3, MDRRMO Ambulance 3)');
+  console.log('    RESPONDER              : responder2@mdrrmo.bocaue.gov.ph (BRAVO-1, MDRRMO Rescue Boat 1)');
+  console.log('    RESPONDER              : responder3@bfp.bocaue.gov.ph (CHARLIE-1, BFP Fire Truck 1)');
+  console.log('    RESPONDER              : responder6@bfp.bocaue.gov.ph (CHARLIE-3, BFP Fire Truck 2)');
   console.log('    HOSPITAL_USER          : receiving@bocauehospital.gov.ph');
   console.log('    ORG_ADMINISTRATOR      : orgadmin@mdrrmo.bocaue.gov.ph');
   console.log('    ORG_ADMINISTRATOR      : orgadmin@bfp.bocaue.gov.ph (BFP Bocaue, answers mutual aid)');
