@@ -1,6 +1,6 @@
 # Plan — PhilHealth ID Verification at Citizen Registration
 
-**Status:** Approved, not started. Decisions recorded 2026-11-05 (§11) · **Date:** 2026-11-05 · **Owner:** AGAP mobile + backend + frontend (admin)
+**Status:** In progress: Phases 0–3 built (see Progress log). Decisions recorded 2026-11-05 (§11) · **Date:** 2026-11-05 · **Owner:** AGAP mobile + backend + frontend (admin)
 **Implementation prompts:** [PHILHEALTH_ID_VERIFICATION_PROMPTS.md](PHILHEALTH_ID_VERIFICATION_PROMPTS.md)
 **Modules:** MOD-01 (registration), MOD-48 (privacy and consent), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration)
 **Surfaces affected:** `mobile/app/auth/registration.tsx`, `mobile/src/components/registration/` (new), `mobile/src/services/api/auth.api.ts`, `backend/src/auth`, `backend/src/identity-verification` (new), `backend/prisma`, `shared/src/validation`, `frontend/app/(ops)/administration`
@@ -206,6 +206,10 @@ model identity_verifications {
 }
 ```
 
+**Phase 3 change:** `pin_hmac`, `pin_last4` and `name_on_id_sealed` are nullable (migration
+`20261105160000_identity_verification_review_scans`), so a card the server can't read can still go to staff review after the
+third attempt. See the Phase 3 section of the Progress log.
+
 `User` gains `identity_verified_at DateTime? @db.Timestamptz(6)`. It is set on `AUTO_VERIFIED` or `APPROVED`, and it is what
 the dispatch label and app banners read.
 
@@ -404,7 +408,7 @@ person or a phone.
 | 0. Spike and samples | Tools installed; waiting on phone + sample runs | 2026-11-05 | Agent part done. The user still fills in the layout notes below |
 | 1. Shared rules | Done, awaiting review | 2026-11-05 | 25 matcher tests pass; built on 1 real card's layout (see Phase 0) |
 | 2. Backend | Done, awaiting review | 2026-11-05 | Migration applied; 44 new tests pass; e2e blocked by Redis not running |
-| 3. Mobile | Not started | | |
+| 3. Mobile | Done, awaiting review and a phone test | 2026-11-05 | Includes a backend follow-up (review of unreadable scans, migration applied) and `expo-image-manipulator`, both approved by the user. 23 mobile + 7 backend tests; e2e blocked by Redis again |
 | 4. Admin review | Not started | | |
 | 5. Labels and seed | Not started | | |
 | 6. Docs and defense readiness | Not started | | |
@@ -663,6 +667,104 @@ wait forever. Re-run with Redis up.
 - Before turning the flag on, generate `ID_DOCUMENT_ENCRYPTION_KEY` and `ID_PIN_PEPPER` in `backend/.env` with the command
   in `.env.example`.
 - Restart the backend so it picks up the new module and the regenerated Prisma client.
+
+**Later check (Phase 3 preflight, 2026-11-05):** with Redis up, `test:e2e:db` + `test:e2e` passed 1/1.
+
+### Phase 3 — 2026-11-05
+
+**Preflight check of Phases 0–2.** No errors or duplication found; 218/218 ID + auth tests and the e2e passed. One gap: plan §3
+promises "Send to MDRRMO for review" after 3 failed scans, but the backend refused an unreadable scan, stored nothing and
+returned no token, and the PIN/name columns were `NOT NULL`. The user chose to fix it inside this phase (backend follow-up below).
+
+**Migration:** `20261105160000_identity_verification_review_scans`, **applied** to the dev database (`migrate deploy`) and the
+E2E database (`test:e2e:db`). It makes `pin_hmac`, `pin_last4` and `name_on_id_sealed` nullable. `migrate status`: up to date.
+
+**Dependency (approved by the user; not in Part C's list):** `expo-image-manipulator` **57.0.21** (the `sdk-57` tag), mobile.
+It crops the fallback photo to the card frame and downscales both paths to a 1600 px long edge, as the Phase 0 findings require.
+It's a native module, so the dev client must be rebuilt (it already had to be).
+
+**Added — mobile**
+- `mobile/src/lib/id-verification.ts`: pure rules, no native imports:
+  - `IdVerificationError` (an `ApiError` with a typed `code`), `readIdVerificationCode`, `toIdVerificationError`
+  - `scanFailureFromError`, `countsAsAttempt`, `canOfferReview`, `nextAttemptNumber`, `retryMessageKey`
+  - `localReadVerdict`, `typedIdName`, `checkTypedName`, `canCreateAccount`, `formatNameOnId`
+  - `frameToPhotoCrop` (fallback camera frame → photo pixels)
+- `mobile/src/services/id-scan/philhealth-scan.ts`: `openDocumentScanner` (1 page; a scanner that can't start returns
+  `scanner_unavailable`), `processIdImage` (crop/downscale → on-device reading → local check → `submitIdScan`; both image
+  files deleted in a `finally`), `deleteCachedFile`.
+- `mobile/src/components/registration/PhilHealthIdStep.tsx`: intro + consent, scanning (15 s slow notice), retry with
+  "Attempt n of 3" and a reason per failure, the review offer after the third failed attempt, the offline card (§4.4) with
+  911 / MDRRMO call buttons, and the fallback camera in a modal. "Report an emergency" is on every state and in the fallback camera.
+- `mobile/src/components/registration/IdCameraFallback.tsx`: `expo-camera` with an ID-1 card frame.
+- `mobile/src/components/registration/NameFields.tsx`: Last / First / Middle / Suffix plus the match indicator.
+- `mobile/src/lib/__tests__/id-verification.test.ts`: 23 tests.
+
+**Changed — mobile**
+- `app/auth/registration.tsx`:
+  - `LocationStep` is now `RegistrationStep` with `id_intro`, `id_scanning` and `id_retry`, and `inside` is renamed to `form`.
+    The geo-fence pass goes to `id_intro`.
+  - The Full Name input is replaced by `NameFields`. `registerSchema` has `lastName`, `firstName`, `middleName` and `suffix`.
+  - Create account is disabled until the name matches or review is chosen.
+  - `ID_SCAN_EXPIRED` returns to `id_intro` with a notice. A badge on the form shows "PIN ending in ••••" plus a Scan again link.
+  - Phone, email, password, terms, the modal and the OTP redirect are unchanged; the modal now greets by first name.
+- `src/services/api/auth.api.ts`:
+  - `submitIdScan()` is a native multipart `UploadTask`, like incident photos.
+  - `register()` gained the name parts, `idVerificationToken` and `requestReview`, and rethrows coded errors as `IdVerificationError`.
+- `src/i18n/translations.ts`: every new string in `en` and `fil`. The now-unused `fullName` / `fullNamePlaceholder` keys
+  were removed from both.
+- `app/profile/index.tsx`: the `__DEV__` "PhilHealth scan spike" row was removed. **Deleted:** `app/dev/id-scan-spike.tsx`.
+- `package.json`, `pnpm-lock.yaml`: the dependency above.
+
+**Changed — backend and shared (review-path follow-up)**
+- `POST /auth/id-verification` accepts `requestReview` (read from the raw field, like `consentGiven`). It's honoured only when
+  `attemptNumber ≥ 3` **and** the server can't use the card (`UNREADABLE` or `NOT_PHILHEALTH_ID`).
+  - The sealed image is then stored as an unclaimed `PENDING_REVIEW` row: no name, and `match_result = { scanFailure }`.
+  - A readable card is processed normally even when review was asked for.
+  - A PIN the server could read is still HMAC'd and checked against existing accounts (409).
+- The response always has `reviewRequired`; `nameOnId` and `pinLast4` are `null` on a review scan.
+  New shared type `IdScanResponse` in `shared/src/constants/identity-verification.ts`.
+- `prepareClaim` / `claim` accept an unclaimed `PENDING_REVIEW` row. A review scan always registers as `PENDING_REVIEW`, so
+  the image is kept for staff and `identity_verified_at` stays null. `PreparedClaim.parts` became `matchResult`.
+- The cleanup job also expires unclaimed `PENDING_REVIEW` rows after 30 minutes and deletes their images.
+- Tests:
+  - `id-scan-endpoint.spec.ts`: +5 tests. The success test's expected keys gained `reviewRequired`; no assertion was loosened.
+  - `id-register.spec.ts`: +1.
+  - `id-cleanup-and-ocr.spec.ts`: +1.
+
+**Inventory:** none of the Phase 3 files, functions, translation keys or the `requestReview` scan field existed before.
+
+**Tests:**
+- Mobile: 182 → **205** (15 → 16 suites).
+- Backend: 1656 → **1663**. The suite without `auth-phase3` passed 1604/1604, and `auth-phase3` alone passed 59/59.
+- Typecheck clean in shared, backend, mobile and frontend.
+- **E2E:** `test:e2e:db` succeeded (migrated and seeded). `test:e2e` timed out at 120 s because **Redis was down again**
+  (port 6379 closed). It passed earlier the same day with Redis up. Re-run with Redis up.
+
+**Deviations and decisions (for review)**
+- **How "Send for review" works.** It opens the scanner once more and uploads that scan with `requestReview`, rather than keeping
+  a failed image on the phone between attempts. Every image still leaves the cache right after its upload.
+- **Phone-side check.** When the phone's own reading lacks the PhilHealth heading and PIN (`looksLikePhilHealthId`), the scan is
+  refused on the phone (`NOT_RECOGNISED`, which counts as an attempt) and not uploaded.
+  - If on-device text reading isn't available (no ML Kit), the scan is uploaded anyway (§4.3).
+  - The review upload skips the phone check.
+  - The server still decides every upload.
+- **What counts as an attempt.** Only `NOT_RECOGNISED`, `NOT_PHILHEALTH_ID`, `UNREADABLE` and image problems count. Offline and
+  server errors don't count. The review offer is hidden after `ID_ALREADY_REGISTERED`, which shows "Sign in instead".
+- **Image preparation.** Both paths are re-encoded as JPEG at 0.85 with a long edge ≤ 1600 px. The scanner is asked for
+  quality 95 to avoid a double loss. The fallback crop is the frame plus a 6 % margin, mapped through the preview's `cover` scaling.
+- **The live check and the button.** The match indicator shows after a name field loses focus and on submit, as specified. The
+  button's enabled state is computed live, because tapping a button in RN with `keyboardShouldPersistTaps` doesn't blur the input.
+- **Suffix** is a chip picker (None / Jr. / Sr. / II / III / IV), the values the shared matcher knows, not a free-text field.
+- **The guest SOS code in the form** is unchanged (same inline handler). The ID steps call the same `beginGuestReport()` +
+  `router.push('/emergency/location')`.
+- **Not done:** excluding ML Kit's Chinese/Devanagari/Japanese/Korean models in Gradle (a Phase 0 "consider"). The location
+  screens before the ID step are still English-only and have no guest button; that's existing behaviour, outside this phase.
+
+**Needs a person or a phone**
+1. Start Redis, then `cd backend; pnpm test:e2e`.
+2. In `backend/.env`, set `ID_DOCUMENT_ENCRYPTION_KEY` and `ID_PIN_PEPPER` (command in `.env.example`). The scan endpoint
+   returns 503 without them, **even with the flag off**. Optionally set `ID_VERIFICATION_REQUIRED=true`. Restart the backend.
+3. Rebuild the dev client (new native module, spike removed), restart Metro with `-c`, and run the phone checks in the Phase 3 report.
 
 ---
 

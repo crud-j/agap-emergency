@@ -407,6 +407,9 @@ importers:
       expo-haptics:
         specifier: ~57.0.3
         version: 57.0.3(expo@57.0.30)
+      expo-image-manipulator:
+        specifier: 57.0.21
+        version: 57.0.21(expo@57.0.30)
       expo-image-picker:
         specifier: ~57.0.20
         version: 57.0.20(expo@57.0.30)
@@ -5092,6 +5095,11 @@ packages:
 
   expo-image-loader@57.0.1:
     resolution: {integrity: sha512-uhrZKLT/cTl2mXyR28kPpVkS5O+PK9N1QA/07IFM4f5T4g0lTW1JHT3NEWwEEsGFldPmVX4j7LwUVVZxE+woug==}
+    peerDependencies:
+      expo: '*'
+
+  expo-image-manipulator@57.0.21:
+    resolution: {integrity: sha512-NZeNvZxBNf/PK97Df5zORmtqRR/LovkA+lHdRLm1IJFiVKjs4xr+Ib6/jWhDxn04VOX3TJswCQyu4SCxkgMe4Q==}
     peerDependencies:
       expo: '*'
 
@@ -15242,6 +15250,11 @@ snapshots:
   expo-image-loader@57.0.1(expo@57.0.30):
     dependencies:
       expo: 57.0.30(80ac1c9471978b5f3c37cbbaabc095a9)
+
+  expo-image-manipulator@57.0.21(expo@57.0.30):
+    dependencies:
+      expo: 57.0.30(80ac1c9471978b5f3c37cbbaabc095a9)
+      expo-image-loader: 57.0.1(expo@57.0.30)
 
   expo-image-picker@57.0.20(expo@57.0.30):
     dependencies:

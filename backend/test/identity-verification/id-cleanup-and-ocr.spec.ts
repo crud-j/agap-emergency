@@ -46,6 +46,16 @@ describe('ID scan cleanup job', () => {
     expect(kit.storage.objects.has('local:id-documents/fresh')).toBe(true);
   });
 
+  it('expires an unclaimed review scan too, and deletes its image', async () => {
+    seed('review-stale', { status: 'PENDING_REVIEW', pin_hmac: null, claim_expires_at: minutes(-1) });
+    seed('review-fresh', { status: 'PENDING_REVIEW', pin_hmac: null, claim_expires_at: minutes(5) });
+
+    expect(await kit.service.cleanup(NOW)).toEqual({ expired: 1, deleted: 1, failed: 0 });
+    expect(rowOf('review-stale')).toMatchObject({ status: 'EXPIRED', image_storage_key: null });
+    expect(kit.storage.objects.has('local:id-documents/review-stale')).toBe(false);
+    expect(rowOf('review-fresh')).toMatchObject({ status: 'PENDING_REVIEW', image_storage_key: 'local:id-documents/review-fresh' });
+  });
+
   it('sweeps images of decided rows, and keeps the ones staff still need to review', async () => {
     seed('matched', { user_id: 'u-1', status: 'AUTO_VERIFIED' });
     seed('approved', { user_id: 'u-2', status: 'APPROVED' });

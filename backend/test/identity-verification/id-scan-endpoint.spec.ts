@@ -68,7 +68,8 @@ describe('POST /v1/auth/id-verification', () => {
   it('returns only the token, the name as read and the last 4 PIN digits', async () => {
     const res = await post(form({ clientText: 'PhilHealth 00 000000001 0', attemptNumber: '2' }));
     expect(res.status).toBe(200);
-    expect(Object.keys(res.json).sort()).toEqual(['nameOnId', 'pinLast4', 'token']);
+    expect(Object.keys(res.json).sort()).toEqual(['nameOnId', 'pinLast4', 'reviewRequired', 'token']);
+    expect(res.json.reviewRequired).toBe(false);
     expect(res.json.pinLast4).toBe('0010');
     expect(res.json.nameOnId).toEqual({ last: 'DELA CRUZ', first: 'JUAN', middle: 'SANTOS' });
     expect(res.text).not.toContain(PIN);
@@ -202,6 +203,75 @@ describe('POST /v1/auth/id-verification', () => {
     const res = await post(form());
     expect(res.status).toBe(503);
     expect(kit.ocr.read).not.toHaveBeenCalled();
+  });
+
+  describe('review scan after the third failed attempt (plan §3)', () => {
+    const UNREADABLE_READ = { text: 'g i y L ¥ ] = a Fi', confidence: 28 };
+
+    it('stores an unreadable card for staff review: no name, no PIN, a sealed image and the reason', async () => {
+      kit.ocr.read.mockResolvedValue(UNREADABLE_READ);
+      const res = await post(form({ attemptNumber: '3', requestReview: 'true' }));
+      expect(res.status).toBe(200);
+      expect(res.json).toEqual({ token: expect.any(String), nameOnId: null, pinLast4: null, reviewRequired: true });
+
+      const [row] = kit.prisma.db.idv;
+      expect(row).toMatchObject({
+        status: 'PENDING_REVIEW',
+        user_id: null,
+        claim_token_hash: sha256(res.json.token),
+        pin_hmac: null,
+        pin_last4: null,
+        name_on_id_sealed: null,
+        match_result: { scanFailure: 'UNREADABLE' },
+        attempt_number: 3,
+      });
+      expect(kit.crypto.openImage(row.id, kit.storage.objects.get(row.image_storage_key)!).equals(JPEG)).toBe(true);
+    });
+
+    it('records NOT_PHILHEALTH_ID as the reason when the card was read clearly as something else', async () => {
+      kit.ocr.read.mockResolvedValue({ text: LICENCE_TEXT, confidence: 85 });
+      const res = await post(form({ attemptNumber: '4', requestReview: 'true' }));
+      expect(res.status).toBe(200);
+      expect(kit.prisma.db.idv[0].match_result).toEqual({ scanFailure: 'NOT_PHILHEALTH_ID' });
+    });
+
+    it('keeps the readable PIN of a card whose name line failed, and still enforces one ID per account', async () => {
+      kit.ocr.read.mockResolvedValue({ text: 'PhilHealth\n00-000000001-0\nJANUARY 01, 1990', confidence: 70 });
+      const res = await post(form({ attemptNumber: '3', requestReview: 'true' }));
+      expect(res.status).toBe(200);
+      expect(res.json).toMatchObject({ pinLast4: '0010', nameOnId: null, reviewRequired: true });
+      expect(kit.prisma.db.idv[0].pin_hmac).toBe(kit.crypto.pinHmac(PIN));
+
+      kit = makeKit();
+      kit.ocr.read.mockResolvedValue({ text: 'PhilHealth\n00-000000001-0\nJANUARY 01, 1990', confidence: 70 });
+      kit.prisma.db.idv.push({ id: 'old', user_id: 'u-1', status: 'AUTO_VERIFIED', pin_hmac: kit.crypto.pinHmac(PIN) });
+      const taken = await post(form({ attemptNumber: '3', requestReview: 'true' }));
+      expect(taken.status).toBe(409);
+      expect(taken.json.code).toBe('ID_ALREADY_REGISTERED');
+    });
+
+    it('refuses review before the third attempt, or when requestReview is "false"', async () => {
+      kit.ocr.read.mockResolvedValue(UNREADABLE_READ);
+      for (const fields of [
+        { attemptNumber: '2', requestReview: 'true' },
+        { attemptNumber: '3', requestReview: 'false' },
+        { attemptNumber: '3' },
+      ]) {
+        const res = await post(form(fields));
+        expect(res.status).toBe(422);
+        expect(res.json.code).toBe('UNREADABLE');
+      }
+      expect(kit.prisma.db.idv).toHaveLength(0);
+      expect(kit.storage.objects.size).toBe(0);
+    });
+
+    it('processes a readable card normally even when review was asked for', async () => {
+      const res = await post(form({ attemptNumber: '3', requestReview: 'true' }));
+      expect(res.status).toBe(200);
+      expect(res.json).toMatchObject({ reviewRequired: false, pinLast4: '0010' });
+      expect(res.json.nameOnId).toEqual({ last: 'DELA CRUZ', first: 'JUAN', middle: 'SANTOS' });
+      expect(kit.prisma.db.idv[0].status).toBe('AUTO_VERIFIED');
+    });
   });
 
   it('removes the stored image when the row cannot be saved', async () => {

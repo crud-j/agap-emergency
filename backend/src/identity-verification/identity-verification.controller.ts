@@ -69,11 +69,12 @@ export class IdentityVerificationController {
         longitude: { type: 'number' },
         clientText: { type: 'string' },
         attemptNumber: { type: 'integer' },
+        requestReview: { type: 'boolean' },
       },
     },
   })
   @ApiOperation({ summary: 'Scan a PhilHealth ID before creating a citizen account (MOD-01)' })
-  @ApiResponse({ status: 200, description: '{ token, nameOnId, pinLast4 }' })
+  @ApiResponse({ status: 200, description: '{ token, nameOnId, pinLast4, reviewRequired }' })
   @ApiResponse({ status: 409, description: 'ID_ALREADY_REGISTERED' })
   @ApiResponse({ status: 422, description: 'NOT_PHILHEALTH_ID or UNREADABLE' })
   async scan(@UploadedFile() image: Express.Multer.File | undefined, @Body() dto: IdScanDto) {
@@ -92,6 +93,10 @@ export class IdentityVerificationController {
         'Registration is only available for residents and workers within Bocaue, Bulacan.',
       );
     }
-    return this.identityVerification.scan(image, { clientText: dto.clientText, attemptNumber: dto.attemptNumber });
+    return this.identityVerification.scan(image, {
+      clientText: dto.clientText,
+      attemptNumber: dto.attemptNumber,
+      requestReview: dto.requestReview,
+    });
   }
 }

@@ -1,6 +1,9 @@
-import { apiFetch, ApiError } from './http';
+import { File, UploadTask, UploadType } from 'expo-file-system';
+import type { IdScanResponse } from '@agap/shared';
+import { apiFetch, ApiError, NetworkError } from './http';
+import { IdVerificationError, toIdVerificationError } from '../../lib/id-verification';
 
-export { ApiError };
+export { ApiError, IdVerificationError };
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -47,7 +50,17 @@ export interface AuthResponse extends AuthTokens {
 }
 
 export interface RegisterDto {
-  fullName: string;
+  /** Older builds only. With a PhilHealth ID scan the server builds the full name from the parts below. */
+  fullName?: string;
+  /** MOD-01: the name as typed, checked against the PhilHealth ID by the server. */
+  lastName?: string;
+  firstName?: string;
+  middleName?: string;
+  suffix?: string;
+  /** Token from submitIdScan(). */
+  idVerificationToken?: string;
+  /** Create the account even though the name doesn't match; MDRRMO staff review the ID. */
+  requestReview?: boolean;
   phoneNumber: string;
   email?: string;
   password: string;
@@ -60,10 +73,77 @@ export interface RegisterDto {
 
 export interface RegisterResponse {
   user: SafeUser;
+  /** AUTO_VERIFIED: name matched the ID. PENDING_REVIEW: MDRRMO staff will check it. */
+  identityVerification?: 'AUTO_VERIFIED' | 'PENDING_REVIEW' | null;
 }
 
+/** Rejects with an IdVerificationError (typed `code`) for PhilHealth ID refusals. */
 export async function register(dto: RegisterDto): Promise<RegisterResponse> {
-  return api('/v1/auth/register', { method: 'POST', body: JSON.stringify(dto) });
+  try {
+    return await api('/v1/auth/register', { method: 'POST', body: JSON.stringify(dto) });
+  } catch (err) {
+    throw toIdVerificationError(err);
+  }
+}
+
+export interface SubmitIdScanOptions {
+  /** The phone's own reading. The server only compares it; it never verifies from it. */
+  clientText?: string;
+  attemptNumber: number;
+  latitude: number;
+  longitude: number;
+  consentGiven: boolean;
+  /** After the third failed attempt: store an unreadable card for MDRRMO staff review. */
+  requestReview?: boolean;
+}
+
+/** The server's limit on clientText. */
+const CLIENT_TEXT_MAX = 5000;
+
+/**
+ * POST /auth/id-verification (MOD-01): uploads the front of the PhilHealth ID (JPEG) for the
+ * server to read. Rejects with an IdVerificationError (typed `code`) when the server refuses
+ * the scan, or a NetworkError when it can't be reached. Never logs the image or the text.
+ */
+export async function submitIdScan(imageUri: string, options: SubmitIdScanOptions): Promise<IdScanResponse> {
+  const parameters: Record<string, string> = {
+    consentGiven: String(options.consentGiven),
+    attemptNumber: String(options.attemptNumber),
+    latitude: String(options.latitude),
+    longitude: String(options.longitude),
+  };
+  if (options.clientText) parameters.clientText = options.clientText.slice(0, CLIENT_TEXT_MAX);
+  if (options.requestReview) parameters.requestReview = 'true';
+
+  // Native multipart upload, like incident photos: RN's FormData file parts fail on the New
+  // Architecture (see uploadIncidentPhoto in incidents.api.ts).
+  let result: { status: number; body: string } | null | undefined;
+  try {
+    result = await new UploadTask(new File(imageUri), `${API_BASE}/v1/auth/id-verification`, {
+      httpMethod: 'POST',
+      uploadType: UploadType.MULTIPART,
+      fieldName: 'image',
+      mimeType: 'image/jpeg',
+      parameters,
+      headers: { 'ngrok-skip-browser-warning': '1' },
+    }).uploadAsync();
+  } catch (err) {
+    throw new NetworkError(err);
+  }
+  if (!result) throw new NetworkError();
+
+  let body: unknown = {};
+  try {
+    body = result.body ? JSON.parse(result.body) : {};
+  } catch {
+    /* non-JSON body (proxy error page) */
+  }
+  if (result.status < 200 || result.status >= 300) {
+    const raw = (body as { message?: unknown }).message;
+    const message = Array.isArray(raw) ? raw.join(', ') : typeof raw === 'string' ? raw : `HTTP ${result.status}`;
+    throw toIdVerificationError(new ApiError(message, result.status, body));
+  }
+  return body as IdScanResponse;
 }
 
 export interface GeoCheckResult {

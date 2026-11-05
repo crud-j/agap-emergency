@@ -118,6 +118,33 @@ describe('AuthService.register with a PhilHealth ID scan', () => {
     expect(kit.prisma.db.verifications).toHaveLength(1); // OTP still sent
   });
 
+  it('review scan (unreadable card after 3 attempts): account created under review, image kept for staff', async () => {
+    kit.ocr.read.mockResolvedValue({ text: 'g i y L', confidence: 20 });
+    const scanned = await kit.service.scan(file(JPEG), { attemptNumber: 3, requestReview: true });
+    expect(scanned.reviewRequired).toBe(true);
+
+    // Nothing to match the typed name against, so it never blocks: staff check it.
+    const result = await auth.register({ ...BASE, ...NAME, idVerificationToken: scanned.token, requestReview: true } as RegisterDto);
+
+    expect(result.identityVerification).toBe('PENDING_REVIEW');
+    const [user] = kit.prisma.db.users;
+    expect(user.full_name).toBe('Juan S. Dela Cruz');
+    expect(user.identity_verified_at).toBeNull();
+    expect(row()).toMatchObject({
+      user_id: user.id,
+      status: 'PENDING_REVIEW',
+      match_result: { scanFailure: 'UNREADABLE' },
+      consent_record_id: kit.prisma.db.consents[0].id,
+    });
+    expect(kit.storage.objects.has(row().image_storage_key)).toBe(true);
+    expect(kit.prisma.db.audit[0].new_values).toEqual({ outcome: 'PENDING_REVIEW' });
+    expect(kit.prisma.db.verifications).toHaveLength(1); // OTP still sent
+
+    // A claimed review scan can't be claimed again.
+    const again = { ...BASE, ...NAME, phoneNumber: '09171234568', idVerificationToken: scanned.token } as RegisterDto;
+    expect(await codeOf(auth.register(again))).toBe('ID_SCAN_EXPIRED');
+  });
+
   it('ID_SCAN_EXPIRED for an expired, reused or unknown token', async () => {
     const expired = await scan();
     row().claim_expires_at = new Date(Date.now() - 1000);

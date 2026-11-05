@@ -25,14 +25,21 @@ import * as Location from 'expo-location';
 import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import type { Language } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
-import { register, geoCheck } from '../../src/services/api/auth.api';
+import { register, geoCheck, IdVerificationError } from '../../src/services/api/auth.api';
 import { useIncidentStore } from '../../src/stores/incident.store';
-import { isCoordinateInBocaue } from '@agap/shared';
+import { IdVerificationErrorCode, isCoordinateInBocaue, type IdScanResponse } from '@agap/shared';
+import PhilHealthIdStep, { type IdStep } from '../../src/components/registration/PhilHealthIdStep';
+import NameFields, { EMPTY_NAME, type NameValues } from '../../src/components/registration/NameFields';
+import { canCreateAccount, checkTypedName, typedIdName } from '../../src/lib/id-verification';
 
 // ─── Validation schema (address fields removed) ──────────────────────────────
 
 const registerSchema = z.object({
-  fullName:        z.string().min(2, 'Full name must be at least 2 characters.'),
+  // MOD-01: the name in parts, checked against the PhilHealth ID (plan §3).
+  lastName:        z.string().min(1, 'Enter your last name.').max(100),
+  firstName:       z.string().min(1, 'Enter your first name.').max(100),
+  middleName:      z.string().max(100).optional(),
+  suffix:          z.string().max(10).optional(),
   phoneNumber:     z.string().regex(/^(\+63|0)9\d{9}$/, 'Enter a valid Philippine mobile number.'),
   email:           z.string().email('Enter a valid email address.').optional().or(z.literal('')),
   password:        z.string()
@@ -62,9 +69,9 @@ function normalizePhoneForOtp(value: string): string {
   return phone.startsWith('+63') ? phone : `+63${phone.replace(/^0/, '')}`;
 }
 
-// ─── Location step state machine ─────────────────────────────────────────────
+// ─── Registration step state machine ─────────────────────────────────────────
 
-type LocationStep =
+type RegistrationStep =
   | 'permission'   // initial: show rationale + "Allow" button
   | 'permission_request' // OS permission dialog is in progress
   | 'requesting'   // OS permission dialog in progress or GPS acquiring
@@ -73,7 +80,10 @@ type LocationStep =
   | 'checking'     // server-side geo-fence API call in progress
   | 'outside'      // geo-fence returned inside=false
   | 'geo_error'    // geo-check API threw an error
-  | 'inside';      // geo-fence passed → show registration form
+  | IdStep         // geo-fence passed → PhilHealth ID: 'id_intro' | 'id_scanning' | 'id_retry'
+  | 'form';        // ID scanned → registration form with the name-match indicator
+
+const ID_STEPS: readonly RegistrationStep[] = ['id_intro', 'id_scanning', 'id_retry'];
 
 // ─── SVG logo fallback ───────────────────────────────────────────────────────
 
@@ -112,16 +122,32 @@ export default function RegistrationScreen() {
   const t = useTranslations();
 
   // ── Location state ──
-  const [locationStep, setLocationStep] = useState<LocationStep>('permission');
+  const [step, setStep] = useState<RegistrationStep>('permission');
   const [capturedCoords, setCapturedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
+  // ── PhilHealth ID state (MOD-01, plan §3) ──
+  const [idScan, setIdScan]                   = useState<IdScanResponse | null>(null);
+  const [idNotice, setIdNotice]               = useState<string | null>(null);
+  const [reviewChosen, setReviewChosen]       = useState(false);
+  /** Show the name-match indicator: set when a name field loses focus and on submit. */
+  const [nameChecked, setNameChecked]         = useState(false);
+
   // ── Form state ──
-  const [fullName, setFullName]               = useState('');
+  const [name, setName]                       = useState<NameValues>(EMPTY_NAME);
   const [mobileNumber, setMobileNumber]       = useState('');
   const [email, setEmail]                     = useState('');
   const [password, setPassword]               = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const passwordIsStrong = PASSWORD_REQUIREMENTS.every((requirement) => requirement.test(password));
+
+  // The same matcher the server decides with. Live for the button; shown on blur / submit.
+  const typedName = typedIdName(name);
+  const nameMatch = checkTypedName(typedName, idScan?.nameOnId ?? null);
+  const createEnabled = canCreateAccount({
+    nameMatches: nameMatch?.matches === true,
+    reviewChosen,
+    reviewScan: idScan?.reviewRequired === true,
+  });
 
   // ── UX state ──
   const [isPasswordVisible, setIsPasswordVisible]               = useState(false);
@@ -154,7 +180,7 @@ export default function RegistrationScreen() {
   // ── Location / geo-fence handlers ──────────────────────────────────────────
 
   async function handleGeoFenceCheck() {
-    setLocationStep('requesting');
+    setStep('requesting');
     let location: Location.LocationObject;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -168,7 +194,7 @@ export default function RegistrationScreen() {
         }),
       ]);
     } catch {
-      setLocationStep('gps_error');
+      setStep('gps_error');
       return;
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
@@ -176,37 +202,38 @@ export default function RegistrationScreen() {
 
     const { latitude, longitude } = location.coords;
     if (!isCoordinateInBocaue(latitude, longitude)) {
-      setLocationStep('outside');
+      setStep('outside');
       return;
     }
 
-    setLocationStep('checking');
+    setStep('checking');
     try {
       const result = await geoCheck(latitude, longitude);
       if (!result.inside) {
-        setLocationStep('outside');
+        setStep('outside');
         return;
       }
       setCapturedCoords({ latitude, longitude });
-      setLocationStep('inside');
+      // Inside Bocaue → scan the PhilHealth ID before the form (plan §3).
+      setStep('id_intro');
     } catch {
-      setLocationStep('geo_error');
+      setStep('geo_error');
     }
   }
 
   async function handleRequestPermission() {
-    setLocationStep('permission_request');
+    setStep('permission_request');
     try {
       const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         await handleGeoFenceCheck();
       } else if (!canAskAgain) {
-        setLocationStep('denied');
+        setStep('denied');
       } else {
-        setLocationStep('permission');
+        setStep('permission');
       }
     } catch {
-      setLocationStep('denied');
+      setStep('denied');
     }
   }
 
@@ -218,7 +245,9 @@ export default function RegistrationScreen() {
     const phone = normalizePhoneForOtp(mobileNumber);
 
     const result = registerSchema.safeParse({
-      fullName: fullName.trim(), phoneNumber: phone,
+      lastName: name.last.trim(), firstName: name.first.trim(),
+      middleName: name.middle.trim() || undefined, suffix: name.suffix || undefined,
+      phoneNumber: phone,
       email: email.trim() || undefined, password, confirmPassword,
     });
     if (!result.success) {
@@ -227,6 +256,10 @@ export default function RegistrationScreen() {
       setFieldErrors(errs);
       return;
     }
+    if (!idScan) { resetIdScan(null); return; }
+    // Same rule as the disabled button: the name matches, or the ID goes to MDRRMO review.
+    setNameChecked(true);
+    if (!createEnabled) { setApiError(t.registration.createDisabledHint); return; }
     if (!agreeTerms) { setApiError('You must agree to the Terms of Service and Privacy Policy.'); return; }
 
     checkScale.setValue(0);
@@ -240,7 +273,12 @@ export default function RegistrationScreen() {
 
     try {
       await register({
-        fullName:        fullName.trim(),
+        lastName:        name.last.trim(),
+        firstName:       name.first.trim(),
+        middleName:      name.middle.trim() || undefined,
+        suffix:          name.suffix || undefined,
+        idVerificationToken: idScan.token,
+        requestReview:   idScan.reviewRequired || reviewChosen ? true : undefined,
         phoneNumber:     phone,
         email:           email.trim() || undefined,
         password,
@@ -262,16 +300,59 @@ export default function RegistrationScreen() {
       if (continuedToOtp.current) return;
       setShowModal(false);
       setIsLoading(false);
+      if (e instanceof IdVerificationError) {
+        switch (e.code) {
+          case IdVerificationErrorCode.ID_SCAN_EXPIRED:
+          case IdVerificationErrorCode.ID_VERIFICATION_REQUIRED:
+            // The scan is gone (30 minutes passed, or already used): scan again.
+            resetIdScan(t.registration.idScanExpired);
+            return;
+          case IdVerificationErrorCode.NAME_DOES_NOT_MATCH_ID:
+            setNameChecked(true);
+            setApiError(t.registration.createDisabledHint);
+            return;
+          case IdVerificationErrorCode.ID_ALREADY_REGISTERED:
+            setApiError(t.registration.idErrorAlreadyRegistered);
+            return;
+          default:
+            break;
+        }
+      }
       const msg: string = e.message ?? '';
       if (msg.toLowerCase().includes('phone') || msg.toLowerCase().includes('number')) {
         setApiError(t.registration.errorPhoneExists);
       } else if (msg.toLowerCase().includes('bocaue')) {
         // Server rejected the geo-fence — bounce back to outside screen
-        setLocationStep('outside');
+        setStep('outside');
       } else {
         setApiError(msg || t.common.error);
       }
     }
+  }
+
+  // ── PhilHealth ID handlers ──────────────────────────────────────────────────
+
+  function reportEmergencyAsGuest() {
+    beginGuestReport();
+    router.push('/emergency/location');
+  }
+
+  function handleIdVerified(result: IdScanResponse) {
+    setIdScan(result);
+    setIdNotice(null);
+    setReviewChosen(false);
+    setNameChecked(false);
+    setStep('form');
+  }
+
+  /** Back to the ID intro for a fresh scan; the typed name and the rest of the form are kept. */
+  function resetIdScan(notice: string | null) {
+    setIdScan(null);
+    setReviewChosen(false);
+    setNameChecked(false);
+    setApiError('');
+    setIdNotice(notice);
+    setStep('id_intro');
   }
 
   function continueToOtp() {
@@ -284,9 +365,37 @@ export default function RegistrationScreen() {
     });
   }
 
+  // ── Render: PhilHealth ID steps (after the geo-fence passed) ───────────────
+
+  if (ID_STEPS.includes(step) && capturedCoords) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+        <ScrollView
+          contentContainerStyle={[styles.scrollContent, styles.locationScreenContent]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.logoBlock}>
+            <AgapLogo />
+          </View>
+          <PhilHealthIdStep
+            step={step as IdStep}
+            onStepChange={setStep}
+            coords={capturedCoords}
+            notice={idNotice}
+            onVerified={handleIdVerified}
+            onOutsideServiceArea={() => setStep('outside')}
+            onReportEmergency={reportEmergencyAsGuest}
+            onSignIn={() => router.push('/auth/login')}
+          />
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   // ── Render: location step screens ──────────────────────────────────────────
 
-  if (locationStep !== 'inside') {
+  if (step !== 'form' || !idScan) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
@@ -300,7 +409,7 @@ export default function RegistrationScreen() {
           </View>
 
           {/* ── Permission rationale ── */}
-          {locationStep === 'permission' && (
+          {step === 'permission' && (
             <View style={styles.locationCard}>
               <View style={styles.locationIconWrap}>
                 <Ionicons name="location-outline" size={40} color="#0D6053" />
@@ -342,20 +451,20 @@ export default function RegistrationScreen() {
           )}
 
           {/* ── GPS acquiring / server check loading ── */}
-          {(locationStep === 'permission_request' || locationStep === 'requesting' || locationStep === 'checking') && (
+          {(step === 'permission_request' || step === 'requesting' || step === 'checking') && (
             <View style={styles.locationCard}>
               <View style={styles.locationSpinnerWrap}>
                 <ActivityIndicator size="large" color="#0D6053" />
               </View>
               <Text style={styles.locationHeading}>
-                {locationStep === 'permission_request'
+                {step === 'permission_request'
                   ? 'Requesting location access…'
-                  : locationStep === 'checking'
+                  : step === 'checking'
                     ? 'Verifying your location…'
                     : 'Detecting your location…'}
               </Text>
               <Text style={styles.locationBody}>
-                {locationStep === 'permission_request'
+                {step === 'permission_request'
                   ? 'Allow location access in the prompt to check that you are within Bocaue.'
                   : 'Please wait a moment'}
               </Text>
@@ -363,7 +472,7 @@ export default function RegistrationScreen() {
           )}
 
           {/* ── Permission permanently denied ── */}
-          {locationStep === 'denied' && (
+          {step === 'denied' && (
             <View style={styles.locationCard}>
               <View style={[styles.locationIconWrap, styles.locationIconError]}>
                 <Ionicons name="location-outline" size={40} color="#EF4444" />
@@ -391,7 +500,7 @@ export default function RegistrationScreen() {
               <TouchableOpacity
                 style={styles.locationSecondaryBtn}
                 activeOpacity={0.7}
-                onPress={() => setLocationStep('permission')}
+                onPress={() => setStep('permission')}
               >
                 <Text style={styles.locationSecondaryText}>Try again</Text>
               </TouchableOpacity>
@@ -399,7 +508,7 @@ export default function RegistrationScreen() {
           )}
 
           {/* ── GPS timeout / signal error ── */}
-          {locationStep === 'gps_error' && (
+          {step === 'gps_error' && (
             <View style={styles.locationCard}>
               <View style={[styles.locationIconWrap, styles.locationIconError]}>
                 <Ionicons name="wifi-outline" size={40} color="#F59E0B" />
@@ -428,7 +537,7 @@ export default function RegistrationScreen() {
           )}
 
           {/* ── Outside Bocaue ── */}
-          {locationStep === 'outside' && (
+          {step === 'outside' && (
             <View style={styles.locationCard}>
               <View style={[styles.locationIconWrap, styles.locationIconWarning]}>
                 <Ionicons name="map-outline" size={40} color="#DC2626" />
@@ -467,7 +576,7 @@ export default function RegistrationScreen() {
           )}
 
           {/* ── Geo-check API error ── */}
-          {locationStep === 'geo_error' && (
+          {step === 'geo_error' && (
             <View style={styles.locationCard}>
               <View style={[styles.locationIconWrap, styles.locationIconError]}>
                 <Ionicons name="cloud-offline-outline" size={40} color="#EF4444" />
@@ -579,32 +688,41 @@ export default function RegistrationScreen() {
             <Text style={styles.locationBadgeText}>Location confirmed — Bocaue, Bulacan</Text>
           </View>
 
+          {/* ── PhilHealth ID scanned badge ── */}
+          <View style={[styles.locationBadge, styles.idBadge]}>
+            <Ionicons name={idScan.reviewRequired ? 'people-outline' : 'card-outline'} size={16} color="#0D6053" />
+            <Text style={[styles.locationBadgeText, styles.idBadgeText]}>
+              {idScan.reviewRequired
+                ? t.registration.idReviewBadge
+                : idScan.pinLast4
+                  ? t.registration.idScannedBadge(idScan.pinLast4)
+                  : t.registration.idScannedBadgeNoPin}
+            </Text>
+            <TouchableOpacity onPress={() => resetIdScan(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.linkText}>{t.registration.idRescanLink}</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* ── Form Fields ── */}
           <View style={styles.formBlock}>
 
-            {/* Full Name */}
-            <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>{t.registration.fullName}</Text>
-              <View style={[styles.inputContainer, focusedField === 'name' && styles.inputContainerFocused]}>
-                <Ionicons
-                  name="person-outline"
-                  size={20}
-                  color={focusedField === 'name' ? '#0D6053' : '#9CA3AF'}
-                  style={styles.inputIconLeft}
-                />
-                <TextInput
-                  testID="fullname-input"
-                  style={styles.textInput}
-                  placeholder={t.registration.fullNamePlaceholder}
-                  placeholderTextColor="#9CA3AF"
-                  value={fullName}
-                  onChangeText={setFullName}
-                  onFocus={() => setFocusedField('name')}
-                  onBlur={() => setFocusedField(null)}
-                  autoCapitalize="words"
-                />
-              </View>
-            </View>
+            {/* Name, checked against the PhilHealth ID */}
+            <NameFields
+              value={name}
+              onChange={(next) => {
+                setName(next);
+                setNameChecked(false);
+              }}
+              nameOnId={idScan.nameOnId}
+              shownMatch={nameChecked ? nameMatch : null}
+              onNameBlur={() => setNameChecked(typedName !== null)}
+              reviewChosen={reviewChosen}
+              onReviewChange={setReviewChosen}
+              errors={{
+                lastName: fieldErrors.lastName ? t.registration.errorLastName : undefined,
+                firstName: fieldErrors.firstName ? t.registration.errorFirstName : undefined,
+              }}
+            />
 
             {/* Mobile Number */}
             <View style={styles.inputWrapper}>
@@ -826,9 +944,10 @@ export default function RegistrationScreen() {
             <TouchableOpacity
               testID="register-submit-btn"
               activeOpacity={0.85}
-              style={styles.solidButtonContainer}
+              style={[styles.solidButtonContainer, !createEnabled && styles.solidButtonDisabled]}
               onPress={handleRegister}
-              disabled={isLoading}
+              disabled={isLoading || !createEnabled}
+              accessibilityState={{ disabled: isLoading || !createEnabled }}
             >
               <LinearGradient
                 colors={['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)', '#0A5448']}
@@ -842,6 +961,9 @@ export default function RegistrationScreen() {
                   : <Text style={styles.solidButtonText}>{t.registration.createBtn}</Text>}
               </LinearGradient>
             </TouchableOpacity>
+            {!createEnabled && (
+              <Text style={styles.createDisabledHint}>{t.registration.createDisabledHint}</Text>
+            )}
 
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />
@@ -904,7 +1026,7 @@ export default function RegistrationScreen() {
                   <Ionicons name="checkmark" size={40} color="#FFFFFF" />
                 </Animated.View>
                 <Text style={styles.modalTitle}>Account Created!</Text>
-                <Text style={styles.modalName}>Welcome, {fullName.trim()}!</Text>
+                <Text style={styles.modalName}>Welcome, {name.first.trim()}!</Text>
                 <Text style={styles.modalSubtext}>We sent a 6-digit verification code to</Text>
                 <Text style={styles.modalPhone}>{submittedPhone}</Text>
                 <View style={styles.modalDivider} />
@@ -1048,6 +1170,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#0D6053',
     fontWeight: '600',
+  },
+  idBadge: {
+    marginTop: -12,
+  },
+  idBadgeText: {
+    flex: 1,
+  },
+  createDisabledHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: -8,
+  },
+  solidButtonDisabled: {
+    opacity: 0.55,
   },
 
   // ── Top Bar ──

@@ -684,11 +684,11 @@ model identity_verifications {
   /// SHA-256 (hex) of the token returned to the app; the token itself is never stored.
   claim_token_hash  String                       @unique @db.VarChar(64)
   claim_expires_at  DateTime                     @db.Timestamptz(6)
-  /// HMAC-SHA256(PIN, ID_PIN_PEPPER): duplicate check only.
-  pin_hmac          String                       @db.VarChar(64)
-  pin_last4         String                       @db.VarChar(4)
-  /// Sealed JSON { last, first, middle, suffix }.
-  name_on_id_sealed String
+  /// HMAC-SHA256(PIN, ID_PIN_PEPPER): duplicate check only. null when the server couldn't read the PIN (review scan).
+  pin_hmac          String?                      @db.VarChar(64)
+  pin_last4         String?                      @db.VarChar(4)
+  /// Sealed JSON { last, first, middle, suffix }. null when the server couldn't read the name (review scan).
+  name_on_id_sealed String?
   /// Where the sealed image is stored (`<bucket>:<key>`); null once deleted (plan §5.2a).
   image_storage_key String?
   /// The phone's own reading agreed with the server's. Information only.

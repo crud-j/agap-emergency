@@ -35,4 +35,14 @@ export class IdScanDto {
   @Min(1)
   @Max(99)
   attemptNumber?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Send this scan to MDRRMO staff if the server cannot read it. Honoured from the third attempt on; a readable card is processed normally.',
+  })
+  @IsOptional()
+  // From the raw field, like consentGiven.
+  @Transform(({ obj }) => obj.requestReview === true || obj.requestReview === 'true')
+  @IsBoolean()
+  requestReview?: boolean;
 }

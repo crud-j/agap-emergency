@@ -1,3 +1,5 @@
+import type { IdName } from '../validation/philhealth-id';
+
 /**
  * PhilHealth ID verification at registration (MOD-01, docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md).
  * Shared so the app's limits and error handling match the server's.
@@ -27,4 +29,20 @@ export enum IdVerificationErrorCode {
   ID_SCAN_EXPIRED = 'ID_SCAN_EXPIRED',
   NAME_DOES_NOT_MATCH_ID = 'NAME_DOES_NOT_MATCH_ID',
   ID_VERIFICATION_REQUIRED = 'ID_VERIFICATION_REQUIRED',
+}
+
+/** What POST /auth/id-verification returns. Never the full PIN. */
+export interface IdScanResponse {
+  /** Claim token for POST /auth/register (valid ID_SCAN_CLAIM_TTL_MINUTES). */
+  token: string;
+  /** The name as the server read it from the citizen's own card; null on a review scan. */
+  nameOnId: IdName | null;
+  /** Last 4 digits of the PIN; null when the server couldn't read it. */
+  pinLast4: string | null;
+  /**
+   * true: the server couldn't read the card, and the citizen asked (after ID_SCAN_MAX_ATTEMPTS
+   * failed attempts) for MDRRMO staff to check it. Registering with this token always creates
+   * the account with its ID under review.
+   */
+  reviewRequired: boolean;
 }
