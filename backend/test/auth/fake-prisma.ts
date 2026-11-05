@@ -147,8 +147,19 @@ export function resetFakePrisma(prisma: any) {
   prisma.db.passkeys.length = 0;
 }
 
-/** AuthService with the real lockout and trusted-device services over the fake database. */
-export function makeAuthService(prisma: any, jwt: any, smsQueue: any, audit: any, sessions: any): AuthService {
+/**
+ * AuthService with the real lockout and trusted-device services over the fake database.
+ * `config` and `idVerification` matter only to register() (PhilHealth ID verification).
+ */
+export function makeAuthService(
+  prisma: any,
+  jwt: any,
+  smsQueue: any,
+  audit: any,
+  sessions: any,
+  config: any = { get: () => undefined },
+  idVerification: any = undefined,
+): AuthService {
   return new AuthService(
     prisma,
     jwt,
@@ -157,6 +168,8 @@ export function makeAuthService(prisma: any, jwt: any, smsQueue: any, audit: any
     sessions,
     new LoginLockoutService(prisma, audit, smsQueue),
     new TrustedDeviceService(prisma),
+    config,
+    idVerification,
   );
 }
 

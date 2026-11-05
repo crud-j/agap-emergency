@@ -18,7 +18,7 @@ import { Readable } from 'stream';
 import { memoryStorage } from 'multer';
 import { randomUUID } from 'crypto';
 import { extname, join, resolve, sep } from 'path';
-import { mkdir, writeFile, readFile } from 'fs/promises';
+import { mkdir, writeFile, readFile, unlink } from 'fs/promises';
 import { haversineMeters } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -393,6 +393,56 @@ export class MediaService {
     const full = this.localPath(key);
     await mkdir(resolve(full, '..'), { recursive: true });
     await writeFile(full, body);
+  }
+
+  // ─── Private objects (MOD-01 ID documents) ────────────────────────────────
+  // Never given a public URL and never listed with incident media. Same bucket and
+  // local fallback as evidence; callers seal the bytes before they get here.
+
+  /** Stores `body` and returns where it landed, as `<bucket>:<key>` (`local:<key>` on disk). */
+  async putPrivateObject(key: string, body: Buffer): Promise<string> {
+    try {
+      await this.ensureBucket();
+      try {
+        await this.s3.send(
+          new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: 'application/octet-stream' }),
+        );
+      } catch (err: unknown) {
+        this.logger.error(`S3 upload of a private object failed: ${String(err)}`);
+        throw new ServiceUnavailableException('Object storage is unavailable.');
+      }
+      return `${this.bucket}:${key}`;
+    } catch (err: unknown) {
+      if (!(err instanceof ServiceUnavailableException) || !this.localFallback) throw err;
+      await this.writeLocal(key, body);
+      return `${LOCAL_BUCKET}:${key}`;
+    }
+  }
+
+  async getPrivateObject(location: string): Promise<Buffer> {
+    const { bucket, key } = this.parseLocation(location);
+    if (bucket === LOCAL_BUCKET) return readFile(this.localPath(key));
+    const res = await this.s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    if (!res.Body) throw new NotFoundException('Object not found.');
+    return Buffer.from(await res.Body.transformToByteArray());
+  }
+
+  /** Deletes the object. Already gone counts as deleted. Other failures throw so the caller can retry later. */
+  async deletePrivateObject(location: string): Promise<void> {
+    const { bucket, key } = this.parseLocation(location);
+    if (bucket === LOCAL_BUCKET) {
+      await unlink(this.localPath(key)).catch((err: NodeJS.ErrnoException) => {
+        if (err.code !== 'ENOENT') throw err;
+      });
+      return;
+    }
+    await this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  }
+
+  private parseLocation(location: string): { bucket: string; key: string } {
+    const at = location.indexOf(':');
+    if (at <= 0) throw new NotFoundException('Object not found.');
+    return { bucket: location.slice(0, at), key: location.slice(at + 1) };
   }
 
   async uploadAnnouncementImage(

@@ -21,6 +21,8 @@ import { EtaRefreshProcessor } from './processors/eta-refresh.processor';
 import { AnnouncementPushProcessor } from './processors/announcement-push.processor';
 import { AiAssistModule } from '../ai-assist/ai-assist.module';
 import { AiAssistProcessor } from './processors/ai-assist.processor';
+import { IdentityVerificationModule } from '../identity-verification/identity-verification.module';
+import { IdentityVerificationCleanupProcessor } from './processors/identity-verification.processor';
 
 @Module({
   imports: [
@@ -34,6 +36,7 @@ import { AiAssistProcessor } from './processors/ai-assist.processor';
     AnalyticsModule,
     BarangayCoordinationModule,
     AiAssistModule,
+    IdentityVerificationModule,
     ScheduleModule.forRoot(),
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }),
@@ -56,6 +59,7 @@ import { AiAssistProcessor } from './processors/ai-assist.processor';
     EtaRefreshProcessor,
     AnnouncementPushProcessor,
     AiAssistProcessor,
+    IdentityVerificationCleanupProcessor,
   ],
 })
 export class JobsModule {}

@@ -44,6 +44,11 @@ model User {
   /// null = never asked (legacy, guests, admin-created); PREFER_NOT_TO_SAY = asked and declined.
   /// Personal data, NOT patient data (patient sex lives on incident_patients).
   sex                                                                      user_sex?
+  /// MOD-01: set when the PhilHealth ID name matched at registration or staff approved it.
+  /// Information only — never affects priority, recommendations or dispatch (rule 8).
+  identity_verified_at                                                     DateTime?                      @db.Timestamptz(6)
+  identity_verifications                                                   identity_verifications[]       @relation("IdentityVerificationUser")
+  reviewed_identity_verifications                                          identity_verifications[]       @relation("IdentityVerificationReviewer")
   account_lifecycle_events_account_lifecycle_events_performed_by_idTousers account_lifecycle_events[]     @relation("account_lifecycle_events_performed_by_idTousers")
   account_lifecycle_events_account_lifecycle_events_user_idTousers         account_lifecycle_events[]     @relation("account_lifecycle_events_user_idTousers")
   alert_triggers                                                           alert_triggers[]
@@ -664,6 +669,45 @@ model consent_records {
   created_at       DateTime         @default(now()) @db.Timestamptz(6)
   users            User             @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   medical_profiles MedicalProfile[]
+  identity_verifications identity_verifications[]
+}
+
+/// MOD-01/48: one PhilHealth ID scan. Created before the account exists, then claimed by POST /auth/register.
+/// The name and image are sealed (ID_DOCUMENT_ENCRYPTION_KEY); the PIN is kept only as an HMAC and its last 4 digits.
+/// One PhilHealth ID per account: partial unique index uq_identity_verifications_pin_active (migration SQL only).
+model identity_verifications {
+  id                String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  /// null until claimed by a registration.
+  user_id           String?                      @db.Uuid
+  document_type     id_document_type             @default(PHILHEALTH)
+  status            identity_verification_status
+  /// SHA-256 (hex) of the token returned to the app; the token itself is never stored.
+  claim_token_hash  String                       @unique @db.VarChar(64)
+  claim_expires_at  DateTime                     @db.Timestamptz(6)
+  /// HMAC-SHA256(PIN, ID_PIN_PEPPER): duplicate check only.
+  pin_hmac          String                       @db.VarChar(64)
+  pin_last4         String                       @db.VarChar(4)
+  /// Sealed JSON { last, first, middle, suffix }.
+  name_on_id_sealed String
+  /// Where the sealed image is stored (`<bucket>:<key>`); null once deleted (plan §5.2a).
+  image_storage_key String?
+  /// The phone's own reading agreed with the server's. Information only.
+  client_read_ok    Boolean?
+  /// Which name parts matched. No names, no PIN.
+  match_result      Json?
+  attempt_number    Int                          @default(1) @db.SmallInt
+  reviewed_by_id    String?                      @db.Uuid
+  reviewed_at       DateTime?                    @db.Timestamptz(6)
+  /// Fixed codes only, never free text with personal data.
+  rejection_reason  String?                      @db.VarChar(50)
+  consent_record_id String?                      @db.Uuid
+  created_at        DateTime                     @default(now()) @db.Timestamptz(6)
+  user              User?                        @relation("IdentityVerificationUser", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  reviewer          User?                        @relation("IdentityVerificationReviewer", fields: [reviewed_by_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  consent_record    consent_records?             @relation(fields: [consent_record_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_identity_verifications_user")
+  @@index([status, created_at], map: "idx_identity_verifications_status_created")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -1883,6 +1927,7 @@ enum audit_action {
   PASSWORD_CHANGE
   MFA_CHANGE
   SESSION_REVOKED
+  IDENTITY_VERIFICATION_CLAIMED
 }
 
 enum breathing_status {
@@ -2230,4 +2275,19 @@ enum readiness_status {
   READY
   LIMITED
   NOT_READY
+}
+
+enum id_document_type {
+  PHILHEALTH
+}
+
+enum identity_verification_status {
+  /// Server read the card, it is a PhilHealth ID, and (once claimed) the name matched.
+  AUTO_VERIFIED
+  /// Citizen asked for staff review (unreadable or name mismatch).
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  /// Never claimed by a registration within 30 minutes.
+  EXPIRED
 }

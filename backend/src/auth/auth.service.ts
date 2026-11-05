@@ -10,10 +10,15 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
-import { AuditAction, QUEUE_NAMES } from '@agap/shared';
+import { AuditAction, IdVerificationErrorCode, QUEUE_NAMES, composeFullName, type IdName } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import {
+  IdentityVerificationService,
+  idVerificationError,
+} from '../identity-verification/identity-verification.service';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { isAccountBlocked } from './account-status';
@@ -85,6 +90,8 @@ export class AuthService {
     private readonly sessions: SessionRevocationService,
     private readonly lockout: LoginLockoutService,
     private readonly trustedDevices: TrustedDeviceService,
+    private readonly config: ConfigService,
+    private readonly idVerification: IdentityVerificationService,
   ) {}
 
   async validateUser(identifier: string, password: string, ctx: AuthRequestContext = {}) {
@@ -286,23 +293,56 @@ export class AuthService {
       if (emailExists) throw new BadRequestException('Email already registered');
     }
 
+    // MOD-01 PhilHealth ID verification (plan §5.3). Gates account creation only; guest
+    // SOS (registerGuest) never needs it.
+    const typedName = this.typedName(dto);
+    if (!dto.idVerificationToken && this.config.get<string>('ID_VERIFICATION_REQUIRED') === 'true') {
+      throw idVerificationError(
+        400,
+        IdVerificationErrorCode.ID_VERIFICATION_REQUIRED,
+        'Scan your PhilHealth ID before creating an account. For emergencies, use Report an emergency.',
+      );
+    }
+    if (dto.idVerificationToken && !typedName) {
+      throw new BadRequestException('lastName and firstName are required with a PhilHealth ID scan');
+    }
+    const fullName = typedName ? composeFullName(typedName) : dto.fullName?.trim();
+    if (!fullName) throw new BadRequestException('fullName is required');
+    const idClaim = dto.idVerificationToken
+      ? await this.idVerification.prepareClaim(dto.idVerificationToken, typedName!, dto.requestReview === true)
+      : null;
+
     const passwordHash = await this.hashPassword(dto.password);
 
-    const user = await this.prisma.user.create({
-      data: {
-        full_name:    dto.fullName,
-        phone_number: phoneNumber,
-        email:        dto.email ?? null,
-        password_hash: passwordHash,
-        // Optional — older app builds omit it, and null means "never asked".
-        sex:          dto.sex ?? null,
-        status:       'PENDING_VERIFICATION',
-        barangay:     null,
-        municipality: 'Bocaue',
-        province:     'Bulacan',
-        full_address: null,
-      },
-    });
+    const data = {
+      full_name:    fullName,
+      phone_number: phoneNumber,
+      email:        dto.email ?? null,
+      password_hash: passwordHash,
+      // Optional — older app builds omit it, and null means "never asked".
+      sex:          dto.sex ?? null,
+      status:       'PENDING_VERIFICATION',
+      barangay:     null,
+      municipality: 'Bocaue',
+      province:     'Bulacan',
+      full_address: null,
+      identity_verified_at: idClaim?.outcome === 'AUTO_VERIFIED' ? new Date() : null,
+    } satisfies Prisma.UserCreateInput;
+
+    // The account and the scan claim commit together: a lost race for the token or a
+    // PhilHealth ID already on another account creates nothing.
+    const user = idClaim
+      ? await this.prisma.$transaction(async (tx) => {
+          const created = await tx.user.create({ data });
+          await this.idVerification.claim(tx, idClaim, created.id);
+          return created;
+        })
+      : await this.prisma.user.create({ data });
+
+    // Matched: the image is no longer needed (plan §5.2a). Never fails the registration.
+    if (idClaim?.outcome === 'AUTO_VERIFIED' && idClaim.imageLocation) {
+      await this.idVerification.deleteImage(idClaim.verificationId, idClaim.imageLocation);
+    }
 
     // Issue a 6-digit OTP and send it via the backend SMS gateway (MOD-17).
     const otp = this.generateOtp();
@@ -331,7 +371,21 @@ export class AuthService {
     });
 
     const { password_hash: _, ...safeUser } = user;
-    return { user: safeUser };
+    // PENDING_REVIEW: the account works (sign-in, SOS) while MDRRMO staff check the ID.
+    return { user: safeUser, identityVerification: idClaim?.outcome ?? null };
+  }
+
+  /** The name parts typed at registration, or null when last or first name is missing. */
+  private typedName(dto: RegisterDto): IdName | null {
+    const last = dto.lastName?.trim();
+    const first = dto.firstName?.trim();
+    if (!last || !first) return null;
+    const name: IdName = { last, first };
+    const middle = dto.middleName?.trim();
+    const suffix = dto.suffix?.trim();
+    if (middle) name.middle = middle;
+    if (suffix) name.suffix = suffix;
+    return name;
   }
 
   async registerGuest(dto: RegisterGuestDto) {

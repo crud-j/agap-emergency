@@ -23,4 +23,6 @@ export enum AuditAction {
   PASSWORD_CHANGE  = 'PASSWORD_CHANGE',
   MFA_CHANGE       = 'MFA_CHANGE',
   SESSION_REVOKED  = 'SESSION_REVOKED',
+  /** MOD-01: a PhilHealth ID scan was claimed by a registration. Details: outcome only. */
+  IDENTITY_VERIFICATION_CLAIMED = 'IDENTITY_VERIFICATION_CLAIMED',
 }

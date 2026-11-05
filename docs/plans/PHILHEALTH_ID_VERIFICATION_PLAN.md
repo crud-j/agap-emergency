@@ -402,8 +402,8 @@ person or a phone.
 | Phase | Status | Date | Notes |
 |---|---|---|---|
 | 0. Spike and samples | Tools installed; waiting on phone + sample runs | 2026-11-05 | Agent part done. The user still fills in the layout notes below |
-| 1. Shared rules | Not started | | |
-| 2. Backend | Not started | | |
+| 1. Shared rules | Done, awaiting review | 2026-11-05 | 25 matcher tests pass; built on 1 real card's layout (see Phase 0) |
+| 2. Backend | Done, awaiting review | 2026-11-05 | Migration applied; 44 new tests pass; e2e blocked by Redis not running |
 | 3. Mobile | Not started | | |
 | 4. Admin review | Not started | | |
 | 5. Labels and seed | Not started | | |
@@ -514,6 +514,156 @@ Written from one card's server OCR output; patterns only, no real values.
 The Phase 3 fallback camera (§4.3) must crop to its card-shaped frame before upload, and Phase 2's OCR service should
 downscale large images. Never send a raw full-frame photo.
 
+### Phase 1 — 2026-11-05
+
+**Added**
+- `shared/src/validation/philhealth-id.ts`: `IdName`, `normalizeNamePart`, `parsePhilHealthPin`, `looksLikePhilHealthId`,
+  `parsePhilHealthName`, `matchIdName`, `composeFullName`, plus a local edit-distance helper. No logging, no new dependency.
+- `backend/test/identity-verification/philhealth-id.spec.ts`: 25 tests. They cover every case listed in §6, PINs with dashes
+  and spaces, 11/13 digits and other groupings (including a PhilSys-style 4-4-4-4 number), a driver's licence and a school ID
+  (made-up text), `composeFullName` with and without middle name and suffix, and parsing of made-up OCR text in the Phase 0
+  layout. Invented names and fake PINs only.
+
+**Changed**
+- `shared/src/validation/index.ts`: exports the new file. `shared/dist` rebuilt (`pnpm build` writes to `dist/` only; no new
+  `.js` copies in `shared/src`).
+
+**Inventory:** none of the six functions, `composeFullName`, the spec file or the test folder existed before.
+
+**Tests:** backend before: 1587 tests, all passing in the last Phase 0 run. Backend after: 1612 tests (1587 + 25 new). The other
+99 suites pass 1553/1553, and `auth-phase3.spec.ts` alone passes 59/59. In the full run it timed out again (known, under load).
+Typecheck clean in shared, backend, mobile and frontend.
+
+**Deviations and decisions (for review)**
+- **Splitting the given names.** The card prints `FIRST MIDDLE` with no separator, so `MARIA CLARA SANTOS` could be
+  MARIA CLARA + SANTOS or MARIA + CLARA SANTOS.
+  - `parsePhilHealthName` picks a split: a middle name that starts with a surname particle (`DELA CRUZ`, `DE LOS SANTOS`),
+    otherwise the last word.
+  - `matchIdName` also accepts the other plausible splits: no middle name, a one-word middle name, or a particle-led one.
+  - "Two-word first names typed in full" holds whenever the card shows three or more given words. With **two** given words
+    (`MARIA CLARA`), the card can't tell first from middle, so typing only `MARIA` passes. This is inherent to the card, not
+    a bug.
+- **Typed middle name when the ID shows none** → `mismatch`. The plan didn't say, and this is the stricter choice.
+- **Middle initials of a compound middle name**: `D` or `DC` both count as `initial` for `DELA CRUZ`.
+- **Suffix position**: the parser accepts the suffix after the surname (`DELA CRUZ JR., JUAN`) or after the given names, because
+  the Phase 0 card had none. Recheck when a card with a suffix is scanned.
+- **Comma misread as `.`, `;` or `:`**: only on the line right after the PIN, and only when no line has a comma. A wrong split
+  there just leads to a mismatch and the review path.
+- **OCR junk filter**: name words must be mostly capitals, since the card prints names in caps. A single stray letter before the
+  surname is dropped, as in the Phase 0 card. Lines with a run of 2+ digits (PIN, birth date, address) are never read as the
+  name, so the birth date, sex and address are never extracted (§5.1).
+- **Normalisation detail**: a period glued to the next letter (`STA.MARIA`) becomes a space rather than vanishing, so it still
+  equals `STA. MARIA`.
+- **Hermes safety**: accents are stripped with an explicit Latin-1 map, not `String.normalize`, and the PIN regex has no
+  lookbehind, so mobile and backend get identical results.
+- **Extra type exports**: `MiddleNameResult` and `IdNameMatch` name the return type of `matchIdName` from §6. Types only, so
+  the mobile app can import them.
+- **`looksLikePhilHealthId`** accepts any text with the PhilHealth heading and a valid PIN, so a PhilHealth paper form (MDR)
+  would also pass. The plan's rule; staff review and one-ID-per-account limit the risk.
+
+**Needs a person or a phone:** more real cards through `ocr-spike.ts`, then `parsePhilHealthName` checked against them (a
+throwaway local check that prints only "parsed: yes/no" and "matches typed: yes/no", never the text). Most useful: a card
+with a suffix, a two-word first name, and a compound middle name.
+
+### Phase 2 — 2026-11-05
+
+**Migration:** `20261105130000_identity_verifications`, **applied** to the dev database with `migrate deploy`, and to the
+E2E database through `test:e2e:db`. It adds `id_document_type`, `identity_verification_status`, the
+`identity_verifications` table, `users.identity_verified_at`, the partial unique index
+`uq_identity_verifications_pin_active`, and the `audit_action` value `IDENTITY_VERIFICATION_CLAIMED`.
+`migrate status`: up to date. `migrate diff` against the schema: empty (Prisma doesn't flag the partial index).
+
+**Added**
+- `backend/src/identity-verification/`:
+  - `identity-verification.module.ts`
+  - `identity-verification.service.ts`: scan, `prepareClaim`, `claim`, `deleteImage`, cleanup
+  - `identity-verification.controller.ts`: `POST /api/v1/auth/id-verification`
+  - `id-document-crypto.service.ts`
+  - `philhealth-ocr.service.ts`
+  - `dto/id-scan.dto.ts`
+- `backend/src/jobs/processors/identity-verification.processor.ts`: `@Cron('*/10 * * * *')`.
+- `shared/src/constants/identity-verification.ts`: `ID_IMAGE_MAX_BYTES` (2 MB), `ID_SCAN_CLAIM_TTL_MINUTES` (30),
+  `ID_SCAN_MAX_ATTEMPTS` (3), `ID_VERIFICATION_CONSENT_TYPE`, and the `IdVerificationErrorCode` enum. These are for the
+  app in Phase 3.
+- Tests in `backend/test/identity-verification/`:
+  - `id-document-crypto.spec.ts` (10): crypto round trip, wrong `aad`, tampering, PIN HMAC, startup refusal.
+  - `id-scan-endpoint.spec.ts` (13): real HTTP through multer and the validation pipe.
+  - `id-register.spec.ts` (14).
+  - `id-cleanup-and-ocr.spec.ts` (7).
+  - `id-test-kit.ts`: in-memory database that rolls back transactions and enforces the partial index, plus in-memory
+    storage.
+
+**Changed**
+- `schema.prisma`: matches the migration; no other lines reformatted.
+- `.env.example`: `ID_VERIFICATION_REQUIRED=false` (Phase 6 turns it on), `ID_DOCUMENT_ENCRYPTION_KEY`, `ID_PIN_PEPPER`.
+- `config.validation.ts`: with the flag on, the server refuses to start without a valid key and a pepper of at least
+  32 characters. A malformed key is refused even with the flag off, the same as the other keys.
+- `secret-box.ts`: `sealBuffer` / `openBuffer`, the binary form of the v1 format: `v1.` + iv + tag + ciphertext.
+- `media.service.ts`: `putPrivateObject` / `getPrivateObject` / `deletePrivateObject`. They use the same S3 client and
+  local-disk fallback, with no public URL. The location is stored as `<bucket>:<key>`.
+- `auth.service.ts` `register()`: changed only after the unchanged geo-fence and duplicate phone/email checks.
+  - Flag check, then the scan check.
+  - The user is created and the scan claimed in one transaction.
+  - The image is deleted after commit on a match.
+  - The response gains `identityVerification: 'AUTO_VERIFIED' | 'PENDING_REVIEW' | null`.
+  - OTP is unchanged. `registerGuest` is untouched.
+- `RegisterDto`: `fullName` is now optional, and it gained `lastName`, `firstName`, `middleName`, `suffix`,
+  `idVerificationToken` and `requestReview`.
+- `auth.module.ts`, `jobs.module.ts`: wiring. `AuditAction.IDENTITY_VERIFICATION_CLAIMED` added in shared.
+- Test setup only, no assertions changed:
+  - `test/auth/fake-prisma.ts`: `makeAuthService` passes the two new `AuthService` arguments.
+  - `test/users/user-sex.spec.ts`: builds `AuthService` with a config stub.
+  - `test/transport-flow.e2e-spec.ts`: sets `ID_VERIFICATION_REQUIRED=false`.
+
+**Inventory:** nothing existed before this phase. `user_verifications` (OTP codes) is unrelated and was left alone.
+
+**Tests:** backend before: 1612 (Phase 1). Backend after: 1656 (+44). The suite run without `auth-phase3` passed
+1592/1597. The 5 failures were in `user-sex.spec.ts`, which builds `AuthService` by hand; after giving it a config stub it
+passes 16/16. All auth suites together pass 133/133. Typecheck clean in shared, backend, mobile and frontend.
+**E2E:** `test:e2e:db` succeeded: migrated and seeded. `test:e2e` booted the full `AppModule`, which proves the new module
+wiring, but the transport-flow test timed out at 120 s because **Redis is not running** (port 6379 closed), so BullMQ calls
+wait forever. Re-run with Redis up.
+
+**Deviations and decisions (for review)**
+- **Controller location.** The scan controller lives in `identity-verification/` but is registered in `AuthModule`, because
+  it needs `AuthService.checkGeoFence` and `AuthService` needs this module to claim scans. Registering it there avoids a
+  circular module import.
+- **Cleanup schedule.** The cleanup job uses `@Cron` from `@nestjs/schedule`. The repo has no BullMQ repeatable jobs; every
+  periodic job is a `@Cron`, so "registered the same way" means that.
+- **Extra error codes**, all in the shared `IdVerificationErrorCode` enum:
+  - `CONSENT_REQUIRED` (400)
+  - `OUTSIDE_SERVICE_AREA` (400)
+  - `IMAGE_TOO_LARGE` (413; multer's own refusal is mapped to the same code by a filter)
+  - `UNSUPPORTED_IMAGE_TYPE` (415, judged by the file signature, not the declared type; 400 when no image)
+  - `ID_VERIFICATION_REQUIRED` (400, flag on and no token)
+  - `NAME_DOES_NOT_MATCH_ID` also returns `parts` (which name parts failed). No names.
+- **Unreadable vs not PhilHealth.** OCR failure or timeout → `UNREADABLE`. Text without the PhilHealth heading and PIN →
+  `NOT_PHILHEALTH_ID`, but only when OCR confidence is ≥ 40, otherwise `UNREADABLE`. From Phase 0: the uncropped photo read
+  at 28, the cropped card at 57. A heading and PIN with no name line → `UNREADABLE`.
+- **Consent record.** It is created at registration, when the user exists, not at scan time. `consentGiven=true` is required
+  at scan time (`consent_records.user_id` is NOT NULL).
+- **Order of checks.** The flag and token are checked after the existing geo-fence and duplicate checks, so an
+  already-registered phone gets the same "Phone number already registered" as before.
+- **Image deletion on a match** is awaited after commit, so the response comes back with the image already gone. It never
+  throws; a failure is retried by the job.
+- **Bug found by the tests and fixed.** The global `ValidationPipe` uses implicit conversion, which turns the string
+  `'false'` into `true`. `consentGiven` and `requestReview` now read the raw field, so `consentGiven=false` can never count
+  as consent.
+- **OCR runs on the whole card.** There are no Phase 0 coordinates for a name/PIN-only pass, and the server doesn't
+  downscale (no image library; the app downscales in Phase 3).
+- **Real OCR test skipped.** There is no image library to generate a card in Jest. Phase 0's synthetic card through
+  `ocr-spike.ts` covers the bundled-data path.
+- **The app's flag default is off.** `ID_VERIFICATION_REQUIRED` unset means off, so the current mobile app keeps
+  registering until Phase 3 ships.
+- **Pepper length.** `ID_PIN_PEPPER` must be at least 32 characters when the flag is on. The plan only said "secret"; a
+  short pepper would let a leaked HMAC be brute-forced over the 10¹² PINs.
+
+**Needs a person**
+- Start Redis, then `cd backend; pnpm test:e2e`.
+- Before turning the flag on, generate `ID_DOCUMENT_ENCRYPTION_KEY` and `ID_PIN_PEPPER` in `backend/.env` with the command
+  in `.env.example`.
+- Restart the backend so it picks up the new module and the regenerated Prisma client.
+
 ---
 
 ## 10. Test checklist
@@ -521,18 +671,18 @@ downscale large images. Never send a raw full-frame photo.
 - [ ] Guest "Report an emergency" works from the ID intro, scanning, retry and form steps.
 - [ ] A non-PhilHealth ID (driver's licence, PhilSys, school ID) → "This isn't a PhilHealth ID".
 - [ ] A blurred or glared scan → retry. On the third failure, "Send for review" appears.
-- [ ] Typed name matches → account created, `identity_verified_at` set, OTP sent.
+- [x] Typed name matches → account created, `identity_verified_at` set, OTP sent.
 - [ ] Typed name differs → Create account disabled. The server also rejects a forced request with `NAME_DOES_NOT_MATCH_ID`.
-- [ ] Same PhilHealth ID on a second phone number → `ID_ALREADY_REGISTERED`.
-- [ ] Token older than 30 minutes → `ID_SCAN_EXPIRED`. The image is deleted by the job.
-- [ ] A modified client sending matching `clientText` with an image of something else → not verified (server reads the image).
+- [x] Same PhilHealth ID on a second phone number → `ID_ALREADY_REGISTERED`.
+- [x] Token older than 30 minutes → `ID_SCAN_EXPIRED`. The image is deleted by the job.
+- [x] A modified client sending matching `clientText` with an image of something else → not verified (server reads the image).
 - [ ] Logs, Sentry and SMS contain no PIN, no OCR text, no name from the ID.
 - [ ] Admin image view writes an audit row. A dispatcher cannot open the review page or the image route (403).
 - [ ] Phone without Google Play services → fallback camera works.
 - [ ] Seeded citizen account signs in and sends an SOS as before.
-- [ ] Matched registration → the stored image is gone right after (`image_storage_key` null, file deleted).
+- [x] Matched registration → the stored image is gone right after (`image_storage_key` null, file deleted).
 - [ ] Review approved or rejected → image deleted; the image route then returns 410.
-- [ ] Storage delete fails → registration still succeeds; the next job run deletes the image.
+- [x] Storage delete fails → registration still succeeds; the next job run deletes the image.
 
 ---
 

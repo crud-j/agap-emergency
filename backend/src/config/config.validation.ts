@@ -3,6 +3,9 @@ import { IsEnum, IsNumber, IsOptional, IsString, validateSync } from 'class-vali
 import { parseEncryptionKey } from '../common/crypto/secret-box';
 import { normalizePhPhone } from '@agap/shared';
 
+/** ID_PIN_PEPPER: a short pepper would let a leaked pin_hmac be brute-forced over the 10^12 PINs. */
+export const MIN_PIN_PEPPER_LENGTH = 32;
+
 enum Environment {
   Development = 'development',
   Production = 'production',
@@ -59,6 +62,21 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   MEDICAL_ENCRYPTION_KEY?: string;
+
+  // PhilHealth ID verification at registration (MOD-01 / MOD-48). 'true' = /auth/register
+  // requires a scan, which needs ID_DOCUMENT_ENCRYPTION_KEY (32 bytes, base64, sealing the
+  // name and image) and ID_PIN_PEPPER (HMAC secret for the one-ID-per-account check).
+  @IsString()
+  @IsOptional()
+  ID_VERIFICATION_REQUIRED?: string;
+
+  @IsString()
+  @IsOptional()
+  ID_DOCUMENT_ENCRYPTION_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  ID_PIN_PEPPER?: string;
 
   // 'true' = staff roles without a second factor must enroll at next sign-in. Leave
   // 'false' during the enrollment window: enrollment is offered but skippable.
@@ -273,6 +291,19 @@ export function validateConfig(config: Record<string, unknown>) {
   }
   if (validatedConfig.AUTH_MFA_ENFORCED === 'true' && !mfaKey) {
     throw new Error('Configuration validation failed: AUTH_MFA_ENFORCED=true requires MFA_ENCRYPTION_KEY');
+  }
+  const idDocumentKey = parseEncryptionKey(validatedConfig.ID_DOCUMENT_ENCRYPTION_KEY, 'ID_DOCUMENT_ENCRYPTION_KEY');
+  if (validatedConfig.ID_VERIFICATION_REQUIRED === 'true') {
+    if (!idDocumentKey) {
+      throw new Error(
+        'Configuration validation failed: ID_VERIFICATION_REQUIRED=true requires ID_DOCUMENT_ENCRYPTION_KEY',
+      );
+    }
+    if ((validatedConfig.ID_PIN_PEPPER?.trim().length ?? 0) < MIN_PIN_PEPPER_LENGTH) {
+      throw new Error(
+        `Configuration validation failed: ID_VERIFICATION_REQUIRED=true requires ID_PIN_PEPPER (at least ${MIN_PIN_PEPPER_LENGTH} characters)`,
+      );
+    }
   }
 
   if (

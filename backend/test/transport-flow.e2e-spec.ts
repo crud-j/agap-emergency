@@ -74,6 +74,8 @@ describeE2E('Emergency transport flow (E2E)', () => {
     process.env['REDIS_URL'] = e2eRedisUrl();
     process.env['TRANSPORT_ROUTING_ENABLED'] = 'true';
     process.env['REPORTER_DESTINATION_SHARING_ENABLED'] = 'false';
+    // PhilHealth ID verification (MOD-01) is covered by test/identity-verification; keep old registration here.
+    process.env['ID_VERIFICATION_REQUIRED'] = 'false';
     for (const key of ['TEXTBEE_API_KEY', 'TEXTBEE_DEVICE_ID', 'FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY']) {
       process.env[key] = '';
     }

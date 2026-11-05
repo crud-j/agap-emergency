@@ -25,12 +25,15 @@ import { MfaTokenService } from './mfa/mfa-token.service';
 import { TotpService } from './mfa/totp.service';
 import { BackupCodesService } from './mfa/backup-codes.service';
 import { TrustedDeviceService } from './mfa/trusted-device.service';
+import { IdentityVerificationModule } from '../identity-verification/identity-verification.module';
+import { IdentityVerificationController } from '../identity-verification/identity-verification.controller';
 
 @Module({
   imports: [
     PassportModule,
     AuditModule,
     SessionsModule,
+    IdentityVerificationModule,
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -41,7 +44,7 @@ import { TrustedDeviceService } from './mfa/trusted-device.service';
       }),
     }),
   ],
-  controllers: [AuthController, MfaController, WellKnownController],
+  controllers: [AuthController, MfaController, WellKnownController, IdentityVerificationController],
   providers: [
     { provide: APP_GUARD, useClass: PasswordChangeGuard },
     AuthService,

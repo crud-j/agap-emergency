@@ -44,7 +44,12 @@ describe('MOD-01 optional reporter sex', () => {
         user_verifications: { create: jest.fn() },
       };
       const smsQueue = { add: jest.fn().mockResolvedValue(undefined) };
-      const service = new AuthService(prisma as any, {} as any, smsQueue as any);
+      // register() reads ID_VERIFICATION_REQUIRED; unset = the registration flow these tests cover.
+      const config = { get: () => undefined };
+      const service = new AuthService(
+        prisma as any, {} as any, smsQueue as any, undefined as any, undefined as any,
+        undefined as any, undefined as any, config as any, undefined as any,
+      );
       return { service, prisma };
     }
 

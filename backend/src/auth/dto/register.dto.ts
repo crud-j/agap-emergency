@@ -1,11 +1,55 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, MinLength, MaxLength, Matches, IsOptional, IsEmail, IsNumber, Min, Max, IsEnum } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsString, MinLength, MaxLength, Matches, IsOptional, IsEmail, IsNumber, Min, Max, IsEnum, IsBoolean } from 'class-validator';
 import { UserSex } from '@agap/shared';
 
 export class RegisterDto {
-  @ApiProperty({ example: 'Juan dela Cruz' })
+  @ApiPropertyOptional({
+    example: 'Juan dela Cruz',
+    description: 'Older app builds only. Refused when ID_VERIFICATION_REQUIRED=true; newer builds send the name parts.',
+  })
+  @IsOptional()
   @IsString()
-  fullName!: string;
+  @MaxLength(255)
+  fullName?: string;
+
+  // MOD-01 PhilHealth ID verification: the name as the citizen typed it, checked against the ID.
+  @ApiPropertyOptional({ example: 'Dela Cruz' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  lastName?: string;
+
+  @ApiPropertyOptional({ example: 'Juan' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  firstName?: string;
+
+  @ApiPropertyOptional({ example: 'Santos', description: 'Optional. Full middle name or initial.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  middleName?: string;
+
+  @ApiPropertyOptional({ example: 'Jr.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  suffix?: string;
+
+  @ApiPropertyOptional({ description: 'Token from POST /auth/id-verification. Required when ID_VERIFICATION_REQUIRED=true.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  idVerificationToken?: string;
+
+  @ApiPropertyOptional({ description: 'Create the account even though the name does not match; MDRRMO staff review the ID.' })
+  @IsOptional()
+  // From the raw field: implicit conversion would turn the string 'false' into true.
+  @Transform(({ obj }) => obj.requestReview === true || obj.requestReview === 'true')
+  @IsBoolean()
+  requestReview?: boolean;
 
   @ApiPropertyOptional({
     enum: UserSex,
