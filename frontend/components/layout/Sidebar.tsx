@@ -17,7 +17,7 @@ import {
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
   Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug, Inbox, ShieldCheck, MapPinned, LogOut,
-  Fingerprint,
+  Fingerprint, IdCard,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -48,6 +48,7 @@ const ICONS: Record<string, LucideIcon> = {
   '/administration/users': Users,
   '/administration/permissions': KeyRound,
   '/administration/barangays': Landmark,
+  '/administration/id-reviews': IdCard,
   '/administration/risk-areas': MapPinned,
   '/administration/config': Settings,
   '/administration/security': ShieldAlert,
@@ -182,7 +183,7 @@ function SidebarNav(): JSX.Element {
   const pendingSnapshot = useRef<Snapshot | null>(null);
   const [activePosition, setActivePosition] = useState<{ top: number; height: number } | null>(null);
 
-  const groups = navForRole(user?.role).map((g) => ({
+  const groups = navForRole(user?.role, user?.orgType).map((g) => ({
     label: g.label,
     items: g.items.map((item): NavItem => ({ ...item, icon: ICONS[item.href] ?? Circle })),
   }));

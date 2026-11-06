@@ -65,6 +65,9 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/administration', roles: [SYS_ADMIN] },
   // The only administration page the Org Administrator opens (Phase 6).
   { prefix: '/administration/barangays', roles: [ORG_ADMIN, SYS_ADMIN] },
+  // PhilHealth ID reviews (MOD-01, plan §7). The API also requires an Org Administrator's
+  // organization to be MDRRMO; the sidebar link follows that (orgAdminOrgTypes below).
+  { prefix: '/administration/id-reviews', roles: [ORG_ADMIN, SYS_ADMIN] },
   { prefix: '/ops/kitchen-sink', roles: [SYS_ADMIN] },
 ];
 
@@ -103,6 +106,8 @@ export interface NavLink {
   label: string;
   roles: readonly string[];
   exact?: boolean;
+  /** An Org Administrator sees this link only when their organization is one of these types. */
+  orgAdminOrgTypes?: readonly string[];
 }
 
 export interface NavGroup {
@@ -174,6 +179,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/administration/users', label: 'Users & Accounts', roles: [SYS_ADMIN] },
       { href: '/administration/permissions', label: 'Roles & Permissions', roles: [SYS_ADMIN] },
       { href: '/administration/barangays', label: 'Barangay Directory', roles: [ORG_ADMIN, SYS_ADMIN] },
+      // Reviewers: System Administrator and MDRRMO Org Administrators (Part B Q1).
+      { href: '/administration/id-reviews', label: 'ID Reviews', roles: [ORG_ADMIN, SYS_ADMIN], orgAdminOrgTypes: ['MDRRMO'] },
       // MOD-51 reference data; the Risk page itself stays Supervisor-only (Phase 5b).
       { href: '/administration/risk-areas', label: 'Risk Areas', roles: [SYS_ADMIN] },
       { href: '/audit', label: 'Audit Log', roles: [SYS_ADMIN] },
@@ -192,12 +199,18 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** The sidebar for one role: groups with at least one visible link. */
-export function navForRole(role: string | undefined): NavGroup[] {
+function showsLink(item: NavLink, role: string, orgType: string | undefined): boolean {
+  if (!item.roles.includes(role)) return false;
+  if (role === ORG_ADMIN && item.orgAdminOrgTypes) return !!orgType && item.orgAdminOrgTypes.includes(orgType);
+  return true;
+}
+
+/** The sidebar for one role (and, for Org Administrators, their organization type): groups with at least one visible link. */
+export function navForRole(role: string | undefined, orgType?: string): NavGroup[] {
   if (!role) return [];
   return NAV_GROUPS.map((group) => ({
     label: group.label,
-    items: group.items.filter((item) => item.roles.includes(role)),
+    items: group.items.filter((item) => showsLink(item, role, orgType)),
   })).filter((group) => group.items.length > 0);
 }
 

@@ -66,6 +66,8 @@ export interface SessionUser {
   name: string;
   orgId: string | null;
   orgName: string | null;
+  /** That organization's type (e.g. MDRRMO). Shapes the console's navigation only; the API checks access itself. */
+  orgType: string | null;
   mustChangePassword: boolean;
 }
 
@@ -585,7 +587,7 @@ export class AuthService {
           where: { is_active: true },
           orderBy: { joined_at: 'asc' },
           take: 1,
-          select: { organizations: { select: { id: true, name: true } } },
+          select: { organizations: { select: { id: true, name: true, organization_type: true } } },
         },
       },
     });
@@ -598,6 +600,7 @@ export class AuthService {
       name: user.full_name,
       orgId: org?.id ?? null,
       orgName: org?.name ?? null,
+      orgType: org?.organization_type ?? null,
       mustChangePassword: user.must_change_password,
     };
   }

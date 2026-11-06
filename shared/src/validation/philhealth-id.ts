@@ -151,6 +151,10 @@ function buildName(lastRaw: string[], givenRaw: string[]): IdName | null {
 /** Lines with a run of digits are the PIN, the birth date or the address, never the name. */
 const HAS_NUMBER = /\d{2,}/;
 
+/** `MONTH DD,` (OCR may read digits as O, I, l, S or B) or `- MALE`: the birth line, which follows the name. */
+const BIRTH_LINE =
+  /\b(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+[\dOIlSB]{1,2}\s*[,.]|[-–—]\s*(?:FE)?MALE\b/i;
+
 function nameFromLine(line: string, next: string | undefined, separator = ','): IdName | null {
   if (HAS_NUMBER.test(line)) return null;
   const at = line.indexOf(separator);
@@ -166,30 +170,38 @@ function nameFromLine(line: string, next: string | undefined, separator = ','): 
 }
 
 /**
- * The name printed on a PhilHealth ID, from OCR text, or null. Looks for the `LAST, FIRST MIDDLE`
- * line after the PIN first, then anywhere on the card. Tolerates stray symbols and lowercase OCR
- * junk around the name, extra spaces, and a line break after `LAST,`. Never reads the birth date,
- * sex or address (plan §5.1, data minimisation).
+ * The name printed on a PhilHealth ID, from OCR text, or null. The card prints the PIN, the name,
+ * the birth date and sex, then the address, so only the lines between the PIN and the birth line
+ * can be the name, or lines above the PIN if OCR moved it there. Tolerates stray symbols and
+ * lowercase OCR junk around the name, extra spaces, and a line break after `LAST,`. Never reads
+ * the birth date, sex or address (plan §5.1, data minimisation).
  */
 export function parsePhilHealthName(text: string): IdName | null {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const pinLine = lines.findIndex((line) => parsePhilHealthPin(line) !== null);
-  const starts = pinLine >= 0 ? [pinLine + 1, 0] : [0];
+  const start = pinLine + 1;
+  const birthLine = lines.findIndex((line, i) => i >= start && (HAS_NUMBER.test(line) || BIRTH_LINE.test(line)));
+  const end = birthLine >= 0 ? birthLine : lines.length;
 
-  for (const start of starts) {
-    for (let i = start; i < lines.length; i++) {
-      const name = nameFromLine(lines[i] ?? '', lines[i + 1]);
+  const search = (from: number, to: number): IdName | null => {
+    for (let i = from; i < to; i++) {
+      const name = nameFromLine(lines[i] ?? '', i + 1 < to ? lines[i + 1] : undefined);
       if (name) return name;
     }
-  }
+    return null;
+  };
+
+  const found = search(start, end);
+  if (found) return found;
 
   // The comma misread as `.`, `;` or `:` on the line right after the PIN.
-  if (pinLine >= 0) {
-    const line = (lines[pinLine + 1] ?? '').replace(/^[^A-Za-zÀ-ÿ]+/, '');
+  if (pinLine >= 0 && start < end) {
+    const line = (lines[start] ?? '').replace(/^[^A-Za-zÀ-ÿ]+/, '');
     const misread = /[.;:]/.exec(line);
-    if (misread) return nameFromLine(line, lines[pinLine + 2], misread[0]);
+    const name = misread ? nameFromLine(line, start + 1 < end ? lines[start + 1] : undefined, misread[0]) : null;
+    if (name) return name;
   }
-  return null;
+  return pinLine > 0 ? search(0, pinLine) : null;
 }
 
 function editDistance(a: string, b: string): number {

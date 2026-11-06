@@ -248,7 +248,19 @@ export default function PhilHealthIdStep({
           {useFallback ? <Banner icon="camera-outline" text={t.registration.idScannerUnavailable} tone="info" /> : null}
 
           {lastReason === 'ID_ALREADY_REGISTERED' ? (
-            <PrimaryButton icon="log-in-outline" label={t.registration.idSignInInstead} onPress={onSignIn} />
+            <>
+              <PrimaryButton icon="log-in-outline" label={t.registration.idSignInInstead} onPress={onSignIn} />
+              {/* The card's owner, when the account holding it isn't theirs (plan §7). */}
+              <TouchableOpacity
+                testID="id-not-my-account-call-btn"
+                style={styles.callBtn}
+                onPress={() => void Linking.openURL(`tel:${MDRRMO_HOTLINE}`)}
+                accessibilityRole="button"
+              >
+                <Ionicons name="call" size={16} color="#DC2626" />
+                <Text style={styles.callText}>{t.registration.idCallMdrrmo}</Text>
+              </TouchableOpacity>
+            </>
           ) : (
             <PrimaryButton
               testID="id-scan-again-btn"

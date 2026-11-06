@@ -1,3 +1,5 @@
+import { MDRRMO_HOTLINE_DISPLAY } from '../config/hotlines';
+
 export const en = {
   common: {
     skip: 'Skip',
@@ -101,7 +103,7 @@ export const en = {
     idErrorUnreadable: "We couldn't read your PhilHealth ID. Hold it flat in good light, avoid glare, and try again.",
     idErrorImage: "The picture couldn't be used. Please scan again.",
     idErrorServer: 'Our verification service had a problem. Please try again in a moment.',
-    idErrorAlreadyRegistered: 'This PhilHealth ID is already linked to an AGAP account. Sign in or reset your password.',
+    idErrorAlreadyRegistered: `This PhilHealth ID is already linked to an AGAP account. Sign in or reset your password. Not your account? Call MDRRMO at ${MDRRMO_HOTLINE_DISPLAY} and show them your ID.`,
     idErrorOutside: 'Registration is only available within Bocaue, Bulacan.',
     idSignInInstead: 'Sign in instead',
     idReviewOfferTitle: 'Still not working?',
@@ -678,7 +680,7 @@ export const fil: typeof en = {
     idErrorUnreadable: 'Hindi namin mabasa ang iyong PhilHealth ID. Ilapag ito sa maliwanag na lugar, iwasan ang silaw, at subukan ulit.',
     idErrorImage: 'Hindi magamit ang litrato. Mag-scan ulit.',
     idErrorServer: 'Nagkaproblema ang aming serbisyo sa pagsusuri. Subukan ulit maya-maya.',
-    idErrorAlreadyRegistered: 'Naka-link na ang PhilHealth ID na ito sa isang AGAP account. Mag-sign in o i-reset ang password.',
+    idErrorAlreadyRegistered: `Naka-link na ang PhilHealth ID na ito sa isang AGAP account. Mag-sign in o i-reset ang password. Hindi sa iyo ang account? Tumawag sa MDRRMO sa ${MDRRMO_HOTLINE_DISPLAY} at ipakita ang iyong ID.`,
     idErrorOutside: 'Ang pagpaparehistro ay para lamang sa loob ng Bocaue, Bulacan.',
     idSignInInstead: 'Mag-sign in na lang',
     idReviewOfferTitle: 'Hindi pa rin gumagana?',

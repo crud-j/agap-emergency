@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { requireOptionalNativeModule } from 'expo';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ID_VERIFICATION_CONSENT_TYPE } from '@agap/shared';
 import { ScreenHeader } from '../../src/components/ui/screen-header';
 import {
   checkConsent, grantConsent, revokeConsent, getAccessLog, exportMyData,
@@ -112,6 +113,29 @@ export default function PrivacyScreen() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['consent', MEDICAL_CONSENT_TYPE] }),
     onError: (e: unknown) => Alert.alert('Could not withdraw consent', e instanceof Error ? e.message : 'Please try again.'),
   });
+
+  // PhilHealth ID check (MOD-48). Shown only while this consent is active.
+  const idConsent = useQuery({
+    queryKey: ['consent', ID_VERIFICATION_CONSENT_TYPE],
+    queryFn: () => checkConsent(ID_VERIFICATION_CONSENT_TYPE),
+  });
+
+  const withdrawId = useMutation({
+    mutationFn: () => revokeConsent(ID_VERIFICATION_CONSENT_TYPE),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['consent', ID_VERIFICATION_CONSENT_TYPE] }),
+    onError: (e: unknown) => Alert.alert('Could not withdraw consent', e instanceof Error ? e.message : 'Please try again.'),
+  });
+
+  function confirmWithdrawId() {
+    Alert.alert(
+      'Withdraw PhilHealth ID consent?',
+      'We will erase your PhilHealth number, the name read from your ID, and any stored image. Your account will show as not ID verified until you scan your ID again. You can still sign in and send an SOS.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Withdraw', style: 'destructive', onPress: () => withdrawId.mutate() },
+      ],
+    );
+  }
 
   function confirmRevoke() {
     Alert.alert(
@@ -237,6 +261,38 @@ export default function PrivacyScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* PhilHealth ID consent (MOD-48) */}
+        {idConsent.data?.granted ? (
+          <View style={styles.card}>
+            <View style={styles.cardHead}>
+              <View style={[styles.iconWrap, { backgroundColor: '#E7F6F1' }]}>
+                <Ionicons name="card-outline" size={22} color="#0D6053" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>PhilHealth ID Check</Text>
+                <Text style={styles.cardSub}>Granted — used to confirm the name on your account.</Text>
+              </View>
+            </View>
+
+            <Text style={styles.legal}>
+              We keep your PhilHealth number only in a form that can't be read back, its last 4 digits, and the
+              name read from your ID, encrypted. Your ID image is deleted once the check is done.
+            </Text>
+
+            <TouchableOpacity
+              testID="withdraw-id-consent-btn"
+              style={[styles.btn, styles.btnDanger]}
+              onPress={confirmWithdrawId}
+              disabled={withdrawId.isPending}
+              activeOpacity={0.85}
+            >
+              {withdrawId.isPending
+                ? <ActivityIndicator color="#B42318" />
+                : <Text style={styles.btnDangerText}>Withdraw Consent</Text>}
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {/* Data export */}
         <View style={styles.card}>

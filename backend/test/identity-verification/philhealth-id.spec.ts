@@ -124,6 +124,39 @@ describe('parsePhilHealthName', () => {
     expect(parsePhilHealthName('PhilHealth\n00-000000001-0\nJANUARY 01, 1990 - MALE')).toBeNull();
     expect(parsePhilHealthName('')).toBeNull();
   });
+
+  describe('never reads the address as the name (plan §5.1)', () => {
+    const ADDRESS = 'SITIO PAG-ASA, BUNLO\nBOCAUE, BULACAN 3018';
+
+    it('a comma misread as a period on the name line still finds the name, not the address', () => {
+      expect(
+        parsePhilHealthName(`PhilHealth\n00-000000001-0\nDELA CRUZ. JUAN SANTOS\nJANUARY 01, 1990 - MALE\n${ADDRESS}`),
+      ).toEqual(ID);
+    });
+
+    it('a name line OCR lost entirely is null, so the scan is retried', () => {
+      expect(parsePhilHealthName(`PhilHealth\n00-000000001-0\n~~ ###\nJANUARY 01, 1990 - MALE\n${ADDRESS}`)).toBeNull();
+      expect(parsePhilHealthName(`PhilHealth\n00-000000001-0\nJANUARY 01, 1990 - FEMALE\nPUROK 1, BINANG 1ST`)).toBeNull();
+    });
+
+    it('a birth date whose digits OCR misread still ends the search', () => {
+      expect(parsePhilHealthName(`PhilHealth\n00-000000001-0\n~~\nJANUARY O1, I99O - MALE\n${ADDRESS}`)).toBeNull();
+      expect(parsePhilHealthName(`PhilHealth\n00-000000001-0\nJANUARY O1. I99O\nSEX - FEMALE\n${ADDRESS}`)).toBeNull();
+    });
+
+    it('still reads a normal card, and a surname that is also a month', () => {
+      expect(parsePhilHealthName(`PhilHealth\n00-000000001-0\nDELA CRUZ, JUAN SANTOS\nJANUARY 01, 1990 - MALE\n${ADDRESS}`)).toEqual(ID);
+      expect(parsePhilHealthName(`00-000000001-0\nMAY, JUAN SANTOS\nMAY 01, 1990 - MALE\n${ADDRESS}`)).toEqual({
+        last: 'MAY',
+        first: 'JUAN',
+        middle: 'SANTOS',
+      });
+    });
+
+    it('still finds a name OCR placed before the PIN', () => {
+      expect(parsePhilHealthName(`PhilHealth\nDELA CRUZ, JUAN SANTOS\n00-000000001-0\nJANUARY 01, 1990 - MALE\n${ADDRESS}`)).toEqual(ID);
+    });
+  });
 });
 
 describe('matchIdName', () => {

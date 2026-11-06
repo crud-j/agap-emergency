@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import {
@@ -12,6 +12,7 @@ import {
   matchIdName,
   parsePhilHealthName,
   parsePhilHealthPin,
+  type IdCardReleaseReason,
   type IdName,
   type IdScanResponse,
 } from '@agap/shared';
@@ -28,7 +29,24 @@ import { PhilhealthOcrService } from './philhealth-ocr.service';
 const MIN_OCR_CONFIDENCE = 40;
 
 /** Statuses that hold a PhilHealth ID for an account (one per account; partial unique index). */
-const ACTIVE_STATUSES = ['AUTO_VERIFIED', 'PENDING_REVIEW', 'APPROVED'] as const;
+export const ACTIVE_STATUSES = ['AUTO_VERIFIED', 'PENDING_REVIEW', 'APPROVED'] as const;
+
+/** A claimed row in any of these still keeps card data, so it can be released. */
+const RELEASABLE_STATUSES = [...ACTIVE_STATUSES, 'REJECTED'] as const;
+
+/** An account that hasn't confirmed its phone holds a card for this long (plan §5.2a). */
+const UNVERIFIED_CLAIM_HOURS = 24;
+
+/** Why a claim ended: the citizen withdrew consent, the phone was never confirmed, or staff released the card. */
+export type IdReleaseReason = 'CONSENT_WITHDRAWN' | 'PHONE_NOT_VERIFIED' | IdCardReleaseReason;
+
+/** Erased from a row once nothing needs it. Its status and timestamps stay. */
+const CARD_DATA_ERASED = { pin_hmac: null, pin_last4: null, name_on_id_sealed: null } as const;
+
+export interface ReleasedScan {
+  id: string;
+  image_storage_key: string | null;
+}
 
 /**
  * Statuses of a scan still waiting for its registration: AUTO_VERIFIED (read, name to be
@@ -39,7 +57,7 @@ const CLAIMABLE_STATUSES = ['AUTO_VERIFIED', 'PENDING_REVIEW'] as const;
 type ScanFailure = IdVerificationErrorCode.UNREADABLE | IdVerificationErrorCode.NOT_PHILHEALTH_ID;
 
 /** Statuses whose image is no longer needed (plan §5.2a). AUTO_VERIFIED only once claimed. */
-const DECIDED_STATUSES = ['EXPIRED', 'APPROVED', 'REJECTED'] as const;
+const DECIDED_STATUSES = ['EXPIRED', 'APPROVED', 'REJECTED', 'RELEASED'] as const;
 
 const CLEANUP_BATCH = 200;
 
@@ -304,13 +322,121 @@ export class IdentityVerificationService {
   }
 
   /**
-   * The cleanup job (every 10 minutes): expire scans nobody claimed in time, then delete
-   * every image that is no longer needed, including ones whose earlier delete failed.
+   * Ends a user's claim, inside the caller's transaction: erases the name and PIN data, marks
+   * the account not verified and audits why. The card is then free to be scanned again. The
+   * account itself stays usable: getting help never depends on this (rule 14). Returns the rows
+   * whose images the caller deletes after commit; empty when there was nothing to release.
+   */
+  async releaseInTransaction(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    reason: IdReleaseReason,
+    actor?: { id: string; role: string },
+  ): Promise<ReleasedScan[]> {
+    const rows = await tx.identity_verifications.findMany({
+      where: { user_id: userId, status: { in: [...RELEASABLE_STATUSES] } },
+      select: { id: true, image_storage_key: true },
+    });
+    if (rows.length === 0) return [];
+
+    // Re-checked inside the write: of two releases at once, only one finds anything left.
+    const { count } = await tx.identity_verifications.updateMany({
+      where: { id: { in: rows.map((row) => row.id) }, status: { in: [...RELEASABLE_STATUSES] } },
+      data: { status: 'RELEASED', ...CARD_DATA_ERASED },
+    });
+    if (count === 0) return [];
+
+    await tx.user.updateMany({ where: { id: userId }, data: { identity_verified_at: null } });
+    await this.audit.logInTransaction(tx, {
+      action: AuditAction.IDENTITY_VERIFICATION_RELEASED,
+      ...(actor && { actorId: actor.id, actorRole: actor.role }),
+      entityType: 'user',
+      entityId: userId,
+      moduleId: 'MOD-48',
+      newValues: { reason, scans: count },
+    });
+    return rows;
+  }
+
+  /** Deletes released images after commit. Never throws; false means the cleanup job will retry. */
+  async deleteReleasedImages(rows: ReleasedScan[]): Promise<boolean> {
+    let allDeleted = true;
+    for (const row of rows) {
+      if (row.image_storage_key && !(await this.deleteImage(row.id, row.image_storage_key))) allDeleted = false;
+    }
+    return allDeleted;
+  }
+
+  /**
+   * The citizen withdrew their ID verification consent (RA 10173): the consent is marked withdrawn
+   * and what it allowed AGAP to keep is erased in one transaction, then any stored image is
+   * deleted. They can still sign in and send an SOS; scanning again verifies them again.
+   */
+  async withdrawConsent(userId: string): Promise<void> {
+    const released = await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.consent_records.updateMany({
+        where: { user_id: userId, consent_type: ID_VERIFICATION_CONSENT_TYPE, status: 'GRANTED' },
+        data: { status: 'WITHDRAWN', withdrawn_at: new Date() },
+      });
+      if (count === 0) throw new NotFoundException('No active consent found');
+
+      const rows = await this.releaseInTransaction(tx, userId, 'CONSENT_WITHDRAWN', { id: userId, role: 'CITIZEN' });
+      // Even with no row left to release, an account without this consent isn't verified.
+      await tx.user.updateMany({ where: { id: userId }, data: { identity_verified_at: null } });
+      return rows;
+    });
+    await this.deleteReleasedImages(released);
+  }
+
+  /**
+   * Part of the cleanup job: a card stays claimed by an account that never confirmed its phone
+   * for only UNVERIFIED_CLAIM_HOURS, so nobody can lock out a card's owner using a number they
+   * don't control. Suspended and deactivated accounts keep their claim: waiting must not undo
+   * a ban. Staff can still release those (plan §7). Returns how many accounts were released.
+   */
+  async releaseUnverifiedClaims(now = new Date()): Promise<number> {
+    const stale = await this.prisma.identity_verifications.findMany({
+      where: {
+        status: { in: [...ACTIVE_STATUSES] },
+        created_at: { lt: new Date(now.getTime() - UNVERIFIED_CLAIM_HOURS * 60 * 60 * 1000) },
+        user: { is_phone_verified: false, status: { in: ['ACTIVE', 'PENDING_VERIFICATION'] } },
+      },
+      select: { user_id: true },
+      take: CLEANUP_BATCH,
+    });
+
+    let released = 0;
+    for (const userId of new Set(stale.flatMap((row) => row.user_id ?? []))) {
+      try {
+        const rows = await this.prisma.$transaction((tx) => this.releaseInTransaction(tx, userId, 'PHONE_NOT_VERIFIED'));
+        if (rows.length > 0) released++;
+      } catch (err: unknown) {
+        const reason = err instanceof Error ? err.name : 'unknown error';
+        this.logger.warn(`Could not release the PhilHealth ID claim of user ${userId} (${reason}); the next run retries`);
+      }
+    }
+    return released;
+  }
+
+  /**
+   * The cleanup job (every 10 minutes): expire scans nobody claimed in time, erase their name
+   * and PIN data, then delete every image that is no longer needed, including ones whose
+   * earlier delete failed.
    */
   async cleanup(now = new Date()): Promise<{ expired: number; deleted: number; failed: number }> {
     const { count: expired } = await this.prisma.identity_verifications.updateMany({
       where: { user_id: null, status: { in: [...CLAIMABLE_STATUSES] }, claim_expires_at: { lt: now } },
       data: { status: 'EXPIRED' },
+    });
+
+    // Nobody registered, so nothing needs this data and no consent record covers it. A separate
+    // write so it also reaches rows that expired before this rule existed.
+    await this.prisma.identity_verifications.updateMany({
+      where: {
+        status: 'EXPIRED',
+        OR: [{ pin_hmac: { not: null } }, { pin_last4: { not: null } }, { name_on_id_sealed: { not: null } }],
+      },
+      data: CARD_DATA_ERASED,
     });
 
     const stale = await this.prisma.identity_verifications.findMany({

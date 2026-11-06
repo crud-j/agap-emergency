@@ -46,6 +46,26 @@ describe('ID scan cleanup job', () => {
     expect(kit.storage.objects.has('local:id-documents/fresh')).toBe(true);
   });
 
+  it('erases the name and PIN data of an expired scan, keeping only that it happened', async () => {
+    seed('stale', { claim_expires_at: minutes(-1), pin_hmac: 'hmac', pin_last4: '0010', name_on_id_sealed: 'sealed' });
+    seed('fresh', { claim_expires_at: minutes(5), pin_hmac: 'hmac2', pin_last4: '0020', name_on_id_sealed: 'sealed2' });
+
+    await kit.service.cleanup(NOW);
+
+    expect(rowOf('stale')).toMatchObject({ status: 'EXPIRED', pin_hmac: null, pin_last4: null, name_on_id_sealed: null });
+    expect(rowOf('fresh')).toMatchObject({ pin_hmac: 'hmac2', pin_last4: '0020', name_on_id_sealed: 'sealed2' });
+  });
+
+  it('also erases rows that expired before this rule existed, and leaves claimed rows alone', async () => {
+    seed('old', { status: 'EXPIRED', claim_expires_at: minutes(-500), pin_hmac: 'hmac', pin_last4: '0010', name_on_id_sealed: 'sealed' });
+    seed('claimed', { user_id: 'u-1', status: 'APPROVED', claim_expires_at: minutes(-500), pin_hmac: 'hmac3', pin_last4: '0030', name_on_id_sealed: 'sealed3' });
+
+    await kit.service.cleanup(NOW);
+
+    expect(rowOf('old')).toMatchObject({ pin_hmac: null, pin_last4: null, name_on_id_sealed: null });
+    expect(rowOf('claimed')).toMatchObject({ status: 'APPROVED', pin_hmac: 'hmac3', pin_last4: '0030', name_on_id_sealed: 'sealed3' });
+  });
+
   it('expires an unclaimed review scan too, and deletes its image', async () => {
     seed('review-stale', { status: 'PENDING_REVIEW', pin_hmac: null, claim_expires_at: minutes(-1) });
     seed('review-fresh', { status: 'PENDING_REVIEW', pin_hmac: null, claim_expires_at: minutes(5) });

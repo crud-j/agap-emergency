@@ -34,6 +34,7 @@ describe('AuthController — web session cookie', () => {
     name: 'Juan',
     orgId: 'org-1',
     orgName: 'MDRRMO',
+    orgType: 'MDRRMO',
     mustChangePassword: false,
   };
   let authService: Record<string, jest.Mock>;
@@ -217,7 +218,7 @@ describe('AuthService — sessions', () => {
   it('getSessionUser returns the summary with the first active organization', async () => {
     seedUser(prisma, {
       email: 'd1@mdrrmo.bocaue.gov.ph',
-      organization_memberships: [{ organizations: { id: 'org-1', name: 'Bocaue MDRRMO' } }],
+      organization_memberships: [{ organizations: { id: 'org-1', name: 'Bocaue MDRRMO', organization_type: 'MDRRMO' } }],
     });
 
     await expect(service.getSessionUser('u-1')).resolves.toEqual({
@@ -227,6 +228,7 @@ describe('AuthService — sessions', () => {
       name: 'Juan dela Cruz',
       orgId: 'org-1',
       orgName: 'Bocaue MDRRMO',
+      orgType: 'MDRRMO',
       mustChangePassword: false,
     });
   });

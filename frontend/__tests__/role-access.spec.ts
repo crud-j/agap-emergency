@@ -134,9 +134,24 @@ describe('role-access', () => {
     ]);
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
       'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Hospitals & Facilities',
-      'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'Risk Areas', 'Audit Log',
+      'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'ID Reviews', 'Risk Areas', 'Audit Log',
       'Security Events', 'Integrations', 'Configuration',
       'Account Security',
     ]);
+  });
+
+  it('ID Reviews: shown to an MDRRMO Org Administrator only, among Org Administrators', () => {
+    const orgAdminLabels = (orgType?: string) =>
+      navForRole(ROLE.ORG_ADMIN, orgType).flatMap((g) => g.items.map((i) => i.label));
+
+    expect(orgAdminLabels('MDRRMO')).toContain('ID Reviews');
+    expect(orgAdminLabels('BFP')).not.toContain('ID Reviews');
+    expect(orgAdminLabels('HOSPITAL')).not.toContain('ID Reviews');
+    expect(orgAdminLabels(undefined)).not.toContain('ID Reviews');
+    // The org type only narrows Org Administrators; other roles are unaffected by it.
+    expect(navForRole(ROLE.SYS_ADMIN, 'BFP').flatMap((g) => g.items.map((i) => i.label))).toContain('ID Reviews');
+    expect(navForRole(ROLE.DISPATCHER, 'MDRRMO').flatMap((g) => g.items.map((i) => i.label))).not.toContain('ID Reviews');
+    expect(canOpen(ROLE.DISPATCHER, '/administration/id-reviews')).toBe(false);
+    expect(canOpen(ROLE.SUPERVISOR, '/administration/id-reviews')).toBe(false);
   });
 });

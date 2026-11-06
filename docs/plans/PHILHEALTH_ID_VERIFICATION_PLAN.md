@@ -176,7 +176,8 @@ enum identity_verification_status {
   PENDING_REVIEW   // citizen asked for staff review (unreadable or mismatch)
   APPROVED         // staff approved after review
   REJECTED         // staff rejected
-  EXPIRED          // scan never claimed by a registration within 30 minutes
+  EXPIRED          // scan never claimed by a registration within 30 minutes; card data erased
+  RELEASED         // the claim ended (§5.2a); card data erased, and the card can be scanned again
 }
 
 /// MOD-01/48: one PhilHealth ID scan. Created before the account exists, then claimed by POST /auth/register.
@@ -245,7 +246,19 @@ The ID image is kept **only while something still needs it**:
 
 Deleting the stored file happens **after** the database commit and must never fail the registration or the review. If the
 delete fails, log it (no PII) and leave `image_storage_key` set; the cleanup job (§5.3) retries it. What stays in the database
-after deletion: `pin_hmac`, `pin_last4`, the sealed name, the status and the match result.
+after deletion, for a claim still held: `pin_hmac`, `pin_last4`, the sealed name, the status and the match result.
+
+**When the name and PIN data are erased too (§11 D4–D6).** These clear `pin_hmac`, `pin_last4` and `name_on_id_sealed`:
+
+| Situation | What happens | Status |
+|---|---|---|
+| Scan never claimed | The cleanup job erases the data when the claim expires. Nobody registered, and no consent record covers it. | `EXPIRED` |
+| Citizen withdraws consent (Profile → Privacy & Consent) | Erased at once, with any image. The account shows "ID not verified" until the citizen scans again. | `RELEASED` |
+| Account never confirmed its phone, 24 hours after the scan | The cleanup job releases the claim, so nobody can hold a card using a number they don't control. | `RELEASED` |
+| Staff release the card (§7) | Erased at once; the holder is told to scan again. | `RELEASED` |
+
+A release never blocks the account: it can still sign in and send an SOS (rules 5 and 14). **Suspended and deactivated accounts
+keep their claim** unless staff release it, so waiting can't undo a ban.
 
 ### 5.3 Module `backend/src/identity-verification/`
 
@@ -267,7 +280,7 @@ id-document-crypto.service.ts            seal/open names + image buffers
   1. Read text with the server OCR (§5.4).
   2. Check it is a PhilHealth ID: the card heading keywords and a PIN in the expected pattern (§6). If not → `422 NOT_PHILHEALTH_ID`.
   3. Parse the name. If unreadable → `422 UNREADABLE` (the app offers a retry).
-  4. Seal the image and store it under a separate `id-documents/` prefix, never in the incident media bucket.
+  4. Seal the image and store it under a separate `id-documents/` prefix of the same private bucket (§11 D7).
   5. Save the row with status `AUTO_VERIFIED`, unclaimed, and an expiry 30 minutes ahead. The name match happens at registration, because the name isn't typed yet.
   6. Return `{ token, nameOnId: {last, first, middle, suffix}, pinLast4 }`. The full PIN is **never** returned.
 - Duplicate PhilHealth ID: if `pin_hmac` already belongs to an active account, return `409 ID_ALREADY_REGISTERED` with
@@ -370,6 +383,14 @@ Frontend page: `frontend/app/(ops)/administration/id-reviews/page.tsx`
 - A rejected citizen can rescan from their profile. The account is **not** deactivated automatically. Suspending is a separate,
   deliberate admin action (existing MOD-49 tools).
 
+**A card's owner finds it already taken (§11 D6).** The scan's `ID_ALREADY_REGISTERED` screen tells the citizen to call MDRRMO and
+has a call button. Staff then use the same page:
+
+| Route | Does |
+|---|---|
+| `POST /v1/administration/id-verifications/find-by-pin` | `{ pin }` in the body, typed from the card in front of staff. Compares only the HMAC and returns the account holding the card, never the number. Throttled. **Every lookup audited** (`ID_CARD_LOOKUP`, found or not, without the number). |
+| `POST /v1/administration/id-verifications/:id/release` | `{ reason: 'OWNER_DISPUTE' \| 'ACCOUNT_CLOSED' \| 'STAFF_CORRECTION' }`. Needs a recent sign-in. Erases the card data, marks the account not verified, audits (`IDENTITY_VERIFICATION_RELEASED`), deletes any image, and tells the citizen unless the account is blocked. |
+
 ---
 
 ## 8. Other surfaces
@@ -382,6 +403,7 @@ Frontend page: `frontend/app/(ops)/administration/id-reviews/page.tsx`
   pre-existing citizen accounts to migrate. No "verify later" banner and no grandfathering.
 - **Seed:** seeded citizen accounts get `identity_verified_at` set and a claimed `AUTO_VERIFIED` row with no image, so demos
   and e2e flows work unchanged. Use clearly fake PINs (for example `00-000000001-0`), never real-looking ones.
+  **They must also get `is_phone_verified = true`** (the default is `false`), or the cleanup job releases their claims after 24 hours (§5.2a).
 
 ---
 
@@ -405,11 +427,11 @@ person or a phone.
 
 | Phase | Status | Date | Notes |
 |---|---|---|---|
-| 0. Spike and samples | Tools installed; waiting on phone + sample runs | 2026-11-05 | Agent part done. The user still fills in the layout notes below |
-| 1. Shared rules | Done, awaiting review | 2026-11-05 | 25 matcher tests pass; built on 1 real card's layout (see Phase 0) |
-| 2. Backend | Done, awaiting review | 2026-11-05 | Migration applied; 44 new tests pass; e2e blocked by Redis not running |
-| 3. Mobile | Done, awaiting review and a phone test | 2026-11-05 | Includes a backend follow-up (review of unreadable scans, migration applied) and `expo-image-manipulator`, both approved by the user. 23 mobile + 7 backend tests; e2e blocked by Redis again |
-| 4. Admin review | Not started | | |
+| 0. Spike and samples | Reviewed (no code defects); "done when" not met: 1 of 8–10 cards, no phone without Google Play services | 2026-11-06 | Layout notes filled in from 1 card |
+| 1. Shared rules | Reviewed; 1 defect fixed (address read as name) | 2026-11-06 | 30 matcher tests pass; built on 1 real card's layout (see Phase 0) |
+| 2. Backend | Reviewed (no code defects); 4 decisions open | 2026-11-06 | Migration applied; e2e passes with Redis up |
+| 3. Mobile | Reviewed (no defects); phone: happy path passed; the database shows a mismatch → review run on 2026-11-05 (see Review, Phase 4) | 2026-11-05 | Includes a backend follow-up (review of unreadable scans, migration applied) and `expo-image-manipulator`, both approved by the user. 23 mobile + 7 backend tests; e2e passed on re-run with Redis up |
+| 4. Admin review | Reviewed; 3 defects fixed; reject path ran live, approve path still to test | 2026-11-06 | Migration applied (3 audit actions); 22 backend + 5 frontend tests; e2e passes. Routes under `/administration`, not `/admin` |
 | 5. Labels and seed | Not started | | |
 | 6. Docs and defense readiness | Not started | | |
 
@@ -518,6 +540,21 @@ Written from one card's server OCR output; patterns only, no real values.
 The Phase 3 fallback camera (§4.3) must crop to its card-shaped frame before upload, and Phase 2's OCR service should
 downscale large images. Never send a raw full-frame photo.
 
+### Review — 2026-11-06 (Phase 0)
+
+Prompt R on commit `3ff8498` and the current code, run after the later phases.
+
+**Findings: no code defects, no changes.**
+- Steps: the spike screen and its profile row are gone (Phase 3), with no references left. `ocr-spike.ts` has the required
+  header, refuses a folder inside the repo, and writes nothing to disk.
+- Dependencies: the four allowed packages, exact versions. Both backend packages are in `dependencies`, so they exist at runtime.
+- Privacy: no sample images or card text in the repo. The layout notes hold patterns only.
+
+**Open: the Phase 0 "done when" is not met.**
+1. **Accuracy:** 1 card tested; the target is at least 8 of 10, by phone and server. The name parser rests on this one layout.
+2. **Phone without Google Play services:** not tested, so the fallback path (Part B Q3) is unproven on real hardware.
+3. **For a person to confirm:** the adviser reviewed the consent text, and the sample scans were deleted.
+
 ### Phase 1 — 2026-11-05
 
 **Added**
@@ -568,6 +605,30 @@ Typecheck clean in shared, backend, mobile and frontend.
 **Needs a person or a phone:** more real cards through `ocr-spike.ts`, then `parsePhilHealthName` checked against them (a
 throwaway local check that prints only "parsed: yes/no" and "matches typed: yes/no", never the text). Most useful: a card
 with a suffix, a two-word first name, and a compound middle name.
+
+### Review — 2026-11-06 (Phase 1)
+
+Prompt R on commit `7808d6d` and the current code, run after the later phases.
+
+**Fixed: `parsePhilHealthName` could read the address as the name.** It searched every line after the PIN for a comma, so when
+OCR garbled the name line, the first address line without a run of digits won.
+- Made-up example: `SITIO PAG-ASA, BUNLO` became last name `SITIO PAG-ASA`, first name `BUNLO`.
+- Effects:
+  - It broke §5.1 ("the address is not extracted") and showed the citizen a wrong "Your PhilHealth ID shows" line.
+  - A card that should have been `UNREADABLE` was accepted, and typing the address as the name would have passed the match.
+  - The comma-misread fallback never ran on such a card.
+- Now only the lines between the PIN and the birth line can be the name, or lines above the PIN if OCR moved it there. The birth
+  line is a line with a run of digits, `MONTH DD,` (including misread digits) or `- MALE` / `- FEMALE`.
+- Only the backend calls this function, so restarting the backend is enough; the app needs no rebuild.
+- 5 new tests in `philhealth-id.spec.ts`; 4 failed before the fix. All use invented data. It has not been run on a real card yet.
+
+**Otherwise no defects.** The §6 API, normalisation and match rules are as specified; PIN parsing, detection and matching live
+only in this file; every §6 test case exists.
+
+**Open**
+1. **The one-edit tolerance can accept a different name.** Typing `JUAN` passes against a card reading `JUANA`, because the card
+   word has 5 letters. This is the §6 rule working as written, and the price of tolerating OCR slips.
+2. **Two given words can't be told apart** (`MARIA CLARA`): logged in Phase 1, and inherent to the card.
 
 ### Phase 2 — 2026-11-05
 
@@ -670,6 +731,38 @@ wait forever. Re-run with Redis up.
 
 **Later check (Phase 3 preflight, 2026-11-05):** with Redis up, `test:e2e:db` + `test:e2e` passed 1/1.
 
+### Review — 2026-11-06 (Phase 2)
+
+Prompt R on commit `e245ff5` and the current code, run after the later phases.
+
+**Findings: no code defects, no changes.** Checked against the code:
+- **Claim:** the conditional `updateMany` inside the registration transaction means two registrations can't both claim a token.
+  A card already on another account trips the partial index and returns `ID_ALREADY_REGISTERED`. The image is deleted only after commit.
+- **Crypto:** AES-256-GCM with the row id as `aad`; separate key; the PIN is stored only as an HMAC plus its last 4 digits; the
+  token is stored only as a SHA-256. The server refuses to start with the flag on and a missing key or pepper.
+- **Privacy:**
+  - No backend code logs request bodies, and the backend has no Sentry, so `clientText` and typed names aren't captured there.
+  - Log lines carry a row id or an error name. The OCR failure log carries the error message, never the card text.
+  - No static route serves the local upload folder, and `backend/uploads/` is gitignored.
+  - No `id-documents` folder remains on disk in the dev environment.
+- **Rules:** `registerGuest` has no diff. The geo-fence and duplicate phone/email checks run first, as before.
+- **Tests:** they assert stored rows, refusal codes and deleted files, and cover every case in Prompt 2 step 6 except the
+  logged real-OCR test.
+
+**Open: decisions for the owner, not defects.** All four were settled the same day: see "Follow-up — 2026-11-06" and §11 D4–D7.
+1. **Abandoned scans keep data indefinitely.** An `EXPIRED` row loses its image but keeps the sealed name, `pin_hmac` and
+   `pin_last4` forever, with no consent record, because consent is recorded only at registration. §5.2a allows this as written,
+   but nothing needs that data once the scan has expired. **Recommended:** have the cleanup job clear those three columns on
+   expired rows.
+2. **ID images share the media bucket.** `putPrivateObject` uses `STORAGE_BUCKET` (`agap-media`), the bucket incident photos load
+   from by direct URL. §5.3 says "never in the incident media bucket", while Prompt 2 says to reuse the storage under an
+   `id-documents/` prefix. This deviation wasn't logged. Objects are AES-sealed with random ids, so the exposure is ciphertext
+   at worst. **Recommended:** a separate private bucket before production; fine for the defense.
+3. **Withdrawing consent doesn't touch ID data.** `consent.service.ts` handles any consent type generically. MOD-48 should say what
+   withdrawal means here (Phase 6 docs).
+4. **There is no supported way to release a card.** A deactivated or never-OTP-verified account keeps its claim, so a card's real
+   owner can be locked out by someone who scanned it first, with only a manual database fix available. Consider an admin action.
+
 ### Phase 3 — 2026-11-05
 
 **Preflight check of Phases 0–2.** No errors or duplication found; 218/218 ID + auth tests and the e2e passed. One gap: plan §3
@@ -739,6 +832,14 @@ It's a native module, so the dev client must be rebuilt (it already had to be).
 - Typecheck clean in shared, backend, mobile and frontend.
 - **E2E:** `test:e2e:db` succeeded (migrated and seeded). `test:e2e` timed out at 120 s because **Redis was down again**
   (port 6379 closed). It passed earlier the same day with Redis up. Re-run with Redis up.
+  - **Re-run 2026-11-05 with Redis up:** `test:e2e:db` migrated and seeded; `test:e2e` **1/1 passed**
+    (`transport-flow.e2e-spec.ts`, 12.7 s).
+- **Phone test, 2026-11-05** (EAS `development` build of `a8b80bf`, `ID_VERIFICATION_REQUIRED=true`): happy path passed.
+  Scan → typed name matched → OTP → home. DB row: `AUTO_VERIFIED`, claimed, image deleted, `client_read_ok` true, attempt 1,
+  user `ACTIVE` with `identity_verified_at` set. **Not yet run on a phone:** guest SOS from each ID step, non-PhilHealth card,
+  three failed scans → review offer, offline card, name mismatch, `ID_ALREADY_REGISTERED`, review registration, fallback camera.
+  - The first install of the old dev client failed with `Cannot find native module 'ExpoImageManipulator'`, as expected;
+    the rebuilt APK (368 MB) fixed it.
 
 **Deviations and decisions (for review)**
 - **How "Send for review" works.** It opens the scanner once more and uploads that scan with `requestReview`, rather than keeping
@@ -766,6 +867,292 @@ It's a native module, so the dev client must be rebuilt (it already had to be).
    returns 503 without them, **even with the flag off**. Optionally set `ID_VERIFICATION_REQUIRED=true`. Restart the backend.
 3. Rebuild the dev client (new native module, spike removed), restart Metro with `-c`, and run the phone checks in the Phase 3 report.
 
+### Review — 2026-11-05 (Phase 3)
+
+Prompt R on commit `a8b80bf` (`git show a8b80bf`, 23 files). Run in the same chat as the phone test, not a new one, at the
+user's choice; every point below was checked against the code.
+
+**Findings: no confirmed defects, so no code was changed.**
+
+- **a. Steps.** Prompt 3 steps 1–10 are all present:
+  - scan service: [philhealth-scan.ts](../../mobile/src/services/id-scan/philhealth-scan.ts), 1 page, files deleted in `finally`
+  - fallback camera: [IdCameraFallback.tsx](../../mobile/src/components/registration/IdCameraFallback.tsx)
+  - `submitIdScan` / `register()` plus typed errors: [auth.api.ts](../../mobile/src/services/api/auth.api.ts)
+  - [PhilHealthIdStep.tsx](../../mobile/src/components/registration/PhilHealthIdStep.tsx), [NameFields.tsx](../../mobile/src/components/registration/NameFields.tsx)
+  - state machine, `registerSchema` with four parts, disabled button, `ID_SCAN_EXPIRED` → intro
+  - en/fil strings: each new key defined exactly twice; the removed `fullName` keys are unused
+  - spike deleted with no references left; tests
+  - No §10 boxes were ticked by Phase 3. The phone test confirms only the already-ticked "typed name matches" box.
+- **b. Bugs.** None confirmed.
+  - Backend: the claim is atomic (`updateMany` re-checks unclaimed, unexpired and claimable status; `P2002` → `ID_ALREADY_REGISTERED`).
+    The image is deleted only after the transaction commits, and only for `AUTO_VERIFIED`. The cleanup job also expires
+    unclaimed `PENDING_REVIEW` rows. A review scan with a readable PIN is still duplicate-checked, at scan time and by the
+    partial index at claim.
+  - Every server error code the scan and register routes emit maps to a screen state.
+  - Null middle name / suffix: handled by `typedIdName` and the optional DTO fields.
+- **c. Duplication.** None. PIN, name and PhilHealth detection come only from `@agap/shared`. There is no second upload
+  client and no second crypto helper.
+- **d. Privacy.**
+  - Logs: no `console.*` in the new mobile files. The backend's only new or changed log lines carry a row id or an error name.
+  - Responses: `nameOnId` and `pinLast4` are `null` on a review scan. `match_result` holds a fixed code only.
+  - Images: both cache files are deleted in `finally`.
+  - The image route is Phase 4.
+- **e. Rules.**
+  - "Report an emergency" is rendered outside the state blocks of `PhilHealthIdStep`, so it shows in every ID state, and also
+    in both fallback-camera views.
+  - The form's guest handler has no diff.
+  - `identity_verified_at` is read nowhere except at registration, so an account under review signs in and sends an SOS as before.
+- **f. Tests.** The one removed assertion was replaced by an equally exact one (the response keys now include
+  `reviewRequired`). No skips, and new tests assert stored rows, kept or deleted images, and refusal codes.
+- **g. Dependencies.** Only `expo-image-manipulator` **57.0.21**, exact and user-approved.
+
+**Open (not defects; for Phase 4 or later)**
+1. **The three-attempt gate is client-reported.** `attemptNumber` comes from the app, so a modified client can send any image
+   straight to review. Staff review is the control. Phase 4 reviewers should treat review scans (`match_result.scanFailure`)
+   as unverified, and they may be a non-PhilHealth card (`scanFailure: NOT_PHILHEALTH_ID`).
+2. **Phase 4's queue must handle review rows with null `pin_last4` and null sealed name.**
+3. **`openDocumentScanner` treats any scanner error as "unavailable".** It then switches to the fallback camera for the rest
+   of that registration. A transient ML Kit error (for example, the scanner module still downloading on first use) would do
+   the same. Not seen on the test phone.
+4. **A claim race losing with `ID_ALREADY_REGISTERED` at Create account shows the message without a "Sign in instead" button.**
+5. **The dev-client APK is 368 MB.** ML Kit's Chinese/Devanagari/Japanese/Korean models are still bundled (Phase 0 "consider").
+
+**Tests after review** (unchanged from Phase 3):
+- Typecheck clean in shared, backend, mobile and frontend.
+- Mobile 205/205 (16 suites).
+- Backend 1604/1604 without `auth-phase3`, plus `auth-phase3` alone 59/59 (= 1663).
+- `test:e2e:db` + `test:e2e` 1/1.
+- `migrate status` up to date (34 migrations).
+
+**Still needs a phone before Prompt 4** (Phase 3 "done when"): the mismatch → review path, plus the unrun checks listed above.
+
+### Phase 4 — 2026-11-05
+
+Started at the user's request before the Phase 3 mismatch → review phone test (that gate is still open). Same chat as the
+Phase 3 review, not a new one.
+
+**Inventory:** none of the routes, services, audit actions, rejection codes, frontend files or the `orgType` session field
+existed. There was nothing to extend. (`orgType` exists elsewhere, but only as an unrelated incident filter.)
+
+**Migration:** `20261105180000_identity_verification_review_audit`, **applied** to the dev database (`migrate deploy`) and the
+E2E database (`test:e2e:db`). It adds `ID_IMAGE_VIEWED`, `IDENTITY_VERIFICATION_APPROVED` and `IDENTITY_VERIFICATION_REJECTED`
+to `audit_action`. `migrate status`: up to date. **No new dependencies.**
+
+**Added — backend** (`backend/src/identity-verification/`)
+- `identity-verification-admin.controller.ts`: `/v1/administration/id-verifications`
+  - `GET` (queue; `?status=PENDING_REVIEW|APPROVED|REJECTED`, paged)
+  - `GET :id/image`
+  - `POST :id/approve`
+  - `POST :id/reject` (`{ reason }`)
+  - Guards: `@Roles(SYSTEM_ADMINISTRATOR, ORG_ADMINISTRATOR)` plus the service's MDRRMO check.
+- `identity-verification-review.service.ts`:
+  - `assertReviewer`: a System Administrator, or an Org Administrator with an active membership in an active MDRRMO
+    organization. Anyone else gets 403.
+  - `list`: account name (as typed), phone, submitted at, scans, and the reason (`reviewReasonOf`: failed name parts or the
+    scan failure code). No image, no PIN, no card name.
+  - `openImage`: 404 for unknown or unclaimed scans, 410 once deleted. The `ID_IMAGE_VIEWED` audit row (actor + id only)
+    is written with a throwing write before the image is returned, so if the audit fails the image isn't shown.
+  - `approve` / `reject`:
+    - One transaction: a conditional status update (two reviewers can't both decide; the loser gets 409),
+      `identity_verified_at` on approve, and the audit row with the status and reason code.
+    - After the commit: delete the image (a failure keeps the decision and leaves the key for the cleanup job), then notify.
+- `id-review-notifier.ts`: an in-app row plus a push, then an SMS, with the exact §7 texts. It never throws; logs carry the
+  user id and the error name only.
+- `dto/id-review.dto.ts`: query DTO; reject reason limited to the 4 fixed codes.
+- Module: registers the controller, the service and the notifier; imports `NotificationsModule` and the NOTIFICATIONS and SMS
+  queues.
+
+**Changed**
+- `shared/src/enums/audit-action.enum.ts`: the 3 actions.
+- `shared/src/constants/identity-verification.ts`:
+  - `ID_REJECTION_REASONS`, `ID_REVIEW_STATUSES`
+  - `IdReviewItem`, `IdReviewReason`, `IdReviewDecisionResult`, `IdNamePart`
+- `backend/prisma/schema.prisma`: enum values only.
+- `backend/src/auth/auth.service.ts`: `SessionUser.orgType` (the first active organization's type), so the console can hide
+  the link from non-MDRRMO org admins. The API remains the control.
+- Frontend:
+  - `lib/auth.ts` and `lib/use-auth.ts`: `orgType`.
+  - `lib/role-access.ts`:
+    - route `/administration/id-reviews` (Org Admin, Sys Admin)
+    - sidebar link "ID Reviews" with `orgAdminOrgTypes: ['MDRRMO']`
+    - `navForRole(role, orgType?)`
+  - `components/layout/Sidebar.tsx`: passes `orgType`; adds the `IdCard` icon.
+
+**Added — frontend**
+- `features/identity-verification/api.ts`, `hooks.ts` and `format.ts`.
+  - `useIdImage` fetches only on "Show ID image", never caches, retries or refetches on focus, and revokes the object URL.
+- `components/admin/IdReviewQueue.tsx`:
+  - Status tabs, queue table and a detail drawer.
+  - The drawer shows the typed name next to the image, which loads on click with an "opening is audited" note.
+  - Approve; Reject with a reason select.
+  - Messages for 403, 409 and 410.
+- `app/(ops)/administration/id-reviews/page.tsx`.
+
+**Tests**
+- New: `backend/test/identity-verification/id-review.spec.ts` (19). It runs over HTTP with the real `RolesGuard`, the real
+  service and notifier, and rows created through the real scan + register flow. It covers:
+  - who may review: dispatcher, BFP org admin and ended MDRRMO membership → 403; MDRRMO org admin and System Admin → OK
+  - queue content: no card data
+  - image: no-store, audit per view, audit failure → not shown, 410 after a decision, 404 for unclaimed
+  - approve and reject: stored state, image deleted, push + SMS texts
+  - fixed reason codes only; 409 on a second decision
+  - failed push/SMS keeps the decision; failed image delete → cleanup removes it later; failed audit rolls back
+  - review scans; `reviewReasonOf`
+- New: `frontend/__tests__/id-review-format.spec.ts` (4).
+- Changed (extended, not loosened):
+  - `backend/test/auth/auth-phase1.spec.ts`: the session user gains `orgType`.
+  - `frontend/__tests__/role-access.spec.ts`: the System Administrator's exact sidebar list gains "ID Reviews", plus one new
+    test for the MDRRMO-only link.
+- Counts, before → after:
+  - Backend 1663 → **1682** (1623 without `auth-phase3`, plus `auth-phase3` alone 59).
+  - Frontend 181 → **186** (16 → 17 suites).
+  - Mobile 205 → 205.
+  - Typecheck clean in all four packages.
+  - `test:e2e:db` + `test:e2e` 1/1.
+
+**Deviations and decisions (for review)**
+- **Routes are `/v1/administration/id-verifications`, not the plan's `/api/v1/admin/...`.** Every existing admin route lives
+  under `administration`.
+- **No permission row.** Prompt 4 step 1: the `permissions` / `role_permissions` tables are a catalog that no guard reads, so
+  adding `identity_verification:review` there would grant nothing. Access is `@Roles` plus the MDRRMO membership check.
+- **The image-view audit uses a throwing write** (`logInTransaction` on the client), not `AuditService.log()`, which swallows
+  failures. An unaudited view is refused instead.
+- **Approve/reject don't require recent sign-in (step-up)**, unlike user unlock and temporary passwords. They can be added if
+  wanted.
+- **The sidebar link follows the first active organization's type** (`getSessionUser` already picks the first). The API
+  accepts an Org Administrator with **any** active MDRRMO membership. An admin of several organizations whose first isn't
+  MDRRMO could use the page but wouldn't see the link.
+- **"Typed name" in the queue is `users.full_name`**, the four typed parts joined. The parts aren't stored separately.
+- **The SMS processor's existing log line prints the phone number** (`SMS delivered to …`). That's existing behaviour for all
+  SMS, not changed here.
+
+**Needs a person**
+1. Restart the backend (new routes, regenerated Prisma client) and the frontend dev server (`shared/dist` rebuilt). Sign out
+   and back in on the web so the session carries `orgType`.
+2. On the web, as `orgadmin@mdrrmo.bocaue.gov.ph` or `admin@agap.local`: open **Administration → ID Reviews**, open a pending
+   check, Show ID image, then approve or reject.
+   - The citizen gets the push and SMS.
+   - The image then shows as deleted.
+   - The Audit Log shows `ID_IMAGE_VIEWED` and the decision.
+   - As `orgadmin@bfp.bocaue.gov.ph`, the link isn't shown and the URL shows "Only MDRRMO administrators…".
+   - A pending check needs the phone's mismatch → review path (the open Phase 3 phone check), or a review scan.
+
+### Review — 2026-11-06 (Phase 4)
+
+Prompt R on the uncommitted changes, in a new chat. Prompt 4 steps 1–5 are all present; no new dependencies; each route, audit
+action and label is defined once.
+
+**Fixed (3)**
+1. **The image route could serve an image after its retention ended.** `openImage` checked only for a stored key, so while a failed
+   delete waited for the cleanup job, an image stayed viewable after a decision, or after an auto-match. It now returns 410
+   unless the check is `PENDING_REVIEW`, and the queue's `hasImage` follows the same rule. 2 new tests.
+2. **A failed read after the commit lost the notification.** `decide()` read the image key after the transaction, outside any
+   `try`. A database error there returned 500 for a decision that had saved, and the citizen was never told. The key is now read
+   inside the transaction, so that failure rolls the decision back. 1 new test.
+3. **"Show ID image" (`useIdImage`).**
+   - After a failed load the button did nothing, because the query was already enabled.
+   - Hide then Show redisplayed the cached image with no request, so that view wasn't audited (rule 11).
+   - Each Show is now a new audited request, and Hide drops the image from memory.
+   - **Not covered by a unit test:** the frontend's Jest runs in Node with no DOM or testing library, and adding one needs approval.
+     Typecheck only; confirm in the web test.
+
+**Otherwise no defects**
+- **Queues:** both job shapes match the real SMS and notification processors, and in-app rows use the feed's existing fallback.
+- **Access:** checked against the real `JwtStrategy` user and `canOpen`. The permission tables are read by no guard, so skipping
+  a permission row was right.
+- **Privacy:** the queue returns no card data; audit rows carry the actor, the id and at most a reason code; messages carry no names.
+- **Rules:** an account under review signs in as usual, and nothing reads `identity_verified_at` for dispatch.
+- **Tests:** they assert stored rows, deleted files and response contents. Two earlier assertion changes extend, not loosen.
+
+**What the dev database shows (read-only, statuses and timestamps only; local time, 2026-11-05)**
+- 18:52: a citizen account was created with `PENDING_REVIEW`, reason "first name doesn't match", scan attempt 4.
+- 18:53:03: an MDRRMO Org Administrator opened the image; `ID_IMAGE_VIEWED` was written.
+- 18:53:21: rejected with `NAME_MISMATCH`, audited, the image deleted, and the push row marked delivered.
+
+So the mismatch → review path and the reject path appear to have run for real, just before the 18:55 handoff that called them
+untested. The screens and the SMS can't be confirmed from the database, so no §10 box was ticked on this evidence.
+
+**Test data retired (approved by the owner, 2026-11-06):** the first test citizen account, using the same steps as
+`AdministrationService.deactivate()`. It is `DEACTIVATED`, with a placeholder email, no phone number, its session revoked and its
+push token removed; the audit trigger stayed on. It had no `identity_verifications` row left (removed earlier, with no audit
+entry), and the card was already free. The second test account was not touched.
+
+**Open**
+1. **The approve path hasn't run live.** That is the rest of the Phase 4 "done when". "Citizen sees Verified" also needs the Phase 5
+   status row; until then the push and SMS are the only signal.
+2. **Check the BFP Org Administrator on the web:** no link, and the page shows the MDRRMO-only message.
+3. From the Phase 4 section: approve/reject need no step-up, and an admin whose first organization isn't MDRRMO won't see the link.
+4. **The SMS processor logs phone numbers** (existing behaviour for all SMS). This keeps the §10 "logs contain no…" box honest only
+   for PIN, OCR text and card name, not for the phone number.
+
+**Tests, final**
+- Backend 1682 → **1690**: 1631, plus `auth-phase3` alone 59 (3 new here, 5 new in the Phase 1 review).
+- Frontend 186, mobile 205, unchanged.
+- Typecheck clean in all four packages. `test:e2e:db` + `test:e2e` 1/1. `migrate status` up to date.
+
+### Follow-up — 2026-11-06 (decisions from the Phase 2 review)
+
+The owner asked for what actually solves each problem, checked first. See §11 D4–D7 and §5.2a.
+
+**What the checks changed**
+- **Separate bucket: dropped, reversing the review's recommendation.** Anonymous read and list return 403 on dev storage, and the
+  objects are sealed. Production settings couldn't be checked from here, so D7 records a deployment rule instead.
+- **Consent withdrawal: more work than the review said.** Privacy & Consent only offered medical consent, so a citizen couldn't
+  reach it at all. It needed a button, not just backend logic.
+- **Releasing a card: built now, not after the defense.** Nothing else fixes a lockout.
+
+**Migration:** `20261106090000_identity_verification_release`, **applied** to the dev and E2E databases. It adds the status
+`RELEASED` and the audit actions `ID_CARD_LOOKUP` and `IDENTITY_VERIFICATION_RELEASED`. **No new dependencies.**
+
+**Backend**
+- `identity-verification.service.ts`:
+  - `releaseInTransaction`: the single way a claim ends.
+  - `deleteReleasedImages`, `withdrawConsent`, `releaseUnverifiedClaims`.
+  - `cleanup` also erases the data of expired scans, including rows that expired before this rule.
+- `identity-verification-review.service.ts`: `findCardHolder`, `releaseCard`. The controller and DTOs add the two routes in §7.
+- `id-review-notifier.ts`: the `RELEASED` message. `identity-verification.processor.ts`: releases first, then cleans up.
+- `consent.service.ts`: withdrawing this consent type goes through `withdrawConsent`. Other types are unchanged. `consent.module.ts` imports the module.
+
+**Frontend:** `components/admin/IdCardRelease.tsx` on the ID Reviews page, plus API, hooks and labels. The typed number is cleared
+once used and isn't kept in the mutation cache.
+
+**Mobile**
+- `profile/privacy.tsx`: a "PhilHealth ID Check" card, shown only while the consent is active, with a confirmation that says what
+  is erased and that SOS still works. English only, like the rest of that screen.
+- `PhilHealthIdStep.tsx`: a call button on the already-linked screen.
+- `translations.ts`: the already-linked message now tells the owner to call MDRRMO, in `en` and `fil`, with the number from `hotlines.ts`.
+- JavaScript only: no new dev build is needed.
+
+**Tests**
+- New: `id-release.spec.ts` (12) and additions to `id-review.spec.ts` (8) and `id-cleanup-and-ocr.spec.ts` (2), all written before the code.
+- New: `test/identity-verification-release.e2e-spec.ts` (6), against **real PostgreSQL** through the real `PrismaService`: the partial
+  index, the relation filter, enum values, rollback and date comparison.
+- New frontend tests: `cardHolderNotes` and the labels (4).
+- **Not tested:** `IdCardRelease.tsx` and the privacy card have no component tests, because neither package's setup covers them without
+  new dependencies. Typecheck only. Check them by hand.
+- **Counts, final:**
+  - Backend 1690 → **1712**: 1653, plus `auth-phase3` alone 59.
+  - Frontend 186 → **190**. Mobile 205.
+  - `test:e2e` 2 suites, **7/7**. Typecheck clean in all four packages. `migrate status` up to date.
+- **One flaky run.** The first full run failed 1 test in `auth-phase2.spec.ts` (the bcrypt password-suffix test) and 3 in `auth-phase3.spec.ts`.
+  Both passed alone (9/9, 59/59), and the full suite then passed 1653/1653 with no code change. `auth-phase3` is a known load timeout. The
+  `auth-phase2` failure looks like the same thing, but its error wasn't captured, so that cause is likely, not proven.
+
+**Decisions for review**
+- **A release frees the card, so one card can verify a new account after withdrawing from an old one.** At most one account is verified
+  per card at a time, which is the rule that matters. The old account loses its status and its audit trail stays.
+- **A `REJECTED` row keeps its card data** until the citizen withdraws or staff release. The rejection may be evidence (`SUSPECTED_FRAUD`).
+- **24 hours is a judgement call:** long enough for a slow SMS, short enough that an owner isn't stuck for long. A citizen released this
+  way only loses the label, and can scan again.
+- **"Scan again" arrives in Phase 5.** Until then, a released citizen is told to scan again but has no screen to do it from.
+  The in-app feed has no special handling for the new notification type and uses its default icon.
+
+**Needs a person**
+1. Restart the backend (new routes, new Prisma client) and `pnpm dev` (`shared/dist` rebuilt). Reload the app in Metro.
+2. Web, as an MDRRMO org admin: ID Reviews → type a card's number → Find account → pick a reason → Release card. Then check the Audit Log.
+   A long-signed-in session should get the step-up prompt first.
+3. Phone: Profile → Privacy & Consent → PhilHealth ID Check → Withdraw. Scanning a card already linked should show the MDRRMO message and call button.
+
 ---
 
 ## 10. Test checklist
@@ -779,12 +1166,16 @@ It's a native module, so the dev client must be rebuilt (it already had to be).
 - [x] Token older than 30 minutes → `ID_SCAN_EXPIRED`. The image is deleted by the job.
 - [x] A modified client sending matching `clientText` with an image of something else → not verified (server reads the image).
 - [ ] Logs, Sentry and SMS contain no PIN, no OCR text, no name from the ID.
-- [ ] Admin image view writes an audit row. A dispatcher cannot open the review page or the image route (403).
+- [x] Admin image view writes an audit row. A dispatcher cannot open the review page or the image route (403).
 - [ ] Phone without Google Play services → fallback camera works.
 - [ ] Seeded citizen account signs in and sends an SOS as before.
 - [x] Matched registration → the stored image is gone right after (`image_storage_key` null, file deleted).
-- [ ] Review approved or rejected → image deleted; the image route then returns 410.
+- [x] Review approved or rejected → image deleted; the image route then returns 410.
 - [x] Storage delete fails → registration still succeeds; the next job run deletes the image.
+- [x] Unclaimed scan expires → its name, PIN hash and last 4 digits are erased.
+- [x] Withdrawing consent → card data erased, account not verified, card free again; the account isn't blocked. *(Tests; the Privacy & Consent button still needs a phone.)*
+- [x] Account never confirms its phone → claim released after 24 hours. Suspended and deactivated accounts keep theirs.
+- [x] Staff look up a card by its number and release it → audited without the number, holder un-verified, card free again. *(Tests; the page still needs a web check.)*
 
 ---
 
@@ -797,6 +1188,10 @@ It's a native module, so the dev client must be rebuilt (it already had to be).
 | D1 | Must existing citizen accounts verify? | **Yes, every citizen account goes through the scan.** No banner, no grandfathering. Seeded demo citizens are pre-verified. | The database is reset before the defense, so there are no real existing accounts. |
 | D2 | How long is the ID image kept? | **Only while needed:** deleted right after a matched registration, when a review is decided, or 30 minutes after an unclaimed scan (§5.2a). | Data Privacy Act proportionality: collect and keep only what the purpose needs. Less stored, less to secure, a clear answer for the panel. |
 | D3 | Local or cloud card reading? | **Local `tesseract.js` on the AGAP server.** No cloud OCR. | No third-party transfer of a government ID; free; works offline on the demo laptop. |
+| D4 (2026-11-06) | Do abandoned scans keep their data? | **No.** The cleanup job erases the name and PIN data once a scan expires. | Nobody registered, so nothing needs it and no consent record covers it. |
+| D5 (2026-11-06) | What does withdrawing consent do? | **Erases the card data and marks the account not verified.** The account stays usable; scanning again verifies it again. A button in Privacy & Consent makes this reachable. | RA 10173: withdrawal has to mean something, and a citizen needs a way to do it. Getting help never depends on it (rule 14). |
+| D6 (2026-11-06) | How does a card's owner get it back? | **Unconfirmed phone: released automatically after 24 hours. Any other account: staff look at the card, find the holder by its number, and release it.** Blocked accounts are never released automatically. | Without this, whoever scans a card first can lock its owner out for good, and only a database edit could fix it. |
+| D7 (2026-11-06) | Do ID images need their own bucket? | **No.** They stay under `id-documents/` in the same bucket. **Deployment rule: keep that bucket private** (noted in `.env.example`). | Checked: anonymous read and list both return 403 on the dev storage, objects are AES-sealed with a key kept outside storage, and incident photos and announcement images already stream through the API, so nothing needs the bucket public. A second bucket would use the same credentials, so it adds setup and a failure mode and closes no hole. Production storage settings couldn't be checked from here. |
 
 ### Still open (recommended answer in brackets)
 

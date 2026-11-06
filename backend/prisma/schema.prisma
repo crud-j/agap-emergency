@@ -1928,6 +1928,11 @@ enum audit_action {
   MFA_CHANGE
   SESSION_REVOKED
   IDENTITY_VERIFICATION_CLAIMED
+  ID_IMAGE_VIEWED
+  IDENTITY_VERIFICATION_APPROVED
+  IDENTITY_VERIFICATION_REJECTED
+  ID_CARD_LOOKUP
+  IDENTITY_VERIFICATION_RELEASED
 }
 
 enum breathing_status {
@@ -2288,6 +2293,8 @@ enum identity_verification_status {
   PENDING_REVIEW
   APPROVED
   REJECTED
-  /// Never claimed by a registration within 30 minutes.
+  /// Never claimed by a registration within 30 minutes. Its name and PIN data are erased.
   EXPIRED
+  /// The claim ended: consent withdrawn, phone never confirmed, or staff released the card. Card data erased.
+  RELEASED
 }

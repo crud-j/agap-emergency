@@ -278,6 +278,17 @@ pnpm --filter @agap/frontend dev &
 pnpm --filter @agap/mobile start
 ```
 
+
+cd C:\Users\Zionne\Music\agap-emergency\backend
+
+# 1. Reset: drops every table and rebuilds them from the migrations in prisma/migrations
+pnpm prisma migrate reset
+
+# 2. Seed: this Prisma version doesn't run it automatically after a reset
+pnpm prisma db seed
+
+
+
 ---
 
 ## Testing

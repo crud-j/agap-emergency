@@ -9,6 +9,8 @@ export interface AuthUser {
   role: string;
   orgId?: string | undefined;
   orgName?: string | undefined;
+  /** e.g. MDRRMO. Navigation only; the API checks access itself. */
+  orgType?: string | undefined;
   name?: string | undefined;
   mustChangePassword: boolean;
 }
@@ -23,6 +25,7 @@ export function getAuthUser(): AuthUser | null {
     role: user.role,
     orgId: user.orgId ?? undefined,
     orgName: user.orgName ?? undefined,
+    orgType: user.orgType ?? undefined,
     name: user.name,
     mustChangePassword: user.mustChangePassword,
   };

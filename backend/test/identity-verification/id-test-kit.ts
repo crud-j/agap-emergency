@@ -113,6 +113,19 @@ export function makeDb() {
     return result;
   });
 
+  // The relation filter on the account: `where: { user: { ... } }`.
+  const plainFindMany = idv.findMany.getMockImplementation()!;
+  idv.findMany.mockImplementation(async (args: any = {}) => {
+    const { user, ...where } = args.where ?? {};
+    if (!user) return plainFindMany(args);
+    const accountMatches = (row: Row) => {
+      const account = db.users.find((u) => u.id === row.user_id);
+      return !!account && matches(account, user);
+    };
+    const ids = db.idv.filter((row) => matches(row, where) && accountMatches(row)).map((row) => row.id);
+    return plainFindMany({ ...args, where: { id: { in: ids } } });
+  });
+
   const prisma: any = {
     db,
     user: fakeTable(db.users, () => ({ role: 'CITIZEN', is_guest: false })),

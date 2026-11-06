@@ -120,6 +120,7 @@ From `CLAUDE.md` and the plan §1:
 | Q1 | Reviewers: System Administrator, and Org Administrators of the MDRRMO organization only. |
 | Q2 | Minors: no special handling in this plan. |
 | Q3 | Phones without Google Play services: fallback `expo-camera` capture; review if it still fails. |
+| D4–D7 | 2026-11-06, in the plan's §11: expired scans lose their card data; withdrawing consent erases it and un-verifies the account; unconfirmed-phone claims release after 24 hours and staff can release any card; ID images stay in the same private bucket. |
 
 ---
 
@@ -399,10 +400,13 @@ query that returns reporter info for that view, mobile/app/profile/, backend/pri
 2. Frontend: show "ID verified" / "ID not verified" on the reporter card only, styled as neutral
    information (not a warning colour that suggests lower priority). Never on the patient.
    Confirm nothing in priority, recommendations or dispatch reads this field.
-3. Mobile profile: a status row (Verified / Under review / Not approved → Scan again). "Scan again"
+3. Mobile profile: a status row (Verified / Under review / Not approved or no longer verified →
+   Scan again). A RELEASED or REJECTED latest row, or no row, means "Scan again". "Scan again"
    reuses PhilHealthIdStep with a backend route for an existing signed-in account to submit a
-   rescan (reuse the Phase 2 service; same rules, the claim goes straight to the signed-in user).
-4. Seed: seeded CITIZEN accounts get identity_verified_at and a claimed AUTO_VERIFIED row with no
+   rescan (reuse the Phase 2 service; same rules, the claim goes straight to the signed-in user,
+   and it records a new consent, since the old one may be withdrawn).
+4. Seed: seeded CITIZEN accounts get identity_verified_at, is_phone_verified = true (the cleanup
+   job releases claims of unconfirmed phones after 24 hours) and a claimed AUTO_VERIFIED row with no
    image, clearly fake PINs (pin_hmac computed from values like 00-000000001-0 using the pepper
    from the environment; if the pepper is unset in seed context, skip these rows and log one
    line). Upserts only, so running the seed twice creates no duplicates.

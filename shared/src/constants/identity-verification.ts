@@ -46,3 +46,68 @@ export interface IdScanResponse {
    */
   reviewRequired: boolean;
 }
+
+// ─── Staff review (plan §7) ──────────────────────────────────────────────────
+
+/** Why staff rejected an ID under review: fixed codes, never free text with personal data. */
+export const ID_REJECTION_REASONS = ['NOT_PHILHEALTH', 'NAME_MISMATCH', 'UNREADABLE', 'SUSPECTED_FRAUD'] as const;
+export type IdRejectionReason = (typeof ID_REJECTION_REASONS)[number];
+
+/** Statuses the review queue lists. */
+export const ID_REVIEW_STATUSES = ['PENDING_REVIEW', 'APPROVED', 'REJECTED'] as const;
+export type IdReviewStatus = (typeof ID_REVIEW_STATUSES)[number];
+
+export type IdNamePart = 'last' | 'first' | 'middle' | 'suffix';
+
+/**
+ * Why an ID went to staff: the typed name didn't match the card (which parts), or the server
+ * couldn't use the card at all (review scan). No names, no PIN.
+ */
+export type IdReviewReason =
+  | { kind: 'NAME_MISMATCH'; failedParts: IdNamePart[] }
+  | { kind: 'SCAN_FAILURE'; code: IdVerificationErrorCode.UNREADABLE | IdVerificationErrorCode.NOT_PHILHEALTH_ID }
+  | { kind: 'UNKNOWN' };
+
+/** One row of GET /administration/id-verifications. No image, no PIN, no name read from the card. */
+export interface IdReviewItem {
+  id: string;
+  status: IdReviewStatus;
+  /** When the citizen scanned the ID (ISO). */
+  submittedAt: string;
+  attemptNumber: number;
+  /** The account as the citizen created it; `name` is the name they typed. */
+  account: { id: string; name: string; phoneNumber: string | null };
+  reason: IdReviewReason;
+  /** The image can be opened: the check is pending and its image is stored (plan §5.2a). */
+  hasImage: boolean;
+  reviewedAt: string | null;
+  reviewedByName: string | null;
+  rejectionReason: IdRejectionReason | null;
+}
+
+/** Why staff released a card from the account holding it: fixed codes, never free text. */
+export const ID_CARD_RELEASE_REASONS = ['OWNER_DISPUTE', 'ACCOUNT_CLOSED', 'STAFF_CORRECTION'] as const;
+export type IdCardReleaseReason = (typeof ID_CARD_RELEASE_REASONS)[number];
+
+/** POST /administration/id-verifications/find-by-pin: the account holding a card. Never the number. */
+export interface IdCardHolder {
+  id: string;
+  status: 'AUTO_VERIFIED' | 'PENDING_REVIEW' | 'APPROVED';
+  submittedAt: string;
+  account: { id: string; name: string; phoneNumber: string | null; status: string; phoneVerified: boolean };
+}
+
+/** POST /administration/id-verifications/:id/release. */
+export interface IdCardReleaseResult {
+  id: string;
+  /** false: the delete failed and the cleanup job will retry it. */
+  imageDeleted: boolean;
+}
+
+/** POST /administration/id-verifications/:id/approve | reject. */
+export interface IdReviewDecisionResult {
+  id: string;
+  status: 'APPROVED' | 'REJECTED';
+  /** false: the delete failed and the cleanup job will retry it. */
+  imageDeleted: boolean;
+}

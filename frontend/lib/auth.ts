@@ -14,6 +14,8 @@ export interface SessionUser {
   name: string;
   orgId: string | null;
   orgName: string | null;
+  /** That organization's type (e.g. MDRRMO). Absent from sessions issued before it was added. */
+  orgType?: string | null;
   mustChangePassword: boolean;
 }
 
