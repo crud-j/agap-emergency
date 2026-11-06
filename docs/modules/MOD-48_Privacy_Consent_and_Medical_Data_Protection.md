@@ -14,8 +14,8 @@
 -   **Module Name:** Privacy, Consent and Medical Data Protection
 -   **Module ID:** MOD-48
 -   **Version:** 1.0
--   **Date Created / Updated:** September 8, 2026 / initial detailed
-    specification
+-   **Date Created / Updated:** September 8, 2026 / November 6, 2026
+    (PhilHealth ID data, section 21)
 -   **Module Owner:** AGAP product and operations team, with operational
     ownership assigned by the adopting MDRRMO/LGU or participating
     organization
@@ -387,3 +387,95 @@ retain/delete under policy.
     offline/failure-path tests pass.
 
 ------------------------------------------------------------------------
+
+---
+
+## 21. PhilHealth ID Data
+
+Registration reads a citizen's PhilHealth ID (MOD-01, section 22). A government-issued ID number is *sensitive personal information* under the Data Privacy Act (RA 10173, Sec. 3(l)). It needs explicit consent, encryption at rest, least-privilege access and an audit trail. Full design: `docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md`, §5.2a and §11.
+
+### What is read, and why
+
+| Read from the card | Why | How it is stored |
+|---|---|---|
+| Name | So the account's name matches the ID | AES-256-GCM sealed (`name_on_id_sealed`) |
+| PhilHealth number (PIN) | So each card holds only one account | Never in full: an HMAC (`pin_hmac`) and the last 4 digits (`pin_last4`) |
+| Image of the card | So the server can read it, and staff can review unclear cases | AES-256-GCM sealed, under `id-documents/` in private storage |
+
+The date of birth, address and photo on the card are not extracted or stored. Reading happens on AGAP's own server with local `tesseract.js`, and no cloud OCR service receives the card. The text the OCR returns is not saved.
+
+### Consent
+
+- The citizen must tick the consent box on the ID intro before scanning, and the server refuses a scan without it (`CONSENT_REQUIRED`).
+- The `consent_records` row (type `ID_VERIFICATION_PHILHEALTH`) is written at registration, because the record needs an account to belong to. A scan that never becomes an account has no record, and its data is erased at 30 minutes.
+- This consent is separate from medical consent.
+- The seeded demo citizen has no consent record, so it has no Withdraw card.
+
+### When the data is deleted
+
+**The image is kept only while something still needs it.**
+
+| Situation | When the image is deleted |
+|---|---|
+| Name matched at registration | Right after the registration transaction commits |
+| Sent for staff review | When staff approve or reject |
+| Scanned but never registered | When the claim expires, 30 minutes after the scan |
+
+A failed delete never fails the registration or the review. The key stays on the row and the cleanup job retries every 10 minutes.
+
+**The name and PIN data stay for as long as the account holds the card, and are erased here:**
+
+| Situation | What happens | Status |
+|---|---|---|
+| Scan never claimed | The cleanup job erases the data when the claim expires | `EXPIRED` |
+| Citizen withdraws consent | Erased at once, with any image. The account shows "Not verified" until the citizen scans again | `RELEASED` |
+| Account never confirmed its phone, 24 hours after the scan | The cleanup job releases the claim, so nobody can hold a card using a number they don't control | `RELEASED` |
+| Staff release the card | Erased at once. The holder is told to scan again | `RELEASED` |
+
+A release never blocks the account: it can still sign in and send an SOS. Suspended and deactivated accounts keep their claim unless staff release it, so waiting can't undo a ban. A `REJECTED` row keeps its card data until the citizen withdraws or staff release it, because a rejection may be evidence (`SUSPECTED_FRAUD`).
+
+### Withdrawing consent
+
+**Profile → Privacy & Data → PhilHealth ID Check → Withdraw Consent.** The screen says what will be erased and that SOS still works. The account stays usable, and scanning again verifies it again.
+
+### Who can see what
+
+| Who | Sees |
+|---|---|
+| The citizen | Their own name as read and the last 4 digits, only while registering or scanning again |
+| Reviewers: System Administrator, MDRRMO Org Administrator | The queue: typed name, phone, submitted time, scan count, reason. The image only on request |
+| Dispatcher, Supervisor, System Administrator, Org Administrator (any organization) | Only the "ID verified" or "ID not verified" label on a citizen reporter, through the incident record. The console shows it on the incident drawer |
+| Responders, Hospital Users, reporters | Nothing |
+
+**Staff routes**, under `/v1/administration/id-verifications`:
+
+| Route | Does | Audit action |
+|---|---|---|
+| `GET /` | The queue. No image, no PIN, no card name | None |
+| `GET /:id/image` | Streams the image with `Cache-Control: no-store`. 410 once it is deleted. If the audit write fails, the image is not shown | `ID_IMAGE_VIEWED`, every view |
+| `POST /:id/approve` | Approves, then deletes the image | `IDENTITY_VERIFICATION_APPROVED` |
+| `POST /:id/reject` | Rejects with a fixed reason code, then deletes the image | `IDENTITY_VERIFICATION_REJECTED` |
+| `POST /find-by-pin` | Staff type the number from the card in front of them. Compares only the HMAC and returns the account, never the number | `ID_CARD_LOOKUP`, found or not, without the number |
+| `POST /:id/release` | Erases the card data and marks the account not verified. Needs a recent sign-in | `IDENTITY_VERIFICATION_RELEASED` |
+
+Registration writes `IDENTITY_VERIFICATION_CLAIMED`, with the outcome and user id only. A withdrawal writes `IDENTITY_VERIFICATION_RELEASED`.
+
+### Never
+
+The full PIN, the OCR text, the name read from the card and the image never go into a log line, an audit entry, a WebSocket payload, a notification or an SMS. The API returns only `nameOnId` and `pinLast4`, and only from the scan endpoint. The citizen's SMS and push say only that the check was approved, not approved or removed.
+
+`backend/test/emergency-flow-id-required.e2e-spec.ts` checks this against every log line and queued job while citizens register, both matched and sent for review. Staff decisions, lookups, releases and withdrawals are not part of that run; `id-review.spec.ts` checks the exact SMS and push texts of a decision.
+
+### Operating rules
+
+- **Keep the storage bucket private.** ID images share it with incident media, sealed with a key kept outside storage. Anonymous read and list were checked on the development storage only; check production when it is set up.
+- **Back up `ID_DOCUMENT_ENCRYPTION_KEY`.** Losing it makes the stored names and any images awaiting review unreadable.
+- **Don't change `ID_PIN_PEPPER`.** Changing it breaks the one-ID-per-account check for every existing account.
+
+### Open items
+
+These need a decision by a person. They are not settled by this document.
+
+1. **There is no privacy policy or terms page.** On the registration form, "Terms of Service" and "Privacy Policy" are styled text with no link and no page behind them, and the agree box starts ticked. The form also says information is used "only for emergency response", which does not cover the ID check. The ID intro screen and the Privacy & Data screen do explain what is read, why and when it is deleted.
+2. **Legal wording has not been confirmed as reviewed.** Module Boundary (section 3) still applies: exact legal and retention requirements must be confirmed with the adopting organization. The plan asks for the adviser to review the consent text; that review is not recorded yet.
+3. **Minors** (a dependent under 18 with their own PhilHealth ID) are outside this work.

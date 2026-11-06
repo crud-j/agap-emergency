@@ -1,7 +1,7 @@
 # AGAP — Operational User Accounts (non-citizen)
 
 Seeded staff/operational accounts for the **Operations Center (web)** and **Responder (mobile)** apps.
-Citizen/guest reporter accounts are intentionally excluded.
+Citizen and guest reporter accounts are excluded, except the seeded demo citizen ([below](#seeded-citizen-pre-verified)).
 
 - **Source of truth:** `backend/prisma/seed/seed.ts` — (re)create with `cd backend && pnpm prisma db seed`.
 - **Operator context:** Bocaue MDRRMO / LGU Operations Center, Bocaue, Bulacan.
@@ -66,11 +66,11 @@ All accounts are `PENDING_VERIFICATION` in the database. That is expected (`auth
 
 | Role | Sidebar pages |
 |---|---|
-| **System Administrator** | Dashboard · Organizations · Fleet & Units · Hospitals & Facilities · Users & Accounts · Roles & Permissions · Barangay Directory · Audit Log · Security Events · Integrations · Configuration |
+| **System Administrator** | Dashboard · Organizations · Fleet & Units · Hospitals & Facilities · Users & Accounts · Roles & Permissions · Barangay Directory · ID Reviews · Audit Log · Security Events · Integrations · Configuration |
 | **Supervisor** | Dashboard · Incident Queue · Live Map · Triage · Dispatch · Escalations · Activity Log · Command / ICS · Multi-Agency · Surge Mode · Fleet & Units · Hospitals & Facilities · Analytics · Risk Map · Approvals · Incident History |
 | **Dispatcher** | Dashboard · Incident Queue · Live Map · Triage · Dispatch · Multi-Agency · Fleet & Units · Hospitals & Facilities · Incident History |
 | **Announcements Publisher** | Dashboard · Announcements · Publication History (plus *Create announcement*) |
-| **Org Administrator** | Dashboard · Organizations · Fleet & Units · Requests · Barangay Directory |
+| **Org Administrator** | Dashboard · Organizations · Fleet & Units · Requests · Barangay Directory · ID Reviews (MDRRMO only) |
 | **Hospital User** | Hospital Portal only (`/hospitals`) |
 
 ### Accounts with no website access
@@ -141,7 +141,22 @@ hospital user +639171234007, publisher +639171234008, org admin +639171234009.
 | Role | Why no seed account | How to create |
 |---|---|---|
 | **Bystander** (`BYSTANDER`) | Guest reporter — submits an emergency with **no account** (Rule 14) | n/a (guest path) |
-| **Citizen** (`CITIZEN`) | Excluded here by request | Self-registration in the mobile app |
+| **Citizen** (`CITIZEN`) | One demo account only ([below](#seeded-citizen-pre-verified)) | Self-registration in the mobile app, with a PhilHealth ID scan |
+
+---
+
+## Seeded citizen (pre-verified)
+
+| Name | Email (login) | Phone | Password | Signs in on |
+|---|---|---|---|---|
+| Demo Citizen | `citizen@demo.agap` | +639170000001 | `AgapDev2026!` | Mobile |
+
+New citizens must scan a PhilHealth ID to create an account (`ID_VERIFICATION_REQUIRED=true`). **Seeded citizens skip that:** they are pre-verified, so demos and test flows work without a card.
+
+- The account has `identity_verified_at` and `is_phone_verified` set, and a claimed `AUTO_VERIFIED` scan row with a clearly fake PIN (`00-000000001-0`) and no image. Its profile shows **Verified**, and its reports show **ID verified** on the dispatch console.
+- The scan row is written only when `ID_PIN_PEPPER` is set at seed time. Without it, the seed prints a notice and skips the row, and the account is still marked verified.
+- It has no consent record, so **Privacy & Data** shows no Withdraw card. Use a registered account to test withdrawal.
+- `bystander@demo.agap` is not a citizen, so it can't scan and its reports show no ID label.
 
 ---
 

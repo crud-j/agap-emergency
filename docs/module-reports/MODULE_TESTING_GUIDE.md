@@ -56,6 +56,8 @@ cd mobile && npx expo start -c             # Mobile (Expo Go / dev build / emula
 
 **GPS:** guest reports and registration only work **inside Bocaue**. On an emulator, set a mock location such as `14.7950, 120.9300`.
 
+**PhilHealth ID check:** on by default. `.env.example` sets `ID_VERIFICATION_REQUIRED=true`, and the backend refuses to start until `ID_DOCUMENT_ENCRYPTION_KEY` and `ID_PIN_PEPPER` are set. Generate each one, with a different value for each: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. Creating a citizen account then needs a PhilHealth ID and a dev build (Expo Go can't run the scanner). Guest reports need neither. Test cases: §7.
+
 **SMS (Textbee):** optional. Without `TEXTBEE_API_KEY` / `TEXTBEE_DEVICE_ID`, SMS jobs are skipped and **OTP codes are printed in the backend console** (`[DEV] Registration OTP …`). Steps that need a real SMS are marked *(Needs Textbee)*.
 
 **API-only checks (🔌):** some checks have no screen. Open Swagger at `http://localhost:3000/api`, call `POST /v1/auth/login` with the account (the body field is `identifier`, not `email`), copy the access token, click **Authorize**, then call the endpoint. Paths are `/v1/...` (no `/api` prefix).
@@ -91,6 +93,7 @@ Password for every account: **`AgapDev2026!`**. The admin uses `INITIAL_ADMIN_PA
 
 **Notes**
 - The **same mobile app** serves citizens and responders. After sign-in, a Responder lands on the Responder **Home**; everyone else lands on the citizen **Home**. On the sign-in screen, tap **Email** to use the emails above, or stay on **Mobile** and use the phone number.
+- `citizen@demo.agap` is **pre-verified**: it never scans a PhilHealth ID, and its profile shows **Verified**.
 - **Use two browsers** (for example Chrome and an Edge or Incognito window) to stay signed in as two roles at once. Many live-update checks need this.
 - Only one Supervisor is seeded. MOD-43 needs a second one: as admin, **Users & Accounts → Change role** on dispatcher2.
 
@@ -134,6 +137,7 @@ Each sidebar page, its address, and who sees it. A role that doesn't see a page 
 | Users & Accounts | `/administration/users` | System Administrator |
 | Roles & Permissions | `/administration/permissions` | System Administrator |
 | Barangay Directory | `/administration/barangays` | Org Administrator, System Administrator |
+| ID Reviews | `/administration/id-reviews` | MDRRMO Org Administrator, System Administrator |
 | Risk Areas | `/administration/risk-areas` | System Administrator |
 | Security Events | `/administration/security` | System Administrator |
 | Integrations | `/administration/integrations` | System Administrator |
@@ -198,9 +202,9 @@ Run this once first. Most of the per-module checks below reuse it.
 **Purpose:** Lets a resident create an AGAP account with a verified phone number, sign in and recover access, so their reports carry a known identity.
 **Sign in as:** a new phone number (to register), then `citizen@demo.agap`
 **Go to:** 📱 sign-in screen → **Create Account** · **Forgot password?** · **Profile → Language**
-**Before you start:** be inside Bocaue (or set a mock location there). Without Textbee, the OTP is in the backend console.
+**Before you start:** be inside Bocaue (or set a mock location there). Have a PhilHealth ID and a dev build. Without Textbee, the OTP is in the backend console.
 
-1. 📱 **Create Account**: register a new account, enter the OTP, and confirm you land on **Home**.
+1. 📱 **Create Account**: scan your PhilHealth ID, type your name as printed on it, register, enter the OTP, and confirm you land on **Home**. The other ID checks are in §7.
 2. 📱 Register again with the same number. It is refused.
 3. 📱 Enter a wrong or expired OTP. It is refused.
 4. 📱 Sign in with the password. Sign out (**Profile** → bottom), then sign in with **Send me an SMS code instead**.
@@ -717,6 +721,7 @@ How it works: 30 s after an incident is sent, the system checks whether it moved
 1. 📱 The **Medical Data Consent** toggle, **Access Log** and **Export My Data** are all there and work.
 2. 🗄️ The `medical_profiles` values start with `v1.`. Compare with the readable values in the app.
 3. 📱 Withdraw consent. **Medical Profile** (MOD-03) locks immediately.
+4. 📱 On an account registered with a real scan, **PhilHealth ID Check → Withdraw Consent**: see PH-17 in §7. The seeded citizen has no such card.
 
 #### MOD-48 System Administration and Account Management · 🖥️ + 🔌
 **Purpose:** The System Administrator's tools: manage accounts and roles, check system health, and change configuration safely.
@@ -859,3 +864,154 @@ These are things the reports describe that you **cannot** fully test from a scre
 | MOD-40 | The Escalations page's message mentions the System Administrator, but only the Supervisor can open the page. |
 | Seed | Only one Supervisor. MOD-43 needs a second one (promote dispatcher2). |
 | MOD-06 / 09 | The citizen app has no "Medical" incident type (Road incident, Fire, Natural disaster only). |
+| MOD-01 / 47 | "Terms of Service" and "Privacy Policy" on the registration form are plain text with no page behind them, and the agree box starts ticked. |
+
+---
+
+## 7. PhilHealth ID verification test cases
+
+These are the checks from §10 of `docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md`, plus the two screens added after it (PH-20, PH-21). In this guide's numbering the feature belongs to MOD-01 and MOD-47. Module specifications: `docs/modules/MOD-01_*` section 22 and `docs/modules/MOD-48_*` section 21.
+
+**Before you start**
+- **Phone:** an Expo dev build (EAS `development`). Expo Go can't run the scanner. Be inside Bocaue.
+- **Backend:** `ID_VERIFICATION_REQUIRED=true`, with `ID_DOCUMENT_ENCRYPTION_KEY` and `ID_PIN_PEPPER` set (§0).
+- **Cards:** use team members' own PhilHealth IDs, with their written consent. Don't take screenshots of a card, and don't paste a name or number into chat or a file.
+- **A used card stays taken** while its account holds it. To free it: **Privacy & Data → Withdraw Consent** on that account, or PH-19.
+- **Reports:** when Textbee is configured, every test report texts the ops phone.
+
+"Automated" means an automated test covers it. **A hand check is still needed wherever the table says so**, because the screens have no component tests.
+
+| Case | What | Surface | Automated | Hand check | Result |
+|---|---|---|---|---|---|
+| PH-01 | Guest report from every ID step | 📱 🖥️ | API path only | **Yes** | |
+| PH-02 | A card that isn't a PhilHealth ID | 📱 | Server and message | **Yes** | |
+| PH-03 | Blurred scan, third failure offers review | 📱 | Stubbed OCR and rules | **Yes** | |
+| PH-04 | Typed name matches | 📱 🗄️ | Yes | Passed 2026-11-05 | |
+| PH-05 | Typed name differs | 📱 🔌 | Yes | **Yes** (the button) | |
+| PH-06 | Same card, second phone number | 📱 | Yes | Optional | |
+| PH-07 | Scan older than 30 minutes | 📱 🗄️ | Yes | Optional | |
+| PH-08 | Modified client sends matching text | 🔌 | Yes | Optional | |
+| PH-09 | No card data in logs, SMS or jobs | 🖥️ | Backend, registering | **Yes** (real SMS) | |
+| PH-10 | Image view audited, dispatcher refused | 🖥️ 🔌 | Yes | **Yes** (the page) | |
+| PH-11 | Phone without Google Play services | 📱 | No | **Yes** | |
+| PH-12 | Seeded citizen signs in and reports | 📱 🖥️ | API path | **Yes** | |
+| PH-13 | Matched: image gone | 🗄️ | Yes | Optional | |
+| PH-14 | Review decided: image deleted, route 410 | 🖥️ 🔌 | Yes | **Yes** (approve) | |
+| PH-15 | Storage delete fails | none | Yes | No | |
+| PH-16 | Unclaimed scan erased | 🗄️ | Yes | Optional | |
+| PH-17 | Withdraw consent | 📱 🗄️ | Yes | **Yes** (the button) | |
+| PH-18 | Unconfirmed phone released at 24 hours | 🗄️ | Yes | Optional | |
+| PH-19 | Staff look up and release a card | 🖥️ | Yes | **Yes** (the page) | |
+| PH-20 | Reporter label on the dispatch console | 🖥️ | Yes | **Yes** (the label) | |
+| PH-21 | Scan again from the profile | 📱 | Backend and rules | **Yes** | |
+
+**PH-01 Guest report from every ID step** · new phone number, signed out
+1. 📱 Sign-in screen → **Create Account**, and allow location.
+2. 📱 On each of these, **Emergency? Report without an Account** is visible and opens the emergency flow: the ID intro; while "Checking your PhilHealth ID…" shows; "Let's try that again" (scan any other card to reach it); the name form.
+3. 📱 Send one report from any of them. 🖥️ As a dispatcher, it is in **Incident Queue** and the drawer's Reporter card shows no ID label.
+
+*Automated:* `emergency-flow-id-required.e2e-spec.ts` reports with no account and with a guest token, with the flag on.
+
+**PH-02 A card that isn't a PhilHealth ID** · new phone number
+1. 📱 On the ID intro, scan a driver's licence, PhilSys ID or school ID.
+2. 📱 The phone's own check refuses it first: *"We couldn't find the PhilHealth heading and number on this card…"*, with "Attempt n of 3". Nothing is uploaded.
+3. 📱 *"This isn't a PhilHealth ID…"* appears only when the server makes the call: the phone's text reading isn't available, or the card has the PhilHealth heading and a number but the server disagrees.
+
+*Automated:* `id-scan-endpoint.spec.ts` (422 `NOT_PHILHEALTH_ID`, nothing stored); `id-verification.test.ts` (each failure has a message in English and Filipino).
+
+**PH-03 Blurred scan, third failure offers review** · new phone number
+1. 📱 Scan a card three times with glare or blur. Each failure shows "Let's try that again".
+2. 📱 After the third, **Still not working?** appears with **Send to MDRRMO for review**. Before the third, it doesn't.
+3. 📱 Tap it and scan once more. The form shows *"PhilHealth ID sent to MDRRMO for review"*. Finish registering. Profile shows **Under review by MDRRMO**.
+
+*Automated, with stubbed OCR:* `id-scan-endpoint.spec.ts`, `id-register.spec.ts`, `id-verification.test.ts`. A real blurred image needs a person.
+
+**PH-04 Typed name matches** · new phone number
+1. 📱 Scan your card and type your name as printed. *"Matches your PhilHealth ID"* appears when you leave the field.
+2. 📱 Create the account, enter the OTP, and land on **Home**. Profile shows **Verified**.
+3. 🗄️ `users.identity_verified_at` is set. `identity_verifications.status` is `AUTO_VERIFIED`.
+
+**PH-05 Typed name differs** · new phone number
+1. 📱 Scan your card and type a different name. *"Doesn't match your PhilHealth ID."* and *"Your PhilHealth ID shows:"* appear. **Create Account** stays disabled.
+2. 📱 *My name is right — send to MDRRMO for review* enables it, and the account is created under review.
+3. 🔌 With a fresh token and a wrong name, and no `requestReview`, `POST /v1/auth/register` returns 400 `NAME_DOES_NOT_MATCH_ID`, and no account is created.
+
+*Automated:* `id-register.spec.ts`, `id-verification.test.ts`, and the e2e over HTTP.
+
+**PH-06 Same card, second phone number**
+1. 📱 With a card already on an account, start registering a different number and scan it.
+2. 📱 *"This PhilHealth ID is already linked to an AGAP account…"* appears, with the MDRRMO call button. No review offer appears.
+
+**PH-07 Scan older than 30 minutes**
+1. 📱 Scan a card and stop on the form for over 30 minutes. Tap **Create Account**.
+2. 📱 You return to the ID intro with *"Your PhilHealth ID scan expired. Please scan it again."*
+3. 🗄️ Within 10 more minutes the row is `EXPIRED`, with `image_storage_key` null.
+
+**PH-08 Modified client sends matching text**
+1. 🔌 Send `POST /v1/auth/id-verification` with an image of something else and `clientText` copied from a real card.
+2. The response is 422 and no verification is created: the server reads the image, not the text.
+
+**PH-09 No card data in logs, SMS or jobs**
+1. 🖥️ Run PH-04, PH-05 and PH-14 with the backend console open, and read the SMS and push the citizen receives.
+2. Search the console for the card's number, in all forms, and for its address and birth date. Nothing appears. The SMS and push contain only the fixed "ID check" text.
+
+*Automated:* the e2e captures every log line and queued job while citizens register, both matched and sent for review. It doesn't run staff decisions, lookups, releases or withdrawals. `id-review.spec.ts` checks the exact SMS and push texts. No package uses Sentry. **Known and not covered by this case:** the SMS processor logs phone numbers.
+
+**PH-10 Image view audited, dispatcher refused**
+1. 🖥️ As `orgadmin@mdrrmo.bocaue.gov.ph`: **ID Reviews**, open a pending check, **Show ID image**. **Audit Log** gains `ID_IMAGE_VIEWED`, with no card data.
+2. 🖥️ As `dispatcher1`: the sidebar has no **ID Reviews**. 🔌 `GET /v1/administration/id-verifications/:id/image` returns 403.
+3. 🖥️ As `orgadmin@bfp.bocaue.gov.ph`: no link. Opening `/administration/id-reviews` shows *"Only MDRRMO administrators can review PhilHealth ID checks."*
+
+**PH-11 Phone without Google Play services** · for example a newer Huawei
+1. 📱 Start registering. *"This phone's document scanner isn't available, so we'll use the camera instead."* appears, then **Take a photo of your PhilHealth ID**.
+2. 📱 Fit the card in the frame and tap **Take photo**. The rest of the flow is the same as PH-04.
+3. 📱 **Emergency? Report without an Account** is on both camera views.
+
+Not yet run on any phone.
+
+**PH-12 Seeded citizen signs in and reports** · `citizen@demo.agap`, `AgapDev2026!`
+1. 📱 Sign in. No scan is asked for. Profile shows **Verified**.
+2. 📱 Send an SOS. 🖥️ It reaches **Incident Queue**, and the Reporter card shows **ID verified**.
+
+**PH-13 Matched: image gone**
+1. After PH-04: 🗄️ `image_storage_key` is null, and nothing for that row remains under `id-documents/` in storage.
+
+**PH-14 Review decided: image deleted, route 410** · an account under review from PH-03 or PH-05
+1. 🖥️ As `orgadmin@mdrrmo.bocaue.gov.ph`: **ID Reviews**, open it, **Show ID image**, **Approve**.
+2. The citizen gets *"Your AGAP account ID check was approved."* by push and SMS. 📱 Profile shows **Verified**.
+3. 🔌 The image route now returns 410. 🗄️ `image_storage_key` is null. **Audit Log** shows the view and the decision.
+4. Repeat with **Reject** on another account: the message is *"…was not approved. Open AGAP to scan again."* and Profile shows **Not approved** with **Scan again**.
+
+**The approve path has not been run live yet.** The reject path ran on 2026-11-05.
+
+**PH-15 Storage delete fails.** Automated only, by `id-register.spec.ts` and `id-review.spec.ts`: the registration or decision still succeeds and the next job run deletes the image.
+
+**PH-16 Unclaimed scan erased**
+1. After PH-07: 🗄️ `pin_hmac`, `pin_last4` and `name_on_id_sealed` are null on the `EXPIRED` row.
+
+**PH-17 Withdraw consent** · an account registered with a real scan (the seeded citizen has no Withdraw card)
+1. 📱 **Profile → Privacy & Data → PhilHealth ID Check → Withdraw Consent**. The confirmation says what is erased and that SOS still works.
+2. 📱 Go back. Profile shows **Not verified** with **Scan again**.
+3. 🗄️ The row is `RELEASED` with the card data null, and `identity_verified_at` is null.
+4. 📱 Sign in and send an SOS: still allowed. Scan the same card on any account: accepted.
+
+**PH-18 Unconfirmed phone released at 24 hours**
+1. 📱 Register and don't enter the OTP. After 24 hours and the next job run, 🗄️ the row is `RELEASED`, and the card can be scanned again.
+2. Suspended and deactivated accounts keep their claim (automated, `id-release.spec.ts`).
+
+**PH-19 Staff look up and release a card**
+1. 🖥️ As `orgadmin@mdrrmo.bocaue.gov.ph`: **ID Reviews**, type a card's number, **Find account**, pick a reason, **Release card**. A long-signed-in session gets the step-up prompt first.
+2. **Audit Log** shows `ID_CARD_LOOKUP` and `IDENTITY_VERIFICATION_RELEASED`, without the number.
+3. 📱 The holder is told to scan again, and shows **Not verified**. The card can now be scanned on another account.
+
+**PH-20 Reporter label on the dispatch console**
+1. 🖥️ As a dispatcher, open `INC-2026-DEMO01`: the Reporter card shows **ID verified**.
+2. A report from an account under review shows **ID not verified**. A guest report, or one from a bystander or staff account, shows neither. The Patient card never shows it.
+3. The label changes nothing: priority and recommendations are the same.
+
+*Automated:* `reporter-sex.spec.ts`, and the e2e (same priority for all four kinds of reporter).
+
+**PH-21 Scan again from the profile** · an account showing **Not approved** or **Not verified**
+1. 📱 **Profile → Scan again**. Scan, type the name, submit. Profile shows **Verified**.
+2. 📱 Try a wrong name, then send it for review. Profile shows **Under review by MDRRMO**.
+3. 📱 With location denied, **Emergency? Report without an Account** is still visible and opens the SOS screen. No "Sign in" link appears on any step.

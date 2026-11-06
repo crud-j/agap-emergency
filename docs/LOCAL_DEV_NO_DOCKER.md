@@ -166,6 +166,13 @@ JWT_SECRET=dev_jwt_secret_change_in_prod
 JWT_REFRESH_SECRET=dev_refresh_secret_change_in_prod
 JWT_EXPIRES_IN=15m
 JWT_REFRESH_EXPIRES_IN=7d
+
+# PhilHealth ID check at citizen registration. On in .env.example, and the backend refuses to
+# start with it on and these two blank. Generate each one, with a different value for each:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+ID_VERIFICATION_REQUIRED=true
+ID_DOCUMENT_ENCRYPTION_KEY=               # ← generated value
+ID_PIN_PEPPER=                            # ← a second generated value
 ```
 
 The remaining variables (`FCM_*`, `TEXTBEE_*`, `MAP_API_KEY`, etc.) are only required when working on the specific features they support. The backend starts and runs core incident flow without them.

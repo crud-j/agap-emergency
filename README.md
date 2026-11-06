@@ -92,6 +92,9 @@ Open `.env` and fill in the required values:
 | `REDIS_URL` | Yes | Pre-filled for Docker dev setup |
 | `JWT_SECRET` | Yes | Generate: `openssl rand -hex 64` |
 | `JWT_REFRESH_SECRET` | Yes | Generate: `openssl rand -hex 64` |
+| `ID_VERIFICATION_REQUIRED` | Yes | `true` in `.env.example`: a citizen must scan a PhilHealth ID to create an account. Guest emergency reports never need it |
+| `ID_DOCUMENT_ENCRYPTION_KEY` | Yes, while the flag is `true` | Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. The backend refuses to start without it |
+| `ID_PIN_PEPPER` | Yes, while the flag is `true` | Same command, a different value. Changing it later breaks the one-ID-per-account check |
 | `TEXTBEE_API_KEY` | For SMS | Textbee API key (https://textbee.dev) |
 | `TEXTBEE_DEVICE_ID` | For SMS | Android gateway device ID from Textbee dashboard |
 | `MDRRMO_OPS_PHONE` | For SMS | Operations center phone number that receives alerts |

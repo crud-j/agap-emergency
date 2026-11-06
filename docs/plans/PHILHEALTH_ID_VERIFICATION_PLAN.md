@@ -1,6 +1,6 @@
 # Plan — PhilHealth ID Verification at Citizen Registration
 
-**Status:** In progress: Phases 0–5 built (see Progress log). Decisions recorded 2026-11-05 (§11) · **Date:** 2026-11-05 · **Owner:** AGAP mobile + backend + frontend (admin)
+**Status:** Phases 0–6 built; hand checks, Phase 0's card target and the demo rehearsal still need a person (see Progress log). Decisions recorded 2026-11-05 (§11) · **Date:** 2026-11-05 · **Owner:** AGAP mobile + backend + frontend (admin)
 **Implementation prompts:** [PHILHEALTH_ID_VERIFICATION_PROMPTS.md](PHILHEALTH_ID_VERIFICATION_PROMPTS.md)
 **Modules:** MOD-01 (registration), MOD-48 (privacy and consent), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration)
 **Surfaces affected:** `mobile/app/auth/registration.tsx`, `mobile/src/components/registration/` (new), `mobile/src/services/api/auth.api.ts`, `backend/src/auth`, `backend/src/identity-verification` (new), `backend/prisma`, `shared/src/validation`, `frontend/app/(ops)/administration`
@@ -433,7 +433,7 @@ person or a phone.
 | 3. Mobile | Reviewed (no defects); phone: happy path passed; the database shows a mismatch → review run on 2026-11-05 (see Review, Phase 4) | 2026-11-05 | Includes a backend follow-up (review of unreadable scans, migration applied) and `expo-image-manipulator`, both approved by the user. 23 mobile + 7 backend tests; e2e passed on re-run with Redis up |
 | 4. Admin review | Reviewed; 3 defects fixed; reject path ran live, approve path still to test | 2026-11-06 | Migration applied (3 audit actions); 22 backend + 5 frontend tests; e2e passes. Routes under `/administration`, not `/admin` |
 | 5. Labels and seed | Done, awaiting review | 2026-11-06 | No migration. Seed runs twice without duplicates; backend 1735, e2e 10/10. Screens still need a person |
-| 6. Docs and defense readiness | Not started | | |
+| 6. Docs and defense readiness | Done, awaiting review; hand checks and the rehearsal need a person | 2026-11-06 | No migration. Emergency e2e passes with the flag on: new spec 7/7, `test:e2e` 19/19 |
 
 ### Phase 0 — 2026-11-05
 
@@ -1299,22 +1299,73 @@ Existing behaviour across the whole mobile app, fixed at the owner's request bef
 - **Tests:** new `session-cache.spec.ts` (8), written with the code. So its logic was broken 7 different ways, and all 7 were caught. Frontend 191 → **199**. Frontend typecheck clean.
 - **Not covered:** the provider's wiring has no test, because the frontend's Jest has no DOM. Check by hand: sign in as a dispatcher, open an incident, sign out, sign in as another staff account and open the same page. **Restart `pnpm dev` first.**
 
+### Phase 6 — 2026-11-06
+
+Started on commit `c94e928` with a clean tree, in a new chat. **No migration, no new dependencies, no change under `backend/src`, `shared/src`, `mobile` or `frontend`.**
+
+**Inventory:** none of the listed docs mentioned this feature. `.env.example` had the flag, set to `false`. `DEVELOPER_SETUP.md` wasn't in the prompt's list, but it is a dev setup doc with a "fill in at minimum" list, so it was updated too.
+
+**Changed**
+- `.env.example`: `ID_VERIFICATION_REQUIRED=true`.
+- `README.md` (3 rows, approved by the owner; the flag alone would leave out the two keys it requires), `docs/LOCAL_DEV_NO_DOCKER.md`, `DEVELOPER_SETUP.md`: the flag, both keys and how to generate them. **With the flag on and the keys blank, the backend refuses to start,** so a fresh copy of `.env.example` needs both generated first.
+- `docs/modules/MOD-01_*` section 22: flow, data collected, rules, routes, error codes, configuration. §5–§7 updated.
+- `docs/modules/MOD-48_*` section 21: what is read and why, consent, retention, withdrawal, who sees what, staff routes and audit actions, operating rules, open items.
+- `docs/USER_ACCOUNTS.md`: a "Seeded citizen (pre-verified)" section, and ID Reviews in the sidebar lists.
+- `docs/module-reports/MODULE_TESTING_GUIDE.md`: §7 with test cases PH-01 to PH-21: the 19 §10 checks and 2 later screens. Also §0, §1, §2.1, MOD-01, MOD-47 and §6.
+
+**Added:** `backend/test/emergency-flow-id-required.e2e-spec.ts` (7 tests), approved by the owner. It runs the real `AppModule` over real HTTP and PostgreSQL with the flag on. Only OCR, ID image storage and the outside world are stubbed. It covers:
+- a new account without a scan is refused, and nothing is created
+- a guest, a seeded citizen, a citizen who matched and a citizen under review each report through `POST /v1/incidents`, then reach the queue and the ops room and can be dispatched
+- all four get the same priority
+- no log line or queued job carries a PIN or text read from a card
+
+**The flag-on e2e.** `transport-flow.e2e-spec.ts:78` forces the flag off, with a comment saying it needs the old registration. It never calls registration, so that line isn't needed, and flipping it would prove nothing about registration anyway. It was left unchanged at the owner's choice. A throwaway copy with the flag on and test keys **passed 1/1** and was deleted. The committed proof is the new spec.
+
+**Tests seen failing.** All 7 passed first time, so the code was broken 8 ways, one at a time, and restored byte for byte. **All 8 were caught:** flag ignored; no-account report refused; guest token refused; priority depending on having an account; dispatch held for an unverified reporter; image kept after a match; OCR text logged; a card-only name in a queued job. One break first survived because it was written wrongly (`incident_reporters` is a single object there, not an array, so it did nothing). Corrected, it was caught.
+
+**Tests, before → after**
+- Backend **1746 → 1746**: 1687, plus `auth-phase3` alone 59. The new spec is an e2e spec, so it isn't in this count.
+- `test:e2e:db` + `test:e2e`: 2 suites, **12 → 19** in 3 suites.
+- Frontend **199**, mobile **212**, unchanged.
+- Typecheck clean in all four packages. `migrate status` up to date (36 migrations).
+- **Backend specs get no type check by default:** `backend/tsconfig.json` excludes `test/`, and ts-jest runs with `isolatedModules`. The new spec was checked once with a throwaway config: clean.
+
+**§10:** 5 more boxes ticked, each saying what the tests cover and what they don't. Still open: the guest button on each ID screen, and a phone without Google Play services.
+
+**Step 3, privacy notice:** there is **no privacy policy or terms page**. In `mobile/app/auth/registration.tsx`, "Terms of Service" and "Privacy Policy" are styled text with no link. No legal page was written, as the prompt says. Already in place and accurate: the ID intro screen and the Privacy & Data card both say what is read, why and when it is deleted. **For a person to decide:**
+1. The agree box starts ticked (`useState(true)`), although RA 10173 consent should be an active choice. The separate ID consent box is not affected.
+2. The form says information is used "only for emergency response", which doesn't cover the ID check.
+
+**Findings for review (nothing changed)**
+1. **§10 and §13 promised the wrong message for a non-PhilHealth card.** On a normal phone, the on-device check refuses it first, with "We couldn't find the PhilHealth heading and number on this card…". "This isn't a PhilHealth ID" appears only when the server decides. Both sections are corrected, and it's in PH-02.
+2. **The ID label also reaches Org Administrators of any organization through `GET /incidents/:id`,** because they count as incident staff (`INCIDENT_STAFF_ROLES`). That is an existing rule, wider than §8's "dispatchers". It is only the label. MOD-48 states it as built.
+3. **`USER_ACCOUNTS.md` still lists Bystander under "no seeded account"**, although `bystander@demo.agap` is seeded. The new section mentions the account; the old row was left.
+4. **Commit `38cd0b3` is labelled `docs(readme)` but also holds all of Phase 4** (42 files). `git log` won't show a Phase 4 commit, so find it by that hash.
+5. **During preflight, a recursive search printed the two ID secrets from `backend/.env` into the agent's session,** breaking the house rule. Nothing used them, and the search then moved to `git grep`, which can't read that ignored file. Generate new values when the database is reset before the defense. Changing them without a reset would make stored data unreadable and break the duplicate check.
+
+**Needs a person.** The system is **not** defense-ready until these are done.
+1. **Phase 0's target isn't met:** 1 card tested against a target of 8 of 10, and no phone without Google Play services. The parser fix hasn't been run on a real card.
+2. **The approve path hasn't run live** (PH-14).
+3. **Hand checks:** the cases marked "Yes" in `MODULE_TESTING_GUIDE.md` §7, including those from the Phase 5 lists.
+4. **Cache at sign-out:** the hand checks in that follow-up, on both phone and web.
+5. **Rehearse the §13 demo, then reset the database.** Consent text: confirm the adviser reviewed it, and that the sample scans were deleted (Phase 0).
+
 ---
 
 ## 10. Test checklist
 
-- [ ] Guest "Report an emergency" works from the ID intro, scanning, retry and form steps.
-- [ ] A non-PhilHealth ID (driver's licence, PhilSys, school ID) → "This isn't a PhilHealth ID".
-- [ ] A blurred or glared scan → retry. On the third failure, "Send for review" appears.
+- [ ] Guest "Report an emergency" works from the ID intro, scanning, retry and form steps. *(With the flag on, the e2e proves the API accepts a report with no account; the button on each screen still needs a phone.)*
+- [x] A non-PhilHealth ID (driver's licence, PhilSys, school ID) is refused: on a normal phone by the on-device check ("We couldn't find the PhilHealth heading and number on this card…"), otherwise by the server ("This isn't a PhilHealth ID"). *(Tests, with made-up text; a real card still needs a phone.)*
+- [x] A blurred or glared scan → retry. On the third failure, "Send for review" appears. *(Tests, with stubbed OCR and the offer rule; a real blurred scan and the screen still need a phone.)*
 - [x] Typed name matches → account created, `identity_verified_at` set, OTP sent.
-- [ ] Typed name differs → Create account disabled. The server also rejects a forced request with `NAME_DOES_NOT_MATCH_ID`.
+- [x] Typed name differs → Create account disabled. The server also rejects a forced request with `NAME_DOES_NOT_MATCH_ID`. *(Tests, including the e2e over HTTP; the disabled button still needs a phone.)*
 - [x] Same PhilHealth ID on a second phone number → `ID_ALREADY_REGISTERED`.
 - [x] Token older than 30 minutes → `ID_SCAN_EXPIRED`. The image is deleted by the job.
 - [x] A modified client sending matching `clientText` with an image of something else → not verified (server reads the image).
-- [ ] Logs, Sentry and SMS contain no PIN, no OCR text, no name from the ID.
+- [x] Logs, Sentry and SMS contain no PIN, no OCR text, no name from the ID. *(The e2e checks every backend log line and queued job while citizens register, both matched and sent for review; `id-review.spec.ts` checks the exact SMS and push texts of a decision. No package uses Sentry. Not run through the e2e: staff decisions, lookups, releases and withdrawals. Real SMS still needs a person. The SMS processor logs phone numbers, which this box doesn't cover.)*
 - [x] Admin image view writes an audit row. A dispatcher cannot open the review page or the image route (403).
 - [ ] Phone without Google Play services → fallback camera works.
-- [ ] Seeded citizen account signs in and sends an SOS as before.
+- [x] Seeded citizen account signs in and sends an SOS as before. *(E2e over HTTP, with the flag on; the app still needs a phone.)*
 - [x] Matched registration → the stored image is gone right after (`image_storage_key` null, file deleted).
 - [x] Review approved or rejected → image deleted; the image route then returns 410.
 - [x] Storage delete fails → registration still succeeds; the next job run deletes the image.
@@ -1364,8 +1415,9 @@ Existing behaviour across the whole mobile app, fixed at the owner's request bef
   with `ID_ALREADY_REGISTERED` while that rehearsal account still exists.
 - Have three cards ready: **(1)** a team member's PhilHealth ID for the happy path; **(2)** a second person's PhilHealth ID,
   typing a different name, to show the mismatch → "Send to MDRRMO for review" → approve from the web admin; **(3)** a
-  non-PhilHealth ID (school ID or driver's licence) to show "This isn't a PhilHealth ID".
-- Show the guest **Report an emergency** button on the ID screens, which answers "what if someone has no PhilHealth ID?" (rule 14).
+  non-PhilHealth ID (school ID or driver's licence) to show it being refused. On a normal phone the message is "We couldn't find the
+  PhilHealth heading and number on this card…", from the on-device check.
+- Show the guest button on the ID screens (it reads **Emergency? Report without an Account**), which answers "what if someone has no PhilHealth ID?" (rule 14).
 - Expected panel questions and short answers:
   - *"Can it detect a fake ID?"* No. It checks the card is a PhilHealth ID and the name matches. One ID per account,
     phone OTP and staff review reduce misuse (§1).

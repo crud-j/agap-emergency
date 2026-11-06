@@ -167,6 +167,13 @@ JWT_REFRESH_SECRET=<your_refresh_secret>
 INITIAL_ADMIN_EMAIL=admin@agap.local
 INITIAL_ADMIN_PASSWORD=<your_admin_password>
 
+# PhilHealth ID check at citizen registration. On in .env.example, and the backend refuses to
+# start with it on and these two blank. Generate each one, with a different value for each:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+ID_VERIFICATION_REQUIRED=true
+ID_DOCUMENT_ENCRYPTION_KEY=<generated_value>
+ID_PIN_PEPPER=<second_generated_value>
+
 # Backend / Frontend URLs (leave as-is for local dev)
 BACKEND_PORT=3000
 CORS_ORIGIN=http://localhost:3001
