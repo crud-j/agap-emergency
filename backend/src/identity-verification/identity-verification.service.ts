@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import {
@@ -8,12 +8,15 @@ import {
   ID_SCAN_MAX_ATTEMPTS,
   ID_VERIFICATION_CONSENT_TYPE,
   IdVerificationErrorCode,
+  composeFullName,
   looksLikePhilHealthId,
   matchIdName,
   parsePhilHealthName,
   parsePhilHealthPin,
   type IdCardReleaseReason,
+  type IdClaimResponse,
   type IdName,
+  type IdProfileStatus,
   type IdScanResponse,
 } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -93,6 +96,24 @@ const alreadyRegistered = () =>
     IdVerificationErrorCode.ID_ALREADY_REGISTERED,
     'This PhilHealth ID is already linked to an AGAP account. Sign in or reset your password.',
   );
+
+/** The typed name parts as an IdName, or null while last or first name is empty. */
+export function typedNameFrom(parts: {
+  lastName?: string | undefined;
+  firstName?: string | undefined;
+  middleName?: string | undefined;
+  suffix?: string | undefined;
+}): IdName | null {
+  const last = parts.lastName?.trim();
+  const first = parts.firstName?.trim();
+  if (!last || !first) return null;
+  const name: IdName = { last, first };
+  const middle = parts.middleName?.trim();
+  const suffix = parts.suffix?.trim();
+  if (middle) name.middle = middle;
+  if (suffix) name.suffix = suffix;
+  return name;
+}
 
 export interface IdScanInput {
   /** The phone's own reading. Compared with the server's, never trusted, stored or logged. */
@@ -322,6 +343,60 @@ export class IdentityVerificationService {
   }
 
   /**
+   * What the citizen's profile shows (plan §8), in the order claimForUser refuses: being verified,
+   * then a check under review, so "Scan again" is never offered when the claim would be refused.
+   * A rejection counts only with neither; a release turns every older rejection into RELEASED.
+   */
+  async profileStatus(userId: string): Promise<{ status: IdProfileStatus }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { identity_verified_at: true } });
+    if (user?.identity_verified_at) return { status: 'VERIFIED' };
+
+    const scans = await this.prisma.identity_verifications.findMany({
+      where: { user_id: userId, status: { in: ['PENDING_REVIEW', 'REJECTED'] } },
+      select: { status: true },
+    });
+    if (scans.some((scan) => scan.status === 'PENDING_REVIEW')) return { status: 'UNDER_REVIEW' };
+    return { status: scans.length > 0 ? 'NOT_APPROVED' : 'NOT_VERIFIED' };
+  }
+
+  /**
+   * Scanning again from the profile (plan §8): the same rules as registration, except the scan
+   * is claimed for the signed-in citizen. The account's name becomes the name that was checked,
+   * as registration sets it; otherwise "ID verified" could sit next to a different name, and
+   * reviewers would compare the card with the wrong one.
+   */
+  async claimForUser(userId: string, token: string, typed: IdName, requestReview: boolean): Promise<IdClaimResponse> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, is_guest: true },
+    });
+    if (!user || user.is_guest || user.role !== 'CITIZEN') {
+      throw new ForbiddenException('Only citizen accounts scan a PhilHealth ID.');
+    }
+    await this.refuseIfChecked(this.prisma, userId);
+
+    const prepared = await this.prepareClaim(token, typed, requestReview);
+    const fullName = composeFullName(typed);
+    await this.prisma.$transaction(async (tx) => {
+      // The partial index keeps a card on one account, not an account on one card. Two different
+      // cards claimed at once both pass the check above, so the second waits here and is refused.
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+      await this.refuseIfChecked(tx, userId);
+      await this.claim(tx, prepared, userId);
+      await tx.user.updateMany({
+        where: { id: userId },
+        data: { full_name: fullName, identity_verified_at: prepared.outcome === 'AUTO_VERIFIED' ? new Date() : null },
+      });
+    });
+
+    // Matched: the image is no longer needed (plan §5.2a). Under review: staff still need it.
+    if (prepared.outcome === 'AUTO_VERIFIED' && prepared.imageLocation) {
+      await this.deleteImage(prepared.verificationId, prepared.imageLocation);
+    }
+    return { identityVerification: prepared.outcome, fullName };
+  }
+
+  /**
    * Ends a user's claim, inside the caller's transaction: erases the name and PIN data, marks
    * the account not verified and audits why. The card is then free to be scanned again. The
    * account itself stays usable: getting help never depends on this (rule 14). Returns the rows
@@ -453,6 +528,22 @@ export class IdentityVerificationService {
       if (row.image_storage_key && (await this.deleteImage(row.id, row.image_storage_key))) deleted++;
     }
     return { expired, deleted, failed: stale.length - deleted };
+  }
+
+  /** Refuses a new claim while the account is verified or holds a check. */
+  private async refuseIfChecked(db: Prisma.TransactionClient, userId: string): Promise<void> {
+    const user = await db.user.findUnique({ where: { id: userId }, select: { identity_verified_at: true } });
+    const held = await db.identity_verifications.findFirst({
+      where: { user_id: userId, status: { in: [...ACTIVE_STATUSES] } },
+      select: { id: true },
+    });
+    if (held || user?.identity_verified_at) {
+      throw idVerificationError(
+        HttpStatus.CONFLICT,
+        IdVerificationErrorCode.ID_ALREADY_REGISTERED,
+        'Your account already has a PhilHealth ID check.',
+      );
+    }
   }
 
   private checkImage(file: Express.Multer.File | undefined): Buffer {

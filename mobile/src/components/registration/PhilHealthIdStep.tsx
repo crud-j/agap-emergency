@@ -40,7 +40,8 @@ interface Props {
   onVerified: (result: IdScanResponse) => void;
   onOutsideServiceArea: () => void;
   onReportEmergency: () => void;
-  onSignIn: () => void;
+  /** Registration only: someone scanning from their own account is already signed in. */
+  onSignIn?: () => void;
 }
 
 export default function PhilHealthIdStep({
@@ -249,7 +250,7 @@ export default function PhilHealthIdStep({
 
           {lastReason === 'ID_ALREADY_REGISTERED' ? (
             <>
-              <PrimaryButton icon="log-in-outline" label={t.registration.idSignInInstead} onPress={onSignIn} />
+              {onSignIn ? <PrimaryButton icon="log-in-outline" label={t.registration.idSignInInstead} onPress={onSignIn} /> : null}
               {/* The card's owner, when the account holding it isn't theirs (plan §7). */}
               <TouchableOpacity
                 testID="id-not-my-account-call-btn"
@@ -309,11 +310,13 @@ export default function PhilHealthIdStep({
         </LinearGradient>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.signInRow} onPress={onSignIn} hitSlop={{ top: 12, bottom: 12 }}>
-        <Text style={styles.signInText}>
-          {t.registration.alreadyHave} <Text style={styles.signInLink}>{t.registration.signIn}</Text>
-        </Text>
-      </TouchableOpacity>
+      {onSignIn ? (
+        <TouchableOpacity style={styles.signInRow} onPress={onSignIn} hitSlop={{ top: 12, bottom: 12 }}>
+          <Text style={styles.signInText}>
+            {t.registration.alreadyHave} <Text style={styles.signInLink}>{t.registration.signIn}</Text>
+          </Text>
+        </TouchableOpacity>
+      ) : null}
 
       <Modal visible={fallbackOpen} animationType="slide" onRequestClose={closeFallback} statusBarTranslucent>
         <IdCameraFallback onCaptured={onFallbackCaptured} onCancel={closeFallback} onReportEmergency={reportEmergency} />

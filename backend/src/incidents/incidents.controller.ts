@@ -153,6 +153,8 @@ export class IncidentsController {
         ...incident,
         barangay_notices,
         reporter_sex: await this.incidentsService.getReporterSex(id),
+        // Information for the dispatcher only: nothing in priority, recommendations or dispatch reads it (rule 8).
+        reporterIdVerified: await this.incidentsService.getReporterIdVerified(id),
       };
     }
     return { ...incident, reporter_sex: await this.incidentsService.getReporterSex(id) };

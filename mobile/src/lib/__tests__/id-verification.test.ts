@@ -8,6 +8,7 @@ import {
   countsAsAttempt,
   formatNameOnId,
   frameToPhotoCrop,
+  idStatusView,
   localReadVerdict,
   nextAttemptNumber,
   readIdVerificationCode,
@@ -190,5 +191,14 @@ describe('fallback camera crop', () => {
     expect(crop.originY).toBeGreaterThanOrEqual(0);
     expect(crop.originX + crop.width).toBeLessThanOrEqual(photo.width);
     expect(crop.originY + crop.height).toBeLessThanOrEqual(photo.height);
+  });
+});
+
+describe('idStatusView', () => {
+  it('offers "Scan again" only when there is nothing current to wait for', () => {
+    expect(idStatusView('VERIFIED')).toMatchObject({ labelKey: 'idStatusVerified', canScanAgain: false });
+    expect(idStatusView('UNDER_REVIEW')).toMatchObject({ labelKey: 'idStatusUnderReview', canScanAgain: false });
+    expect(idStatusView('NOT_APPROVED')).toMatchObject({ labelKey: 'idStatusNotApproved', canScanAgain: true });
+    expect(idStatusView('NOT_VERIFIED')).toMatchObject({ labelKey: 'idStatusNotVerified', canScanAgain: true });
   });
 });

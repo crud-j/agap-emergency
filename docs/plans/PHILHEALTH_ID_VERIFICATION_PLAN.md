@@ -1,6 +1,6 @@
 # Plan — PhilHealth ID Verification at Citizen Registration
 
-**Status:** In progress: Phases 0–3 built (see Progress log). Decisions recorded 2026-11-05 (§11) · **Date:** 2026-11-05 · **Owner:** AGAP mobile + backend + frontend (admin)
+**Status:** In progress: Phases 0–5 built (see Progress log). Decisions recorded 2026-11-05 (§11) · **Date:** 2026-11-05 · **Owner:** AGAP mobile + backend + frontend (admin)
 **Implementation prompts:** [PHILHEALTH_ID_VERIFICATION_PROMPTS.md](PHILHEALTH_ID_VERIFICATION_PROMPTS.md)
 **Modules:** MOD-01 (registration), MOD-48 (privacy and consent), MOD-46 (audit), MOD-47 (RBAC), MOD-49 (administration)
 **Surfaces affected:** `mobile/app/auth/registration.tsx`, `mobile/src/components/registration/` (new), `mobile/src/services/api/auth.api.ts`, `backend/src/auth`, `backend/src/identity-verification` (new), `backend/prisma`, `shared/src/validation`, `frontend/app/(ops)/administration`
@@ -397,7 +397,7 @@ has a call button. Staff then use the same page:
 
 - **Dispatch console:** on the incident reporter card, show *"ID verified"* or *"ID not verified"* from `identity_verified_at`.
   It applies to the **reporter** only, never the patient. It is information only and never affects priority, recommendations or
-  dispatch (rule 8). Guests already show as guests.
+  dispatch (rule 8). Guests already show as guests. Accounts that aren't citizens' show no label: only citizens can scan.
 - **Mobile profile:** a status row (Verified / Under review / Not approved → Scan again).
 - **Every citizen account goes through the scan (§11 D1).** The database is reset before the defense, so there are no
   pre-existing citizen accounts to migrate. No "verify later" banner and no grandfathering.
@@ -432,7 +432,7 @@ person or a phone.
 | 2. Backend | Reviewed (no code defects); 4 decisions open | 2026-11-06 | Migration applied; e2e passes with Redis up |
 | 3. Mobile | Reviewed (no defects); phone: happy path passed; the database shows a mismatch → review run on 2026-11-05 (see Review, Phase 4) | 2026-11-05 | Includes a backend follow-up (review of unreadable scans, migration applied) and `expo-image-manipulator`, both approved by the user. 23 mobile + 7 backend tests; e2e passed on re-run with Redis up |
 | 4. Admin review | Reviewed; 3 defects fixed; reject path ran live, approve path still to test | 2026-11-06 | Migration applied (3 audit actions); 22 backend + 5 frontend tests; e2e passes. Routes under `/administration`, not `/admin` |
-| 5. Labels and seed | Not started | | |
+| 5. Labels and seed | Done, awaiting review | 2026-11-06 | No migration. Seed runs twice without duplicates; backend 1735, e2e 10/10. Screens still need a person |
 | 6. Docs and defense readiness | Not started | | |
 
 ### Phase 0 — 2026-11-05
@@ -1153,6 +1153,152 @@ once used and isn't kept in the mutation cache.
    A long-signed-in session should get the step-up prompt first.
 3. Phone: Profile → Privacy & Consent → PhilHealth ID Check → Withdraw. Scanning a card already linked should show the MDRRMO message and call button.
 
+### Phase 5 — 2026-11-06
+
+Run in the same chat as the reviews, at the user's request, not a new one.
+
+**Inventory:** none of the fields, routes, screens or seed rows existed. **No migration, no new dependencies.**
+
+**Backend**
+- `incidents.service.ts`: `getReporterIdVerified`: true or false for an account, null for a guest or no account.
+- `incidents.controller.ts`: `GET /incidents/:id` returns `reporterIdVerified` to **staff only**; not to crew or the reporter.
+- `identity-verification.service.ts`:
+  - `profileStatus`: `VERIFIED`, `UNDER_REVIEW`, `NOT_APPROVED` or `NOT_VERIFIED`. Being verified decides first, then the newest scan.
+  - `claimForUser`: registration's rules for a signed-in citizen. Staff and guests are refused; so is an account already verified or under review.
+  - `typedNameFrom`: moved here from `auth.service.ts`, so one place builds the typed name.
+- `identity-verification.controller.ts`: `GET /v1/auth/id-verification/status` and `POST /v1/auth/id-verification/claim`, signed-in only. New `dto/id-claim.dto.ts`.
+- `prisma/seed/seed.ts`: the demo citizen gets `is_phone_verified`, `identity_verified_at` and a claimed `AUTO_VERIFIED` row: fake PIN, no image, keyed on a fixed token hash.
+
+**Frontend:** `reporterIdLabel` in `format.ts`, shown in `IncidentDetailDrawer.tsx` under Reporter only, in the same neutral text colour as other secondary details. `reporterIdVerified` added to the type.
+
+**Mobile**
+- `components/profile/id-status-card.tsx` on the profile, citizens only. It shows nothing until it has an answer or if the request fails.
+- `app/profile/id-verification.tsx`: location, then `PhilHealthIdStep`, then `NameFields`, then the result. "Report an emergency" stays reachable and opens `/emergency/sos`.
+- `services/api/id-verification.api.ts`: a separate file because `authed-fetch` imports `auth.api`, so `auth.api` can't import it back.
+- `PhilHealthIdStep.tsx`: `onSignIn` is now optional, since a signed-in citizen has nothing to sign in to.
+- `lib/id-verification.ts`: `idStatusView`. `translations.ts`: new strings in `en` and `fil`.
+- JavaScript only: no new dev build. It adds a route, so restart Metro with `npx expo start -c`.
+
+**Rule check (rule 8):** outside the identity-verification module and the registration code that sets it, `identity_verified_at` and `reporterIdVerified` are read only by `getReporterIdVerified`, its controller branch and the reporter card. Nothing under `dispatch`, `jobs` or `analytics` reads them. `registerGuest` has no change; the only `auth.service.ts` change is the moved helper.
+
+**Seed, run twice against the dev database:** users 21, incidents 10, consents 2 and the demo citizen's 1 row did not change between runs. Identity rows went 3 → 4 on the first run and stayed 4.
+
+**Tests**
+- New: `id-rescan.spec.ts`. Extended: `reporter-sex.spec.ts` (3 new; one mock gains the new method), `incident-read-access.spec.ts` (mock only), `id-test-kit.ts` (newest-first), `id-review-format.spec.ts` (1), `id-verification.test.ts` (1).
+- `identity-verification-release.e2e-spec.ts` gains 3 on **real PostgreSQL**: newest row decides the status, the real index rolls back a raced claim, and the reporter flag for verified, unverified and guest.
+- Unlike the follow-up above, these tests were written with the code, so they weren't seen failing first.
+- **Not tested:** the status card, the rescan screen and the reporter label's placement have no component tests. Typecheck only.
+- Counts, before → after:
+  - Backend 1712 → **1735**: 1676, plus `auth-phase3` alone 59.
+  - Frontend 190 → **191**. Mobile 205 → **206**.
+  - `test:e2e` **10/10** (2 suites). Typecheck clean in all four packages. `migrate status` up to date.
+
+**Deviations and decisions (for review)**
+- **Scanning again is two calls, not one rescan route:** the existing scan route, then the new claim route. The scan and its checks aren't duplicated, and the citizen can fix a typed name without rescanning, as at registration.
+- **The claim changes the account's name to the name typed and checked,** as registration does. Otherwise "ID verified" could sit beside a different name, and reviewers would compare the card with the wrong one.
+- **The geo-fence applies to scanning again** ("same rules"): a citizen outside Bocaue sees an explanation and can scan when back.
+- **The seeded row has no sealed name and no consent record.** So the demo citizen has no Withdraw card in Privacy & Consent; use a registered account to show that.
+- **Only the demo citizen is a seeded `CITIZEN`.** `bystander@demo.agap` is a different role.
+
+**Open (reported, not changed; outside this phase)**
+1. **A verified citizen can change their name through `PATCH /users/me`.** The app has no screen for it, so it takes a modified client, but "ID verified" would then sit beside a name nobody checked. **Recommended:** refuse a name change while verified.
+2. **The seed's timestamps land 8 hours early.** Its database adapter doesn't pin the session to UTC as `PrismaService` does: `identity_verified_at` stored 2025-12-31 16:00 UTC instead of 2026-01-01 00:00. Harmless here, and existing behaviour for the whole seed.
+3. **A tapped ID notification doesn't open the ID screen.** The citizen reaches it through the profile.
+
+**Live evidence (read-only):** two scans on the dev database from 2026-11-06 about 14:25 were never claimed. Both are `EXPIRED` with PIN data and image gone, so D4's erasure works on the running backend.
+
+**Needs a person**
+1. Restart the backend and `pnpm dev` (`shared/dist` rebuilt), and restart Metro with `npx expo start -c`.
+2. Web: open an incident from a registered citizen as a dispatcher. The Reporter card shows "ID verified" or "ID not verified"; a guest incident shows neither; the Patient card never does. `INC-2026-DEMO01` is a ready example (verified).
+3. Phone, as the second test citizen (check rejected): the profile shows "Not approved" with "Scan again". Scan, type the name and submit; it should become "Verified". Try a wrong name too, then "Send to MDRRMO for review".
+4. Sign in as `citizen@demo.agap` and send an SOS to confirm that §10 box. **Use a staging path, not the live backend, if it would send real SMS.**
+
+### Review — 2026-11-06 (Phase 5)
+
+Prompt R on the unstaged Phase 5 changes, in a new chat. Prompt 5 steps 1–6 are all present. No new dependencies, no migration; each route and translation key is defined once.
+
+**Fixed (7).** The four backend ones each had a test that failed first.
+1. **Two different cards could be claimed for one account at once.** The partial index keeps a card on one account, but nothing kept an account on one card, and both requests passed the check before either committed. Reproduced on real PostgreSQL. `claimForUser` now locks the user row and checks again inside the transaction. New e2e test.
+2. **Non-citizen reporters were labelled "ID not verified".** That includes bystander, responder and staff accounts, none of which can scan: the claim route refuses them. The dev database has one such incident. `getReporterIdVerified` now returns null for them, and §8 says so.
+3. **The profile could offer "Scan again" when the claim would be refused.** With a check under review and a rejected scan taken later, the status followed the newest scan and showed "Not approved". `profileStatus` now checks in the same order as the refusal, so this replaces "the newest scan decides" in the Phase 5 section. It no longer needs an `orderBy`, so that fake is gone from `id-test-kit.ts`.
+4. **A last or first name of only spaces returned 500.** It passed `@IsNotEmpty`, then `typedNameFrom` returned null into the matcher. It now returns 400. A modified client only: the app trims names.
+5. **"Report an emergency" was missing from four states of the Scan again screen:** `locating`, `location_error`, `outside` and `done`. The `outside` message even says you can still send an SOS. It is now on every state (rule 14).
+6. **The status card went out of date.** The profile stays mounted under the screens it opens, and nothing asked again on returning, so a citizen who withdrew still saw "Verified" with no way to scan. The same went for a staff decision read in Notifications. It now refreshes on focus. (Its cache was per account at first; clearing the whole cache at sign-out, below, replaced that.)
+7. **Scan again showed a dead "Already have an account? Sign in" link.** `onSignIn` became optional, but this row still rendered with no action.
+
+Also removed: a doc comment left behind in `auth.service.ts` that now described `registerGuest`. `registerGuest` itself has no change.
+
+**Not covered by a test:** fixes 5, 6 and 7 are typecheck only, because the mobile package has no component tests. They haven't been run on a phone.
+
+**Tests seen failing (mutation check).** The Phase 5 tests were written with the code, so 19 lines of `claimForUser`, `profileStatus`, `getReporterIdVerified` and the controller were broken one at a time, then restored byte for byte. 17 were caught. The 2 that survived were real gaps, and both are now caught by new tests: a verified account with no scan row, and another citizen's scan affecting the status.
+
+**Checked, no defect**
+- **Privacy:** no new log lines except the seed's fixed text. The claim returns only the typed name; the audit row carries only the outcome.
+- **Rules:** nothing under dispatch, jobs, analytics, realtime or risk intelligence reads the verified field. `mobile/app/emergency` and `backend/src/emergency-alerts` are untouched. A deactivated account has its sessions revoked, so it can't reach the claim route. `claimForUser` has no status check of its own, and no backend code sets `SUSPENDED` today, so a suspension added later must revoke sessions too.
+- **Seed:** the fake PIN uses the same pepper handling as the app. The dev database holds 1 row for the demo citizen, and no citizen has a verified flag out of step with their rows. The seed itself wasn't re-run.
+- **Earlier tests:** none weakened. Two titles were reworded to match the new status logic, with their assertions unchanged.
+
+**Open**
+1. ~~Signing out doesn't clear the mobile query cache.~~ Fixed: see "Follow-up (query cache at sign-out)" below.
+2. ~~A verified citizen can still rename through `PATCH /users/me`.~~ Decided and fixed: see the follow-up below and §11 D8.
+3. **Small wording and feedback gaps, not changed:**
+   - On Scan again, a signed-in citizen sees "Emergency? Report without an Account".
+   - The already-linked message says "Sign in or reset your password", with no sign-in button.
+   - Tapping the dimmed Submit with an empty name shows no message.
+4. **A name over 255 characters returns 500 and writes nothing.** The fields allow 310 in total, the column 255. A modified client only; registration behaves the same.
+5. **Still true from earlier phases:** Phase 0's "done when" isn't met (1 card tested, target 8 of 10; no phone without Google Play services), and the Phase 4 approve path hasn't run live.
+
+**Tests, final**
+- Backend 1735 → **1740**: 1681, plus `auth-phase3` alone 59.
+- Frontend **191**, mobile **206**, unchanged.
+- `test:e2e:db` + `test:e2e` 2 suites, 10 → **11**. Typecheck clean in all four packages. `migrate status` up to date.
+- **One flaky run.** The first full run failed 1 test in `auth-phase0.spec.ts` (the bcrypt unknown-account test). It passed alone (18/18) and the full suite then passed 1681/1681 with no code change. Its error text wasn't captured, so load is the likely cause, not a proven one.
+
+**Needs a person** (in addition to the Phase 5 list; restart the backend and Metro first)
+1. Phone: Profile → Privacy & Consent → Withdraw → back. The status should change to "Not verified" with "Scan again".
+2. Phone: Scan again with location denied. "Report an emergency" should be visible and open the SOS screen, and no "Sign in" link should appear on any step.
+3. Web: an incident reported by a bystander or staff account shows no ID label; one from a citizen account still does.
+
+### Follow-up — 2026-11-06 (renaming while verified)
+
+The owner decided a verified citizen can't rename (§11 D8).
+
+**Changed:** `UsersService.updateMe` returns 409 when a verified account sends a different `fullName`, and saves nothing from that request. The message repeats neither name. No migration, no new dependencies, and no mobile change: the app has no rename screen.
+
+**Still allowed:** sending the same name, changing any other profile field, and renaming by an unverified citizen or a staff account. A citizen whose legal name changed withdraws consent, then scans again.
+
+**Tests:** new `test/users/verified-name.spec.ts` (6), plus 1 e2e on real PostgreSQL: locked while verified, free after a withdrawal. The refusal tests failed before the fix.
+- Backend 1740 → **1746**: 1687, plus `auth-phase3` alone 59.
+- `test:e2e` 11 → **12**. Backend typecheck clean. `migrate status` up to date. Frontend and mobile weren't changed or re-run.
+
+**Open, not changed**
+1. **An account under review can still rename.** Reviewers see the current name, so a rename before the decision is compared with the card. A rename between staff opening the case and approving it would be verified unchecked. This needs a modified client and precise timing.
+2. **The check and the save aren't atomic.** A rename sent at the moment a claim commits could overwrite the checked name. This also needs a modified client and precise timing.
+
+### Follow-up — 2026-11-06 (query cache at sign-out)
+
+Existing behaviour across the whole mobile app, fixed at the owner's request before Prompt 6. **The problem:** nothing cleared the query cache, and keys like `['medical-profile']` and `['emergency-contacts']` aren't per account, so the next account on a shared phone could be shown the last one's data.
+
+**Changed**
+- `mobile/src/lib/query-client.ts` (new): the one `QueryClient`, moved out of `app/_layout.tsx` so the auth store can reach it.
+- `mobile/src/stores/auth.store.ts`: clears the queries and mutations when a session ends, and when a different account signs in. That covers every sign-out, including an expired session in `authed-fetch`. A token refresh keeps the cache.
+- `id-status-card.tsx`: back to a plain key, so there is one mechanism, not two.
+
+**Guard:** `logout` clears only when a session actually existed. `authedFetch` calls it on every 401 with no refresh token, so clearing each time would make a mounted screen fetch, fail and repeat forever.
+
+**Emergency flow:** no emergency screen uses a mutation, and the guest path doesn't sign in, so clearing can't touch an SOS being sent. If a session dies during an SOS, a background query such as the map settings may reload, which doesn't affect sending the report.
+
+**Tests:** new `auth-query-cache.test.ts` (6). 4 failed before the fix. The other 2 guard against clearing too much, so the store's lines were also broken one at a time: all 4 mutations were caught. JavaScript only: no new dev build.
+- Mobile 206 → **212**. Mobile typecheck clean. Backend and frontend weren't changed or re-run.
+
+**Not covered:** this tests the store and the real cache, not screens. A screen still mounted under the stack can hold what it last rendered until it re-renders or unmounts. Check by hand: sign in as one citizen, open Medical, sign out, sign in as another citizen and open Medical straight away. Nothing from the first account should appear.
+
+**The web app.** Fixed as well, at the owner's request.
+- **What was really exposed was narrower than first reported.** Console sign-outs call `router.replace('/login')`, but `AuthGate` also calls `redirectToLogin()` as soon as the session ends. That is a full page load, which should wipe the in-memory cache, though only as a side effect of that race. The change-password page sits outside `AuthGate`, so its sign-out really was client-side only. Read from the code; not confirmed in a browser.
+- **Changed:** `frontend/lib/session-cache.ts` (new) follows the session itself, and `providers/providers.tsx` starts it. The cache empties when the signed-in account signs out or changes, whichever path caused it. A token refresh, an unlock and a session restored after a page load keep it, so a dispatcher's screens never blank out.
+- **Tests:** new `session-cache.spec.ts` (8), written with the code. So its logic was broken 7 different ways, and all 7 were caught. Frontend 191 → **199**. Frontend typecheck clean.
+- **Not covered:** the provider's wiring has no test, because the frontend's Jest has no DOM. Check by hand: sign in as a dispatcher, open an incident, sign out, sign in as another staff account and open the same page. **Restart `pnpm dev` first.**
+
 ---
 
 ## 10. Test checklist
@@ -1192,6 +1338,7 @@ once used and isn't kept in the mutation cache.
 | D5 (2026-11-06) | What does withdrawing consent do? | **Erases the card data and marks the account not verified.** The account stays usable; scanning again verifies it again. A button in Privacy & Consent makes this reachable. | RA 10173: withdrawal has to mean something, and a citizen needs a way to do it. Getting help never depends on it (rule 14). |
 | D6 (2026-11-06) | How does a card's owner get it back? | **Unconfirmed phone: released automatically after 24 hours. Any other account: staff look at the card, find the holder by its number, and release it.** Blocked accounts are never released automatically. | Without this, whoever scans a card first can lock its owner out for good, and only a database edit could fix it. |
 | D7 (2026-11-06) | Do ID images need their own bucket? | **No.** They stay under `id-documents/` in the same bucket. **Deployment rule: keep that bucket private** (noted in `.env.example`). | Checked: anonymous read and list both return 403 on the dev storage, objects are AES-sealed with a key kept outside storage, and incident photos and announcement images already stream through the API, so nothing needs the bucket public. A second bucket would use the same credentials, so it adds setup and a failure mode and closes no hole. Production storage settings couldn't be checked from here. |
+| D8 (2026-11-06) | Can a verified citizen change their name? | **No.** `PATCH /users/me` refuses a different name while the account is verified. To change it: withdraw consent, then scan again. | Otherwise "ID verified" could sit beside a name nobody checked. |
 
 ### Still open (recommended answer in brackets)
 

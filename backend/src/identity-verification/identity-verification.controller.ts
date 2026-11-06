@@ -4,24 +4,29 @@ import {
   Catch,
   Controller,
   ExceptionFilter,
+  Get,
   HttpCode,
   HttpStatus,
   PayloadTooLargeException,
   Post,
+  Request,
   UploadedFile,
   UseFilters,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
-import { ID_IMAGE_MAX_BYTES, IdVerificationErrorCode } from '@agap/shared';
+import { ID_IMAGE_MAX_BYTES, IdVerificationErrorCode, type IdName } from '@agap/shared';
 import { Public } from '../common/decorators/public.decorator';
 import { MULTER_MEMORY_STORAGE } from '../media/media.service';
 import { AuthService } from '../auth/auth.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { IdClaimDto } from './dto/id-claim.dto';
 import { IdScanDto } from './dto/id-scan.dto';
-import { IdentityVerificationService, idVerificationError } from './identity-verification.service';
+import { IdentityVerificationService, idVerificationError, typedNameFrom } from './identity-verification.service';
 
 /** Multer stops reading at the size limit; give that refusal the same stable `code` as the service's. */
 @Catch(PayloadTooLargeException)
@@ -98,5 +103,31 @@ export class IdentityVerificationController {
       attemptNumber: dto.attemptNumber,
       requestReview: dto.requestReview,
     });
+  }
+
+  @Get('id-verification/status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "The signed-in citizen's PhilHealth ID status, for their profile" })
+  status(@Request() req: { user: { id: string } }) {
+    return this.identityVerification.profileStatus(req.user.id);
+  }
+
+  /** Scanning again from the profile: the scan goes through POST id-verification as at registration. */
+  @Post('id-verification/claim')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ burst: { ttl: 60000, limit: 5 }, sustained: { ttl: 900000, limit: 10 } })
+  @ApiOperation({ summary: "Claim a new PhilHealth ID scan for the signed-in citizen's account" })
+  @ApiResponse({ status: 400, description: 'ID_SCAN_EXPIRED or NAME_DOES_NOT_MATCH_ID' })
+  @ApiResponse({ status: 409, description: 'ID_ALREADY_REGISTERED' })
+  claim(@Request() req: { user: { id: string } }, @Body() dto: IdClaimDto) {
+    return this.identityVerification.claimForUser(
+      req.user.id,
+      dto.idVerificationToken,
+      typedNameFrom(dto) as IdName,
+      dto.requestReview === true,
+    );
   }
 }

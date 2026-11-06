@@ -16,6 +16,7 @@ import {
   Tabs, TabsList, TabsTrigger, TabsContent,
   PriorityBadge, StatusChip, Button, Skeleton, EmptyState, EtaLabel, Badge,
 } from '@/components/ui';
+import { reporterIdLabel } from '@/features/identity-verification/format';
 import {
   useIncident, useUpdateIncidentStatus, useCreateResolution, useCloseIncident, useReporterStanding,
   useIncidentTransports, useUpdateIncidentTransport, useRejectAttachment, useRescueSummary,
@@ -854,6 +855,8 @@ function People({ incident }: { incident: IncidentDetail }): JSX.Element {
   const reporter = incident.incident_reporters;
   const reporterStatus = reporter?.reporter_status as ReporterStatus | null | undefined;
   const patients = incident.incident_patients ?? [];
+  // About the reporter, never the patient. Neutral on purpose: it must not read as lower priority (rule 8).
+  const idLabel = reporterIdLabel(incident.reporterIdVerified);
 
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -872,6 +875,7 @@ function People({ incident }: { incident: IncidentDetail }): JSX.Element {
           </p>
         )}
         {!reporter?.is_guest && <ReporterStandingLine incidentId={incident.id} />}
+        {idLabel && <p className="mt-1 text-xs text-agap-textSub">{idLabel}</p>}
       </Section>
 
       <Section icon={Users} title={patients.length > 1 ? `Patients (${patients.length})` : 'Patient'}>

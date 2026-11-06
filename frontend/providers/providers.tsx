@@ -2,8 +2,9 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { ToastProvider, ToastViewport } from '@/components/ui/toast';
+import { clearCacheWhenAccountChanges } from '@/lib/session-cache';
 import { SocketProvider } from './socket-provider';
 
 export function Providers({ children }: { children: ReactNode }): ReactElement {
@@ -32,6 +33,8 @@ export function Providers({ children }: { children: ReactNode }): ReactElement {
         },
       }),
   );
+
+  useEffect(() => clearCacheWhenAccountChanges(queryClient), [queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>

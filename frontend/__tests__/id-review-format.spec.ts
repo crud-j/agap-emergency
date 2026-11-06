@@ -2,6 +2,7 @@ import { ID_CARD_RELEASE_REASONS, ID_REJECTION_REASONS, ID_REVIEW_STATUSES, IdVe
 import {
   CARD_RELEASE_REASON_LABELS,
   cardHolderNotes,
+  reporterIdLabel,
   REJECTION_REASON_LABELS,
   REVIEW_STATUS_LABELS,
   reviewCheckHint,
@@ -28,6 +29,13 @@ describe('PhilHealth ID review labels', () => {
     expect(reviewCheckHint({ kind: 'NAME_MISMATCH', failedParts: ['first'] })).toMatch(/typed name/);
     expect(reviewCheckHint({ kind: 'SCAN_FAILURE', code: IdVerificationErrorCode.UNREADABLE })).toMatch(/PhilHealth ID/);
     expect(reviewCheckHint({ kind: 'UNKNOWN' })).toMatch(/PhilHealth ID/);
+  });
+
+  it('labels the reporter only when an account exists: a guest gets no label', () => {
+    expect(reporterIdLabel(true)).toBe('ID verified');
+    expect(reporterIdLabel(false)).toBe('ID not verified');
+    expect(reporterIdLabel(null)).toBeNull();
+    expect(reporterIdLabel(undefined)).toBeNull();
   });
 
   describe('cardHolderNotes', () => {

@@ -22,6 +22,13 @@ export const CARD_RELEASE_REASON_LABELS: Record<IdCardReleaseReason, string> = {
   STAFF_CORRECTION: 'Staff correction',
 };
 
+/** The reporter card's label. null without a citizen account: a guest just shows as a guest. Information only (plan §8). */
+export function reporterIdLabel(verified: boolean | null | undefined): string | null {
+  if (verified === true) return 'ID verified';
+  if (verified === false) return 'ID not verified';
+  return null;
+}
+
 /** What the reviewer should know about the account holding a card before releasing it. */
 export function cardHolderNotes(holder: Pick<IdCardHolder, 'status' | 'account'>): string[] {
   const notes: string[] = [];

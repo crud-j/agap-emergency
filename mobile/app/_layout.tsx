@@ -3,11 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
+import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from '../src/stores/auth.store';
 import { useAccessibilityStore } from '../src/stores/accessibility.store';
+import { queryClient } from '../src/lib/query-client';
 import { homeRouteForRole } from '../src/lib/role-routing';
 import { OfflineBanner } from '../src/components/ui/OfflineBanner';
 import {
@@ -38,18 +39,6 @@ if (Platform.OS !== 'web') {
     }),
   });
 }
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      // 3 retries with exponential backoff (1 s → 2 s → 4 s) so brief backend
-      // startup windows don't permanently strand queries in error state.
-      retry: 3,
-      retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 10_000),
-      staleTime: 30_000,
-    },
-  },
-});
 
 const PUBLIC_SEGMENTS = ['auth', 'onboarding', 'emergency'];
 const AUTH_ONLY_SEGMENTS = ['auth', 'onboarding'];

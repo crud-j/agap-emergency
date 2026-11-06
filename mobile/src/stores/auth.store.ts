@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import type { SafeUser, AuthTokens } from '../services/api/auth.api';
+import { queryClient } from '../lib/query-client';
 import { useIncidentStore } from './incident.store';
 import { disconnectSocket } from '../services/websocket/agap-socket';
 
@@ -59,7 +60,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // session's incident (e.g. a guest report's id on a shared phone). A token
     // refresh calls login for the same user and keeps it, and keeps the socket too.
     // Another account must not reuse the previous user's socket and incident rooms.
-    if (get().user?.id !== user.id) {
+    const anotherAccount = get().user?.id !== user.id;
+    if (anotherAccount) {
       useIncidentStore.getState().reset();
       disconnectSocket();
     }
@@ -69,6 +71,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       SecureStore.setItemAsync(KEYS.user, JSON.stringify(user)),
     ]);
     set({ ...tokens, user, isAuthenticated: true });
+    // After the new session is set, so whatever refetches does so as the new account.
+    if (anotherAccount) queryClient.clear();
   },
 
   updateUser: async (partial) => {
@@ -83,6 +87,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Close the realtime socket first, so it never outlives the session (even when
     // revoking it doesn't reach the server) and the next account starts clean.
     disconnectSocket();
+    const { user, accessToken } = get();
     await Promise.all([
       SecureStore.deleteItemAsync(KEYS.accessToken),
       SecureStore.deleteItemAsync(KEYS.refreshToken),
@@ -90,5 +95,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     ]);
     set({ accessToken: null, refreshToken: null, user: null, isAuthenticated: false });
     useIncidentStore.getState().reset();
+    // Medical data, contacts and the rest are cached under keys that aren't per account. Only when
+    // a session really ended: authedFetch calls logout on every 401 with no refresh token, and
+    // emptying the cache each time would make a mounted screen fetch, fail and repeat forever.
+    if (user || accessToken) queryClient.clear();
   },
 }));

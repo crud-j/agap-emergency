@@ -16,12 +16,19 @@ import {
 } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcryptjs';
+import { createHash, createHmac } from 'crypto';
 import { seedBarangayDirectory } from './barangay-directory';
 
 const adapter = new PrismaPg({ connectionString: process.env['DATABASE_URL'] as string });
 const prisma = new PrismaClient({ adapter });
 
 const DEV_PASSWORD = 'AgapDev2026!';
+
+/**
+ * A seeded citizen passed the PhilHealth ID check (plan §8). Fixed values, so re-seeding changes
+ * nothing. is_phone_verified matters: the cleanup job releases claims of unconfirmed phones.
+ */
+const SEEDED_ID_VERIFIED = { is_phone_verified: true, identity_verified_at: new Date('2026-01-01T00:00:00.000Z') };
 
 async function main() {
   console.log('Seeding AGAP database...');
@@ -1019,7 +1026,7 @@ async function main() {
 
   const demoCitizen = await prisma.user.upsert({
     where: { email: 'citizen@demo.agap' },
-    update: {},
+    update: SEEDED_ID_VERIFIED,
     create: {
       full_name: 'Demo Citizen',
       email: 'citizen@demo.agap',
@@ -1028,8 +1035,31 @@ async function main() {
       role: user_role.CITIZEN,
       is_email_verified: true,
       barangay: 'Turo',
+      ...SEEDED_ID_VERIFIED,
     },
   });
+
+  // PhilHealth ID check (plan §8): seeded citizens count as already verified, with a clearly fake
+  // PIN and no image. Keyed on a fixed token hash, so seeding twice keeps one row. The pepper
+  // must be the app's, or the row couldn't take part in the one-ID-per-account check.
+  const idPepper = process.env['ID_PIN_PEPPER']?.trim();
+  if (idPepper) {
+    const seededScan = {
+      user_id: demoCitizen.id,
+      status: 'AUTO_VERIFIED' as const,
+      pin_hmac: createHmac('sha256', idPepper).update('000000000010', 'utf8').digest('hex'), // 00-000000001-0
+      pin_last4: '0010',
+      image_storage_key: null,
+      claim_expires_at: SEEDED_ID_VERIFIED.identity_verified_at,
+    };
+    await prisma.identity_verifications.upsert({
+      where: { claim_token_hash: createHash('sha256').update('seed:citizen@demo.agap').digest('hex') },
+      update: seededScan,
+      create: { ...seededScan, claim_token_hash: createHash('sha256').update('seed:citizen@demo.agap').digest('hex') },
+    });
+  } else {
+    console.log('  ID_PIN_PEPPER is not set: skipped the seeded PhilHealth ID scan rows');
+  }
 
   await prisma.incident.upsert({
     where: { id: DEMO_INCIDENT_ID },

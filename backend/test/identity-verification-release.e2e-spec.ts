@@ -1,11 +1,13 @@
 import * as path from 'path';
 import * as dotenv from 'dotenv';
-import { randomBytes, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { AuditAction } from '@agap/shared';
 import { AuditService } from '../src/audit/audit.service';
 import { PrismaService } from '../src/common/prisma/prisma.service';
+import { IncidentsService } from '../src/incidents/incidents.service';
 import { IdDocumentCryptoService } from '../src/identity-verification/id-document-crypto.service';
 import { IdentityVerificationService } from '../src/identity-verification/identity-verification.service';
+import { UsersService } from '../src/users/users.service';
 import { e2eDatabaseUrl } from './e2e/e2e-database';
 
 // MOD-48 — when a claim on a PhilHealth ID ends, against real PostgreSQL: the partial unique index,
@@ -25,6 +27,7 @@ if (!E2E_URL) {
 describeE2E('PhilHealth ID release (real database)', () => {
   let prisma: PrismaService;
   let service: IdentityVerificationService;
+  let crypto: IdDocumentCryptoService;
   const media = { deletePrivateObject: jest.fn(async () => undefined) };
   const userIds: string[] = [];
   const scanIds: string[] = [];
@@ -38,9 +41,10 @@ describeE2E('PhilHealth ID release (real database)', () => {
       ID_DOCUMENT_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
       ID_PIN_PEPPER: randomBytes(32).toString('base64'),
     };
+    crypto = new IdDocumentCryptoService({ get: (name: string) => secrets[name] } as any);
     service = new IdentityVerificationService(
       prisma,
-      new IdDocumentCryptoService({ get: (name: string) => secrets[name] } as any),
+      crypto,
       {} as any,
       media as any,
       new AuditService(prisma),
@@ -166,6 +170,117 @@ describeE2E('PhilHealth ID release (real database)', () => {
     expect((await prisma.consent_records.findUniqueOrThrow({ where: { id: consent.id } })).status).toBe('WITHDRAWN');
     const other = await account();
     await expect(scan(pin, { user_id: other })).resolves.toEqual(expect.any(String));
+  });
+
+  describe('scanning again from the profile', () => {
+    const token = () => randomBytes(32).toString('base64url');
+
+    /** An unclaimed scan of a card reading DELA CRUZ, JUAN, with its token. */
+    async function unclaimedScan(pin = hmac()): Promise<{ id: string; token: string }> {
+      const id = randomUUID();
+      const raw = token();
+      await scan(pin, {
+        id,
+        claim_token_hash: createHash('sha256').update(raw, 'utf8').digest('hex'),
+        name_on_id_sealed: crypto.sealName(id, { last: 'DELA CRUZ', first: 'JUAN' }),
+      });
+      scanIds.push(id);
+      return { id, token: raw };
+    }
+
+    const CITIZEN = { role: 'CITIZEN', identity_verified_at: null };
+
+    it('a rejected citizen is verified by a new matching scan, and the status follows each step', async () => {
+      const citizen = await account(CITIZEN);
+      const rejected = await unclaimedScan();
+      await service.claimForUser(citizen, rejected.token, { last: 'Dela Rosa', first: 'Juan' }, true);
+      expect(await service.profileStatus(citizen)).toEqual({ status: 'UNDER_REVIEW' });
+
+      await prisma.identity_verifications.update({ where: { id: rejected.id }, data: { status: 'REJECTED' } });
+      expect(await service.profileStatus(citizen)).toEqual({ status: 'NOT_APPROVED' });
+
+      const again = await unclaimedScan();
+      const result = await service.claimForUser(citizen, again.token, { last: 'Dela Cruz', first: 'Juan' }, false);
+
+      expect(result).toEqual({ identityVerification: 'AUTO_VERIFIED', fullName: 'Juan Dela Cruz' });
+      expect(await service.profileStatus(citizen)).toEqual({ status: 'VERIFIED' });
+      expect(await row(again.id)).toMatchObject({ user_id: citizen, status: 'AUTO_VERIFIED', image_storage_key: null });
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: citizen } })).toMatchObject({ full_name: 'Juan Dela Cruz' });
+    });
+
+    it('a card another account holds trips the real index, and the whole claim rolls back', async () => {
+      const pin = hmac();
+      const holder = await account();
+      await scan(pin, { user_id: holder });
+      const citizen = await account(CITIZEN);
+      // A scan taken before the other account claimed the card: only the index can refuse it now.
+      const raced = await unclaimedScan(pin);
+
+      await expect(service.claimForUser(citizen, raced.token, { last: 'Dela Cruz', first: 'Juan' }, false)).rejects.toMatchObject({
+        status: 409,
+      });
+
+      expect((await row(raced.id)).user_id).toBeNull();
+      const after = await prisma.user.findUniqueOrThrow({ where: { id: citizen } });
+      expect(after).toMatchObject({ full_name: 'Test Citizen', identity_verified_at: null });
+      expect(await prisma.consent_records.count({ where: { user_id: citizen } })).toBe(0);
+    });
+
+    it('two cards claimed at once for one account: only one wins, one card per account', async () => {
+      const citizen = await account(CITIZEN);
+      const [first, second] = await Promise.all([unclaimedScan(), unclaimedScan()]);
+
+      const results = await Promise.allSettled([
+        service.claimForUser(citizen, first.token, { last: 'Dela Cruz', first: 'Juan' }, false),
+        service.claimForUser(citizen, second.token, { last: 'Dela Cruz', first: 'Juan' }, false),
+      ]);
+
+      expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+      expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: { status: 409 } });
+      expect(await prisma.identity_verifications.count({ where: { user_id: citizen } })).toBe(1);
+      expect(await prisma.consent_records.count({ where: { user_id: citizen } })).toBe(1);
+    });
+
+    it('a verified name is locked until the citizen withdraws', async () => {
+      const users = new UsersService(prisma, { log: jest.fn() } as any, {} as any);
+      const citizen = await account(CITIZEN);
+      await service.claimForUser(citizen, (await unclaimedScan()).token, { last: 'Dela Cruz', first: 'Juan' }, false);
+
+      await expect(users.updateMe(citizen, { fullName: 'Someone Else' })).rejects.toMatchObject({ status: 409 });
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: citizen } })).toMatchObject({ full_name: 'Juan Dela Cruz' });
+
+      await service.withdrawConsent(citizen);
+      await users.updateMe(citizen, { fullName: 'Someone Else' });
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: citizen } })).toMatchObject({ full_name: 'Someone Else' });
+    });
+  });
+
+  it('getReporterIdVerified: true or false for an account, null for a guest', async () => {
+    const incidents: IncidentsService = new (IncidentsService as any)(prisma); // This read needs only the database.
+    const verified = await account();
+    const unverified = await account({ identity_verified_at: null });
+    const incident = async (reporter: Record<string, unknown>) => {
+      const id = randomUUID();
+      await prisma.incident.create({
+        data: {
+          id,
+          public_reference: `INC-E2E-${randomBytes(4).toString('hex')}`,
+          category: 'MEDICAL',
+          incident_reporters: { create: reporter as any },
+        } as any,
+      });
+      return id;
+    };
+
+    expect(await incidents.getReporterIdVerified(await incident({ user_id: verified }))).toBe(true);
+    expect(await incidents.getReporterIdVerified(await incident({ user_id: unverified }))).toBe(false);
+    expect(await incidents.getReporterIdVerified(await incident({ is_guest: true }))).toBeNull();
+
+    // Only citizens can scan: "ID not verified" would be a label these accounts could never lose.
+    for (const role of ['BYSTANDER', 'RESPONDER', 'DISPATCHER']) {
+      const staff = await account({ role, identity_verified_at: null });
+      expect(await incidents.getReporterIdVerified(await incident({ user_id: staff }))).toBeNull();
+    }
   });
 
   it('cleanup erases the card data of an expired scan with nobody behind it', async () => {

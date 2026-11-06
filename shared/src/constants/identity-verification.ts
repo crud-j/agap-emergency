@@ -47,6 +47,16 @@ export interface IdScanResponse {
   reviewRequired: boolean;
 }
 
+/** GET /auth/id-verification/status: what the citizen's profile shows (plan §8). */
+export type IdProfileStatus = 'VERIFIED' | 'UNDER_REVIEW' | 'NOT_APPROVED' | 'NOT_VERIFIED';
+
+/** POST /auth/id-verification/claim: a signed-in citizen's new scan. */
+export interface IdClaimResponse {
+  identityVerification: 'AUTO_VERIFIED' | 'PENDING_REVIEW';
+  /** The account's name, now the name that was checked. As typed, never read from the card. */
+  fullName: string;
+}
+
 // ─── Staff review (plan §7) ──────────────────────────────────────────────────
 
 /** Why staff rejected an ID under review: fixed codes, never free text with personal data. */

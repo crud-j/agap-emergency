@@ -16,6 +16,7 @@ function makeController(participation: Participation) {
     findById: jest.fn().mockResolvedValue({ id: 'inc-1', status: 'TRANSPORTING', barangay_notices: [] }),
     findReporterView: jest.fn().mockResolvedValue({ id: 'inc-1', status: 'TRANSPORTING' }),
     getReporterSex: jest.fn().mockResolvedValue(null),
+    getReporterIdVerified: jest.fn().mockResolvedValue(null),
     listEvents: jest.fn().mockResolvedValue([]),
     getTimeline: jest.fn().mockResolvedValue({ timeline: [] }),
     getResolution: jest.fn().mockResolvedValue({ outcome: 'TRANSPORTED' }),

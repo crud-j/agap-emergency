@@ -14,6 +14,7 @@ import { updateUserPreferences } from '../../src/services/api/users.api';
 import { BottomNav } from '../../src/components/ui/bottom-nav';
 import { MapIconCard } from '../../src/components/profile/map-icon-card';
 import { VerifiedReporterBadge } from '../../src/components/reporter/verified-reporter';
+import { IdStatusCard } from '../../src/components/profile/id-status-card';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -126,6 +127,7 @@ export default function ProfileScreen() {
           </View>
 
           {!user?.is_guest && user?.role === 'CITIZEN' && <VerifiedReporterBadge />}
+          {!user?.is_guest && user?.role === 'CITIZEN' && <IdStatusCard />}
 
           {/* ── Profile completeness ──────────────────────────────────── */}
           {completeness < 100 ? (

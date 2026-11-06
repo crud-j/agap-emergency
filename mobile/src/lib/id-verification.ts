@@ -13,6 +13,7 @@ import {
   matchIdName,
   type IdName,
   type IdNameMatch,
+  type IdProfileStatus,
 } from '@agap/shared';
 import type { Translations } from '../i18n/translations';
 import { ApiError, NetworkError } from '../services/api/http';
@@ -159,6 +160,24 @@ export function checkTypedName(typed: IdName | null, nameOnId: IdName | null): I
  */
 export function canCreateAccount(state: { nameMatches: boolean; reviewChosen: boolean; reviewScan: boolean }): boolean {
   return state.nameMatches || state.reviewChosen || state.reviewScan;
+}
+
+/** How the profile shows a citizen's status: its label, tone, and whether they can scan again. */
+export function idStatusView(status: IdProfileStatus): {
+  labelKey: 'idStatusVerified' | 'idStatusUnderReview' | 'idStatusNotApproved' | 'idStatusNotVerified';
+  tone: 'ok' | 'info' | 'warn';
+  canScanAgain: boolean;
+} {
+  switch (status) {
+    case 'VERIFIED':
+      return { labelKey: 'idStatusVerified', tone: 'ok', canScanAgain: false };
+    case 'UNDER_REVIEW':
+      return { labelKey: 'idStatusUnderReview', tone: 'info', canScanAgain: false };
+    case 'NOT_APPROVED':
+      return { labelKey: 'idStatusNotApproved', tone: 'warn', canScanAgain: true };
+    case 'NOT_VERIFIED':
+      return { labelKey: 'idStatusNotVerified', tone: 'warn', canScanAgain: true };
+  }
 }
 
 /** A rectangle in a photo's pixels. */

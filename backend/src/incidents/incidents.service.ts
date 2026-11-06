@@ -297,6 +297,22 @@ export class IncidentsService {
     return incident;
   }
 
+  /**
+   * Did the reporter's account pass the PhilHealth ID check? The console's reporter card only
+   * (plan §8), about the reporter, never the patient. null for a guest, a reporter with no account,
+   * or an account that isn't a citizen's: only citizens can scan, so "not verified" would mislead.
+   * Information only: it must never feed priority, recommendations or dispatch (rule 8).
+   */
+  async getReporterIdVerified(incidentId: string): Promise<boolean | null> {
+    const reporter = await this.prisma.incidentReporter.findUnique({
+      where: { incident_id: incidentId },
+      select: { is_guest: true, users: { select: { identity_verified_at: true, is_guest: true, role: true } } },
+    });
+    if (!reporter || reporter.is_guest || !reporter.users || reporter.users.is_guest) return null;
+    if (reporter.users.role !== 'CITIZEN') return null;
+    return reporter.users.identity_verified_at !== null;
+  }
+
   /** 404 for an unknown incident; 403 unless `userId` is the incident's reporter. */
   async assertReporter(incidentId: string, userId: string): Promise<void> {
     const reporter = await this.prisma.incidentReporter.findUnique({

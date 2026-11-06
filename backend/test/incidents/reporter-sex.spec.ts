@@ -23,12 +23,43 @@ describe('reporter_sex exposure (WP3.6, least privilege)', () => {
     });
   });
 
+  describe('GET /incidents/:id: the reporter\'s ID check (plan §8)', () => {
+    function makeController(participation: 'staff' | 'reporter' | 'crew') {
+      const incidents = {
+        findById: jest.fn().mockResolvedValue({ id: 'inc-1', incident_patients: [{ id: 'p-1' }] }),
+        findReporterView: jest.fn().mockResolvedValue({ id: 'inc-1' }),
+        getReporterSex: jest.fn().mockResolvedValue(null),
+        getReporterIdVerified: jest.fn().mockResolvedValue(false),
+      };
+      const participants = { getParticipation: jest.fn().mockResolvedValue(participation) };
+      const controller = new IncidentsController(
+        incidents as any, {} as any, {} as any, {} as any, {} as any, participants as any,
+      );
+      return { controller, incidents };
+    }
+
+    it('staff see it at the incident level, about the reporter, and on no patient', async () => {
+      const { controller } = makeController('staff');
+      const result: any = await controller.findOne('inc-1', { user: { id: 'u-1', role: 'DISPATCHER' } } as any);
+      expect(result.reporterIdVerified).toBe(false);
+      expect(result.incident_patients[0]).toEqual({ id: 'p-1' });
+    });
+
+    it.each(['crew', 'reporter'] as const)('%s do not get it', async (participation) => {
+      const { controller, incidents } = makeController(participation);
+      const result: any = await controller.findOne('inc-1', { user: { id: 'u-1', role: 'CITIZEN' } } as any);
+      expect(result.reporterIdVerified).toBeUndefined();
+      expect(incidents.getReporterIdVerified).not.toHaveBeenCalled();
+    });
+  });
+
   describe('GET /incidents/:id', () => {
     function makeController(participation: 'staff' | 'reporter' | 'crew' | null) {
       const incidents = {
         findById: jest.fn().mockResolvedValue({ id: 'inc-1', status: 'EN_ROUTE' }),
         findReporterView: jest.fn().mockResolvedValue({ id: 'inc-1', status: 'EN_ROUTE' }),
         getReporterSex: jest.fn().mockResolvedValue('FEMALE'),
+        getReporterIdVerified: jest.fn().mockResolvedValue(true),
       };
       const participants = { getParticipation: jest.fn().mockResolvedValue(participation) };
       const controller = new IncidentsController(

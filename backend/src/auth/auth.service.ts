@@ -12,12 +12,13 @@ import { Queue } from 'bullmq';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
-import { AuditAction, IdVerificationErrorCode, QUEUE_NAMES, composeFullName, type IdName } from '@agap/shared';
+import { AuditAction, IdVerificationErrorCode, QUEUE_NAMES, composeFullName } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import {
   IdentityVerificationService,
   idVerificationError,
+  typedNameFrom,
 } from '../identity-verification/identity-verification.service';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
@@ -297,7 +298,7 @@ export class AuthService {
 
     // MOD-01 PhilHealth ID verification (plan §5.3). Gates account creation only; guest
     // SOS (registerGuest) never needs it.
-    const typedName = this.typedName(dto);
+    const typedName = typedNameFrom(dto);
     if (!dto.idVerificationToken && this.config.get<string>('ID_VERIFICATION_REQUIRED') === 'true') {
       throw idVerificationError(
         400,
@@ -375,19 +376,6 @@ export class AuthService {
     const { password_hash: _, ...safeUser } = user;
     // PENDING_REVIEW: the account works (sign-in, SOS) while MDRRMO staff check the ID.
     return { user: safeUser, identityVerification: idClaim?.outcome ?? null };
-  }
-
-  /** The name parts typed at registration, or null when last or first name is missing. */
-  private typedName(dto: RegisterDto): IdName | null {
-    const last = dto.lastName?.trim();
-    const first = dto.firstName?.trim();
-    if (!last || !first) return null;
-    const name: IdName = { last, first };
-    const middle = dto.middleName?.trim();
-    const suffix = dto.suffix?.trim();
-    if (middle) name.middle = middle;
-    if (suffix) name.suffix = suffix;
-    return name;
   }
 
   async registerGuest(dto: RegisterGuestDto) {

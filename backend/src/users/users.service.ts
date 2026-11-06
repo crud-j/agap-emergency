@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ReportReadinessDto } from './dto/report-readiness.dto';
@@ -92,6 +92,12 @@ export class UsersService {
   async updateMe(userId: string, dto: UpdateProfileDto) {
     const current = await this.ensureExists(userId);
     const sexChanged = dto.sex !== undefined && dto.sex !== current.sex;
+
+    // "ID verified" must never sit beside a name nobody checked (plan §11 D8). Withdrawing
+    // consent ends the verification; scanning again then checks the new name.
+    if (current.identity_verified_at && dto.fullName !== undefined && dto.fullName !== current.full_name) {
+      throw new ConflictException('Your name is verified against your PhilHealth ID and can\'t be changed here.');
+    }
 
     const updated = await this.prisma.user.update({
       where: { id: userId },

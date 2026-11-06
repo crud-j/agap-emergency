@@ -133,6 +133,8 @@ export function makeDb() {
     consent_records: fakeTable(db.consents),
     identity_verifications: idv,
     auditLog: fakeTable(db.audit),
+    // Row locks only: this database has no concurrency. The real database's are tested in the e2e.
+    $queryRaw: jest.fn(async () => []),
     // Rolls every table back when the callback throws, like a real transaction.
     $transaction: jest.fn(async (fn: (tx: any) => Promise<unknown>) => {
       const snapshot = Object.fromEntries(Object.entries(db).map(([name, rows]) => [name, structuredClone(rows)]));
