@@ -1,14 +1,16 @@
 /**
- * PhilHealth ID verification, Phase 0 spike: how well does local tesseract.js read the cards?
+ * ID verification, Phase 0 spike: how well does local tesseract.js read the cards? Used for both
+ * the PhilHealth ID and the National ID plans.
  *
- * Sample ID images are personal data. Keep them outside the repo. Never commit the output.
+ * Sample ID images are personal data. Keep them outside the repo. The output contains card text:
+ * read it in your own terminal, and never commit it or paste it into a chat or file.
  *
  *   npx ts-node --transpile-only scripts/ocr-spike.ts <folder outside the repo>
  *
  * Reads every .jpg/.jpeg/.png in the folder and prints, per file, the raw OCR text and the
  * time taken. It prints to the terminal only and writes nothing to disk: the English data is
  * read from the bundled @tesseract.js-data/eng package and caching is off, so nothing is
- * downloaded or saved. Copy only the layout (no names, no numbers) into the plan's Phase 0 notes.
+ * downloaded or saved. Copy only the layout (no names, no numbers) into that plan's Phase 0 notes.
  */
 import { readdir, readFile } from 'fs/promises';
 import { dirname, extname, join, relative, resolve, isAbsolute } from 'path';
