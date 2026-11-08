@@ -14,7 +14,7 @@ import {
 import { IdentityVerificationController } from '../../src/identity-verification/identity-verification.controller';
 import { IdentityVerificationService } from '../../src/identity-verification/identity-verification.service';
 import { matches, type Row } from '../auth/fake-prisma';
-import { JPEG, LICENCE_TEXT, PHILHEALTH_TEXT, PIN, file, makeAuth, makeKit, sha256 } from './id-test-kit';
+import { JPEG, LICENCE_TEXT, PHILHEALTH_TEXT, PIN, file, jpegOfSize, makeAuth, makeKit, sha256 } from './id-test-kit';
 
 // MOD-01 / MOD-48 — the National ID through the real scan, registration, consent and staff flows, over
 // real HTTP where the DTOs and pipes matter. OCR is stubbed. Invented names and fake numbers only. The
@@ -155,9 +155,9 @@ describe('National ID', () => {
   const userOf = (id: string) => kit.prisma.db.users.find((u: Row) => u.id === id);
   const hmac = (digits: string) => kit.crypto.pinHmac(digits);
 
-  async function postScan(fields: Record<string, string> = {}) {
+  async function postScan(fields: Record<string, string> = {}, image: Buffer = JPEG) {
     const body = new FormData();
-    body.append('image', new Blob([JPEG], { type: 'image/jpeg' }), 'id.jpg');
+    body.append('image', new Blob([image], { type: 'image/jpeg' }), 'id.jpg');
     for (const [key, value] of Object.entries({ consentGiven: 'true', latitude: '14.7977', longitude: '120.9374', ...fields })) {
       body.append(key, value);
     }
@@ -1111,6 +1111,113 @@ describe('National ID', () => {
       for (const secret of [PCN, PCN_DIGITS, OTHER_PCN, '0001', '0002', '0012', PSN, 'DELA CRUZ', 'JUAN', 'SANTOS', 'SAMPLE STREET', 'JANUARY', 'PAMBANSANG', '1990']) {
         expect(logged).not.toContain(secret);
       }
+    });
+
+    describe('a name-column read, when the whole card read but the name did not', () => {
+      /** A card-shaped upload, 1600 × 1008 px; the name column is then left 688, top 282, 912 × 474. */
+      const CARD_IMAGE = jpegOfSize(1600, 1008);
+      const NAME_COLUMN_PX = { left: 688, top: 282, width: 912, height: 474 };
+      /** What the name column alone reads: the labels and values, with no photo noise. */
+      const NAME_COLUMN = {
+        text: [
+          'Apelyido/Last Name',
+          'DELA CRUZ',
+          'Mga Pangalan/Given Names',
+          'JUAN',
+          'Gitnang Apelyido/Middle Name',
+          'SANTOS',
+          'Petsa ng Kapanganakan/Date of Birth',
+        ].join('\n'),
+        confidence: 75,
+      };
+      /** Photo noise on every name line: the labels garbled, so the whole-card read finds no name. */
+      const NOISY = {
+        text: ['PAMBANSANG PAGKAKAKILANLAN', `${PCN} '`, ": j 7a Apelyldo / Lasi Narne", "| e 12 DELA CRUZ '", 'Petsa ng Kapanganakan/Date of Birth'].join('\n'),
+        confidence: 41,
+      };
+
+      it('reads the name column alone, takes its name, and verifies the card with the number from the whole-card read', async () => {
+        readsInOrder(NOISY, NOISY, NAME_COLUMN);
+        const res = await postScan({ documentType: 'NATIONAL_ID' }, CARD_IMAGE);
+
+        expect(res.status).toBe(200);
+        expect(res.json).toMatchObject({ pinLast4: '0001', reviewRequired: false, documentType: 'NATIONAL_ID' });
+        expect(res.json.nameOnId).toEqual({ last: 'DELA CRUZ', first: 'JUAN', middle: 'SANTOS' });
+        expect(kit.ocr.read).toHaveBeenCalledTimes(3);
+        expect(kit.ocr.read.mock.calls[2].slice(1)).toEqual(['block', NAME_COLUMN_PX]);
+        expect(rows()[0]).toMatchObject({ status: 'AUTO_VERIFIED', pin_hmac: hmac(PCN_DIGITS), pin_last4: '0001', document_type: 'NATIONAL_ID' });
+      });
+
+      it('the typed name must still match the name it read', async () => {
+        readsInOrder(NOISY, NOISY, NAME_COLUMN);
+        const scan = await postScan({ documentType: 'NATIONAL_ID' }, CARD_IMAGE);
+        const { auth } = makeAuth(kit);
+        await expect(auth.register({ ...account(PHONE_1), ...WRONG, idVerificationToken: scan.json.token } as RegisterDto)).rejects.toMatchObject({
+          response: { code: IdVerificationErrorCode.NAME_DOES_NOT_MATCH_ID },
+        });
+      });
+
+      it('logs that the name column saved it, with no name, number or card text', async () => {
+        readsInOrder(NOISY, NOISY, NAME_COLUMN);
+        const logged = await withWarnings(async () => {
+          await postScan({ documentType: 'NATIONAL_ID' }, CARD_IMAGE);
+        });
+        expect(logged).toContain('nameColumn[conf=75 card=false number=false name=true');
+        expect(logged).toContain('outcome=name column read passed');
+        for (const secret of [PCN, PCN_DIGITS, '0001', 'DELA', 'CRUZ', 'JUAN', 'SANTOS', 'Apelyldo', 'Narne', 'PAMBANSANG']) {
+          expect(logged).not.toContain(secret);
+        }
+      });
+
+      it('a name column that finds no name leaves the card unreadable, and stores nothing', async () => {
+        readsInOrder(NOISY, NOISY, { text: 'g i y L ¥ ] = a Fi', confidence: 30 });
+        const logged = await withWarnings(async () => {
+          const res = await postScan({ documentType: 'NATIONAL_ID' }, CARD_IMAGE);
+          expect(res.status).toBe(422);
+          expect(res.json.code).toBe(IdVerificationErrorCode.UNREADABLE);
+        });
+        expect(rows()).toHaveLength(0);
+        expect(logged).toContain('nameColumn[conf=30');
+        expect(logged).toContain('outcome=UNREADABLE');
+      });
+
+      it('a different card number in the name column trusts neither number, and verifies nothing', async () => {
+        readsInOrder(NOISY, NOISY, { ...NAME_COLUMN, text: `${OTHER_PCN}\n${NAME_COLUMN.text}` });
+        const res = await postScan({ documentType: 'NATIONAL_ID' }, CARD_IMAGE);
+        expect(res.status).toBe(422);
+        expect(rows()).toHaveLength(0);
+      });
+
+      it('is not run when the whole card already read, when no number was read, or when the image size is unknown', async () => {
+        readsInOrder(CARD);
+        expect((await postScan({ documentType: 'NATIONAL_ID' }, CARD_IMAGE)).status).toBe(200);
+        expect(kit.ocr.read).toHaveBeenCalledTimes(1);
+
+        const headingOnly = { text: 'PAMBANSANG PAGKAKAKILANLAN\nApelyido/Last Name', confidence: 50 };
+        readsInOrder(headingOnly, headingOnly, NAME_COLUMN);
+        expect((await postScan({ documentType: 'NATIONAL_ID' }, CARD_IMAGE)).status).toBe(422);
+        expect(kit.ocr.read).toHaveBeenCalledTimes(2);
+
+        readsInOrder(NOISY, NOISY, NAME_COLUMN);
+        const logged = await withWarnings(async () => {
+          expect((await postScan({ documentType: 'NATIONAL_ID' })).status).toBe(422); // the 68-byte test stub has no size
+        });
+        expect(kit.ocr.read).toHaveBeenCalledTimes(2);
+        expect(logged).toContain('nameColumn[not run]');
+      });
+
+      it('is not run for an image taller than wide: the card is on its side', async () => {
+        readsInOrder(NOISY, NOISY, NAME_COLUMN);
+        expect((await postScan({ documentType: 'NATIONAL_ID' }, jpegOfSize(1008, 1600))).status).toBe(422);
+        expect(kit.ocr.read).toHaveBeenCalledTimes(2);
+      });
+
+      it('a PhilHealth ID has no name column and is read as before', async () => {
+        const noName = { text: ['REPUBLIC OF THE PHILIPPINES PhilHealth', 'Philippine Health Insurance Corporation', 'am | 00-000000001-0'].join('\n'), confidence: 60 };
+        readsInOrder(noName, noName, NAME_COLUMN);
+        expect((await postScan({ documentType: 'PHILHEALTH' }, CARD_IMAGE)).status).toBe(422);
+        expect(kit.ocr.read).toHaveBeenCalledTimes(2);
+      });
     });
   });
 

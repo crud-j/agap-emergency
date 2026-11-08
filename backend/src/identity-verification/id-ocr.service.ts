@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { dirname, join } from 'path';
 import { createWorker, OEM, PSM, type Worker } from 'tesseract.js';
+import type { PixelRegion } from './id-image-size';
 
 /** A read slower than this returns "unreadable" instead of holding the request open. */
 export const OCR_TIMEOUT_MS = 20_000;
@@ -32,13 +33,18 @@ export class IdOcrService implements OnModuleDestroy {
    */
   private readonly workers: Partial<Record<OcrLayout, Promise<Worker>>> = {};
 
-  /** The text on the card, or null when it couldn't be read in time. Never throws. */
-  async read(image: Buffer, layout: OcrLayout = 'block'): Promise<OcrResult | null> {
+  /**
+   * The text on the card, or null when it couldn't be read in time. Never throws. `region`: read only that
+   * part of the image, e.g. the name column away from the photo.
+   */
+  async read(image: Buffer, layout: OcrLayout = 'block', region?: PixelRegion): Promise<OcrResult | null> {
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<'timeout'>((resolve) => {
       timer = setTimeout(() => resolve('timeout'), OCR_TIMEOUT_MS);
     });
-    const work = this.getWorker(layout).then((worker) => worker.recognize(image));
+    const work = this.getWorker(layout).then((worker) =>
+      region ? worker.recognize(image, { rectangle: region }) : worker.recognize(image),
+    );
     // If the read fails after the timeout already won, that rejection must not go unhandled.
     work.catch(() => undefined);
     try {

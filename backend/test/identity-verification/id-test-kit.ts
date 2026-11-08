@@ -39,6 +39,24 @@ export const LICENCE_TEXT = [
 export const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 7)]);
 export const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 7)]);
 
+/**
+ * A JPEG header with a real size and no image data: APP0, a quantisation table, a Huffman table (its marker
+ * shares the frame-header range), then the frame header. `frame`: 0xc0 baseline, 0xc2 progressive.
+ */
+export function jpegOfSize(width: number, height: number, frame = 0xc0): Buffer {
+  const segment = (marker: number, payload: Buffer) =>
+    Buffer.concat([Buffer.from([0xff, marker, (payload.length + 2) >> 8, (payload.length + 2) & 0xff]), payload]);
+  return Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    segment(0xe0, Buffer.from('JFIF\0\x01\x01\0\0\x01\0\x01\0\0', 'binary')),
+    segment(0xdb, Buffer.alloc(65, 1)),
+    segment(0xc4, Buffer.alloc(20, 2)),
+    segment(frame, Buffer.from([8, height >> 8, height & 0xff, width >> 8, width & 0xff, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1])),
+    Buffer.from([0xff, 0xda, 0, 8]),
+    Buffer.alloc(32, 9),
+  ]);
+}
+
 export const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 
 export function makeConfig(env: Record<string, string | undefined> = {}) {

@@ -311,7 +311,7 @@ Each implementation prompt fills in its row and adds a `### Phase N — <date>` 
 
 | Phase | Status | Date | Notes |
 |---|---|---|---|
-| 0. Spike and samples | Tools built, not yet run on a phone; card check not started | 2026-11-06 | Real cards blocked by G1. No migration or dependency. Test counts unchanged. One out-of-scope digital ID read recorded; it doesn't count toward the target |
+| 0. Spike and samples | Card check started: 2 National IDs read after the name-column read (2026-11-09), exactness not confirmed; target is 8 of 10. Works on the cards tested so far, not yet proven on enough cards | 2026-11-06 | Real cards blocked by G1. No migration or dependency. Test counts unchanged. One out-of-scope digital ID read recorded; it doesn't count toward the target |
 | 1. Shared rules | Done, awaiting review; parser unconfirmed on a real card | 2026-11-06 | Built on the owner's instruction with G2 lifted and the layout notes blank. No migration or dependency. Backend 1687 → 1741, plus `auth-phase3` alone 59 |
 | 2. Backend | Done, awaiting the review decision; parser unconfirmed on a real card | 2026-11-07 | Built on the owner's instruction with the Phase 1 review skipped and G2 lifted. G1 and the layout notes still open. 1 migration, applied (37). Backend 1741 → 1811, plus `auth-phase3` alone 59; e2e 19 → 26 |
 | 3. Mobile | Code done and reviewed (2026-11-07), not yet run on a phone | 2026-11-07 | Built on the owner's instruction with the Phase 2 review skipped. G1 and the layout notes still open. No migration or dependency. Mobile 212 → 241. Backend must be restarted first |
@@ -378,15 +378,17 @@ One image from the owner's sample folder, one server read, 2026-11-06, after Pha
 
 No real names or numbers: patterns only.
 
-- Heading text found on the card (patterns, as printed):
-- Card number: digits only, or letters too? Grouping and position:
-- Name labels as printed, and their order. Is the value on the label's line or the next?
-- Where a suffix prints; a card with no middle name:
-- What follows the name (the lines the parser must stop before):
+*Partly filled in 2026-11-09 from one plastic card: a photo the owner shared in an agent chat, read by eye for layout only. No tool was run on it. Handling: the photo shows the full card number, birth date, address and face, and it sits in the chat transcript and the agent's temp folder (`…\images\1.png`). The owner should delete it. One card is not the 8-of-10 sample.*
+
+- Heading text found on the card (patterns, as printed): four centred lines at the top: `REPUBLIKA NG PILIPINAS`, `Republic of the Philippines`, `PAMBANSANG PAGKAKAKILANLAN`, `Philippine Identification Card`. Both §6 candidates are printed. A fingerprint mark sits top right.
+- Card number: digits only, or letters too? Grouping and position: **digits only**, `4-4-4-4` with dashes, on one line at the left (about 6–38% across, 26–31% down), below the heading and above the main photo.
+- Name labels as printed, and their order. Is the value on the label's line or the next? Bilingual, with Filipino upright and English in italics: `Apelyido/Last Name`, `Mga Pangalan/Given Names`, `Gitnang Apelyido/Middle Name`, in that order. **Each value is on the next line**, in bold capitals. The column starts about 46% across, right of the **main photo (6–28%) and a smaller ghost photo (32–40%)**. A seal sits under the ghost photo.
+- Where a suffix prints; a card with no middle name: not shown on this card (no suffix; it has a middle name).
+- What follows the name (the lines the parser must stop before): `Petsa ng Kapanganakan/Date of Birth` and its value in the same column (about 71–81% down), then `Tirahan/Address` and its value at the bottom left, across the full width. `PHL` and the PSA logo sit at the bottom right. The background is a fine line pattern with large pink and blue waves behind the text.
 - Cards with name AND full number exactly right, by phone (n/10):
 - By server (n/10), OCR confidence range, reading time range:
 - Same card scanned 3 times: same number each time? By phone (n cards tested); by server, from 3 separate photos (n cards tested):
-- Any 12-digit run seen on the front? (yes/no):
+- Any 12-digit run seen on the front? (yes/no): **no**, on this card. The only long digit run is the card number.
 - Printed ePhilID, if available: reads? Anything in the text that marks it as printed?
 - Scanner on a phone without Google Play services, if available:
 - Sample scans deleted, including phone gallery, trash and backups (date); written consent held for each card (yes/no); no sample sent through a chat app, email or cloud storage (yes/no):
@@ -880,6 +882,98 @@ Frontend typecheck clean. Backend, mobile and shared were untouched, so they wer
 2. **Screens have no automated test.** 13 of 18 screen breaks survive. Only the Phase 4 hand checks cover them, and they haven't been done.
 3. **The web and the backend must ship together.** The queue reads `documentType` from every row. A backend older than Phase 2 doesn't send it, and the queue would fail to render. Both are in `482f46c` and later, so a normal deploy is fine. No fallback was added: it would hide a mismatched deploy rather than fix it.
 4. Unchanged from earlier: G1, the layout notes, the Phase 3 phone checks, and the two decisions in "combining reads".
+
+### Change — 2026-11-09: layout map in the failure log (owner's report)
+
+**Why:** the owner reports that National ID names don't read reliably, even from clear images. One log line, patterns only:
+- The first read found the number (`4-4-4-4`) and all three name labels, but **no last-name value** (`nameValues=given,middle`).
+- It found only two heading words (`pam+ide`), so `heading=false`.
+- The second read found nothing.
+- The phone's number matched the server's in only 3 of 4 groups (`phoneNumberSeen=3/4`), so **phone and server disagree on part of the card number.**
+
+The log couldn't say why the last name was lost. An agent may not see real card text (Part A3), so a parser fix now would be a guess.
+
+**The owner's suggested pattern list was checked against §6; nothing was adopted:**
+- The 16-digit number, the English labels and `PHILIPPINE IDENTIFICATION CARD` are already accepted.
+- The any-spacing number pattern `(?:\d[\s-]*){16}` was refused: it would accept a 12-digit run joined to nearby digits (§6, PSN rule).
+- Date of birth, sex and nationality are not read (§5.1; the consent text promises name and number only).
+- `REPUBLIC OF THE PHILIPPINES` is not a heading, because the PhilHealth card prints it.
+
+**Changed**
+- `shared/src/validation/national-id.ts`: `nationalIdLineShapes`, added to `nationalIdReadSignals` as `shape`.
+  - It gives one entry per line, in codes only: name labels (`Llast`, `Lgiven`, `Lmid`), stop labels (`S`), dates (`T`), the card number (`N`), other digits (`D`), heading words (`H`), label halves (`l`), words (`W`), lone letters or symbols (`x`) and `/`. Repeats are counted.
+  - It ends where the name reading ends, at the first birth date, address or date line, and lists at most 24 lines.
+  - It holds no letter, digit or word from the card. It does show how many words each line has.
+- `backend/test/identity-verification/national-id.spec.ts`: 7 new tests, and the added key in the two existing `toEqual` checks.
+
+**Effect:** log only. No outcome changes, and PhilHealth signals are unchanged.
+
+**Tests**
+- Backend 1868 → 1875; `auth-phase3` fails under full-suite load, as known, and passes alone (59).
+- Identity-verification specs 338. Shared built. Shared, backend and mobile typecheck clean.
+- e2e not run: `backend/src` is unchanged and the change only adds a log field.
+- **Deliberate breaks:** 5, on `shared/src` (backend Jest maps `@agap/shared` to the source, not `dist`). All 5 were caught, and the file was restored byte for byte. The breaks: not stopping at the date or stop line, letting words through, dropping the field, removing the line cap, and reading a card-number group as a year.
+
+**Next:** restart the backend fully (a `shared` change), scan the failing card, and share the `ID scan needed a second read` line. The `shape=[…]` part shows where the last name went, and the parser fix follows from it.
+
+**Open, for the owner**
+1. **The number disagreement.** Even with the parser fixed, this scan would pass on the server's number, which may be the misread one. Recommended: when the phone's number differs from the server's, send the scan to staff review instead of passing it. The phone could then block a pass, never cause one.
+2. **The heading rule** (`PAMBANSANG` plus one other heading word, with a valid number) waits for more log lines.
+3. Unchanged: G1, the layout notes, and the decisions in "combining reads".
+
+### Change — 2026-11-09: name-column read (owner's request)
+
+**Evidence.** The next scan's log line (patterns only):
+- The first read found all four heading words and the number, and the phone agreed on all 4 groups (`phoneNumberSeen=4/4`).
+- It found only the middle-name label. The second read found only the last-name label.
+- The `shape` showed junk at the start of nearly every name line (`x W D x …`), and label lines in the slash form whose words weren't recognised.
+
+The owner then shared a photo of their own card. Its layout, recorded in the layout notes above, explains the log: on a full-card read, every name line passes through **the main photo, a ghost photo and a seal** before the text column.
+
+**Changed**
+- `shared/src/validation/id-document-rules.ts`: `IdImageRegion`, and `nameRegion` on each ID's rules.
+  - The National ID's region is `{ left: 0.43, top: 0.28, width: 0.57, height: 0.47 }`. It holds the name column from just above the last-name label down to the birth date label, and leaves out both photos, the seal and the card number.
+  - PhilHealth: `null`.
+- `backend/src/identity-verification/id-image-size.ts` (new): `imageSize` reads a JPEG or PNG's size from its header only, with no pixel data and no new dependency. `regionInPixels` returns null for an image taller than wide (a card on its side).
+- `backend/src/identity-verification/id-ocr.service.ts`: `read(image, layout, region?)` passes `{ rectangle }` to tesseract.js. Same worker, same bundled data.
+- `backend/src/identity-verification/identity-verification.service.ts`:
+  - A third read of the name column runs **only when the whole-card reads found this ID's heading and a number but no name.** It also needs the ID to have a region and the image's size to be readable.
+  - Its text joins the others in `combineIdReads`. The heading, a single agreed number (a different number in the name column trusts neither) and the typed-name check all still apply.
+  - The log gains `nameColumn[…]` (or `not run`) and the outcome `name column read passed`.
+
+**Effect:**
+- A PhilHealth ID, a scan that passes on the first read, and a scan missing the heading or number are unchanged.
+- Older builds are unchanged: they send no `documentType`, so their scans are read as PhilHealth.
+- A National ID scan that lost only its name now gets one more read, about 1–3 s more on a failing scan.
+
+**Tests**
+- Backend 1875 → 1893; `auth-phase3` alone 59; identity-verification specs 338 → 356 (10 → 11 suites).
+- Shared built. Shared, backend, mobile and frontend typecheck clean. e2e not run.
+- New: `id-image-size.spec.ts` (9), 1 in `id-cleanup-and-ocr.spec.ts`, and 8 in `id-national.spec.ts`. They cover:
+  - verifying a card with the name from the name column and the number from the whole-card read;
+  - the typed name still having to match;
+  - the log holding no name or number;
+  - a name column with no name, or a different number, giving nothing;
+  - the read not running in four cases: the card already read, no number, an unknown size, a sideways image;
+  - PhilHealth unchanged.
+- Existing test helpers changed by added parameter or export only: `postScan(fields, image = JPEG)` and `jpegOfSize` in the kit. No existing assertion changed.
+- **Flaky under load, not this change:** in the full run with the dev backend, web and Metro up, `id-national` hit Jest's 5-second limit once, in a registration test that never reaches the scan code. It passed alone twice, 105/105. `auth-phase3` failed 4 in one run alone, then passed 59/59.
+- **Deliberate breaks:** 18, applied in memory through a ts-jest wrapper, because the dev backend was running in watch mode. Hashes show no source file changed.
+  - 17 were caught.
+  - The survivor, putting the name-column text last instead of first, changes nothing: the read runs only when no other read found a name. The code comment that claimed an order was corrected.
+
+**Not yet proven:** no real card has been read with this. The region comes from **one** card photo, and other cards, or a looser scanner crop, may sit a few percent off; the margins are 3% on the photo side and about 1–3% at the top and bottom. If a real scan logs `nameColumn[… name=false …]`, its `shape` shows what the column read.
+
+**Next:** restart the backend fully (a `shared` change), scan the same card, and share the `ID scan needed a second read` line, if one is logged. A first read that passes logs nothing.
+
+**Owner's test, 2026-11-09, after this change:** 2 National IDs and 2 PhilHealth IDs read. Not yet confirmed: that each number (the last 4 digits on the badge) and name were *exactly* right, and which read passed each one.
+
+**Status: works on the cards tested so far, not yet proven on enough cards.** Still needed before "done" or a demo:
+- the Phase 0 target: name and full number exactly right on ≥ 8 of 10 National IDs, and repeat scans giving the same number on at least 3 cards;
+- the Phase 3 phone checks and the Phase 4 web checks;
+- Prompt 5 (Phase 5), including re-running PH-01 to PH-21;
+- G1;
+- the open decision on a phone/server number mismatch.
 
 ---
 

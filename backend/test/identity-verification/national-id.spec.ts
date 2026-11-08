@@ -12,6 +12,7 @@ import {
   looksLikeNationalId,
   looksLikePhilHealthId,
   matchIdName,
+  nationalIdLineShapes,
   nationalIdReadSignals,
   parseNationalIdName,
   parsePhilHealthName,
@@ -555,6 +556,7 @@ describe('what a failed read may log', () => {
       stopLabel: true,
       digitRuns: '4-4-4-4',
       lines: 12,
+      shape: '[W3 ; H2 ; H2 W ; N ; Llast / Llast ; W2 ; Lgiven / Lgiven ; W ; Lmid / Lmid ; W ; S W S / S]',
     });
   });
 
@@ -568,6 +570,48 @@ describe('what a failed read may log', () => {
       stopLabel: false,
       digitRuns: 'none',
       lines: 3,
+      shape: '[H W ; W ; x4]',
+    });
+  });
+
+  describe('the layout map', () => {
+    it('shows a junk line with digits between a label and its value, which loses the name', () => {
+      const text = ['Apelyido/Last Name', '| e 12 a', 'DELA CRUZ', 'Mga Pangalan/Given Names', 'JUAN'].join('\n');
+      expect(nationalIdLineShapes(text)).toBe('[Llast / Llast ; x2 D x ; W2 ; Lgiven / Lgiven ; W]');
+      expect(parseNationalIdName(text)).toBeNull();
+    });
+
+    it('shows a value OCR put before its label on the same line', () => {
+      expect(nationalIdLineShapes('DELA CRUZ Apelyido/Last Name')).toBe('[W2 Llast / Llast]');
+    });
+
+    it('shows half a label and a lone letter beside a value', () => {
+      expect(nationalIdLineShapes('Apelyido/Last Narne\ne DELA CRUZ')).toBe('[Llast / l W ; x W2]');
+      expect(nationalIdLineShapes('Apelyido/ Name')).toBe('[Llast / l]');
+    });
+
+    it('ends at the first date or birth date or address line, like the name reading, and never maps past it', () => {
+      const text = ['Gitnang Apelyido/Middle Name', 'SANTOS', 'JANUARY 01, 1990', 'Tirahan/Address', '123 RIZAL ST'].join('\n');
+      expect(nationalIdLineShapes(text)).toBe('[Lmid / Lmid ; W ; W D x D T]');
+      expect(nationalIdLineShapes('Mga Pangalan/Given Names\nJUAN\nTirahan/Address\nBOCAUE')).toBe('[Lgiven / Lgiven ; W ; S / S]');
+    });
+
+    it('does not take a card number group that looks like a year for a date', () => {
+      expect(nationalIdLineShapes('1990-0000-0000-0001\nApelyido/Last Name')).toBe('[N ; Llast / Llast]');
+    });
+
+    it('lists at most 24 lines', () => {
+      const shape = nationalIdLineShapes(Array(30).fill('WORD').join('\n'));
+      expect(shape.split(' ; ')).toHaveLength(25);
+      expect(shape.endsWith(' ; …]')).toBe(true);
+    });
+
+    it('holds only its codes: no letter, digit or word from the card', () => {
+      const shape = nationalIdLineShapes(['Ñ PEÑA', '1234-5678-9012-3456', '12345', FULL].join('\n'));
+      expect(shape.startsWith('[x W ; N ; D ; W3 ; H2')).toBe(true);
+      const tokens = shape.slice(1, -1).split(/ ; | /);
+      for (const token of tokens) expect(token).toMatch(/^(?:Llast|Lgiven|Lmid|S|T|N|D|H|l|W|x|\/|…)\d*$/);
+      for (const secret of ['PEÑA', 'DELA', 'JUAN', 'SANTOS', '1234', '0001', '12345']) expect(shape).not.toContain(secret);
     });
   });
 

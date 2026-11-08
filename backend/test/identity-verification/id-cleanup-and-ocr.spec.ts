@@ -175,6 +175,18 @@ describe('IdOcrService', () => {
     warn.mockRestore();
   });
 
+  it('reads only the given region when asked, on the same worker, and the whole image otherwise', async () => {
+    recognize.mockResolvedValue({ data: { text: 'ok', confidence: 80 } });
+    const ocr = new IdOcrService();
+    const region = { left: 688, top: 282, width: 912, height: 474 };
+
+    await ocr.read(JPEG);
+    expect(recognize.mock.calls[0]).toEqual([JPEG]);
+    expect(await ocr.read(JPEG, 'block', region)).toEqual({ text: 'ok', confidence: 80 });
+    expect(recognize.mock.calls[1]).toEqual([JPEG, { rectangle: region }]);
+    expect(mockCreateWorker).toHaveBeenCalledTimes(1);
+  });
+
   describe('the automatic-layout read', () => {
     const setParameters = jest.fn().mockResolvedValue(undefined);
 

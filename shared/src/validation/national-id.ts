@@ -98,7 +98,63 @@ export function nationalIdReadSignals(text: string): IdReadSignals {
     stopLabel: STOP_LABEL.test(text),
     digitRuns: digitRunShapes(text),
     lines: text.split(/\r?\n/).filter((line) => line.trim()).length,
+    shape: nationalIdLineShapes(text),
   };
+}
+
+const HEADING_WORD_SET = new Set(HEADING_WORDS.map(([word]) => word));
+
+/** Lines the layout map lists at most: the heading, the number and the three names fit well within this. */
+const SHAPE_MAX_LINES = 24;
+
+/**
+ * A map of a read's layout, one entry per line, with no text from the card, so a failed read can show where
+ * a name went missing. `Llast`, `Lgiven` and `Lmid` are name labels; `S` a birth date or address label;
+ * `T` a date; `N` a card number; `D` other digits; `H` a heading word; `l` half a label; `W` any other word;
+ * `x` a lone letter or symbol; `/` a slash. Repeats are counted (`W2`). It ends where the name reading
+ * ends, at the first birth date or address line.
+ */
+export function nationalIdLineShapes(text: string): string {
+  const lines: string[] = [];
+  const stopLabels = new RegExp(STOP_LABEL.source, 'gi');
+  for (const rawLine of text.split(/\r?\n/)) {
+    const marked = rawLine
+      .replace(DIGIT_RUN, (run) => (cardNumberFromRun(run) ? ' §N ' : ' §D '))
+      .replace(NAME_LABEL, (_label, middle, given) => (middle ? ' §Lmid ' : given ? ' §Lgiven ' : ' §Llast '))
+      .replace(stopLabels, ' §S ')
+      .replace(/\//g, ' / ');
+    const tokens = marked.split(/\s+/).filter(Boolean).map(shapeToken);
+    if (tokens.length === 0) continue;
+    if (lines.length === SHAPE_MAX_LINES) {
+      lines.push('…');
+      break;
+    }
+    // As the name reading does: a card number group that looks like a year isn't a date.
+    const dated = DATE.test(rawLine.replace(DIGIT_RUN, (run) => (cardNumberFromRun(run) ? ' ' : run)));
+    lines.push(countRepeats(dated ? [...tokens, 'T'] : tokens));
+    if (dated || tokens.includes('S')) break;
+  }
+  return `[${lines.join(' ; ') || 'none'}]`;
+}
+
+function shapeToken(token: string): string {
+  if (token.startsWith('§')) return token.slice(1);
+  if (token === '/') return '/';
+  const letters = token.toUpperCase().replace(/[^A-ZÑ]/g, '');
+  if (letters.length <= 1) return 'x';
+  if (HEADING_WORD_SET.has(letters)) return 'H';
+  if (LABEL_WORDS.has(letters)) return 'l';
+  return 'W';
+}
+
+function countRepeats(tokens: string[]): string {
+  const runs: { token: string; count: number }[] = [];
+  for (const token of tokens) {
+    const last = runs[runs.length - 1];
+    if (last && last.token === token) last.count++;
+    else runs.push({ token, count: 1 });
+  }
+  return runs.map(({ token, count }) => (count > 1 ? `${token}${count}` : token)).join(' ');
 }
 
 type NameField = 'last' | 'given' | 'middle';

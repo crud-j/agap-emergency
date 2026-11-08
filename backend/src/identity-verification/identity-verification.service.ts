@@ -25,6 +25,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MediaService } from '../media/media.service';
 import { IdDocumentCryptoService } from './id-document-crypto.service';
+import { imageSize, regionInPixels, type PixelRegion } from './id-image-size';
 import { IdOcrService, type OcrResult } from './id-ocr.service';
 
 /**
@@ -121,6 +122,13 @@ export function typedNameFrom(parts: {
 }
 
 type IdRules = (typeof ID_DOCUMENT_RULES)[IdDocumentType];
+
+/** The ID's name column in this image's pixels, or null: the ID has none, or the image's size can't be read. */
+function nameRegionOf(rules: IdRules, image: Buffer): PixelRegion | null {
+  if (!rules.nameRegion) return null;
+  const size = imageSize(image);
+  return size ? regionInPixels(rules.nameRegion, size) : null;
+}
 
 const readsWholeCard = (rules: IdRules, read: OcrResult): boolean => {
   const found = combineIdReads(rules, [read.text]);
@@ -226,7 +234,17 @@ export class IdentityVerificationService {
       .filter((read): read is OcrResult => read !== null)
       .sort((a, b) => b.confidence - a.confidence)
       .map((read) => read.text);
-    const { headingSeen, number, name: nameOnId, numberConflict } = combineIdReads(rules, serverTexts);
+    let combined = combineIdReads(rules, serverTexts);
+
+    // The whole card was read, heading and number, but not the name: read the name column alone, away from
+    // the photo beside it, whose noise lands on every name line. It runs only when no other read found a
+    // name, so its name is the only one. The heading, a single agreed number and the typed-name check still
+    // apply, as for any read.
+    const nameColumn = combined.headingSeen && combined.number && !combined.name ? nameRegionOf(rules, image) : null;
+    const nameRead = nameColumn ? await this.ocr.read(image, 'block', nameColumn) : null;
+    const allTexts = nameRead ? [nameRead.text, ...serverTexts] : serverTexts;
+    if (nameRead) combined = combineIdReads(rules, allTexts);
+    const { headingSeen, number, name: nameOnId, numberConflict } = combined;
 
     let failure: ScanFailure | null = null;
     if (!number || !nameOnId) {
@@ -238,8 +256,10 @@ export class IdentityVerificationService {
     }
     if (retried) {
       this.logger.warn(
-        `ID scan needed a second read (${documentType}): phone=${phoneReadSummary(rules, input.clientText, serverTexts)} conflict=${numberConflict} ` +
-          `first[${readSummary(rules, firstRead)}] second[${readSummary(rules, secondRead)}] outcome=${failure ?? 'second read passed'}`,
+        `ID scan needed a second read (${documentType}): phone=${phoneReadSummary(rules, input.clientText, allTexts)} conflict=${numberConflict} ` +
+          `first[${readSummary(rules, firstRead)}] second[${readSummary(rules, secondRead)}] ` +
+          `nameColumn[${nameColumn ? readSummary(rules, nameRead) : 'not run'}] ` +
+          `outcome=${failure ?? (nameRead ? 'name column read passed' : 'second read passed')}`,
       );
     }
     if (failure && (input.requestReview !== true || attemptNumber < ID_SCAN_MAX_ATTEMPTS)) {

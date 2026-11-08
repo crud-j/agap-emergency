@@ -16,6 +16,14 @@ import {
 } from './national-id';
 import { hasPhilHealthHeading, looksLikePhilHealthId, parsePhilHealthName, parsePhilHealthPin, type IdName } from './philhealth-id';
 
+/** Part of a card image, as fractions (0–1) of its width and height, measured from the card's edges. */
+export interface IdImageRegion {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export interface IdDocumentRules {
   /** The ID's name in server and staff messages. English only: the app has its own translated text. */
   label: string;
@@ -34,7 +42,21 @@ export interface IdDocumentRules {
   rejectionReason: IdRejectionReason;
   /** Approving a review scan with no stored number needs staff to type it, so the card is held (plan §7, N8). */
   approvalNeedsNumber: boolean;
+  /**
+   * Where the name labels and values sit, for a read of that part alone when a whole-card read loses the
+   * name. null: the ID has none, and is only read whole.
+   */
+  nameRegion: IdImageRegion | null;
 }
+
+/**
+ * The National ID's name column. Measured on one plastic card (layout only, 2026-11-09): the labels and
+ * values start about 46% across, right of the main photo (6–28%) and a smaller ghost photo (32–40%);
+ * the last-name label is about 33% down, the middle-name value ends about 70% down, and the birth date
+ * label follows at about 71–74%, which is where the name reading stops. The card number (6–38% across,
+ * 26–31% down) stays outside it. Margins of a few percent allow for the scanner's crop.
+ */
+const NATIONAL_ID_NAME_REGION: IdImageRegion = { left: 0.43, top: 0.28, width: 0.57, height: 0.47 };
 
 /**
  * Everything that differs by ID, in one place (plan §6). Each parser runs only for its own chosen type,
@@ -53,6 +75,7 @@ export const ID_DOCUMENT_RULES: Record<IdDocumentType, IdDocumentRules> = {
     wrongCardCode: IdVerificationErrorCode.NOT_PHILHEALTH_ID,
     rejectionReason: 'NOT_PHILHEALTH',
     approvalNeedsNumber: false,
+    nameRegion: null,
   },
   NATIONAL_ID: {
     label: 'National ID',
@@ -66,6 +89,7 @@ export const ID_DOCUMENT_RULES: Record<IdDocumentType, IdDocumentRules> = {
     wrongCardCode: IdVerificationErrorCode.NOT_NATIONAL_ID,
     rejectionReason: 'NOT_NATIONAL_ID',
     approvalNeedsNumber: true,
+    nameRegion: NATIONAL_ID_NAME_REGION,
   },
 };
 
