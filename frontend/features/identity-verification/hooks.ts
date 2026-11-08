@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { IdCardReleaseReason, IdRejectionReason } from '@agap/shared';
+import type { IdCardReleaseReason, IdDocumentType, IdRejectionReason } from '@agap/shared';
 import {
   approveIdReview,
   fetchIdImage,
@@ -61,17 +61,22 @@ export function useIdImage(id: string) {
   return { url, isLoading: enabled && query.isFetching, error: enabled ? query.error : null, show, hide };
 }
 
+/** gcTime 0: a card number typed for approval isn't kept in the mutation cache. */
 export function useApproveIdReview() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => approveIdReview(id),
+    mutationFn: ({ id, cardNumber }: { id: string; cardNumber?: string | undefined }) => approveIdReview(id, cardNumber),
     onSettled: () => queryClient.invalidateQueries({ queryKey: [QUEUE_KEY] }),
+    gcTime: 0,
   });
 }
 
 /** gcTime 0: the number typed from the card isn't kept in the mutation cache. */
 export function useFindIdCardHolder() {
-  return useMutation({ mutationFn: (pin: string) => findIdCardHolder(pin), gcTime: 0 });
+  return useMutation({
+    mutationFn: ({ pin, documentType }: { pin: string; documentType: IdDocumentType }) => findIdCardHolder(pin, documentType),
+    gcTime: 0,
+  });
 }
 
 export function useReleaseIdCard() {

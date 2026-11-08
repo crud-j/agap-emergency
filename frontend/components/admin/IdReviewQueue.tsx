@@ -3,7 +3,6 @@
 import { useState, type JSX } from 'react';
 import { ChevronLeft, ChevronRight, Eye, IdCard, ShieldCheck } from 'lucide-react';
 import {
-  ID_REJECTION_REASONS,
   ID_REVIEW_STATUSES,
   type IdRejectionReason,
   type IdReviewItem,
@@ -19,7 +18,12 @@ import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useApproveIdReview, useIdImage, useIdReviews, useRejectIdReview } from '@/features/identity-verification/hooks';
 import {
+  approveErrorText,
+  CARD_NUMBER_FIELD,
+  idDocumentLabel,
+  needsCardNumberToApprove,
   REJECTION_REASON_LABELS,
+  rejectionReasonsFor,
   REVIEW_STATUS_LABELS,
   reviewCheckHint,
   reviewReasonLabel,
@@ -39,7 +43,7 @@ function fmtDateTime(iso: string): string {
 
 function errorText(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
-    if (err.status === 403) return 'Only MDRRMO administrators can review PhilHealth ID checks.';
+    if (err.status === 403) return 'Only MDRRMO administrators can review ID checks.';
     if (err.status === 409) return 'Someone else already decided this check.';
     if (err.status === 410) return 'This ID image has already been deleted.';
   }
@@ -47,9 +51,9 @@ function errorText(err: unknown, fallback: string): string {
 }
 
 /**
- * PhilHealth ID reviews (MOD-01 / MOD-48, plan §7): IDs that citizens sent to MDRRMO at
- * registration. The queue shows no image and no ID number; the image loads only on click, and
- * every load is audited. A decision deletes the image and notifies the citizen.
+ * ID reviews, PhilHealth ID or National ID (MOD-01 / MOD-48, plan §7): IDs that citizens sent to
+ * MDRRMO at registration. The queue shows no image and no ID number; the image loads only on click,
+ * and every load is audited. A decision deletes the image and notifies the citizen.
  */
 export function IdReviewQueue(): JSX.Element {
   const [status, setStatus] = useState<IdReviewStatus>('PENDING_REVIEW');
@@ -76,6 +80,11 @@ export function IdReviewQueue(): JSX.Element {
           <p className="text-[11px] text-agap-textSub">{row.account.phoneNumber ?? '—'}</p>
         </div>
       ),
+    },
+    {
+      key: 'documentType',
+      header: 'ID',
+      accessor: (row) => <span className="whitespace-nowrap text-xs text-agap-textMid">{idDocumentLabel(row.documentType)}</span>,
     },
     {
       key: 'reason',
@@ -121,7 +130,7 @@ export function IdReviewQueue(): JSX.Element {
 
       {error ? (
         <p className="rounded-xl bg-agap-dangerSoft px-4 py-3 text-sm text-agap-danger">
-          {errorText(error, "Couldn't load the PhilHealth ID reviews.")}
+          {errorText(error, "Couldn't load the ID reviews.")}
         </p>
       ) : (
         <DataTable
@@ -131,7 +140,7 @@ export function IdReviewQueue(): JSX.Element {
           loading={isLoading}
           onRowClick={setSelected}
           emptyTitle={status === 'PENDING_REVIEW' ? 'No IDs waiting for review' : `No ${REVIEW_STATUS_LABELS[status].toLowerCase()} IDs`}
-          emptyDescription="Citizens send their PhilHealth ID here when the scan or the name check fails at registration."
+          emptyDescription="Citizens send their ID here when the scan or the name check fails at registration."
         />
       )}
 
@@ -162,16 +171,31 @@ function IdReviewDetail({ item, onClose }: { item: IdReviewItem; onClose: () => 
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState<IdRejectionReason | ''>('');
   const [done, setDone] = useState<string | null>(null);
+  const [cardNumber, setCardNumber] = useState('');
+  const [approveError, setApproveError] = useState<string | null>(null);
 
   const image = useIdImage(item.id);
   const approve = useApproveIdReview();
   const reject = useRejectIdReview();
   const pending = item.status === 'PENDING_REVIEW' && !done;
   const busy = approve.isPending || reject.isPending;
-  const decisionError = approve.error ?? reject.error;
+  const label = idDocumentLabel(item.documentType);
+  const needsNumber = needsCardNumberToApprove(item);
+  const numberField = CARD_NUMBER_FIELD[item.documentType];
 
   async function onApprove() {
-    const result = await approve.mutateAsync(item.id).catch(() => null);
+    // The typed number is cleared as soon as it's sent, and the mutation is reset so it isn't held in memory.
+    const typed = needsNumber ? cardNumber.trim() : undefined;
+    setCardNumber('');
+    setApproveError(null);
+    const result = await approve.mutateAsync({ id: item.id, cardNumber: typed }).catch((err: unknown) => {
+      setApproveError(
+        (err instanceof ApiError ? approveErrorText(err.status, err.body?.['code'], item.documentType) : null)
+          ?? errorText(err, "Couldn't save the decision. Try again."),
+      );
+      return null;
+    });
+    approve.reset();
     if (result) {
       image.hide();
       setDone(result.imageDeleted ? 'Approved. The citizen was notified and the ID image deleted.' : 'Approved. The citizen was notified; the image will be deleted shortly.');
@@ -191,7 +215,7 @@ function IdReviewDetail({ item, onClose }: { item: IdReviewItem; onClose: () => 
     <Drawer open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DrawerContent width="w-full sm:w-[560px]">
         <DrawerHeader>
-          <DrawerTitle className="text-lg font-bold tracking-tight">PhilHealth ID check</DrawerTitle>
+          <DrawerTitle className="text-lg font-bold tracking-tight">{label} check</DrawerTitle>
         </DrawerHeader>
 
         <DrawerBody className="space-y-5">
@@ -202,6 +226,10 @@ function IdReviewDetail({ item, onClose }: { item: IdReviewItem; onClose: () => 
           </section>
 
           <dl className="grid grid-cols-2 gap-3 text-sm">
+            <div className="col-span-2">
+              <dt className="text-xs text-agap-textSub">ID the citizen chose</dt>
+              <dd className="font-medium text-agap-textMain">{label}</dd>
+            </div>
             <div>
               <dt className="text-xs text-agap-textSub">Why it needs review</dt>
               <dd className="font-medium text-agap-textMain">{reviewReasonLabel(item.reason)}</dd>
@@ -231,14 +259,14 @@ function IdReviewDetail({ item, onClose }: { item: IdReviewItem; onClose: () => 
             ) : image.url ? (
               <div className="space-y-2">
                 {/* eslint-disable-next-line @next/next/no-img-element -- an object URL from an authenticated fetch */}
-                <img src={image.url} alt="Front of the citizen's PhilHealth ID" className="w-full rounded-xl border border-[rgba(168,181,193,0.20)]" />
+                <img src={image.url} alt={`Front of the citizen's ${label}`} className="w-full rounded-xl border border-[rgba(168,181,193,0.20)]" />
                 <button type="button" onClick={image.hide} className="text-xs font-semibold text-agap-green hover:underline">
                   Hide image
                 </button>
               </div>
             ) : (
               <div className="space-y-2 rounded-xl border border-dashed border-[rgba(168,181,193,0.40)] px-4 py-4">
-                <p className="text-xs text-agap-textSub">{reviewCheckHint(item.reason)} Opening the image is recorded in the audit log.</p>
+                <p className="text-xs text-agap-textSub">{reviewCheckHint(item.reason, item.documentType)} Opening the image is recorded in the audit log.</p>
                 <Button variant="outline" size="sm" loading={image.isLoading} onClick={image.show}>
                   <Eye size={14} /> Show ID image
                 </Button>
@@ -254,11 +282,40 @@ function IdReviewDetail({ item, onClose }: { item: IdReviewItem; onClose: () => 
               <ShieldCheck size={16} /> {done}
             </p>
           )}
-          {decisionError && !done ? (
+          {approveError && !done ? (
+            <p className="rounded-xl bg-agap-dangerSoft px-4 py-3 text-sm text-agap-danger">{approveError}</p>
+          ) : null}
+          {reject.error && !done ? (
             <p className="rounded-xl bg-agap-dangerSoft px-4 py-3 text-sm text-agap-danger">
-              {errorText(decisionError, "Couldn't save the decision. Try again.")}
+              {reject.error instanceof ApiError && reject.error.status === 400
+                ? `That reason doesn't apply to a ${label} check.`
+                : errorText(reject.error, "Couldn't save the decision. Try again.")}
             </p>
           ) : null}
+
+          {pending && !rejecting && needsNumber && (
+            <section className="space-y-2">
+              <label htmlFor="id-review-card-number" className="block text-xs font-semibold uppercase tracking-wide text-agap-textSub">
+                {numberField.label}
+              </label>
+              <p className="text-xs text-agap-textMid">
+                The card number wasn&apos;t read from this scan. To approve, type it from the image, so this card can&apos;t verify another account.
+              </p>
+              <input
+                id="id-review-card-number"
+                value={cardNumber}
+                onChange={(e) => setCardNumber(e.target.value)}
+                maxLength={32}
+                inputMode="numeric"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={busy}
+                placeholder={numberField.placeholder}
+                className="h-9 w-full rounded-lg border border-[rgba(168,181,193,0.40)] bg-white px-3 text-sm text-agap-textMain outline-none focus:border-agap-green"
+              />
+              {numberField.warning ? <p className="text-xs font-medium text-agap-danger">{numberField.warning}</p> : null}
+            </section>
+          )}
 
           {pending && rejecting && (
             <section className="space-y-2">
@@ -266,7 +323,7 @@ function IdReviewDetail({ item, onClose }: { item: IdReviewItem; onClose: () => 
               <Select value={reason} onValueChange={(v) => setReason(v as IdRejectionReason)}>
                 <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Choose a reason" /></SelectTrigger>
                 <SelectContent>
-                  {ID_REJECTION_REASONS.map((code) => (
+                  {rejectionReasonsFor(item.documentType).map((code) => (
                     <SelectItem key={code} value={code}>{REJECTION_REASON_LABELS[code]}</SelectItem>
                   ))}
                 </SelectContent>
@@ -287,8 +344,10 @@ function IdReviewDetail({ item, onClose }: { item: IdReviewItem; onClose: () => 
               </>
             ) : (
               <>
-                <Button variant="outline" onClick={() => setRejecting(true)} disabled={busy}>Reject…</Button>
-                <Button variant="primary" onClick={onApprove} disabled={busy} loading={approve.isPending}>Approve</Button>
+                <Button variant="outline" onClick={() => { setRejecting(true); setCardNumber(''); setApproveError(null); }} disabled={busy}>Reject…</Button>
+                <Button variant="primary" onClick={onApprove} disabled={busy || (needsNumber && !cardNumber.trim())} loading={approve.isPending}>
+                  Approve
+                </Button>
               </>
             )}
           </DrawerFooter>

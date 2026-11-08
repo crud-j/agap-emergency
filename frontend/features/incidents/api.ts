@@ -183,7 +183,7 @@ export interface IncidentAttachment {
 
 export interface IncidentDetail extends IncidentListItem {
   incident_reporters: IncidentReporter | null;
-  /** The reporter's PhilHealth ID check, staff only. null unless the reporter has a citizen account. Information only, never priority or dispatch. */
+  /** The reporter's ID check (PhilHealth ID or National ID), staff only. null unless the reporter has a citizen account. Information only, never priority or dispatch. */
   reporterIdVerified?: boolean | null;
   incident_patients: IncidentPatient[];
   dispatches: Array<{ id: string; status: string; resource_id: string }>;

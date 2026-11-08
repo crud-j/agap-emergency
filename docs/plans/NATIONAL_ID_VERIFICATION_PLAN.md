@@ -1,6 +1,6 @@
 # Plan — Philippine National ID as a Second ID Option at Citizen Registration
 
-**Status:** Phases 1–3 (shared rules, backend, mobile) built at the owner's instruction, ahead of their gates and **unconfirmed on a real card or a phone**: the layout notes are blank and the adviser's answers aren't in §11 (see the Progress log). Web admin (Phase 4) and docs (Phase 5) not started. Decisions recorded 2026-11-06 (§11) · **Date:** 2026-11-06 · **Owner:** AGAP mobile + backend + frontend (admin)
+**Status:** Phases 1–4 (shared rules, backend, mobile, web admin) built at the owner's instruction, ahead of their gates and **unconfirmed on a real card, a phone or in the browser**: the layout notes are blank and the adviser's answers aren't in §11 (see the Progress log). Docs (Phase 5) not started. Decisions recorded 2026-11-06 (§11) · **Date:** 2026-11-06 · **Owner:** AGAP mobile + backend + frontend (admin)
 **Baseline:** `main` @ `1a22a45` (PhilHealth Phases 0–6 committed, clean tree)
 **Implementation prompts:** [NATIONAL_ID_VERIFICATION_PROMPTS.md](NATIONAL_ID_VERIFICATION_PROMPTS.md)
 **Builds on:** [PHILHEALTH_ID_VERIFICATION_PLAN.md](PHILHEALTH_ID_VERIFICATION_PLAN.md) (the "PhilHealth plan"). This plan covers only what changes; everything else stays as that plan says.
@@ -315,7 +315,7 @@ Each implementation prompt fills in its row and adds a `### Phase N — <date>` 
 | 1. Shared rules | Done, awaiting review; parser unconfirmed on a real card | 2026-11-06 | Built on the owner's instruction with G2 lifted and the layout notes blank. No migration or dependency. Backend 1687 → 1741, plus `auth-phase3` alone 59 |
 | 2. Backend | Done, awaiting the review decision; parser unconfirmed on a real card | 2026-11-07 | Built on the owner's instruction with the Phase 1 review skipped and G2 lifted. G1 and the layout notes still open. 1 migration, applied (37). Backend 1741 → 1811, plus `auth-phase3` alone 59; e2e 19 → 26 |
 | 3. Mobile | Code done and reviewed (2026-11-07), not yet run on a phone | 2026-11-07 | Built on the owner's instruction with the Phase 2 review skipped. G1 and the layout notes still open. No migration or dependency. Mobile 212 → 241. Backend must be restarted first |
-| 4. Admin | Not started | | |
+| 4. Admin | Code done and reviewed (2026-11-09, same chat, not independent); not yet checked in the browser | 2026-11-09 | Gate met: Phase 3 reviewed 2026-11-07. G1 and the layout notes still open. Frontend only: no migration, dependency, backend, shared or mobile change. Frontend 199 → 212, 217 after the review. Restart `pnpm dev` |
 | 5. Docs and readiness | Not started | | |
 
 ### Phase 0 — 2026-11-06
@@ -753,6 +753,133 @@ All typechecks clean. No migration or dependency. Deliberate breaks: 27 in memor
 **Open, for the owner**
 1. **How to close the gap between phone and server.** Options, with a recommendation in that day's report: the phone proposes and the server confirms, sending such scans straight to staff review, image clean-up (a new dependency), or trusting the phone. A cloud service was already ruled out (D3). The new counts show whether the first can work.
 2. **The Digital National ID is out of scope (§12), and whether it should pass is still open (§11, owner item 4).** It's now being tested, so this needs deciding.
+
+### Phase 4 — 2026-11-09
+
+**Gate:** Prompt 4's gate is "Phase 3 reviewed", and that's met (Review, 2026-11-07). The rest is unchanged: **G1 is unanswered, the layout notes are blank,** Phases 1 and 2 have had no review, and the Phase 3 phone checks aren't recorded as done. The two open decisions in "combining reads" (closing the phone/server gap, the Digital National ID) are still open, and nothing here depends on them. Baseline: `482f46c`, clean tree.
+
+**Changed** (frontend only)
+- `frontend/features/identity-verification/format.ts`:
+  - `idDocumentLabel`, read from `ID_DOCUMENT_RULES[type].label` so staff and server name the ID the same way.
+  - `reviewReasonLabel` now maps both wrong-card codes through the rules' `wrongCardCode`, not an `if` per code.
+  - `reviewCheckHint(reason, documentType)` names the expected card. For a National ID it says a legible printed ePhilID may be approved (N1), and it points to the matching wrong-card reason.
+  - `rejectionReasonsFor(type)` keeps the type's own wrong-card reason and drops the other type's.
+  - `needsCardNumberToApprove(item)` is true for a pending check whose rules need a number and that has none stored.
+  - `CARD_NUMBER_FIELD` holds the per-type label, fake example and PhilSys warning.
+  - `approveErrorText` gives the 400 text, and tells 409 `ID_ALREADY_REGISTERED` apart from a plain 409.
+- `frontend/features/identity-verification/api.ts`, `hooks.ts`: `approveIdReview(id, cardNumber?)` sends the number in the body only when one is given. `findIdCardHolder(pin, documentType)`. `useApproveIdReview` is now `gcTime: 0`, as `useFindIdCardHolder` is.
+- `frontend/components/admin/IdReviewQueue.tsx`:
+  - An "ID" column, and an "ID the citizen chose" line in the drawer. The drawer title and the image's alt text follow the type.
+  - The rejection list is filtered by type.
+  - When `needsCardNumberToApprove`, the drawer shows a card-number input labelled with the 16-digit number on the front, plus the PhilSys Number warning. Approve stays disabled until the input has text.
+  - The typed number is cleared from state as soon as it's sent, and the mutation is reset afterwards, so its variables don't keep it. It's also cleared on choosing Reject.
+  - Messages: 400 asks for the right number; 409 `ID_ALREADY_REGISTERED` says the card is held elsewhere and nothing changed; a plain 409 keeps "Someone else already decided this check". A 400 on reject says the reason doesn't apply to this ID.
+- `frontend/components/admin/IdCardRelease.tsx`:
+  - A type picker that defaults to `DEFAULT_ID_DOCUMENT_TYPE` (PhilHealth). The label, placeholder and warning come from `CARD_NUMBER_FIELD`.
+  - The 400 text uses the rules' `numberPrompt`, and the 404 text names the ID.
+  - Changing type clears the typed number, the result and both mutations. The number is still cleared after every lookup.
+- Wording: `frontend/app/(ops)/administration/id-reviews/page.tsx` (description), plus the error and empty texts in the queue. Comments only: `frontend/lib/role-access.ts` and `frontend/features/incidents/api.ts:186` (the reporter's ID check is no longer PhilHealth only; nothing there reads the type).
+
+**Migrations:** none (37). **Dependencies:** none. **Not changed:** `shared/`, `backend/`, `mobile/`. So their suites weren't re-run, and the e2e run in Part C D3 was skipped.
+
+**Inventory:** everything was missing except the `NOT_NATIONAL_ID` rejection label (Phase 1), which was used as is. The backend contracts (`documentType` on `find-by-pin`, `cardNumber` on approve, the 409 code) came from Phase 2 and were used unchanged.
+
+**Tests**
+
+| Suite | Before | After |
+|---|---|---|
+| Frontend | 199 in 18 suites | 212 in 18 suites |
+| `id-review-format.spec.ts` | 9 | 22 |
+
+Frontend typecheck clean. Backend, mobile and shared were not touched; their last counts are in "combining reads".
+
+- **Existing tests changed:** added argument only. The three `reviewCheckHint` calls in "gives a review hint for every reason kind" now pass `'PHILHEALTH'`. Nothing was deleted, skipped or loosened.
+- **Deliberate breaks:** 15, all caught on the first run. Each was applied to a scratch copy of `format.ts` that Jest was pointed at, so the repo file never changed (hash compared before and after) and a running `pnpm dev` never saw a break. They cover the reason filter (2), the needs-a-number check (3), the 400 and 409 texts (2), the wrong-card label (2), the hint (3), the number field (2) and the type label (1).
+- **Not tested, because frontend Jest has no DOM:** the column, the drawer line, the input appearing, Approve staying disabled, clearing the input, the filtered list on screen, the type picker and its reset. These rest on typecheck and reading the code until the hand checks below.
+
+**Deviations**
+- **Approve is reset after each try.** `gcTime: 0` alone keeps the typed number in the mutation's `variables` while the drawer is open. The error is copied to state first, so it still shows.
+- **Rejection reasons and the number field are lookups in `format.ts`** (`EXPECTED_IMAGE`, `CARD_NUMBER_FIELD`), not new fields on `ID_DOCUMENT_RULES`. They are staff-page English, and the server doesn't use them. Labels, prompts, wrong-card codes and `approvalNeedsNumber` still come from the shared rules.
+- **The name-mismatch hint now names the expected card** for both IDs. The existing assertion (`/typed name/`) still holds.
+- **The release lookup keeps its old pattern:** `find` isn't reset after each lookup, because its error is shown afterwards. Its `variables` hold the typed number until the next lookup, a type change or leaving the page. This is the same as before this phase, with `gcTime: 0`. *(Fixed in the review below.)*
+
+**§10 boxes:** none newly ticked. "Review queue shows the type" is built, but nobody has seen it on screen yet. Its 400 half has been server-tested since Phase 2.
+
+**Needs a person: web hand checks**
+
+Restart `pnpm dev` first. Sign in as an MDRRMO Org Administrator or a System Administrator. For checks 2–6 you need a National ID check under review with no number read: on the phone, choose National ID, fail 3 scans, then send it for review. Use invented numbers only, and never a real PhilSys Number.
+
+1. **Page:** the description names both IDs. The queue has an ID column.
+2. **National ID drawer:**
+   - The title says "National ID check", and the "ID the citizen chose" line shows.
+   - The hint mentions the printed ePhilID.
+   - The card-number input has the 16-digit label and the PhilSys warning. Approve stays disabled until something is typed.
+3. **400:** type a 12-digit number and approve. The message asks for the 16-digit number, the input is empty, and the row is still pending.
+4. **409:** type the card number of a National ID already verified on another account. The message says it's already linked and nothing changed, and the row is still pending.
+5. **Approve:** type an unused 16-digit test number. The check is approved and the image deleted. Then Find account with National ID and that number shows this account. The audit row for the approval has no number.
+6. **Reject list:** on a National ID row it offers "Not a National ID" and not "Not a PhilHealth ID". A PhilHealth row is the reverse.
+7. **PhilHealth row:** no number input, and Approve behaves as before.
+8. **Card release:**
+   - The picker starts on PhilHealth ID, with the old placeholder.
+   - Switch to National ID: the label, placeholder and warning change, and a typed number is cleared.
+   - A 12-digit number gives the 16-digit message. An unknown number gives "No account holds this National ID".
+   - The number clears after each lookup.
+9. **Roles:** a non-MDRRMO user still can't open the page.
+
+**Still open:** everything in Phase 3's "Needs a person or a phone", the two decisions in "combining reads", and Prompt R for this phase.
+
+### Review — 2026-11-09 (Phase 4)
+
+Prompt R, run at the owner's request **in the same chat that built Phase 4.** It is not the independent review Prompt R asks for: the reviewer had seen the code being written. It read code and ran tests. **Nothing was checked in a browser.**
+
+**Fixed**
+1. **The card lookup kept the typed number in the query cache while the page was open.** In TanStack Query 5.103.1, `gcTime: 0` only removes a mutation once nothing is watching it, and `MutationObserver.reset()` is what stops the page watching it (read in `query-core`). So `IdCardRelease` now copies the lookup error into its own state and resets `find` after each lookup, as the approve panel already did. This existed before this phase, but Prompt R check g asks for it. `frontend/components/admin/IdCardRelease.tsx`, `onFind`.
+2. **The 409 message sent staff to the wrong place.** It said "Look up who holds it below", but the panel covers the page, and the lookup starts on PhilHealth ID. A 16-digit number typed there gets the 12-digit error. It now says to close the panel and use "Find account" with the ID chosen. A test pins this (`format.ts`, `approveErrorText`).
+3. **The ID picker could change while a release was being sent.** The new type's view would then show "Released". The picker is now disabled during a release as well as a lookup.
+4. **Test gaps that didn't need a DOM.** A new `frontend/__tests__/id-verification-api.spec.ts`, 4 tests:
+   - approve sends the typed number in the body and never the URL, and an empty body without one, as before;
+   - the card lookup sends the chosen type;
+   - both hooks that carry a number use `gcTime: 0`. `useMutation` is stubbed to return its options, which needs no new dependency.
+
+**Checks**
+
+| Check | Result | Evidence |
+|---|---|---|
+| a. Steps, boxes, gates | Steps 1–5 done. No box newly ticked, correctly. Gate met | Phase 4 section; the "Review — 2026-11-07 (Phase 3)" section |
+| b. PSN | Pass | The web pages parse nothing. The server parses by the row's type (approve) or the chosen type (lookup), in `identity-verification-review.service.ts` (`cardToHold`, `findCardHolder`). The National ID field and the lookup both warn about the PhilSys Number |
+| c. Older builds | Pass | Compared with `1a22a45`: approve sent `{}` and still does when no number is needed. The lookup sent `{ pin }` and now sends `{ pin, documentType }`, where `'PHILHEALTH'` is the server's default. Pinned by the new spec |
+| d. Consent | Not affected | Phase 4 changes no consent code. Phase 3's review walked both paths |
+| e. Bugs | Fixes 1–3 | All codes mapped (`reviewReasonLabel` goes through the rules' `wrongCardCode`). The typed number is cleared on send, on choosing Reject and on closing the panel (it unmounts). The 409 code is read from `ApiError.body.code` (`frontend/lib/api.ts:61`) |
+| f. Duplication | Pass | No parsing in the frontend. ID labels, prompts, wrong-card codes and `approvalNeedsNumber` come from `ID_DOCUMENT_RULES`. Each new name is defined once |
+| g. Privacy | Pass after fix 1 | No `console` or logging in the changed files or `frontend/lib/api.ts`. Numbers go in bodies only. Server messages and audit carry no number (Phase 2) |
+| h. Rules | Pass | Nothing outside the ID files reads `documentType`. The one `features/incidents/api.ts` change is a comment. No SOS or dispatch code touched |
+| i. Wording | Pass | Every `philhealth` hit read: per-type labels, tests, and comments naming both IDs |
+| j. Tests | Helpers strong, screens mostly uncovered | See below |
+| k. Dependencies | Pass | No manifest or lockfile changed |
+
+**Tests**
+
+| Suite | Before | After |
+|---|---|---|
+| Frontend | 212 in 18 suites | 217 in 19 suites |
+
+Frontend typecheck clean. Backend, mobile and shared were untouched, so they weren't re-run.
+
+- **Helper breaks** (`format.ts`, applied to a scratch copy): 16, all caught. These are the 15 from Phase 4, plus the old 409 wording.
+- **Screen and request breaks:** 18, applied in place with no dev server running. Every file was restored byte for byte (hashes compared).
+  - **Caught by typecheck (2):** calling the hint without a type; a lookup with no type.
+  - **Caught by the new spec (3, after the fix):** the API dropping `documentType`; the API dropping `cardNumber`; approve losing `gcTime: 0`. A fourth break, the lookup losing `gcTime: 0`, was also caught.
+  - **Survived (13), covered only by the hand checks:**
+    - Approve enabled with no number; the input shown on every row; the number never sent from the panel.
+    - The typed number not cleared after approve; the approve mutation not reset.
+    - The reject list not filtered; the hint ignoring the type; the 409 code ignored; the ID column blank.
+    - The lookup always using PhilHealth; changing type keeping the number; the lookup mutation not reset; the number kept after a lookup.
+
+**Open, for the owner**
+1. **Not independent.** For a separate reviewer, run Prompt R again in a new chat.
+2. **Screens have no automated test.** 13 of 18 screen breaks survive. Only the Phase 4 hand checks cover them, and they haven't been done.
+3. **The web and the backend must ship together.** The queue reads `documentType` from every row. A backend older than Phase 2 doesn't send it, and the queue would fail to render. Both are in `482f46c` and later, so a normal deploy is fine. No fallback was added: it would hide a mismatched deploy rather than fix it.
+4. Unchanged from earlier: G1, the layout notes, the Phase 3 phone checks, and the two decisions in "combining reads".
 
 ---
 

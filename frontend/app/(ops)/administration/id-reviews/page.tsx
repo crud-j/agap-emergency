@@ -5,7 +5,7 @@ import { IdReviewQueue } from '@/components/admin/IdReviewQueue';
 
 export default function AdminIdReviewsPage(): JSX.Element {
   return (
-    <AdminPage title="ID Reviews" description="MOD-01 · PhilHealth IDs that citizens sent to MDRRMO at registration">
+    <AdminPage title="ID Reviews" description="MOD-01 · PhilHealth IDs and National IDs that citizens sent to MDRRMO at registration">
       <div className="space-y-6">
         <IdReviewQueue />
         <IdCardRelease />

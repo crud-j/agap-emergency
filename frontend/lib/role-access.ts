@@ -65,7 +65,7 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/administration', roles: [SYS_ADMIN] },
   // The only administration page the Org Administrator opens (Phase 6).
   { prefix: '/administration/barangays', roles: [ORG_ADMIN, SYS_ADMIN] },
-  // PhilHealth ID reviews (MOD-01, plan §7). The API also requires an Org Administrator's
+  // ID reviews, PhilHealth ID and National ID (MOD-01, plan §7). The API also requires an Org Administrator's
   // organization to be MDRRMO; the sidebar link follows that (orgAdminOrgTypes below).
   { prefix: '/administration/id-reviews', roles: [ORG_ADMIN, SYS_ADMIN] },
   { prefix: '/ops/kitchen-sink', roles: [SYS_ADMIN] },

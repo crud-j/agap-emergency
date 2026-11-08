@@ -4,6 +4,7 @@ import type {
   IdCardHolder,
   IdCardReleaseReason,
   IdCardReleaseResult,
+  IdDocumentType,
   IdRejectionReason,
   IdReviewDecisionResult,
   IdReviewItem,
@@ -11,7 +12,7 @@ import type {
   PaginatedResult,
 } from '@agap/shared';
 
-// PhilHealth ID staff review (MOD-01 / MOD-48, plan §7): /administration/id-verifications.
+// ID staff review, PhilHealth ID and National ID (MOD-01 / MOD-48, plan §7): /administration/id-verifications.
 
 export interface IdReviewParams {
   status?: IdReviewStatus;
@@ -32,8 +33,9 @@ export function fetchIdImage(id: string): Promise<Blob> {
   return api.blob(`/administration/id-verifications/${id}/image`, getToken());
 }
 
-export function approveIdReview(id: string): Promise<IdReviewDecisionResult> {
-  return api.post(`/administration/id-verifications/${id}/approve`, {}, getToken());
+/** `cardNumber`: typed by staff from the image when no number was read (plan §7). In the body, never the URL. */
+export function approveIdReview(id: string, cardNumber?: string): Promise<IdReviewDecisionResult> {
+  return api.post(`/administration/id-verifications/${id}/approve`, cardNumber ? { cardNumber } : {}, getToken());
 }
 
 export function rejectIdReview(id: string, reason: IdRejectionReason): Promise<IdReviewDecisionResult> {
@@ -41,8 +43,8 @@ export function rejectIdReview(id: string, reason: IdRejectionReason): Promise<I
 }
 
 /** Which account holds this card? Audited server-side. The number goes in the body, never the URL. */
-export function findIdCardHolder(pin: string): Promise<IdCardHolder> {
-  return api.post('/administration/id-verifications/find-by-pin', { pin }, getToken());
+export function findIdCardHolder(pin: string, documentType: IdDocumentType): Promise<IdCardHolder> {
+  return api.post('/administration/id-verifications/find-by-pin', { pin, documentType }, getToken());
 }
 
 export function releaseIdCard(id: string, reason: IdCardReleaseReason): Promise<IdCardReleaseResult> {
