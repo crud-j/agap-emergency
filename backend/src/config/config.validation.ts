@@ -63,7 +63,7 @@ class EnvironmentVariables {
   @IsOptional()
   MEDICAL_ENCRYPTION_KEY?: string;
 
-  // PhilHealth ID verification at registration (MOD-01 / MOD-48). 'true' = /auth/register
+  // ID verification at registration (MOD-01 / MOD-48). 'true' = /auth/register
   // requires a scan, which needs ID_DOCUMENT_ENCRYPTION_KEY (32 bytes, base64, sealing the
   // name and image) and ID_PIN_PEPPER (HMAC secret for the one-ID-per-account check).
   @IsString()

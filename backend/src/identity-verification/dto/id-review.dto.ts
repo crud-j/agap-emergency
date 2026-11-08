@@ -3,9 +3,11 @@ import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import {
   ID_CARD_RELEASE_REASONS,
+  ID_DOCUMENT_TYPES,
   ID_REJECTION_REASONS,
   ID_REVIEW_STATUSES,
   type IdCardReleaseReason,
+  type IdDocumentType,
   type IdRejectionReason,
   type IdReviewStatus,
 } from '@agap/shared';
@@ -39,6 +41,24 @@ export class IdCardLookupDto {
   @IsString()
   @MaxLength(32)
   pin!: string;
+
+  @ApiPropertyOptional({ enum: ID_DOCUMENT_TYPES, default: 'PHILHEALTH' })
+  @IsOptional()
+  @IsIn(ID_DOCUMENT_TYPES)
+  documentType?: IdDocumentType;
+}
+
+/** POST /administration/id-verifications/:id/approve. In the body, so the number stays out of URLs and logs. */
+export class IdApproveDto {
+  @ApiPropertyOptional({
+    description:
+      'Required for a National ID with no stored number: the 16-digit number on the front of the card, never the PhilSys Number.',
+    example: '0000-0000-0000-0001',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  cardNumber?: string;
 }
 
 /** POST /administration/id-verifications/:id/release — a fixed code, never free text. */

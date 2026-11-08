@@ -3,9 +3,11 @@ import * as dotenv from 'dotenv';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { AuditAction } from '@agap/shared';
 import { AuditService } from '../src/audit/audit.service';
+import { ConsentService } from '../src/consent/consent.service';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { IncidentsService } from '../src/incidents/incidents.service';
 import { IdDocumentCryptoService } from '../src/identity-verification/id-document-crypto.service';
+import { IdentityVerificationReviewService } from '../src/identity-verification/identity-verification-review.service';
 import { IdentityVerificationService } from '../src/identity-verification/identity-verification.service';
 import { UsersService } from '../src/users/users.service';
 import { e2eDatabaseUrl } from './e2e/e2e-database';
@@ -252,6 +254,143 @@ describeE2E('PhilHealth ID release (real database)', () => {
       await service.withdrawConsent(citizen);
       await users.updateMe(citizen, { fullName: 'Someone Else' });
       expect(await prisma.user.findUniqueOrThrow({ where: { id: citizen } })).toMatchObject({ full_name: 'Someone Else' });
+    });
+  });
+
+  describe('National ID', () => {
+    const SYSTEM_ADMIN = 'SYSTEM_ADMINISTRATOR';
+    /** Sixteen invented digits, new each run. */
+    const cardNumber = () => `0000${randomBytes(6).readUIntBE(0, 6).toString().padStart(12, '0').slice(0, 12)}`;
+    const grouped = (digits: string) => digits.replace(/(\d{4})(?=\d)/g, '$1-');
+
+    function reviewService() {
+      return new IdentityVerificationReviewService(
+        prisma,
+        crypto,
+        media as any,
+        new AuditService(prisma),
+        service,
+        { notifyDecision: jest.fn(async () => undefined) } as any,
+      );
+    }
+
+    /** A citizen with an unread National ID under review: no number and no name are stored. */
+    async function unreadReview(): Promise<{ id: string; citizen: string }> {
+      const citizen = await account({ role: 'CITIZEN', identity_verified_at: null });
+      const id = await scan(hmac(), {
+        user_id: citizen,
+        document_type: 'NATIONAL_ID',
+        status: 'PENDING_REVIEW',
+        pin_hmac: null,
+        pin_last4: null,
+        name_on_id_sealed: null,
+      });
+      return { id, citizen };
+    }
+
+    it('the new enum value saves, reads back, and the old default still applies', async () => {
+      const national = await scan(hmac(), { document_type: 'NATIONAL_ID' });
+      expect((await row(national)).document_type).toBe('NATIONAL_ID');
+      expect((await row(await scan(hmac()))).document_type).toBe('PHILHEALTH');
+    });
+
+    it('approving with a number another account holds: the real index refuses, and everything rolls back', async () => {
+      const admin = await account({ role: SYSTEM_ADMIN });
+      const digits = cardNumber();
+      const holder = await account();
+      await scan(crypto.pinHmac(digits), { user_id: holder, document_type: 'NATIONAL_ID', pin_last4: digits.slice(-4) });
+      const { id, citizen } = await unreadReview();
+
+      const refused = reviewService().approve({ id: admin, role: SYSTEM_ADMIN }, id, grouped(digits));
+
+      await expect(refused).rejects.toMatchObject({ status: 409, response: { code: 'ID_ALREADY_REGISTERED' } });
+      expect(await row(id)).toMatchObject({
+        status: 'PENDING_REVIEW',
+        pin_hmac: null,
+        pin_last4: null,
+        reviewed_by_id: null,
+        reviewed_at: null,
+        image_storage_key: `local:id-documents/${id}`,
+      });
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: citizen } })).identity_verified_at).toBeNull();
+      expect(await prisma.auditLog.count({ where: { entity_id: id } })).toBe(0);
+    });
+
+    it('approving with a free number stores it with the decision, and the real index then holds the card', async () => {
+      const admin = await account({ role: SYSTEM_ADMIN });
+      const digits = cardNumber();
+      const { id, citizen } = await unreadReview();
+
+      await reviewService().approve({ id: admin, role: SYSTEM_ADMIN }, id, grouped(digits));
+
+      expect(await row(id)).toMatchObject({
+        status: 'APPROVED',
+        pin_hmac: crypto.pinHmac(digits),
+        pin_last4: digits.slice(-4),
+        reviewed_by_id: admin,
+      });
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: citizen } })).identity_verified_at).not.toBeNull();
+      const audit = await prisma.auditLog.findFirst({ where: { entity_id: id } });
+      expect(audit?.new_values).toEqual({ status: 'APPROVED' });
+      expect(JSON.stringify(audit)).not.toContain(digits);
+
+      const other = await account();
+      await expect(scan(crypto.pinHmac(digits), { user_id: other, document_type: 'NATIONAL_ID' })).rejects.toMatchObject({ code: 'P2002' });
+    });
+
+    it('a PIN and a card number live side by side on one index, one per card', async () => {
+      const philhealth = await account();
+      const national = await account();
+      await scan(hmac(), { user_id: philhealth });
+      await expect(scan(crypto.pinHmac(cardNumber()), { user_id: national, document_type: 'NATIONAL_ID' })).resolves.toEqual(expect.any(String));
+    });
+
+    it.each(['ID_VERIFICATION_NATIONAL_ID', 'ID_VERIFICATION_PHILHEALTH'])(
+      'withdrawing %s withdraws both consents and erases every row, in one transaction',
+      async (named) => {
+        const consents = new ConsentService(prisma, service);
+        const citizen = await account();
+        const pin = hmac();
+        const card = hmac();
+        const philhealthConsent = await prisma.consent_records.create({
+          data: { user_id: citizen, consent_type: 'ID_VERIFICATION_PHILHEALTH', status: 'GRANTED' },
+        });
+        const nationalConsent = await prisma.consent_records.create({
+          data: { user_id: citizen, consent_type: 'ID_VERIFICATION_NATIONAL_ID', status: 'GRANTED' },
+        });
+        const rejected = await scan(pin, { user_id: citizen, status: 'REJECTED', consent_record_id: philhealthConsent.id });
+        const verified = await scan(card, { user_id: citizen, document_type: 'NATIONAL_ID', consent_record_id: nationalConsent.id });
+
+        await consents.revokeConsent(citizen, named);
+
+        for (const id of [philhealthConsent.id, nationalConsent.id]) {
+          expect(await prisma.consent_records.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: 'WITHDRAWN', withdrawn_at: expect.any(Date) });
+        }
+        for (const id of [rejected, verified]) {
+          expect(await row(id)).toMatchObject({ status: 'RELEASED', pin_hmac: null, pin_last4: null, name_on_id_sealed: null, image_storage_key: null });
+        }
+        expect((await prisma.user.findUniqueOrThrow({ where: { id: citizen } })).identity_verified_at).toBeNull();
+
+        // Both cards are free again.
+        const other = await account();
+        await expect(scan(card, { user_id: other, document_type: 'NATIONAL_ID' })).resolves.toEqual(expect.any(String));
+      },
+    );
+
+    it('a failure while withdrawing leaves both consents and every row as they were', async () => {
+      const consents = new ConsentService(prisma, service);
+      const citizen = await account();
+      const consent = await prisma.consent_records.create({
+        data: { user_id: citizen, consent_type: 'ID_VERIFICATION_NATIONAL_ID', status: 'GRANTED' },
+      });
+      const id = await scan(hmac(), { user_id: citizen, document_type: 'NATIONAL_ID', consent_record_id: consent.id });
+      const release = jest.spyOn(service, 'releaseInTransaction').mockRejectedValueOnce(new Error('later failure'));
+
+      await expect(consents.revokeConsent(citizen, 'ID_VERIFICATION_NATIONAL_ID')).rejects.toThrow('later failure');
+      release.mockRestore();
+
+      expect((await prisma.consent_records.findUniqueOrThrow({ where: { id: consent.id } })).status).toBe('GRANTED');
+      expect(await row(id)).toMatchObject({ status: 'AUTO_VERIFIED', pin_last4: '0010' });
     });
   });
 

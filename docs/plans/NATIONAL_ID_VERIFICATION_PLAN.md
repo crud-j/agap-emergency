@@ -1,6 +1,6 @@
 # Plan — Philippine National ID as a Second ID Option at Citizen Registration
 
-**Status:** Phase 0 tools built; no real card scanned yet (G1), and no feature code, migration or dependency added. Decisions recorded 2026-11-06 (§11) · **Date:** 2026-11-06 · **Owner:** AGAP mobile + backend + frontend (admin)
+**Status:** Phases 1–3 (shared rules, backend, mobile) built at the owner's instruction, ahead of their gates and **unconfirmed on a real card or a phone**: the layout notes are blank and the adviser's answers aren't in §11 (see the Progress log). Web admin (Phase 4) and docs (Phase 5) not started. Decisions recorded 2026-11-06 (§11) · **Date:** 2026-11-06 · **Owner:** AGAP mobile + backend + frontend (admin)
 **Baseline:** `main` @ `1a22a45` (PhilHealth Phases 0–6 committed, clean tree)
 **Implementation prompts:** [NATIONAL_ID_VERIFICATION_PROMPTS.md](NATIONAL_ID_VERIFICATION_PROMPTS.md)
 **Builds on:** [PHILHEALTH_ID_VERIFICATION_PLAN.md](PHILHEALTH_ID_VERIFICATION_PLAN.md) (the "PhilHealth plan"). This plan covers only what changes; everything else stays as that plan says.
@@ -312,9 +312,9 @@ Each implementation prompt fills in its row and adds a `### Phase N — <date>` 
 | Phase | Status | Date | Notes |
 |---|---|---|---|
 | 0. Spike and samples | Tools built, not yet run on a phone; card check not started | 2026-11-06 | Real cards blocked by G1. No migration or dependency. Test counts unchanged. One out-of-scope digital ID read recorded; it doesn't count toward the target |
-| 1. Shared rules | Not started | | Blocked by G2 |
-| 2. Backend | Not started | | |
-| 3. Mobile | Not started | | |
+| 1. Shared rules | Done, awaiting review; parser unconfirmed on a real card | 2026-11-06 | Built on the owner's instruction with G2 lifted and the layout notes blank. No migration or dependency. Backend 1687 → 1741, plus `auth-phase3` alone 59 |
+| 2. Backend | Done, awaiting the review decision; parser unconfirmed on a real card | 2026-11-07 | Built on the owner's instruction with the Phase 1 review skipped and G2 lifted. G1 and the layout notes still open. 1 migration, applied (37). Backend 1741 → 1811, plus `auth-phase3` alone 59; e2e 19 → 26 |
+| 3. Mobile | Code done and reviewed (2026-11-07), not yet run on a phone | 2026-11-07 | Built on the owner's instruction with the Phase 2 review skipped. G1 and the layout notes still open. No migration or dependency. Mobile 212 → 241. Backend must be restarted first |
 | 4. Admin | Not started | | |
 | 5. Docs and readiness | Not started | | |
 
@@ -361,6 +361,19 @@ One image of a Digital National ID, one server read, 2026-11-06. The Digital Nat
 - 12-digit runs: none seen.
 - Confidence 50, 840 ms. OCR added junk text around the two-column layout. From the output, the name check would likely fail because of the last name; only a person can confirm that against the card.
 
+#### First National ID sample read (server, one image; not a passing sample)
+
+One image from the owner's sample folder, one server read, 2026-11-06, after Phase 1 was built. Patterns only. It doesn't count toward the 8 of 10, and the notes below remain the user's to fill in.
+
+**Handling:** G1 wasn't met when this was read, and its OCR output, personal data included, was pasted into an agent chat, against the rule for samples. Still to be done or confirmed by a person: clear the terminal, delete the chat transcript, tell the card's owner and the adviser, and delete the image when testing ends. Confirm written consent for this card.
+
+- Confidence 35, below the server's minimum of 40. About 4.7 s.
+- Heading: pieces of the Filipino heading and of `Philippine Identification` appeared, split across lines. This is the first support for §6's English candidate, but neither heading came through whole.
+- Number: no 16-digit run, and no 12-digit run. Only short digit fragments.
+- Labels: pieces of `Apelyido/L…`, `Mga Pan…galan/Gi…ven Names` and `Tirah…an/Add…`, each broken across lines. That supports the bilingual slash form and that order. No sign of the middle name or birth date label.
+- Words stepping from one line to the next suggest a tilted image, and repeated background print was read as text. Likely not a cropped, upright image; only a person can confirm that.
+- Read by inspection, with the text kept off disk, the Phase 1 rules would refuse it: no heading, no number, no name. That's a safe failure (retry, then review), but it says nothing yet about a clean image.
+
 #### Layout notes (filled in by the user)
 
 No real names or numbers: patterns only.
@@ -378,30 +391,393 @@ No real names or numbers: patterns only.
 - Scanner on a phone without Google Play services, if available:
 - Sample scans deleted, including phone gallery, trash and backups (date); written consent held for each card (yes/no); no sample sent through a chat app, email or cloud storage (yes/no):
 
+### Phase 1 — 2026-11-06
+
+**Gates: the owner's instruction, as written.** Prompt 1 stopped on its gates, and the owner replied on 2026-11-06: "just proceed, i'm the owner of this application the main developer, the photo i have on the id-samples folder are the ids samples i have gathered with my friends and fellow developers so i can test the national id".
+
+- **G2:** recorded as lifted by the owner, for this phase. PhilHealth's own Phase 0 target, PH-14 and Prompt R for Phase 6 are still not done.
+- **G1:** **not met.** No adviser answers are recorded in §11, and nothing here should be read as saying they were. The owner chose to go ahead without them.
+- **Layout notes:** **still blank.** The owner chose to go ahead without them, so no card count backs this parser (0 of the 8 of 10 target). Fill them in and revisit this code.
+- **Sample images:** the agent didn't open, read or run a tool on them (Part A3). It checked only that the folder is outside the repo and holds 1 JPG.
+
+**What the parser rests on:** §6's memory of the heading and labels, and the one Digital National ID read recorded above, which is a different format and didn't show the last name label or value clearly. A real card may differ on any of the unconfirmed points below.
+
+**Added**
+- `shared/src/validation/national-id.ts`: `parsePhilSysCardNumber`, `looksLikeNationalId`, `parseNationalIdName`.
+- `shared/src/validation/id-document-rules.ts`: `ID_DOCUMENT_RULES`.
+- `backend/test/identity-verification/national-id.spec.ts`: 54 tests, invented text only.
+
+**Changed**
+- `shared/src/constants/identity-verification.ts`: `ID_DOCUMENT_TYPES`, `IdDocumentType`, `ID_VERIFICATION_NATIONAL_ID_CONSENT_TYPE`, `ID_VERIFICATION_CONSENT_TYPES`, `isIdVerificationConsentType`, `IdVerificationErrorCode.NOT_NATIONAL_ID`, `NOT_NATIONAL_ID` in `ID_REJECTION_REASONS`, the wider `IdReviewReason`, `documentType` on `IdScanResponse` and `IdReviewItem`, `hasCardNumber` on `IdReviewItem`. Every existing value kept.
+- `shared/src/validation/philhealth-id.ts`: exports `nameTokens` and a new `isNameSuffix`, which replaces the same check written inline in `buildName`. No behaviour change; `philhealth-id.spec.ts` is unchanged and passes.
+- `shared/src/validation/index.ts`: exports both new files.
+- `frontend/features/identity-verification/format.ts`: one label, `NOT_NATIONAL_ID` (see Deviations).
+
+**Migrations:** none (36, up to date). **Dependencies:** none.
+
+**Inventory:** everything was missing except `IdReviewReason`, which was extended.
+
+**Tests**
+- Backend: 1687 → 1741, all passing (+54, the new spec), plus `auth-phase3` alone 59 → 59. Identity-verification specs: 204.
+- Mobile 212 → 212. Frontend 199 → 199. Backend, mobile and frontend typecheck clean.
+- e2e not run: nothing under `backend/src` changed. Prompt 2 runs it.
+- **Deliberate breaks:** 42 one-line breaks to the number, heading, label, stop and rules code, each restored byte for byte (hashes compared). The first run caught 39. The 3 that survived were real test gaps (a later label overwriting a value, a label half with the slash lost, an unlabelled date ending the reading), so 4 tests were added. All 42 are now caught.
+
+**Deviations**
+- `documentType` and `hasCardNumber` are **optional** for now. Required fields would stop the backend compiling until Phase 2 fills them in. **Phase 2 should make them required.**
+- One line in `frontend/.../format.ts`, ahead of Phase 4. `REJECTION_REASON_LABELS` needs a label for every reason, so adding `NOT_NATIONAL_ID` otherwise broke the frontend typecheck and `id-review-format.spec.ts:67`.
+- Added `ID_VERIFICATION_NATIONAL_ID_CONSENT_TYPE`, which Prompt 1 didn't name, so the rules and the list share one value.
+
+**Temporary, until later phases**
+- The review drawer's rejection list now also shows "Not a National ID" on PhilHealth rows, and the server accepts it. Phase 2's check (400) and Phase 4's filtered list close this. Until then staff shouldn't pick it.
+
+**Known limits**
+- 4-4-4 digits followed by exactly one 4-digit group on the same line read as a card number: text alone can't tell them apart. A test pins this. It's why the PSN being on the back and AGAP scanning the front matters: **confirm on a real card that no 12-digit run shows on the front.**
+- Any extra digits joined to the number by only spaces or a dash refuse it whole, so the scan is retried rather than risk a wrong number. If real OCR often puts digits beside it, this may need loosening, without ever cutting a longer run down.
+- A year or date anywhere before the name labels ends the reading, so the name reads as null. The safe side, but check real OCR output for a stray year above the name.
+- A bare single letter at the start of a value is dropped as OCR junk, so a printed `J PAUL` becomes `PAUL` and goes to review.
+
+**To confirm from the layout notes:** the heading words, whether the number has letters (N4), the labels and their order, value on the label's line or the next, whether a suffix has its own label, what a card with no middle name prints, and the labels after the name. `Philippine National ID`, seen on the digital read, isn't accepted as a heading. A Digital National ID with the Filipino heading does pass detection (§11, still open item 4).
+
+**§10 boxes:** none ticked. Each describes behaviour across the scan, staff or phone flow, which later phases build. The parser tests cover only the shared rules underneath them.
+
+**Needs a person or a phone**
+1. Run the card check (Prompt 0, step 4) and fill in the layout notes with patterns only. Use your own terminal for any OCR output, and don't paste it into a chat.
+2. Get the §11 answers from the adviser, or record who decided otherwise.
+3. Written consent for each friend's card, then delete the samples, including gallery, trash and backups.
+4. Run Prompt R for this phase in a new chat before Prompt 2.
+
+### Phase 2 — 2026-11-07
+
+**Gates: the owner's instruction, as written.** On 2026-11-06 the owner said: "Skip the Phase 1 review and lift G2 for Phase 2."
+
+- **Prompt R for Phase 1:** not run, on that instruction.
+- **G2:** recorded as lifted by the owner, for this phase.
+- **G1:** **still not met.** No adviser answers are recorded in §11.
+- **Layout notes:** **still blank.** Everything here runs on invented text that follows §6, so these tests don't show that a real National ID reads.
+
+**Added**
+- `backend/prisma/migrations/20261106100000_id_document_type_national_id/`: `ALTER TYPE` only.
+- `backend/test/identity-verification/id-national.spec.ts`: 70 tests through the real scan, registration, consent and staff flows, with OCR stubbed.
+
+**Changed**
+- `backend/src/identity-verification/identity-verification.service.ts`: scan takes its parsers, wrong-card code and phone-reading check from `ID_DOCUMENT_RULES`, saves and returns `documentType`, and names the chosen ID in its messages. Claim writes the row's consent type and audits the type. Withdrawal covers all ID consent types. The account check stays unfiltered by type.
+- `backend/src/identity-verification/identity-verification-review.service.ts`: reads `NOT_NATIONAL_ID`; the queue returns `documentType` and `hasCardNumber`; a wrong-card reason that doesn't fit the row's type is 400; lookup parses and filters by type; approve takes `cardNumber` per §7 and maps `P2002` to 409.
+- `backend/src/identity-verification/dto/id-scan.dto.ts`, `dto/id-review.dto.ts`, `identity-verification.controller.ts`, `identity-verification-admin.controller.ts`: the new fields and their validation.
+- `backend/src/consent/consent.service.ts`: either ID consent routes to the erasing withdrawal.
+- `backend/src/identity-verification/philhealth-ocr.service.ts` moved to `id-ocr.service.ts`; `PhilhealthOcrService` is now `IdOcrService`, with `identity-verification.module.ts` updated.
+- `backend/src/users/users.service.ts`, `backend/src/auth/auth.service.ts`: messages that can reach a National ID holder no longer name PhilHealth.
+- Comments only, where they'd now be false: `backend/prisma/schema.prisma` (plus the enum value), `backend/src/auth/dto/register.dto.ts`, `backend/src/config/config.validation.ts`, `backend/src/incidents/incidents.service.ts`, `backend/src/jobs/processors/identity-verification.processor.ts`, and others in `backend/src/identity-verification/`.
+- `shared/src/validation/id-document-rules.ts`, `shared/src/constants/identity-verification.ts`: see Deviations.
+- `backend/test/identity-verification-release.e2e-spec.ts`: a National ID block on real PostgreSQL, 7 tests.
+
+**Migrations:** 36 → 37, applied to the dev and e2e databases. `migrate status` is up to date. **Dependencies:** none.
+
+**Inventory:** the shared rules, types and `NOT_NATIONAL_ID` existed from Phase 1 and were extended. Everything else in this phase was missing.
+
+**Tests**
+
+| Suite | Before | After |
+|---|---|---|
+| Backend | 1741 | 1811 |
+| `auth-phase3` alone | 59 | 59 |
+| Identity-verification specs (within backend) | 204 | 274 |
+| e2e | 19 in 3 suites | 26 in 3 suites |
+| Frontend | 199 | 199 |
+| Mobile | 212 | 212 |
+
+Backend, frontend and mobile typecheck clean.
+
+- **e2e:** `transport-flow` fails now and then when the suites run in parallel. It failed in the baseline run before this phase's code, and in 1 of 2 parallel runs at the end. At the end it passed alone, and the whole suite passed 26/26 both in band and in the other parallel run. The cause wasn't found: the error text wasn't captured.
+- **Deliberate breaks:** 55 one-line breaks, each run against `id-national.spec.ts`. 54 are caught. The first pass caught 52, and the 3 survivors were:
+  - **Number read from any card: a real gap, now closed.** The PhilHealth pattern accepts any unspaced 12 digits, so only the card check stops a PhilSys Number being stored as a PIN on a review scan. 2 tests added.
+  - **Too-long approval number: a real gap, now closed.** The old test used text the parser refuses anyway. It now also sends a valid number padded past the limit.
+  - **Name read from any card: can't be caught, because it changes nothing.** On a wrong card the number is always null, so the scan is either refused or sent to review, and a review neither stores nor returns the name.
+- **Interrupted run:** the first break run was killed and left the `@IsIn` line missing from `IdCardLookupDto`. The hash check found it, the line was restored, and all 13 files match their hashes.
+
+**Existing tests changed**
+- Added keys only: `id-scan-endpoint`, `id-review`, `id-register`, `id-rescan` (`documentType` in the expected responses and audit values).
+- Rename only: `id-cleanup-and-ocr`, `id-test-kit`, `emergency-flow-id-required`.
+- None deleted, skipped or loosened.
+
+**Deviations**
+- `ID_DOCUMENT_RULES` gained `label`, `numberPrompt` and `approvalNeedsNumber`, and `DEFAULT_ID_DOCUMENT_TYPE` was added, so per-type choices stay in the lookup.
+- `wrongCardCode` was narrowed to the two wrong-card codes.
+- `documentType` and `hasCardNumber` are now required, as the Phase 1 log asked.
+- A `cardNumber` sent when none is needed is ignored and never stored.
+- The OCR log text is now generic.
+- The wrong-card message now reads "Scan the front of your X, or choose a different ID", no longer "Only a PhilHealth ID can be used".
+
+**Temporary, until later phases**
+- The app sends no `documentType` until Phase 3, so every real scan is still PhilHealth.
+- The review drawer still offers "Not a National ID" on PhilHealth rows until Phase 4. The server now refuses it with a 400, which closes the Phase 1 gap on the server side only.
+
+**§10 boxes:** ticked only where the tests prove the server behaviour. They use invented text, so none of them shows a real card reads. Left open:
+- Chooser, changing the chosen ID, and the Privacy & Consent card: Phase 3.
+- National ID scan to home: the server steps are tested except the OTP, which no National ID test checks, and the full flow needs a phone.
+- Other card scanned: the server code is tested; the on-device check and "Choose a different ID" are Phase 3.
+- Review queue: the API and the 400 are tested; showing the type on screen is Phase 4.
+- Printed ePhilID and the PH-xx regression: need a person.
+
+**Needs a person or a phone**
+1. Restart the backend so it loads the new code.
+2. Everything still listed under Phase 1, "Needs a person or a phone", items 1–3: the card check and layout notes, the §11 adviser answers, and written consent and sample deletion.
+3. Decide on Prompt R for this phase before Prompt 3. The owner's skip covered the Phase 1 review only.
+
+### Phase 3 — 2026-11-07
+
+**Gates: the owner's instruction, as written.** Asked whether to run Prompt R for Phase 2, the owner replied on 2026-11-07: "skip it and proceed with prompt 3". It ran in the same chat as Phase 2, on that instruction.
+
+- **Prompt R for Phase 2:** not run, on that instruction. Phases 1 and 2 have both had no independent review.
+- **G1:** **still not met.** No adviser answers are recorded in §11, so the National ID consent text isn't the adviser's wording.
+- **Layout notes:** **still blank.**
+
+**Added**
+- `mobile/src/components/registration/IdScanStep.tsx` (moved from `PhilHealthIdStep.tsx`): the `id_choose` state, `documentType` and `onDocumentTypeChange` props, and "Choose a different ID" on intro and retry. Changing ID clears the consent tick, the attempt count and the last reason.
+- `mobile/src/services/id-scan/id-scan.ts` (moved from `philhealth-scan.ts`): `documentType` through `processIdImage`.
+- `mobile/src/services/id-scan/__tests__/id-scan.test.ts`: 10 tests that the chosen type reaches the phone's check and the upload, with native modules stubbed.
+
+**Changed**
+- `mobile/src/lib/id-verification.ts`: `localReadVerdict(text, documentType)` through `ID_DOCUMENT_RULES`; `NOT_NATIONAL_ID` in `IdScanFailureReason`, `scanFailureFromError` and `countsAsAttempt`; `retryMessageKey(reason, documentType)`; a new `idConsentCard`.
+- `mobile/src/services/api/auth.api.ts`: `documentType` in the upload.
+- `mobile/app/auth/registration.tsx`, `mobile/app/profile/id-verification.tsx`: hold `documentType`; go to `id_choose` after the geo-fence; `ID_SCAN_EXPIRED` and Scan again return to `id_intro` with the type kept; the badge and the already-registered message follow the type.
+- `mobile/app/profile/privacy.tsx`: checks both consent types, shows one card, and invalidates both on withdrawal. Medical consent untouched.
+- `mobile/src/i18n/translations.ts`: every new or reworded string in `en` and `fil`. Per-ID sentences live in `idDocument`, keyed by type.
+- `mobile/app.json:37,59`: "scan your ID". `NameFields.tsx`, `id-status-card.tsx`, `id-verification.api.ts`: comments only.
+- `mobile/src/lib/__tests__/id-verification.test.ts`: see Tests.
+
+**Removed**
+- `mobile/app/dev/id-scan-spike.tsx` and its profile row, as Prompt 3 says. **The card check it was built for is still open.** To run it, restore the screen with `git show 9f790be:mobile/app/dev/id-scan-spike.tsx` and the row from `9f790be:mobile/app/profile/index.tsx`.
+
+**Migrations:** none (37, up to date). **Dependencies:** none. **No dev-client rebuild:** JavaScript only.
+
+**Inventory:** everything in this phase was missing except the shared rules from Phase 1, which were used as they are. `shared/`, `backend/` and `frontend/` weren't changed.
+
+**Tests**
+- Mobile 212 → 241, all passing, in 18 suites (+1). Mobile typecheck clean.
+- Backend and frontend not re-run: nothing they use changed. Last counts are in Phase 2.
+- A production Android bundle (`expo export`) compiled to Hermes, with the chooser text in it and no trace of the spike route. That shows the moves and imports resolve, not that the screens work. No lookbehind in the shared rules.
+- **Deliberate breaks:** 36 one-line breaks to the verdict, failure mapping, attempts, messages, Privacy card, scan service, upload and text, each restored byte for byte (hashes compared). All 36 caught the first time.
+- **Not tested at all, because screens have no component tests:** the chooser, clearing state on changing ID, the type held across chooser, scan, form and rescan, the Privacy screen's queries, and the emergency button's place on each step. These rest on typecheck and reading the code until a phone check.
+
+**Existing tests changed**
+- Added arguments only: `localReadVerdict(..., 'PHILHEALTH')`, and the `retryMessageKey` check now runs for each ID.
+- Added values only: `NOT_NATIONAL_ID` in `ALL_REASONS`, the error table and the expected attempts list.
+- None deleted, skipped or loosened.
+
+**Deviations**
+- **The form's helper and match text say "your ID" rather than naming the card.** Prompt 3 step 5 says they follow the type; §4.2 says to reword to "your ID" where that reads fine. It never names the wrong card, and a test holds this. The badge does name the card.
+- `idConsentCard` is new, so the card's wording can be tested. Someone holding both consents gets one card naming both IDs, which the plan didn't specify. Single-ID wording for PhilHealth is unchanged, and a test pins it.
+- `idChooseNeitherSignedIn` is new: "can't create an account yet" is false for someone scanning from their profile.
+- `idOnlyPhilHealth` became `idAcceptedIds`. `idIntroTitle`, `idWhatWeRead`, `idConsentLabel`, `idScanBtn`, `idScannedBadge`, `idScannedBadgeNoPin` and `idReviewBadge` moved into `idDocument`.
+- The wrong-card messages now read "Scan the front of your X, or choose a different ID", matching Phase 2's server text.
+- **A bug the self-check found:** registration and the profile rescan both showed the PhilHealth "already linked" message directly, whichever ID was scanned. Both now use `retryMessageKey`. These two screen lines have no test.
+
+**Temporary, until later phases**
+- **Staff can't approve an unread National ID from the web until Phase 4:** the drawer has no number input, so the server's 400 stands. Such a citizen stays under review and can still sign in and send an SOS.
+- The staff lookup has no ID type picker until Phase 4, so it only finds PhilHealth IDs.
+- `privacy.tsx` stays English only, as it was.
+
+**§10 boxes:** none newly ticked. The tests cover the rules underneath them, and each open box needs a phone, a person or a later phase.
+
+**Needs a person or a phone**
+1. Restart the backend. **An app with this code gets a 400 from a backend still running the old code**, because it sends `documentType`.
+2. `npx expo start -c`, then run the phone checks in this phase's report. Any step using a real National ID goes ahead of G1 (N3), so it's the owner's call and the card holder's written consent. Keep OCR output out of chats.
+3. A Filipino speaker should check every new string in `translations.ts`. They were written by an agent.
+4. Still open from Phase 1: the card check and layout notes, the §11 adviser answers, and consent and sample deletion.
+5. Decide on Prompt R for this phase before Prompt 4.
+
+### Review — 2026-11-07 (Phase 3)
+
+Prompt R, run on the owner's choice in a new chat. **This review read code and ran tests. Nothing ran on a phone, and no real card was used,** so it can't show that the screens work.
+
+**Scope:** Phase 3, plus the Phase 1 and 2 lines that Phase 3 calls and checks b, c and d need. Phases 1 and 2 as a whole still have no independent review.
+
+**Fixed**
+1. **An old "scan expired" notice followed the citizen to a different ID.** After an expired scan, choosing another ID showed "Your ID scan expired" on the new ID's intro, for a card they hadn't scanned. Choosing an ID now clears it: `mobile/app/auth/registration.tsx:389`, `mobile/app/profile/id-verification.tsx:177`. Typecheck only, like every screen line: deliberate breaks S11 and S12 survive.
+2. **A blank line left by removing the spike row.** `mobile/app/profile/index.tsx` now has no diff from `1a22a45`.
+3. **The phone steps were only in the old chat.** The Phase 3 log pointed to "this phase's report", which isn't in the repo. They are now listed below.
+
+**Open, for the owner**
+1. **Screens have no test.** Of 12 deliberate breaks to screen lines, the typecheck caught one (S3) and no test caught any. The other 11 are listed under Tests. Only the phone checks below cover them.
+2. **The gates were not met, on the owner's instruction.** G1 is unanswered, the layout notes are blank, and Phases 1 and 2 had no review. The parser still rests on §6's memory and invented text.
+3. **For the adviser (§11 question 4), the consent text says less than the system does.** It says "What we read: your name and the 16-digit card number", but OCR reads the whole front on the phone and on the server, and the phone uploads everything it read as `clientText` (`mobile/src/services/id-scan/id-scan.ts:140`). The server uses that text only for one comparison (`identity-verification.service.ts:222`), and no store or log of it was found. The intro also doesn't say that a keyed hash, the last 4 digits and the sealed name are kept; only the Privacy card does. The PhilHealth text has the same gap. Text not changed: this is the adviser's call.
+4. **The Privacy card can say "We keep" data that's gone.** A staff or 24-hour release erases the card data but leaves the consent `GRANTED` (`identity-verification.service.ts:420`; the only consent writes are `:304` and `:468`). The card then still shows, and after a rescan with the other ID it names both cards. Withdrawal still works. This is existing behaviour that the second ID makes easier to reach. Not changed: choosing a fix is a behaviour decision, and it reaches past this phase.
+5. **`transport-flow` e2e failed again in the parallel run, and the error is now captured:** `No TO_FACILITY route cached for the dispatch within 30000 ms` (`backend/test/transport-flow.e2e-spec.ts:193`, called at `:217`). The same 26 tests passed in band straight after. No Phase 3 code is involved. The cause isn't established; suites competing for a shared queue is only a guess, and wasn't checked.
+
+**Checks**
+
+| Check | Result | Evidence |
+|---|---|---|
+| a. Steps, boxes, gates | Steps 1–9 done. No box newly ticked, correctly. Gates not met, as logged | Files moved with the expected changes only (compared with `9f790be`); step 10's list is now below |
+| b. PSN | Pass | Screens hold only `pinLast4`. Server parsers run only for the chosen type (`identity-verification.service.ts`, `isChosenCard`); B5 caught. A 12-digit run is refused on the phone and the server |
+| c. Older builds | Pass | Compared with `1a22a45`: same parsers, requestReview rule and stored values; `documentType` added to the response. Reworded messages don't reach old apps: they show their own text by code (`1a22a45:mobile/src/components/registration/PhilHealthIdStep.tsx:246`). B3 and B8 caught |
+| d. Consent | Pass on the server | Both paths walked. Holding both consents: `consent.service.ts:27` → `withdrawConsent` → every consent withdrawn and all rows released. A rejected row of the other type is included (`RELEASABLE_STATUSES`). B1 and B2 caught. The Privacy screen's part is untested |
+| e. Bugs | One fixed (above) | All codes mapped. The type can't change while a scan is held: the only way to the chooser goes through `resetIdScan`, or `outside`, and the form needs a new scan. So the two `retryMessageKey('ID_ALREADY_REGISTERED', documentType)` lines (`registration.tsx:317`, `id-verification.tsx:127`) are correct. Image deleted after commit, number stored in the decision's update, `P2002` → 409: read in `identity-verification-review.service.ts:315-364` |
+| f. Duplication | Pass | No number parsing outside `shared/src/validation`. One per-type condition, `granted.includes('NATIONAL_ID')` (`id-verification.ts:190`), for English Privacy text the rules don't hold: not a ladder |
+| g. Privacy | Pass | No `console` or `logger` call in the changed mobile files, and no request-body logging found. Spike removed. No sample in the repo by file name |
+| h. Rules | Pass by reading | Emergency button outside the state blocks (`IdScanStep.tsx:354`), so it's on the chooser. No change under `mobile/app/emergency`, `backend/src/emergency-alerts`, dispatch, realtime or analytics. Nothing outside `identity-verification` reads the type. Flag-on e2e passes. Not yet seen on a phone |
+| i. Wording | Pass in `en` and `fil` | Every `philhealth` hit read: only per-ID sentences, the accepted-IDs line, codes and comments. A Filipino speaker still has to check the new text |
+| j. Tests | Rules strong, screens uncovered | See below. No test weakened: removed lines are renames, or now carry an added key or argument |
+| k. Dependencies | Pass | No manifest or lockfile changed since `1a22a45` |
+
+**Tests**
+
+| Suite | Before | After |
+|---|---|---|
+| Mobile | 241 | 241 |
+| Backend | 1811 | 1811 |
+| `auth-phase3` alone | 59 | 59 |
+| Frontend | 199 | 199 |
+| e2e, parallel | 26 | 25 of 26 (`transport-flow`) |
+| e2e, in band | 26 | 26 of 26 |
+
+Shared built. Shared, mobile, backend and frontend typecheck clean. 37 migrations, up to date. No test added: the fixes are screen lines, which have no test harness.
+
+- **Deliberate breaks:** 44, one at a time, each restored and its hash compared. Metro and the backend were off. Originals were backed up first, and all 12 files matched afterwards.
+- **Caught, 32 of 32:** the phone's verdict, failure mapping, attempts, per-ID messages, Privacy card logic, scan service, image deletion, upload, text (`en` and `fil`), and 8 backend lines for consent, older builds, the type and number storage.
+- **Survived tests, 12 of 12 screen lines.** Typecheck caught S3 (the step not passing the type to the scan). It passes the other 11: changing ID keeps the tick; keeps the attempt count; registration skips the chooser; profile skips the chooser; the already-linked message ignores the type on registration and on profile; Privacy shows only PhilHealth; Privacy refreshes one consent; the form's badge ignores the type; the stale notice on registration and on profile.
+
+**Phone checks still needed (Prompt 3, step 10)**
+
+Restart the backend, then `npx expo start -c`. No dev-client rebuild. A step using a real National ID goes ahead of G1 (N3), so it's the owner's call and needs the card holder's written consent. Keep OCR output out of chats.
+
+1. **Chooser:** after the location check, both IDs show, with the "neither" line and "Report an emergency".
+2. **National ID happy path:** choose, tick, scan, the type's badge, name matches, OTP, home.
+3. **Wrong card, each way:** the message names the chosen ID, with "Choose a different ID" beside it.
+4. **Change ID:** after a failed scan, choose a different ID. The tick is off, the attempt count is gone, and the text follows the new ID.
+5. **Expired scan (this review's fix):** let a scan expire on the form. The intro shows the notice with the type kept. Choose a different ID, and the notice is gone.
+6. **Three failures:** "Send to MDRRMO for review" appears and creates the account under review. Staff can't approve an unread National ID until Phase 4.
+7. **Printed ePhilID,** if available: record whether it reads or reaches review.
+8. **Guest SOS** from chooser, intro, retry, fallback camera and form, on registration; and from the same steps on the profile's Scan again, where the button goes to the signed-in SOS.
+9. **Privacy & Consent:** after a National ID check, the card names the National ID. Withdraw it: the card goes, the profile shows not verified, and sign-in and SOS still work. Repeat for someone holding both consents.
+10. **PhilHealth still works:** the same happy path, then the already-linked message on a card already held.
+11. **Filipino:** repeat 1–4 in Filipino. A Filipino speaker should check the new strings.
+
+**Prompt 4's gate** is "Phase 3 reviewed", which this meets. The plan's "Done when" for Phase 3 needs the phone checks, which are not done. The owner decides whether to run them first.
+
+### Change — 2026-11-07: second read and failure log (owner's request)
+
+**Why:** on a phone test, a clear, centred, cropped National ID got "We couldn't read your National ID". The owner asked for a more accurate scanner. **This is not a confirmed fix: it hasn't run on a real card, and 100% accuracy isn't achievable with OCR.** G1 is still open, so real-card testing remains the owner's call.
+
+**What the message shows:** it's the server's `UNREADABLE`, so the phone's check passed or couldn't read text, and the failure is in the server's read or the parser. The failed scan stored and logged nothing, so which stage failed is unknown.
+
+**Changed**
+- `backend/src/identity-verification/id-ocr.service.ts`: `read(image, layout)`. `block` is Tesseract's default and is what every first read uses. `auto` runs on its own lazily created worker, because a layout setting applies to a whole worker.
+- `backend/src/identity-verification/identity-verification.service.ts`: a read that doesn't get the heading, number and name is tried once more with `auto`. The second read counts only if it reads all three; otherwise the first read's refusal stands. A passing first read isn't repeated, and a timed-out one isn't retried.
+- The same file logs one line whenever a second read was tried: per read, confidence and yes/no stages, plus whether the phone's own check passed.
+- `shared/src/validation/national-id.ts`, `id-document-rules.ts`: `digitRunShapes`, `nationalIdReadSignals`, `readSignals`. Group lengths and yes/no only, never a digit, a name or card text.
+
+**Effect on PhilHealth and older builds:** the same second read applies. Scans that pass first time and refusals are unchanged, but a card that used to be refused can now pass. This changes "exactly as today" (§9) in that one way.
+
+**Evidence, on generated cards with invented data and a layout from memory (no real card):**
+- Tesseract's default is `SINGLE_BLOCK`: its results matched explicit PSM 6.
+- On a heavy background, every layout failed all 9 raw images. Automatic layout had higher confidence (44 vs 29) and ran faster (0.4 s vs 3.4 s) but passed no more of them.
+- A clean-up tuned to these cards recovered the number on all 9. **An untuned clean-up recovered none,** so this gives no case for adding an image library yet. Tesseract's built-in thresholding didn't help, and adaptive Otsu did worse on easy images.
+- No wrong card number was accepted in any run. Some names misread or lost a part, which the name check or staff review would have to catch.
+- **So the second read may not fix the reported failure.** The log line's job is to show what will.
+
+**Tests:** written first; 11 failed before the code existed.
+
+| Suite | Before | After |
+|---|---|---|
+| Backend | 1811 | 1843 |
+| `auth-phase3` alone | 59 | 59 |
+| Mobile | 241 | 241 |
+| Frontend | 199 | 199 |
+
+- All typechecks clean. No migration or dependency.
+- **e2e:** 26 of 26, four runs in a row, after the `transport-flow` fix below. An earlier note here said the e2e suites share the dev backend's Redis. That was wrong: they use Redis database 15 (`backend/test/e2e/e2e-database.ts`), and the dev backend uses database 0.
+- **Deliberate breaks:** 27, applied in memory inside Jest's transform, so no source file changed while the backend ran in watch mode (hashes compared). 24 caught at first; the 3 survivors got tests and are now caught.
+- **`administration/health.spec.ts` failed once** in a full run (`not.toContain('917')`), then passed alone and in the next full run. It's intermittent and the cause isn't established. Nothing here touches that code.
+
+**`transport-flow` e2e, the failure in the Phase 3 review's open item 5: fixed.** It's a clash between test suites, not a product or ID bug. `transport-flow` and `emergency-flow-id-required` share Redis database 15, and each runs a real ETA worker. The emergency suite's fake router returns no route, and a job that gets no route completes without being queued again (`eta-refresh.processor.ts:141`), so if that worker takes the transport test's job, the route never arrives.
+
+| Run | Result |
+|---|---|
+| `transport-flow` + emergency suite, parallel | 3 of 4 failed, all with this error |
+| `transport-flow` + release suite, parallel | 0 of 4 failed |
+| All three, in band | 26 of 26 |
+
+The pairing is measured. Which worker took the job was read from the code, not traced in a run. **Fix:** `test:e2e` in `backend/package.json` now passes `--runInBand`, because the suites also share one Postgres database. Four runs after the fix: 26 of 26 each, 29–52 s. No product code changed.
+
+**Next:** restart the backend, scan once, and read the `ID scan needed a second read` line. It's safe to share, and it decides the next step:
+
+| The line shows | Means | Next step |
+|---|---|---|
+| `outcome=second read passed` | The layout was the cause | Repeat on more cards |
+| `card=false`, `heading=false`, low `conf`, `digitRuns=none` | OCR can't see through the card's print | Image clean-up (a new dependency, needs approval) |
+| `heading=true`, `number=true`, `name=false`, `labels=none` or partial | The parser's labels don't fit the real card | Fix the parser, and fill in the layout notes |
+| `digitRuns` is close to but not `4-4-4-4` | Digits misread or split | Look at number handling, without guessing digits |
+| `phone=read` while both server reads fail | The phone reads what the server can't | Owner decision: "the server decides" is rule A3, and trusting the phone would weaken it |
+
+### Change — 2026-11-07: combining reads, after testing more cards
+
+**What the owner's test showed.** One National ID passed. Other cards failed; the owner named a Digital National ID and a different card, but the log doesn't say which scan was which. All 7 log lines, patterns only:
+
+| Time | Phone | First read found | Second read found | Outcome |
+|---|---|---|---|---|
+| 5:28:15 | read | heading, number | little (6 lines) | Unreadable |
+| 5:29:07 | read | heading | name | Unreadable |
+| 5:29:52 and 5:30:04 (identical) | read | heading; digits `1-4-4` | name | "Not a National ID" |
+| 5:30:21 | read | heading, number | heading, name | Unreadable |
+| 5:30:53 | read | one heading word; digits `4-4-4` | digits `4-4-4` | "Not a National ID" |
+| 5:31:35 | read | number, two heading words | little | "Not a National ID" |
+
+- **The phone read every scan and the server read none,** so server Tesseract is the weak link on these cards. First-read confidence was 34–55.
+- **Automatic layout usually had higher confidence but found fewer parts.** It often kept the name and lost the number, so it isn't a better read, only a different one.
+- **A `4-4-4` run was seen and refused.** Whether it's a PhilSys Number or part of a card number is unknown. If it's a card's front, it bears on §6 and the layout notes.
+
+**Changed**
+- `shared/src/validation/id-document-rules.ts`: `combineIdReads`. Two reads of one image can complete each other, using only the chosen ID's parsers. The heading must appear in some read. Two different numbers trust neither. The most confident read's name wins, and the typed-name check still applies. `hasHeading` added to the rules.
+- `identity-verification.service.ts`: uses it. A read that saw the heading now gives `UNREADABLE`, not the wrong-card code, which applies to PhilHealth and older builds too; their apps show their own "couldn't read" text.
+- `shared/src/validation/national-id.ts`: `hasNationalIdHeading` accepts the two Filipino words apart, not the English ones, since other IDs print those.
+- Log additions: `phoneNumberSeen` and `phoneNameSeen` (how much of the phone's reading the server's reads back up, as counts), `conflict`, `nameValues`, `endedBy`, and heading words as short codes. **They never change an outcome:** the server still decides from its own reads, and a test holds this.
+
+**Expected effect: small.** Applied to the 7 scans by reading the log, combining would rescue only 5:30:21, and the wording fix would change only 5:29:52 and 5:30:04. So this doesn't solve the problem. Not yet re-run on these cards.
+
+**Existing test changed (Phase 2, `id-national.spec.ts`, "a 16-digit run under PhilHealth…"):** it pinned the bug, expecting a wrong-card code when the heading was read but the number wasn't. It now expects `UNREADABLE`. Its refusal and nothing-stored checks stay, and a 422 check was added.
+
+**Tests**
+
+| Suite | Before | After |
+|---|---|---|
+| Backend | 1843 | 1868 |
+| `auth-phase3` alone | 59 | 59 |
+| e2e | 26 | 26 |
+| Mobile | 241 | 241 |
+| Frontend | 199 | 199 |
+
+All typechecks clean. No migration or dependency. Deliberate breaks: 27 in memory, no source touched; 26 caught at first, and the survivor (reads not ordered by confidence) now has a test. `id-register.spec.ts` hit Jest's 5-second limit once in a full run, in a registration test that never reaches the scan code. It passed alone and in the next full run.
+
+**Open, for the owner**
+1. **How to close the gap between phone and server.** Options, with a recommendation in that day's report: the phone proposes and the server confirms, sending such scans straight to staff review, image clean-up (a new dependency), or trusting the phone. A cloud service was already ruled out (D3). The new counts show whether the first can work.
+2. **The Digital National ID is out of scope (§12), and whether it should pass is still open (§11, owner item 4).** It's now being tested, so this needs deciding.
+
 ---
 
 ## 10. Test checklist
 
 - [ ] Chooser shows both IDs. "Report an emergency" works from the chooser and every later ID step.
 - [ ] National ID: scan → typed name matches → account created, `document_type = NATIONAL_ID`, `identity_verified_at` set, OTP sent, image deleted.
-- [ ] A scan with no `documentType` (older build) behaves exactly as today, as PhilHealth.
-- [ ] Unknown `documentType` → 400.
+- [x] A scan with no `documentType` (older build) behaves exactly as today, as PhilHealth.
+- [x] Unknown `documentType` → 400.
 - [ ] National ID chosen, other card scanned → refused, on a normal phone by the on-device check, otherwise `NOT_NATIONAL_ID`. Both layers show "Choose a different ID".
-- [ ] PhilHealth chosen, National ID scanned → refused. A PCN is not stored as a PIN.
-- [ ] **A 12-digit number on a scan or typed by staff is never accepted as a National ID number. No PSN is stored anywhere.**
+- [x] PhilHealth chosen, National ID scanned → refused. A PCN is not stored as a PIN.
+- [x] **A 12-digit number on a scan or typed by staff is never accepted as a National ID number. No PSN is stored anywhere.**
 - [ ] Changing the chosen ID clears the consent tick and the attempt count.
-- [ ] Same National ID on a second phone number → `ID_ALREADY_REGISTERED`.
-- [ ] **One person, both cards, two phone numbers → two accounts, by design (§11 N2). A test records this.**
-- [ ] An account holding a check on one type can't claim a scan of the other type.
-- [ ] National ID consent recorded as `ID_VERIFICATION_NATIONAL_ID`.
-- [ ] **Withdrawing National ID consent erases card data and un-verifies. The card is free again; the account isn't blocked.**
-- [ ] Someone rejected on one type who verified on the other: withdrawal withdraws both consents and erases both rows.
+- [x] Same National ID on a second phone number → `ID_ALREADY_REGISTERED`.
+- [x] **One person, both cards, two phone numbers → two accounts, by design (§11 N2). A test records this.**
+- [x] An account holding a check on one type can't claim a scan of the other type.
+- [x] National ID consent recorded as `ID_VERIFICATION_NATIONAL_ID`.
+- [x] **Withdrawing National ID consent erases card data and un-verifies. The card is free again; the account isn't blocked.**
+- [x] Someone rejected on one type who verified on the other: withdrawal withdraws both consents and erases both rows.
 - [ ] Privacy & Consent shows the withdrawal card for either type, naming the right ID.
-- [ ] Release, expiry and the 24-hour unconfirmed-phone rule work on National ID rows.
+- [x] Release, expiry and the 24-hour unconfirmed-phone rule work on National ID rows.
 - [ ] Review queue shows the type. A wrong-card rejection that doesn't fit the type → 400.
-- [ ] Approving an unread National ID review scan without a number → 400; with a 12-digit number → 400; with a number already held → 409 and nothing changes; with a free number → approved, and that card is now held.
-- [ ] Staff lookup by type; audited without the number.
-- [ ] Logs, audit rows, queued jobs and SMS contain no PCN, OCR text or card name.
+- [x] Approving an unread National ID review scan without a number → 400; with a 12-digit number → 400; with a number already held → 409 and nothing changes; with a free number → approved, and that card is now held.
+- [x] Staff lookup by type; audited without the number.
+- [x] Logs, audit rows, queued jobs and SMS contain no PCN, OCR text or card name.
 - [ ] Printed ePhilID: reads, or reaches review after 3 attempts. Result recorded.
 - [ ] Every PhilHealth test case (PH-01 to PH-21) still passes.
 

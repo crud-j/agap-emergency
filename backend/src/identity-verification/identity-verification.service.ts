@@ -3,18 +3,20 @@ import { Prisma } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import {
   AuditAction,
+  DEFAULT_ID_DOCUMENT_TYPE,
+  ID_DOCUMENT_RULES,
   ID_IMAGE_MAX_BYTES,
   ID_SCAN_CLAIM_TTL_MINUTES,
   ID_SCAN_MAX_ATTEMPTS,
-  ID_VERIFICATION_CONSENT_TYPE,
+  ID_VERIFICATION_CONSENT_TYPES,
   IdVerificationErrorCode,
+  combineIdReads,
   composeFullName,
-  looksLikePhilHealthId,
   matchIdName,
-  parsePhilHealthName,
-  parsePhilHealthPin,
+  phoneReadSupport,
   type IdCardReleaseReason,
   type IdClaimResponse,
+  type IdDocumentType,
   type IdName,
   type IdProfileStatus,
   type IdScanResponse,
@@ -23,15 +25,15 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MediaService } from '../media/media.service';
 import { IdDocumentCryptoService } from './id-document-crypto.service';
-import { PhilhealthOcrService } from './philhealth-ocr.service';
+import { IdOcrService, type OcrResult } from './id-ocr.service';
 
 /**
- * Below this OCR confidence, text that isn't a PhilHealth ID is treated as unreadable (retry)
- * rather than "not a PhilHealth ID". Phase 0: an uncropped photo read at 28, a cropped card at 57.
+ * Below this OCR confidence, text that isn't the chosen ID is treated as unreadable (retry)
+ * rather than the wrong card. PhilHealth Phase 0: an uncropped photo read at 28, a cropped card at 57.
  */
 const MIN_OCR_CONFIDENCE = 40;
 
-/** Statuses that hold a PhilHealth ID for an account (one per account; partial unique index). */
+/** Statuses that hold a card for an account (one account per card; partial unique index). */
 export const ACTIVE_STATUSES = ['AUTO_VERIFIED', 'PENDING_REVIEW', 'APPROVED'] as const;
 
 /** A claimed row in any of these still keeps card data, so it can be released. */
@@ -57,7 +59,10 @@ export interface ReleasedScan {
  */
 const CLAIMABLE_STATUSES = ['AUTO_VERIFIED', 'PENDING_REVIEW'] as const;
 
-type ScanFailure = IdVerificationErrorCode.UNREADABLE | IdVerificationErrorCode.NOT_PHILHEALTH_ID;
+type ScanFailure =
+  | IdVerificationErrorCode.UNREADABLE
+  | IdVerificationErrorCode.NOT_PHILHEALTH_ID
+  | IdVerificationErrorCode.NOT_NATIONAL_ID;
 
 /** Statuses whose image is no longer needed (plan §5.2a). AUTO_VERIFIED only once claimed. */
 const DECIDED_STATUSES = ['EXPIRED', 'APPROVED', 'REJECTED', 'RELEASED'] as const;
@@ -87,14 +92,14 @@ const scanExpired = () =>
   idVerificationError(
     HttpStatus.BAD_REQUEST,
     IdVerificationErrorCode.ID_SCAN_EXPIRED,
-    'Your PhilHealth ID scan has expired. Please scan it again.',
+    'Your ID scan has expired. Please scan it again.',
   );
 
-const alreadyRegistered = () =>
+const alreadyRegistered = (documentType: IdDocumentType) =>
   idVerificationError(
     HttpStatus.CONFLICT,
     IdVerificationErrorCode.ID_ALREADY_REGISTERED,
-    'This PhilHealth ID is already linked to an AGAP account. Sign in or reset your password.',
+    `This ${ID_DOCUMENT_RULES[documentType].label} is already linked to an AGAP account. Sign in or reset your password.`,
   );
 
 /** The typed name parts as an IdName, or null while last or first name is empty. */
@@ -115,7 +120,46 @@ export function typedNameFrom(parts: {
   return name;
 }
 
+type IdRules = (typeof ID_DOCUMENT_RULES)[IdDocumentType];
+
+const readsWholeCard = (rules: IdRules, read: OcrResult): boolean => {
+  const found = combineIdReads(rules, [read.text]);
+  return found.number !== null && found.name !== null;
+};
+
+/**
+ * For the server log: which stage of one read failed. Yes/no answers and counts only, never card text,
+ * a name or a digit. `number` and `name` are asked of any card, but only their yes/no leaves this function.
+ */
+function readSummary(rules: IdRules, read: OcrResult | null): string {
+  if (!read) return 'none';
+  const facts: Record<string, string | number | boolean> = {
+    conf: Math.round(read.confidence),
+    card: rules.looksLike(read.text),
+    number: rules.parseNumber(read.text) !== null,
+    name: rules.parseName(read.text) !== null,
+    ...rules.readSignals(read.text),
+  };
+  return Object.entries(facts)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(' ');
+}
+
+/**
+ * For the server log: whether the phone's own reading passed its check, and how much of it the server's
+ * reads back up. Counts only, and it never changes the outcome: the server decides from its own reads.
+ */
+function phoneReadSummary(rules: IdRules, clientText: string | undefined, serverTexts: readonly string[]): string {
+  if (clientText === undefined) return 'none';
+  const support = Object.entries(phoneReadSupport(rules, clientText, serverTexts))
+    .map(([key, value]) => `${key}=${value}`)
+    .join(' ');
+  return `${rules.looksLike(clientText) ? 'read' : 'refused'} ${support}`;
+}
+
 export interface IdScanInput {
+  /** The ID the citizen chose. Missing means an older app build: PhilHealth. */
+  documentType?: IdDocumentType | undefined;
   /** The phone's own reading. Compared with the server's, never trusted, stored or logged. */
   clientText?: string | undefined;
   attemptNumber?: number | undefined;
@@ -129,16 +173,18 @@ export interface IdScanInput {
 /** A scan checked against the typed name, ready to be claimed inside the registration transaction. */
 export interface PreparedClaim {
   verificationId: string;
+  /** From the scan row: which ID this is, so the claim records that ID's consent. */
+  documentType: IdDocumentType;
   outcome: 'AUTO_VERIFIED' | 'PENDING_REVIEW';
-  /** Stored as match_result: which name parts matched, or why the scan went to review. No names, no PIN. */
+  /** Stored as match_result: which name parts matched, or why the scan went to review. No names, no card number. */
   matchResult: Prisma.InputJsonObject;
   imageLocation: string | null;
 }
 
 /**
- * PhilHealth ID verification at citizen registration (MOD-01 / MOD-48, plan §5). The server
- * reads the card itself; text from the phone is never enough to verify. Gates account
- * creation only — guest SOS never comes here (rule 14).
+ * ID verification at citizen registration (MOD-01 / MOD-48, plan §5): a PhilHealth ID or a
+ * National ID. The server reads the card itself; text from the phone is never enough to verify.
+ * Gates account creation only — guest SOS never comes here (rule 14).
  */
 @Injectable()
 export class IdentityVerificationService {
@@ -147,7 +193,7 @@ export class IdentityVerificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: IdDocumentCryptoService,
-    private readonly ocr: PhilhealthOcrService,
+    private readonly ocr: IdOcrService,
     private readonly media: MediaService,
     private readonly audit: AuditService,
   ) {}
@@ -155,7 +201,7 @@ export class IdentityVerificationService {
   /**
    * POST /auth/id-verification after consent and the geo-fence passed. Reads the card,
    * stores the sealed image and an unclaimed row, and returns a claim token, the name as
-   * read (the citizen's own card) and the PIN's last 4 digits — never the full PIN.
+   * read (the citizen's own card) and the card number's last 4 digits — never the full number.
    *
    * A card the server can't read is refused (422), except when the citizen asks for staff
    * review on attempt ID_SCAN_MAX_ATTEMPTS or later: then the image is stored for MDRRMO
@@ -163,33 +209,51 @@ export class IdentityVerificationService {
    */
   async scan(file: Express.Multer.File | undefined, input: IdScanInput): Promise<IdScanResponse> {
     if (!this.crypto.isConfigured()) {
-      throw new HttpException('PhilHealth ID verification is not configured on this server', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException('ID verification is not configured on this server', HttpStatus.SERVICE_UNAVAILABLE);
     }
-    const image = this.checkImage(file);
+    const documentType = input.documentType ?? DEFAULT_ID_DOCUMENT_TYPE;
+    const rules = ID_DOCUMENT_RULES[documentType];
+    const image = this.checkImage(file, documentType);
     const attemptNumber = Math.min(Math.max(Math.trunc(input.attemptNumber ?? 1), 1), 99);
 
-    const read = await this.ocr.read(image);
-    const isPhilHealth = read !== null && looksLikePhilHealthId(read.text);
-    const pin = isPhilHealth ? parsePhilHealthPin(read.text) : null;
-    const nameOnId = isPhilHealth ? parsePhilHealthName(read.text) : null;
+    // A failed read is tried once more with automatic layout, and the two reads of this one image can
+    // complete each other. A read that passes first time is never repeated. Each ID's parsers run only for
+    // that ID, so a PIN can't be stored as a PhilSys card number or the reverse.
+    const firstRead = await this.ocr.read(image);
+    const retried = firstRead !== null && !readsWholeCard(rules, firstRead);
+    const secondRead = retried ? await this.ocr.read(image, 'auto') : null;
+    const serverTexts = [firstRead, secondRead]
+      .filter((read): read is OcrResult => read !== null)
+      .sort((a, b) => b.confidence - a.confidence)
+      .map((read) => read.text);
+    const { headingSeen, number, name: nameOnId, numberConflict } = combineIdReads(rules, serverTexts);
 
     let failure: ScanFailure | null = null;
-    if (!pin || !nameOnId) {
+    if (!number || !nameOnId) {
+      // A read that saw this ID's heading didn't find the wrong card: it failed to read the right one.
       failure =
-        read && !isPhilHealth && read.confidence >= MIN_OCR_CONFIDENCE
-          ? IdVerificationErrorCode.NOT_PHILHEALTH_ID
+        firstRead && !headingSeen && firstRead.confidence >= MIN_OCR_CONFIDENCE
+          ? rules.wrongCardCode
           : IdVerificationErrorCode.UNREADABLE;
-      if (input.requestReview !== true || attemptNumber < ID_SCAN_MAX_ATTEMPTS) throw this.scanFailed(failure);
+    }
+    if (retried) {
+      this.logger.warn(
+        `ID scan needed a second read (${documentType}): phone=${phoneReadSummary(rules, input.clientText, serverTexts)} conflict=${numberConflict} ` +
+          `first[${readSummary(rules, firstRead)}] second[${readSummary(rules, secondRead)}] outcome=${failure ?? 'second read passed'}`,
+      );
+    }
+    if (failure && (input.requestReview !== true || attemptNumber < ID_SCAN_MAX_ATTEMPTS)) {
+      throw this.scanFailed(failure, documentType);
     }
 
-    // A readable PIN is checked even on a review scan: one PhilHealth ID per account.
-    const pinHmac = pin ? this.crypto.pinHmac(pin) : null;
+    // A readable number is checked even on a review scan: one account per card.
+    const pinHmac = number ? this.crypto.pinHmac(number) : null;
     if (pinHmac) {
       const taken = await this.prisma.identity_verifications.findFirst({
         where: { pin_hmac: pinHmac, user_id: { not: null }, status: { in: [...ACTIVE_STATUSES] } },
         select: { id: true },
       });
-      if (taken) throw alreadyRegistered();
+      if (taken) throw alreadyRegistered(documentType);
     }
 
     const id = randomUUID();
@@ -201,14 +265,15 @@ export class IdentityVerificationService {
       await this.prisma.identity_verifications.create({
         data: {
           id,
+          document_type: documentType,
           status: review ? 'PENDING_REVIEW' : 'AUTO_VERIFIED',
           claim_token_hash: this.hashToken(token),
           claim_expires_at: new Date(Date.now() + ID_SCAN_CLAIM_TTL_MINUTES * 60 * 1000),
           pin_hmac: pinHmac,
-          pin_last4: pin ? pin.slice(-4) : null,
+          pin_last4: number ? number.slice(-4) : null,
           name_on_id_sealed: nameOnId && !review ? this.crypto.sealName(id, nameOnId) : null,
           image_storage_key: imageLocation,
-          client_read_ok: input.clientText === undefined || !pin ? null : parsePhilHealthPin(input.clientText) === pin,
+          client_read_ok: input.clientText === undefined || !number ? null : rules.parseNumber(input.clientText) === number,
           attempt_number: attemptNumber,
           // Why staff are asked to look: a fixed code, never OCR text.
           ...(failure ? { match_result: { scanFailure: failure } } : {}),
@@ -222,8 +287,9 @@ export class IdentityVerificationService {
     return {
       token,
       nameOnId: review ? null : nameOnId,
-      pinLast4: pin ? pin.slice(-4) : null,
+      pinLast4: number ? number.slice(-4) : null,
       reviewRequired: review,
+      documentType,
     };
   }
 
@@ -239,6 +305,7 @@ export class IdentityVerificationService {
       where: { claim_token_hash: this.hashToken(token) },
       select: {
         id: true,
+        document_type: true,
         user_id: true,
         status: true,
         claim_expires_at: true,
@@ -256,6 +323,7 @@ export class IdentityVerificationService {
       const stored = row.match_result;
       return {
         verificationId: row.id,
+        documentType: row.document_type,
         outcome: 'PENDING_REVIEW',
         matchResult: stored && typeof stored === 'object' && !Array.isArray(stored) ? (stored as Prisma.InputJsonObject) : {},
         imageLocation: row.image_storage_key,
@@ -267,12 +335,13 @@ export class IdentityVerificationService {
       throw idVerificationError(
         HttpStatus.BAD_REQUEST,
         IdVerificationErrorCode.NAME_DOES_NOT_MATCH_ID,
-        "The name you typed doesn't match your PhilHealth ID.",
+        `The name you typed doesn't match your ${ID_DOCUMENT_RULES[row.document_type].label}.`,
         { parts: match.parts },
       );
     }
     return {
       verificationId: row.id,
+      documentType: row.document_type,
       outcome: match.matches ? 'AUTO_VERIFIED' : 'PENDING_REVIEW',
       matchResult: match.parts,
       imageLocation: row.image_storage_key,
@@ -282,12 +351,12 @@ export class IdentityVerificationService {
   /**
    * Registration step 2, inside its transaction: record consent and claim the scan for the
    * new user. The claim re-checks "unclaimed and unexpired" atomically, so two registrations
-   * racing for one token can't both win. A PhilHealth ID already on another account trips
-   * the partial unique index. Either failure rolls the whole registration back.
+   * racing for one token can't both win. A card already on another account trips the partial
+   * unique index. Either failure rolls the whole registration back.
    */
   async claim(tx: Prisma.TransactionClient, prepared: PreparedClaim, userId: string): Promise<void> {
     const consent = await tx.consent_records.create({
-      data: { user_id: userId, consent_type: ID_VERIFICATION_CONSENT_TYPE, status: 'GRANTED' },
+      data: { user_id: userId, consent_type: ID_DOCUMENT_RULES[prepared.documentType].consentType, status: 'GRANTED' },
       select: { id: true },
     });
 
@@ -308,7 +377,7 @@ export class IdentityVerificationService {
         },
       }));
     } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') throw alreadyRegistered();
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') throw alreadyRegistered(prepared.documentType);
       throw err;
     }
     if (claimed !== 1) throw scanExpired();
@@ -319,7 +388,7 @@ export class IdentityVerificationService {
       entityType: 'user',
       entityId: userId,
       moduleId: 'MOD-01',
-      newValues: { outcome: prepared.outcome },
+      newValues: { outcome: prepared.outcome, documentType: prepared.documentType },
     });
   }
 
@@ -371,7 +440,7 @@ export class IdentityVerificationService {
       select: { role: true, is_guest: true },
     });
     if (!user || user.is_guest || user.role !== 'CITIZEN') {
-      throw new ForbiddenException('Only citizen accounts scan a PhilHealth ID.');
+      throw new ForbiddenException('Only citizen accounts scan an ID.');
     }
     await this.refuseIfChecked(this.prisma, userId);
 
@@ -397,7 +466,7 @@ export class IdentityVerificationService {
   }
 
   /**
-   * Ends a user's claim, inside the caller's transaction: erases the name and PIN data, marks
+   * Ends a user's claim, inside the caller's transaction: erases the name and card number data, marks
    * the account not verified and audits why. The card is then free to be scanned again. The
    * account itself stays usable: getting help never depends on this (rule 14). Returns the rows
    * whose images the caller deletes after commit; empty when there was nothing to release.
@@ -443,14 +512,15 @@ export class IdentityVerificationService {
   }
 
   /**
-   * The citizen withdrew their ID verification consent (RA 10173): the consent is marked withdrawn
-   * and what it allowed AGAP to keep is erased in one transaction, then any stored image is
-   * deleted. They can still sign in and send an SOS; scanning again verifies them again.
+   * The citizen withdrew their ID verification consent (RA 10173): every ID consent is marked
+   * withdrawn, whichever ID they name, because releasing erases every row and someone rejected on
+   * one card who rescanned with the other holds two (plan §5.3). All in one transaction, then any
+   * stored image is deleted. They can still sign in and send an SOS; scanning again verifies them again.
    */
   async withdrawConsent(userId: string): Promise<void> {
     const released = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.consent_records.updateMany({
-        where: { user_id: userId, consent_type: ID_VERIFICATION_CONSENT_TYPE, status: 'GRANTED' },
+        where: { user_id: userId, consent_type: { in: [...ID_VERIFICATION_CONSENT_TYPES] }, status: 'GRANTED' },
         data: { status: 'WITHDRAWN', withdrawn_at: new Date() },
       });
       if (count === 0) throw new NotFoundException('No active consent found');
@@ -487,7 +557,7 @@ export class IdentityVerificationService {
         if (rows.length > 0) released++;
       } catch (err: unknown) {
         const reason = err instanceof Error ? err.name : 'unknown error';
-        this.logger.warn(`Could not release the PhilHealth ID claim of user ${userId} (${reason}); the next run retries`);
+        this.logger.warn(`Could not release the ID claim of user ${userId} (${reason}); the next run retries`);
       }
     }
     return released;
@@ -495,7 +565,7 @@ export class IdentityVerificationService {
 
   /**
    * The cleanup job (every 10 minutes): expire scans nobody claimed in time, erase their name
-   * and PIN data, then delete every image that is no longer needed, including ones whose
+   * and number data, then delete every image that is no longer needed, including ones whose
    * earlier delete failed.
    */
   async cleanup(now = new Date()): Promise<{ expired: number; deleted: number; failed: number }> {
@@ -530,7 +600,7 @@ export class IdentityVerificationService {
     return { expired, deleted, failed: stale.length - deleted };
   }
 
-  /** Refuses a new claim while the account is verified or holds a check. */
+  /** Refuses a new claim while the account is verified or holds a check, on either ID. */
   private async refuseIfChecked(db: Prisma.TransactionClient, userId: string): Promise<void> {
     const user = await db.user.findUnique({ where: { id: userId }, select: { identity_verified_at: true } });
     const held = await db.identity_verifications.findFirst({
@@ -541,17 +611,17 @@ export class IdentityVerificationService {
       throw idVerificationError(
         HttpStatus.CONFLICT,
         IdVerificationErrorCode.ID_ALREADY_REGISTERED,
-        'Your account already has a PhilHealth ID check.',
+        'Your account already has an ID check.',
       );
     }
   }
 
-  private checkImage(file: Express.Multer.File | undefined): Buffer {
+  private checkImage(file: Express.Multer.File | undefined, documentType: IdDocumentType): Buffer {
     if (!file?.buffer?.length) {
       throw idVerificationError(
         HttpStatus.BAD_REQUEST,
         IdVerificationErrorCode.UNSUPPORTED_IMAGE_TYPE,
-        'Attach a JPEG or PNG image of the front of your PhilHealth ID.',
+        `Attach a JPEG or PNG image of the front of your ${ID_DOCUMENT_RULES[documentType].label}.`,
       );
     }
     if (file.size > ID_IMAGE_MAX_BYTES || file.buffer.length > ID_IMAGE_MAX_BYTES) {
@@ -572,18 +642,19 @@ export class IdentityVerificationService {
     return file.buffer;
   }
 
-  private scanFailed(failure: ScanFailure): HttpException {
-    if (failure === IdVerificationErrorCode.NOT_PHILHEALTH_ID) {
+  private scanFailed(failure: ScanFailure, documentType: IdDocumentType): HttpException {
+    const { label } = ID_DOCUMENT_RULES[documentType];
+    if (failure !== IdVerificationErrorCode.UNREADABLE) {
       return idVerificationError(
         HttpStatus.UNPROCESSABLE_ENTITY,
-        IdVerificationErrorCode.NOT_PHILHEALTH_ID,
-        "This isn't a PhilHealth ID. Only a PhilHealth ID can be used to create an account.",
+        failure,
+        `This isn't a ${label}. Scan the front of your ${label}, or choose a different ID.`,
       );
     }
     return idVerificationError(
       HttpStatus.UNPROCESSABLE_ENTITY,
       IdVerificationErrorCode.UNREADABLE,
-      "We couldn't read your PhilHealth ID. Hold it flat, avoid glare, and try again.",
+      `We couldn't read your ${label}. Hold it flat, avoid glare, and try again.`,
     );
   }
 

@@ -1,5 +1,5 @@
 import { File, UploadTask, UploadType } from 'expo-file-system';
-import type { IdScanResponse } from '@agap/shared';
+import type { IdDocumentType, IdScanResponse } from '@agap/shared';
 import { apiFetch, ApiError, NetworkError } from './http';
 import { IdVerificationError, toIdVerificationError } from '../../lib/id-verification';
 
@@ -50,9 +50,9 @@ export interface AuthResponse extends AuthTokens {
 }
 
 export interface RegisterDto {
-  /** Older builds only. With a PhilHealth ID scan the server builds the full name from the parts below. */
+  /** Older builds only. With an ID scan the server builds the full name from the parts below. */
   fullName?: string;
-  /** MOD-01: the name as typed, checked against the PhilHealth ID by the server. */
+  /** MOD-01: the name as typed, checked against the scanned ID by the server. */
   lastName?: string;
   firstName?: string;
   middleName?: string;
@@ -77,7 +77,7 @@ export interface RegisterResponse {
   identityVerification?: 'AUTO_VERIFIED' | 'PENDING_REVIEW' | null;
 }
 
-/** Rejects with an IdVerificationError (typed `code`) for PhilHealth ID refusals. */
+/** Rejects with an IdVerificationError (typed `code`) for ID refusals. */
 export async function register(dto: RegisterDto): Promise<RegisterResponse> {
   try {
     return await api('/v1/auth/register', { method: 'POST', body: JSON.stringify(dto) });
@@ -87,6 +87,8 @@ export async function register(dto: RegisterDto): Promise<RegisterResponse> {
 }
 
 export interface SubmitIdScanOptions {
+  /** The ID the citizen chose. The server reads the image with that ID's rules. */
+  documentType: IdDocumentType;
   /** The phone's own reading. The server only compares it; it never verifies from it. */
   clientText?: string;
   attemptNumber: number;
@@ -101,12 +103,13 @@ export interface SubmitIdScanOptions {
 const CLIENT_TEXT_MAX = 5000;
 
 /**
- * POST /auth/id-verification (MOD-01): uploads the front of the PhilHealth ID (JPEG) for the
+ * POST /auth/id-verification (MOD-01): uploads the front of the chosen ID (JPEG) for the
  * server to read. Rejects with an IdVerificationError (typed `code`) when the server refuses
  * the scan, or a NetworkError when it can't be reached. Never logs the image or the text.
  */
 export async function submitIdScan(imageUri: string, options: SubmitIdScanOptions): Promise<IdScanResponse> {
   const parameters: Record<string, string> = {
+    documentType: options.documentType,
     consentGiven: String(options.consentGiven),
     attemptNumber: String(options.attemptNumber),
     latitude: String(options.latitude),

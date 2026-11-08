@@ -68,7 +68,7 @@ describe('POST /v1/auth/id-verification', () => {
   it('returns only the token, the name as read and the last 4 PIN digits', async () => {
     const res = await post(form({ clientText: 'PhilHealth 00 000000001 0', attemptNumber: '2' }));
     expect(res.status).toBe(200);
-    expect(Object.keys(res.json).sort()).toEqual(['nameOnId', 'pinLast4', 'reviewRequired', 'token']);
+    expect(Object.keys(res.json).sort()).toEqual(['documentType', 'nameOnId', 'pinLast4', 'reviewRequired', 'token']);
     expect(res.json.reviewRequired).toBe(false);
     expect(res.json.pinLast4).toBe('0010');
     expect(res.json.nameOnId).toEqual({ last: 'DELA CRUZ', first: 'JUAN', middle: 'SANTOS' });
@@ -212,7 +212,7 @@ describe('POST /v1/auth/id-verification', () => {
       kit.ocr.read.mockResolvedValue(UNREADABLE_READ);
       const res = await post(form({ attemptNumber: '3', requestReview: 'true' }));
       expect(res.status).toBe(200);
-      expect(res.json).toEqual({ token: expect.any(String), nameOnId: null, pinLast4: null, reviewRequired: true });
+      expect(res.json).toEqual({ token: expect.any(String), nameOnId: null, pinLast4: null, reviewRequired: true, documentType: 'PHILHEALTH' });
 
       const [row] = kit.prisma.db.idv;
       expect(row).toMatchObject({

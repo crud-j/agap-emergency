@@ -26,7 +26,7 @@ export const ID_REVIEW_MESSAGES = {
 } as const;
 
 /**
- * Tells the citizen how staff decided their PhilHealth ID check (plan §7): an in-app row and a
+ * Tells the citizen how staff decided their ID check (plan §7): an in-app row and a
  * push, then an SMS. Call only after the decision commits. Never throws: a notification failure
  * can't undo the decision. Logs carry the user id only, never the phone number.
  */

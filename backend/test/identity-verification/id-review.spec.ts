@@ -217,6 +217,8 @@ describe('/v1/administration/id-verifications (staff review)', () => {
       expect(res.json.data).toEqual([
         {
           id,
+          documentType: 'PHILHEALTH',
+          hasCardNumber: true,
           status: 'PENDING_REVIEW',
           submittedAt: expect.any(String),
           attemptNumber: 1,

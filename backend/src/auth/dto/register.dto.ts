@@ -13,7 +13,7 @@ export class RegisterDto {
   @MaxLength(255)
   fullName?: string;
 
-  // MOD-01 PhilHealth ID verification: the name as the citizen typed it, checked against the ID.
+  // MOD-01 ID verification: the name as the citizen typed it, checked against the ID.
   @ApiPropertyOptional({ example: 'Dela Cruz' })
   @IsOptional()
   @IsString()

@@ -1,18 +1,19 @@
 /**
- * PhilHealth ID scan at registration (MOD-01, docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md §3–§4).
+ * ID scan at registration (MOD-01, docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md §3–§4 and
+ * docs/plans/NATIONAL_ID_VERIFICATION_PLAN.md §4).
  *
  *   capture (phone's document scanner, or the fallback camera)
  *     → on-device text reading + instant check with @agap/shared (a hint only)
  *     → downscale to ~1600 px JPEG → upload; the server reads the card again and decides.
  *
- * Privacy: the card image, the text read from it and the PIN are personal data. Nothing here
+ * Privacy: the card image, the text read from it and its number are personal data. Nothing here
  * logs them. Every image file is deleted from the cache in a `finally`, success or not.
  */
 import DocumentScanner, { ResponseType, ScanDocumentResponseStatus } from 'react-native-document-scanner-plugin';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { File } from 'expo-file-system';
-import type { IdScanResponse } from '@agap/shared';
+import type { IdDocumentType, IdScanResponse } from '@agap/shared';
 import { submitIdScan } from '../api/auth.api';
 import {
   localReadVerdict,
@@ -39,6 +40,8 @@ export type IdScanOutcome =
   | { kind: 'failed'; reason: IdScanFailureReason };
 
 export interface ProcessIdImageOptions {
+  /** The ID the citizen chose: the phone's own check and the server both use its rules. */
+  documentType: IdDocumentType;
   /** Crop to the fallback camera's card frame before anything else. */
   crop?: CropRect;
   attemptNumber: number;
@@ -128,11 +131,12 @@ export async function processIdImage(sourceUri: string, options: ProcessIdImageO
 
     // Read the prepared (cropped) image, so a fallback photo is judged on the card alone.
     const clientText = await readOnDevice(uploadUri);
-    if (!options.requestReview && localReadVerdict(clientText) === 'not_recognised') {
+    if (!options.requestReview && localReadVerdict(clientText, options.documentType) === 'not_recognised') {
       return { kind: 'failed', reason: 'NOT_RECOGNISED' };
     }
 
     const result = await submitIdScan(uploadUri, {
+      documentType: options.documentType,
       ...(clientText ? { clientText } : {}),
       attemptNumber: options.attemptNumber,
       latitude: options.latitude,

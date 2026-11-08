@@ -298,7 +298,7 @@ export class IncidentsService {
   }
 
   /**
-   * Did the reporter's account pass the PhilHealth ID check? The console's reporter card only
+   * Did the reporter's account pass the ID check? The console's reporter card only
    * (plan §8), about the reporter, never the patient. null for a guest, a reporter with no account,
    * or an account that isn't a citizen's: only citizens can scan, so "not verified" would mislead.
    * Information only: it must never feed priority, recommendations or dispatch (rule 8).

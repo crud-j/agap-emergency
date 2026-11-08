@@ -5,9 +5,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { requireOptionalNativeModule } from 'expo';
 import * as FileSystem from 'expo-file-system/legacy';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ID_VERIFICATION_CONSENT_TYPE } from '@agap/shared';
+import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ID_DOCUMENT_RULES, ID_DOCUMENT_TYPES, ID_VERIFICATION_CONSENT_TYPES } from '@agap/shared';
 import { ScreenHeader } from '../../src/components/ui/screen-header';
+import { idConsentCard } from '../../src/lib/id-verification';
 import {
   checkConsent, grantConsent, revokeConsent, getAccessLog, exportMyData,
   MEDICAL_CONSENT_TYPE, type AccessLogEntry,
@@ -114,27 +115,29 @@ export default function PrivacyScreen() {
     onError: (e: unknown) => Alert.alert('Could not withdraw consent', e instanceof Error ? e.message : 'Please try again.'),
   });
 
-  // PhilHealth ID check (MOD-48). Shown only while this consent is active.
-  const idConsent = useQuery({
-    queryKey: ['consent', ID_VERIFICATION_CONSENT_TYPE],
-    queryFn: () => checkConsent(ID_VERIFICATION_CONSENT_TYPE),
+  // ID check (MOD-48). One card, shown while either ID's consent is active.
+  const idConsents = useQueries({
+    queries: ID_DOCUMENT_TYPES.map((type) => {
+      const { consentType } = ID_DOCUMENT_RULES[type];
+      return { queryKey: ['consent', consentType], queryFn: () => checkConsent(consentType) };
+    }),
   });
+  const idCard = idConsentCard(ID_DOCUMENT_TYPES.filter((_, index) => idConsents[index]?.data?.granted));
 
   const withdrawId = useMutation({
-    mutationFn: () => revokeConsent(ID_VERIFICATION_CONSENT_TYPE),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['consent', ID_VERIFICATION_CONSENT_TYPE] }),
+    mutationFn: (consentType: string) => revokeConsent(consentType),
+    // The server withdraws every ID consent, whichever one is named.
+    onSuccess: () =>
+      Promise.all(ID_VERIFICATION_CONSENT_TYPES.map((type) => qc.invalidateQueries({ queryKey: ['consent', type] }))),
     onError: (e: unknown) => Alert.alert('Could not withdraw consent', e instanceof Error ? e.message : 'Please try again.'),
   });
 
   function confirmWithdrawId() {
-    Alert.alert(
-      'Withdraw PhilHealth ID consent?',
-      'We will erase your PhilHealth number, the name read from your ID, and any stored image. Your account will show as not ID verified until you scan your ID again. You can still sign in and send an SOS.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Withdraw', style: 'destructive', onPress: () => withdrawId.mutate() },
-      ],
-    );
+    if (!idCard) return;
+    Alert.alert(idCard.confirmTitle, idCard.confirmBody, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Withdraw', style: 'destructive', onPress: () => withdrawId.mutate(idCard.consentType) },
+    ]);
   }
 
   function confirmRevoke() {
@@ -262,23 +265,20 @@ export default function PrivacyScreen() {
           )}
         </View>
 
-        {/* PhilHealth ID consent (MOD-48) */}
-        {idConsent.data?.granted ? (
+        {/* ID check consent (MOD-48) */}
+        {idCard ? (
           <View style={styles.card}>
             <View style={styles.cardHead}>
               <View style={[styles.iconWrap, { backgroundColor: '#E7F6F1' }]}>
                 <Ionicons name="card-outline" size={22} color="#0D6053" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>PhilHealth ID Check</Text>
+                <Text style={styles.cardTitle}>{idCard.title}</Text>
                 <Text style={styles.cardSub}>Granted — used to confirm the name on your account.</Text>
               </View>
             </View>
 
-            <Text style={styles.legal}>
-              We keep your PhilHealth number only in a form that can't be read back, its last 4 digits, and the
-              name read from your ID, encrypted. Your ID image is deleted once the check is done.
-            </Text>
+            <Text style={styles.legal}>{idCard.whatWeKeep}</Text>
 
             <TouchableOpacity
               testID="withdraw-id-consent-btn"

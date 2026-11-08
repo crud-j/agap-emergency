@@ -76,16 +76,20 @@ export function parsePhilHealthPin(text: string): string | null {
   return match ? `${match[1]}${match[2]}${match[3]}` : null;
 }
 
-/** The PhilHealth heading (`PHILHEALTH` or `PHILIPPINE HEALTH INSURANCE`) and a valid PIN. */
-export function looksLikePhilHealthId(text: string): boolean {
+/** The PhilHealth heading: `PHILHEALTH` or `PHILIPPINE HEALTH INSURANCE`. */
+export function hasPhilHealthHeading(text: string): boolean {
   // Letters only, so OCR spacing and stray symbols inside the heading don't matter.
   const letters = stripAccents(text.toUpperCase()).replace(/[^A-Z]/g, '');
-  const heading = letters.includes('PHILHEALTH') || letters.includes('PHILIPPINEHEALTHINSURANCE');
-  return heading && parsePhilHealthPin(text) !== null;
+  return letters.includes('PHILHEALTH') || letters.includes('PHILIPPINEHEALTHINSURANCE');
+}
+
+/** The PhilHealth heading and a valid PIN. */
+export function looksLikePhilHealthId(text: string): boolean {
+  return hasPhilHealthHeading(text) && parsePhilHealthPin(text) !== null;
 }
 
 /** Words that look like printed name words: mostly capitals. OCR junk is usually lowercase or symbols. */
-function nameTokens(raw: string): string[] {
+export function nameTokens(raw: string): string[] {
   return raw
     .replace(/[^A-Za-zÀ-ÖØ-öø-ÿ.'\- ]/g, ' ')
     .split(/\s+/)
@@ -130,12 +134,16 @@ function preferredSplit(given: string[]): number {
   return given.length - 1;
 }
 
+/** Is this word a name suffix (JR., III), whatever its case or punctuation? */
+export function isNameSuffix(token: string): boolean {
+  return NAME_SUFFIXES.has(normalizeNamePart(token));
+}
+
 function buildName(lastRaw: string[], givenRaw: string[]): IdName | null {
   // The card may print the suffix after the surname or after the given names.
-  const isSuffix = (token: string) => NAME_SUFFIXES.has(normalizeNamePart(token));
-  const suffix = [...lastRaw, ...givenRaw].filter(isSuffix).pop();
-  const lastTokens = lastRaw.filter((token) => !isSuffix(token));
-  const given = givenRaw.filter((token) => !isSuffix(token));
+  const suffix = [...lastRaw, ...givenRaw].filter(isNameSuffix).pop();
+  const lastTokens = lastRaw.filter((token) => !isNameSuffix(token));
+  const given = givenRaw.filter((token) => !isNameSuffix(token));
 
   // A single stray letter before the surname is OCR junk (Phase 0 saw exactly that).
   while (lastTokens.length > 1 && (lastTokens[0]?.replace(/[^A-ZÀ-Þ]/g, '').length ?? 0) <= 1) lastTokens.shift();

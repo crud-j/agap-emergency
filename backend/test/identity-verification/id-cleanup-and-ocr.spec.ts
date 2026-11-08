@@ -1,12 +1,13 @@
 jest.mock('tesseract.js', () => ({
   OEM: { LSTM_ONLY: 1 },
+  PSM: { AUTO: '3' },
   createWorker: jest.fn(),
 }));
 
 import { createWorker } from 'tesseract.js';
 import { Logger } from '@nestjs/common';
 import { IdentityVerificationCleanupProcessor } from '../../src/jobs/processors/identity-verification.processor';
-import { OCR_TIMEOUT_MS, PhilhealthOcrService } from '../../src/identity-verification/philhealth-ocr.service';
+import { OCR_TIMEOUT_MS, IdOcrService } from '../../src/identity-verification/id-ocr.service';
 import { JPEG, makeKit } from './id-test-kit';
 
 // MOD-01 / MOD-48 — the 10-minute cleanup job (plan §5.2a, §5.3) and the server OCR worker (§5.4).
@@ -119,7 +120,7 @@ describe('ID scan cleanup job', () => {
   });
 });
 
-describe('PhilhealthOcrService', () => {
+describe('IdOcrService', () => {
   const recognize = jest.fn();
   const terminate = jest.fn().mockResolvedValue(undefined);
   const mockCreateWorker = createWorker as jest.Mock;
@@ -133,7 +134,7 @@ describe('PhilhealthOcrService', () => {
 
   it('uses the bundled English data with no remote cache, and reuses one worker', async () => {
     recognize.mockResolvedValue({ data: { text: 'PhilHealth', confidence: 90 } });
-    const ocr = new PhilhealthOcrService();
+    const ocr = new IdOcrService();
 
     expect(await ocr.read(JPEG)).toEqual({ text: 'PhilHealth', confidence: 90 });
     await ocr.read(JPEG);
@@ -148,7 +149,7 @@ describe('PhilhealthOcrService', () => {
     jest.useFakeTimers();
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     recognize.mockReturnValueOnce(new Promise(() => undefined)); // stuck forever
-    const ocr = new PhilhealthOcrService();
+    const ocr = new IdOcrService();
 
     const pending = ocr.read(JPEG);
     await jest.advanceTimersByTimeAsync(OCR_TIMEOUT_MS);
@@ -165,12 +166,81 @@ describe('PhilhealthOcrService', () => {
   it('returns null instead of throwing when the worker fails, without logging any card text', async () => {
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     mockCreateWorker.mockRejectedValueOnce(new Error('wasm failed to load'));
-    const ocr = new PhilhealthOcrService();
+    const ocr = new IdOcrService();
     expect(await ocr.read(JPEG)).toBeNull();
 
     recognize.mockRejectedValueOnce(new Error('bad image'));
     expect(await ocr.read(JPEG)).toBeNull();
     expect(warn).toHaveBeenCalledTimes(2);
     warn.mockRestore();
+  });
+
+  describe('the automatic-layout read', () => {
+    const setParameters = jest.fn().mockResolvedValue(undefined);
+
+    beforeEach(() => {
+      setParameters.mockClear();
+      mockCreateWorker.mockReset().mockImplementation(async () => ({ recognize, terminate, setParameters }));
+      recognize.mockResolvedValue({ data: { text: 'ok', confidence: 80 } });
+    });
+
+    it('has its own worker, set to automatic layout, so it can never change how a first read runs', async () => {
+      const ocr = new IdOcrService();
+      await ocr.read(JPEG);
+      expect(setParameters).not.toHaveBeenCalled();
+      expect(mockCreateWorker).toHaveBeenCalledTimes(1);
+
+      expect(await ocr.read(JPEG, 'auto')).toEqual({ text: 'ok', confidence: 80 });
+      expect(mockCreateWorker).toHaveBeenCalledTimes(2);
+      expect(setParameters).toHaveBeenCalledTimes(1);
+      expect(setParameters).toHaveBeenCalledWith({ tessedit_pageseg_mode: '3' });
+    });
+
+    it('is created once, on first use, and uses the same bundled data', async () => {
+      const ocr = new IdOcrService();
+      await ocr.read(JPEG, 'auto');
+      await ocr.read(JPEG, 'auto');
+      expect(mockCreateWorker).toHaveBeenCalledTimes(1);
+      expect(setParameters).toHaveBeenCalledTimes(1);
+      const [lang, , options] = mockCreateWorker.mock.calls[0];
+      expect(lang).toBe('eng');
+      expect(options).toMatchObject({ cacheMethod: 'none', gzip: true });
+    });
+
+    it('a failure drops only that worker, and the other keeps working', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const ocr = new IdOcrService();
+      await ocr.read(JPEG);
+      await ocr.read(JPEG, 'auto');
+      expect(mockCreateWorker).toHaveBeenCalledTimes(2);
+
+      recognize.mockRejectedValueOnce(new Error('bad image'));
+      expect(await ocr.read(JPEG, 'auto')).toBeNull();
+      expect(terminate).toHaveBeenCalledTimes(1);
+
+      await ocr.read(JPEG);
+      expect(mockCreateWorker).toHaveBeenCalledTimes(2);
+      await ocr.read(JPEG, 'auto');
+      expect(mockCreateWorker).toHaveBeenCalledTimes(3);
+      warn.mockRestore();
+    });
+
+    it('a worker that cannot be set up reads as null, not a throw, and is retried next time', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      setParameters.mockRejectedValueOnce(new Error('bad parameter'));
+      const ocr = new IdOcrService();
+      expect(await ocr.read(JPEG, 'auto')).toBeNull();
+      expect(terminate).toHaveBeenCalledTimes(1); // Not left running with the wrong layout.
+      expect(await ocr.read(JPEG, 'auto')).toEqual({ text: 'ok', confidence: 80 });
+      warn.mockRestore();
+    });
+
+    it('shutting down ends both workers', async () => {
+      const ocr = new IdOcrService();
+      await ocr.read(JPEG);
+      await ocr.read(JPEG, 'auto');
+      await ocr.onModuleDestroy();
+      expect(terminate).toHaveBeenCalledTimes(2);
+    });
   });
 });

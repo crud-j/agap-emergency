@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ID_VERIFICATION_CONSENT_TYPE } from '@agap/shared';
+import { isIdVerificationConsentType } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { IdentityVerificationService } from '../identity-verification/identity-verification.service';
 import { CreateConsentDto } from './dto/create-consent.dto';
@@ -23,8 +23,8 @@ export class ConsentService {
   }
 
   async revokeConsent(userId: string, consentType: string) {
-    // Withdrawing this one also erases what the consent allowed AGAP to keep (RA 10173).
-    if (consentType === ID_VERIFICATION_CONSENT_TYPE) return this.identityVerification.withdrawConsent(userId);
+    // Withdrawing either ID consent also erases what it allowed AGAP to keep (RA 10173).
+    if (isIdVerificationConsentType(consentType)) return this.identityVerification.withdrawConsent(userId);
 
     const record = await this.prisma.consent_records.findFirst({
       where: { user_id: userId, consent_type: consentType, status: 'GRANTED' },

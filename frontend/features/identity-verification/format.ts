@@ -11,6 +11,7 @@ export const REVIEW_STATUS_LABELS: Record<IdReviewStatus, string> = {
 
 export const REJECTION_REASON_LABELS: Record<IdRejectionReason, string> = {
   NOT_PHILHEALTH: 'Not a PhilHealth ID',
+  NOT_NATIONAL_ID: 'Not a National ID',
   NAME_MISMATCH: "Name doesn't match the ID",
   UNREADABLE: "ID can't be read",
   SUSPECTED_FRAUD: 'Suspected fraud',

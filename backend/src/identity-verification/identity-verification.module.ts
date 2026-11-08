@@ -9,10 +9,10 @@ import { IdReviewNotifier } from './id-review-notifier';
 import { IdentityVerificationAdminController } from './identity-verification-admin.controller';
 import { IdentityVerificationReviewService } from './identity-verification-review.service';
 import { IdentityVerificationService } from './identity-verification.service';
-import { PhilhealthOcrService } from './philhealth-ocr.service';
+import { IdOcrService } from './id-ocr.service';
 
 /**
- * MOD-01 / MOD-48: PhilHealth ID verification at citizen registration. The scan route
+ * MOD-01 / MOD-48: ID verification at citizen registration. The scan route
  * (IdentityVerificationController) is registered in AuthModule, which imports this module:
  * it needs AuthService's geo-fence, and AuthService needs this module to claim scans.
  * The staff review routes (plan §7) live here.
@@ -28,7 +28,7 @@ import { PhilhealthOcrService } from './philhealth-ocr.service';
   providers: [
     IdentityVerificationService,
     IdDocumentCryptoService,
-    PhilhealthOcrService,
+    IdOcrService,
     IdentityVerificationReviewService,
     IdReviewNotifier,
   ],

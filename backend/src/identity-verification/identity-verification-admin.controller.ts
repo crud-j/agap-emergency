@@ -21,11 +21,11 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { RecentAuthGuard } from '../common/guards/recent-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequireRecentAuth } from '../common/decorators/recent-auth.decorator';
-import { IdCardLookupDto, IdCardReleaseDto, IdRejectDto, IdReviewQueryDto } from './dto/id-review.dto';
+import { IdApproveDto, IdCardLookupDto, IdCardReleaseDto, IdRejectDto, IdReviewQueryDto } from './dto/id-review.dto';
 import { IdentityVerificationReviewService, type ReviewActor } from './identity-verification-review.service';
 
 /**
- * Staff review of PhilHealth IDs sent for review at registration (MOD-01 / MOD-48, plan §7).
+ * Staff review of IDs sent for review at registration (MOD-01 / MOD-48, plan §7).
  * Under /administration like the other admin routes (the plan's draft said /admin).
  * @Roles narrows to the two admin roles; the service then allows an Org Administrator only
  * if their organization is MDRRMO (Part B Q1).
@@ -39,7 +39,7 @@ export class IdentityVerificationAdminController {
   constructor(private readonly review: IdentityVerificationReviewService) {}
 
   @Get()
-  @ApiOperation({ summary: 'PhilHealth ID review queue (no image, no PIN)' })
+  @ApiOperation({ summary: 'ID review queue (no image, no card number)' })
   list(@Request() req: { user: ReviewActor }, @Query() query: IdReviewQueryDto) {
     return this.review.list(req.user, query);
   }
@@ -48,10 +48,10 @@ export class IdentityVerificationAdminController {
   @HttpCode(200)
   // Staff type this from a card in front of them, so a few a minute is plenty; slows any guessing.
   @Throttle({ burst: { ttl: 60000, limit: 10 }, sustained: { ttl: 900000, limit: 30 } })
-  @ApiOperation({ summary: 'Which account holds this PhilHealth ID? Audited, without the number.' })
+  @ApiOperation({ summary: 'Which account holds this ID? Audited, without the number.' })
   @ApiResponse({ status: 404, description: 'No account holds this card' })
   findByPin(@Request() req: { user: ReviewActor }, @Body() dto: IdCardLookupDto) {
-    return this.review.findCardHolder(req.user, dto.pin);
+    return this.review.findCardHolder(req.user, dto.pin, dto.documentType);
   }
 
   @Post(':id/release')
@@ -59,7 +59,7 @@ export class IdentityVerificationAdminController {
   // Takes verified status from a citizen and frees their card: same bar as unlocking an account.
   @UseGuards(RecentAuthGuard)
   @RequireRecentAuth()
-  @ApiOperation({ summary: 'Release a PhilHealth ID from the account holding it; erases its card data and notifies the citizen' })
+  @ApiOperation({ summary: 'Release an ID from the account holding it; erases its card data and notifies the citizen' })
   @ApiResponse({ status: 409, description: 'This card is no longer linked to the account' })
   release(@Request() req: { user: ReviewActor }, @Param('id', ParseUUIDPipe) id: string, @Body() dto: IdCardReleaseDto) {
     return this.review.releaseCard(req.user, id, dto.reason);
@@ -82,14 +82,17 @@ export class IdentityVerificationAdminController {
 
   @Post(':id/approve')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Approve a PhilHealth ID under review; deletes the image and notifies the citizen' })
-  approve(@Request() req: { user: ReviewActor }, @Param('id', ParseUUIDPipe) id: string) {
-    return this.review.approve(req.user, id);
+  @ApiOperation({ summary: 'Approve an ID under review; deletes the image and notifies the citizen' })
+  @ApiResponse({ status: 400, description: 'A National ID with no stored number needs a valid cardNumber' })
+  @ApiResponse({ status: 409, description: 'Already decided, or ID_ALREADY_REGISTERED: the typed number is on another account' })
+  approve(@Request() req: { user: ReviewActor }, @Param('id', ParseUUIDPipe) id: string, @Body() dto: IdApproveDto) {
+    return this.review.approve(req.user, id, dto.cardNumber);
   }
 
   @Post(':id/reject')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Reject a PhilHealth ID under review; deletes the image and notifies the citizen' })
+  @ApiOperation({ summary: 'Reject an ID under review; deletes the image and notifies the citizen' })
+  @ApiResponse({ status: 400, description: "The other ID's wrong-card reason" })
   reject(@Request() req: { user: ReviewActor }, @Param('id', ParseUUIDPipe) id: string, @Body() dto: IdRejectDto) {
     return this.review.reject(req.user, id, dto.reason);
   }

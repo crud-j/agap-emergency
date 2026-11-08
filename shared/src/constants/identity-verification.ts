@@ -1,7 +1,8 @@
 import type { IdName } from '../validation/philhealth-id';
 
 /**
- * PhilHealth ID verification at registration (MOD-01, docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md).
+ * ID verification at registration (MOD-01, docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md and
+ * docs/plans/NATIONAL_ID_VERIFICATION_PLAN.md).
  * Shared so the app's limits and error handling match the server's.
  */
 
@@ -14,8 +15,29 @@ export const ID_SCAN_CLAIM_TTL_MINUTES = 30;
 /** Failed scans before the app offers "Send to MDRRMO for review". */
 export const ID_SCAN_MAX_ATTEMPTS = 3;
 
-/** `consent_records.consent_type` for the ID scan. */
+/** The IDs a citizen can choose to scan. Same values as the `id_document_type` database enum. */
+export const ID_DOCUMENT_TYPES = ['PHILHEALTH', 'NATIONAL_ID'] as const;
+export type IdDocumentType = (typeof ID_DOCUMENT_TYPES)[number];
+
+/** A scan or lookup that names no ID: older app builds only know the PhilHealth ID. */
+export const DEFAULT_ID_DOCUMENT_TYPE: IdDocumentType = 'PHILHEALTH';
+
+/** `consent_records.consent_type` for a PhilHealth ID scan. */
 export const ID_VERIFICATION_CONSENT_TYPE = 'ID_VERIFICATION_PHILHEALTH';
+
+/** `consent_records.consent_type` for a National ID scan. */
+export const ID_VERIFICATION_NATIONAL_ID_CONSENT_TYPE = 'ID_VERIFICATION_NATIONAL_ID';
+
+/** One consent type per ID: RA 11055 Section 17 asks for consent specific to the purpose (plan §1). */
+export const ID_VERIFICATION_CONSENT_TYPES: readonly string[] = [
+  ID_VERIFICATION_CONSENT_TYPE,
+  ID_VERIFICATION_NATIONAL_ID_CONSENT_TYPE,
+];
+
+/** Is this consent type one of the ID scans? Withdrawing any of them must erase the card data (plan §5.3). */
+export function isIdVerificationConsentType(consentType: string): boolean {
+  return ID_VERIFICATION_CONSENT_TYPES.includes(consentType);
+}
 
 /** Stable `code` values in error bodies from POST /auth/id-verification and POST /auth/register. */
 export enum IdVerificationErrorCode {
@@ -24,6 +46,7 @@ export enum IdVerificationErrorCode {
   IMAGE_TOO_LARGE = 'IMAGE_TOO_LARGE',
   UNSUPPORTED_IMAGE_TYPE = 'UNSUPPORTED_IMAGE_TYPE',
   NOT_PHILHEALTH_ID = 'NOT_PHILHEALTH_ID',
+  NOT_NATIONAL_ID = 'NOT_NATIONAL_ID',
   UNREADABLE = 'UNREADABLE',
   ID_ALREADY_REGISTERED = 'ID_ALREADY_REGISTERED',
   ID_SCAN_EXPIRED = 'ID_SCAN_EXPIRED',
@@ -45,6 +68,8 @@ export interface IdScanResponse {
    * the account with its ID under review.
    */
   reviewRequired: boolean;
+  /** The ID this scan was read as. */
+  documentType: IdDocumentType;
 }
 
 /** GET /auth/id-verification/status: what the citizen's profile shows (plan §8). */
@@ -60,7 +85,7 @@ export interface IdClaimResponse {
 // ─── Staff review (plan §7) ──────────────────────────────────────────────────
 
 /** Why staff rejected an ID under review: fixed codes, never free text with personal data. */
-export const ID_REJECTION_REASONS = ['NOT_PHILHEALTH', 'NAME_MISMATCH', 'UNREADABLE', 'SUSPECTED_FRAUD'] as const;
+export const ID_REJECTION_REASONS = ['NOT_PHILHEALTH', 'NOT_NATIONAL_ID', 'NAME_MISMATCH', 'UNREADABLE', 'SUSPECTED_FRAUD'] as const;
 export type IdRejectionReason = (typeof ID_REJECTION_REASONS)[number];
 
 /** Statuses the review queue lists. */
@@ -75,7 +100,10 @@ export type IdNamePart = 'last' | 'first' | 'middle' | 'suffix';
  */
 export type IdReviewReason =
   | { kind: 'NAME_MISMATCH'; failedParts: IdNamePart[] }
-  | { kind: 'SCAN_FAILURE'; code: IdVerificationErrorCode.UNREADABLE | IdVerificationErrorCode.NOT_PHILHEALTH_ID }
+  | {
+      kind: 'SCAN_FAILURE';
+      code: IdVerificationErrorCode.UNREADABLE | IdVerificationErrorCode.NOT_PHILHEALTH_ID | IdVerificationErrorCode.NOT_NATIONAL_ID;
+    }
   | { kind: 'UNKNOWN' };
 
 /** One row of GET /administration/id-verifications. No image, no PIN, no name read from the card. */
@@ -90,6 +118,10 @@ export interface IdReviewItem {
   reason: IdReviewReason;
   /** The image can be opened: the check is pending and its image is stored (plan §5.2a). */
   hasImage: boolean;
+  /** Which ID was scanned. */
+  documentType: IdDocumentType;
+  /** A card number is stored for this check. Never the number itself. */
+  hasCardNumber: boolean;
   reviewedAt: string | null;
   reviewedByName: string | null;
   rejectionReason: IdRejectionReason | null;

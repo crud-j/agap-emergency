@@ -17,7 +17,7 @@
     "test": "jest --config ./test/jest.config.ts",
     "test:watch": "jest --config ./test/jest.config.ts --watch",
     "test:cov": "jest --config ./test/jest.config.ts --coverage",
-    "test:e2e": "jest --config ./test/jest.config.ts --testMatch \"**/test/**/*.e2e-spec.ts\" --passWithNoTests",
+    "test:e2e": "jest --config ./test/jest.config.ts --testMatch \"**/test/**/*.e2e-spec.ts\" --passWithNoTests --runInBand",
     "test:e2e:db": "ts-node --transpile-only test/e2e/setup-db.ts",
     "db:migrate": "prisma migrate dev",
     "db:migrate:prod": "prisma migrate deploy",

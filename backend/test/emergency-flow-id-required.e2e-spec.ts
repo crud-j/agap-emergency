@@ -103,7 +103,7 @@ describeE2E('Emergency flow with PhilHealth ID verification on (E2E)', () => {
     const { IncidentsService } = (require('../src/incidents/incidents.service') as typeof import('../src/incidents/incidents.service'));
     const { DispatchService } = (require('../src/dispatch/dispatch.service') as typeof import('../src/dispatch/dispatch.service'));
     const { MediaService } = (require('../src/media/media.service') as typeof import('../src/media/media.service'));
-    const { PhilhealthOcrService } = (require('../src/identity-verification/philhealth-ocr.service') as typeof import('../src/identity-verification/philhealth-ocr.service'));
+    const { IdOcrService } = (require('../src/identity-verification/id-ocr.service') as typeof import('../src/identity-verification/id-ocr.service'));
 
     const originalAdd = Queue.prototype.add;
     jest.spyOn(Queue.prototype, 'add').mockImplementation(function (this: Queue, name: string, data: unknown, opts?: unknown) {
@@ -118,7 +118,7 @@ describeE2E('Emergency flow with PhilHealth ID verification on (E2E)', () => {
       .setLogger(logger)
       .overrideProvider(ROUTING_PROVIDER).useValue({ route: jest.fn(async () => null) })
       .overrideProvider(GEOCODING_PROVIDER).useValue({ reverseGeocode: async () => null, search: async () => [] })
-      .overrideProvider(PhilhealthOcrService).useValue(ocr)
+      .overrideProvider(IdOcrService).useValue(ocr)
       // No worker, no poller: nothing can send an SMS or a push from a test run.
       .overrideProvider(SmsProcessor).useValue({})
       .overrideProvider(NotificationProcessor).useValue({})

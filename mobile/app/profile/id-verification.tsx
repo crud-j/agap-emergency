@@ -4,13 +4,19 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { IdVerificationErrorCode, type IdClaimResponse, type IdScanResponse } from '@agap/shared';
+import {
+  DEFAULT_ID_DOCUMENT_TYPE,
+  IdVerificationErrorCode,
+  type IdClaimResponse,
+  type IdDocumentType,
+  type IdScanResponse,
+} from '@agap/shared';
 import { ScreenHeader } from '../../src/components/ui/screen-header';
 import { ID_STATUS_QUERY_KEY } from '../../src/components/profile/id-status-card';
 import NameFields, { EMPTY_NAME, type NameValues } from '../../src/components/registration/NameFields';
-import PhilHealthIdStep, { type IdStep } from '../../src/components/registration/PhilHealthIdStep';
+import IdScanStep, { type IdStep } from '../../src/components/registration/IdScanStep';
 import { useTranslations } from '../../src/hooks/useAccessibility';
-import { IdVerificationError, canCreateAccount, checkTypedName, typedIdName } from '../../src/lib/id-verification';
+import { IdVerificationError, canCreateAccount, checkTypedName, retryMessageKey, typedIdName } from '../../src/lib/id-verification';
 import { claimIdScan } from '../../src/services/api/id-verification.api';
 import { useAuthStore } from '../../src/stores/auth.store';
 
@@ -19,8 +25,9 @@ type Phase = 'locating' | 'location_error' | 'outside' | IdStep | 'name' | 'done
 const GPS_TIMEOUT_MS = 15_000;
 
 /**
- * Scanning a PhilHealth ID again from the profile (MOD-01, plan §8), after a rejection, a
- * withdrawal or a release. The same steps and rules as registration, for a signed-in citizen.
+ * Scanning an ID again from the profile (MOD-01, plan §8), after a rejection, a withdrawal or a
+ * release. The same steps and rules as registration, for a signed-in citizen, who may choose a
+ * different ID than last time (National ID plan §3).
  * "Report an emergency" is on every step (rule 14): this never stands in the way of getting help.
  */
 export default function IdVerificationScreen() {
@@ -31,6 +38,8 @@ export default function IdVerificationScreen() {
 
   const [phase, setPhase] = useState<Phase>('locating');
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  /** Here rather than in the ID step, because that step unmounts on the name form. Set on the chooser before it's used. */
+  const [documentType, setDocumentType] = useState<IdDocumentType>(DEFAULT_ID_DOCUMENT_TYPE);
   const [notice, setNotice] = useState<string | null>(null);
   const [scan, setScan] = useState<IdScanResponse | null>(null);
   const [name, setName] = useState<NameValues>(EMPTY_NAME);
@@ -53,7 +62,7 @@ export default function IdVerificationScreen() {
         }),
       ]);
       setCoords({ latitude: position.coords.latitude, longitude: position.coords.longitude });
-      setPhase('id_intro');
+      setPhase('id_choose');
     } catch {
       setPhase('location_error');
     } finally {
@@ -115,7 +124,7 @@ export default function IdVerificationScreen() {
           return;
         }
         if (err.code === IdVerificationErrorCode.ID_ALREADY_REGISTERED) {
-          setError(t.registration.idErrorAlreadyRegistered);
+          setError(t.registration[retryMessageKey('ID_ALREADY_REGISTERED', documentType)] as string);
           return;
         }
         if (err.code === IdVerificationErrorCode.NAME_DOES_NOT_MATCH_ID) {
@@ -129,7 +138,7 @@ export default function IdVerificationScreen() {
     }
   }
 
-  const idStep = phase === 'id_intro' || phase === 'id_scanning' || phase === 'id_retry';
+  const idStep = phase === 'id_choose' || phase === 'id_intro' || phase === 'id_scanning' || phase === 'id_retry';
 
   return (
     <View style={styles.root}>
@@ -159,9 +168,14 @@ export default function IdVerificationScreen() {
         )}
 
         {idStep && coords && (
-          <PhilHealthIdStep
+          <IdScanStep
             step={phase}
             onStepChange={setPhase}
+            documentType={documentType}
+            onDocumentTypeChange={(type) => {
+              setDocumentType(type);
+              setNotice(null); // "Your scan expired" was about the last ID, not the one just chosen.
+            }}
             coords={coords}
             notice={notice}
             onVerified={(result) => {
@@ -215,7 +229,7 @@ export default function IdVerificationScreen() {
           </Message>
         )}
 
-        {/* PhilHealthIdStep has its own on the ID steps. */}
+        {/* IdScanStep has its own on the ID steps. */}
         {!idStep && (
           <TouchableOpacity
             testID="id-rescan-report-emergency-btn"

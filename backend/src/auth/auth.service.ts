@@ -296,18 +296,18 @@ export class AuthService {
       if (emailExists) throw new BadRequestException('Email already registered');
     }
 
-    // MOD-01 PhilHealth ID verification (plan §5.3). Gates account creation only; guest
+    // MOD-01 ID verification (plan §5.3). Gates account creation only; guest
     // SOS (registerGuest) never needs it.
     const typedName = typedNameFrom(dto);
     if (!dto.idVerificationToken && this.config.get<string>('ID_VERIFICATION_REQUIRED') === 'true') {
       throw idVerificationError(
         400,
         IdVerificationErrorCode.ID_VERIFICATION_REQUIRED,
-        'Scan your PhilHealth ID before creating an account. For emergencies, use Report an emergency.',
+        'Scan your ID before creating an account. For emergencies, use Report an emergency.',
       );
     }
     if (dto.idVerificationToken && !typedName) {
-      throw new BadRequestException('lastName and firstName are required with a PhilHealth ID scan');
+      throw new BadRequestException('lastName and firstName are required with an ID scan');
     }
     const fullName = typedName ? composeFullName(typedName) : dto.fullName?.trim();
     if (!fullName) throw new BadRequestException('fullName is required');
@@ -333,7 +333,7 @@ export class AuthService {
     } satisfies Prisma.UserCreateInput;
 
     // The account and the scan claim commit together: a lost race for the token or a
-    // PhilHealth ID already on another account creates nothing.
+    // card already on another account creates nothing.
     const user = idClaim
       ? await this.prisma.$transaction(async (tx) => {
           const created = await tx.user.create({ data });

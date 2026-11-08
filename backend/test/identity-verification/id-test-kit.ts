@@ -10,7 +10,7 @@ import { AuditService } from '../../src/audit/audit.service';
 import { AuthService } from '../../src/auth/auth.service';
 import { IdDocumentCryptoService } from '../../src/identity-verification/id-document-crypto.service';
 import { IdentityVerificationService } from '../../src/identity-verification/identity-verification.service';
-import type { OcrResult } from '../../src/identity-verification/philhealth-ocr.service';
+import type { OcrResult } from '../../src/identity-verification/id-ocr.service';
 import { makeAuthService, makeFakeSessions, matches, type Row } from '../auth/fake-prisma';
 
 export const KEY = crypto.randomBytes(32).toString('base64');

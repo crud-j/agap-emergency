@@ -66,7 +66,7 @@ describe('AuthService.register with a PhilHealth ID scan', () => {
         action: 'IDENTITY_VERIFICATION_CLAIMED',
         actor_id: user.id,
         entity_id: user.id,
-        new_values: { outcome: 'AUTO_VERIFIED' },
+        new_values: { outcome: 'AUTO_VERIFIED', documentType: 'PHILHEALTH' },
       }),
     ]);
     expect(JSON.stringify(kit.prisma.db.audit)).not.toMatch(/DELA|JUAN|0000000/i);
@@ -114,7 +114,7 @@ describe('AuthService.register with a PhilHealth ID scan', () => {
     expect(row()).toMatchObject({ user_id: user.id, status: 'PENDING_REVIEW', match_result: { last: false } });
     expect(row().image_storage_key).not.toBeNull();
     expect(kit.storage.objects.size).toBe(1);
-    expect(kit.prisma.db.audit[0].new_values).toEqual({ outcome: 'PENDING_REVIEW' });
+    expect(kit.prisma.db.audit[0].new_values).toEqual({ outcome: 'PENDING_REVIEW', documentType: 'PHILHEALTH' });
     expect(kit.prisma.db.verifications).toHaveLength(1); // OTP still sent
   });
 
@@ -137,7 +137,7 @@ describe('AuthService.register with a PhilHealth ID scan', () => {
       consent_record_id: kit.prisma.db.consents[0].id,
     });
     expect(kit.storage.objects.has(row().image_storage_key)).toBe(true);
-    expect(kit.prisma.db.audit[0].new_values).toEqual({ outcome: 'PENDING_REVIEW' });
+    expect(kit.prisma.db.audit[0].new_values).toEqual({ outcome: 'PENDING_REVIEW', documentType: 'PHILHEALTH' });
     expect(kit.prisma.db.verifications).toHaveLength(1); // OTP still sent
 
     // A claimed review scan can't be claimed again.

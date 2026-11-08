@@ -19,7 +19,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
-import { ID_IMAGE_MAX_BYTES, IdVerificationErrorCode, type IdName } from '@agap/shared';
+import { DEFAULT_ID_DOCUMENT_TYPE, ID_DOCUMENT_RULES, ID_DOCUMENT_TYPES, ID_IMAGE_MAX_BYTES, IdVerificationErrorCode, type IdName } from '@agap/shared';
 import { Public } from '../common/decorators/public.decorator';
 import { MULTER_MEMORY_STORAGE } from '../media/media.service';
 import { AuthService } from '../auth/auth.service';
@@ -42,7 +42,7 @@ class IdImageTooLargeFilter implements ExceptionFilter {
 }
 
 /**
- * MOD-01: the PhilHealth ID scan before account creation (plan §5.3). Registered in
+ * MOD-01: the ID scan before account creation (plan §5.3). Registered in
  * AuthModule because it shares the auth route prefix and AuthService's geo-fence.
  */
 @ApiTags('auth')
@@ -68,7 +68,8 @@ export class IdentityVerificationController {
       type: 'object',
       required: ['image', 'consentGiven', 'latitude', 'longitude'],
       properties: {
-        image: { type: 'string', format: 'binary', description: 'Front of the PhilHealth ID, JPEG or PNG, max 2 MB' },
+        image: { type: 'string', format: 'binary', description: 'Front of the ID, JPEG or PNG, max 2 MB' },
+        documentType: { type: 'string', enum: [...ID_DOCUMENT_TYPES], description: 'Missing means PHILHEALTH' },
         consentGiven: { type: 'boolean' },
         latitude: { type: 'number' },
         longitude: { type: 'number' },
@@ -78,16 +79,16 @@ export class IdentityVerificationController {
       },
     },
   })
-  @ApiOperation({ summary: 'Scan a PhilHealth ID before creating a citizen account (MOD-01)' })
-  @ApiResponse({ status: 200, description: '{ token, nameOnId, pinLast4, reviewRequired }' })
+  @ApiOperation({ summary: 'Scan an ID before creating a citizen account (MOD-01)' })
+  @ApiResponse({ status: 200, description: '{ token, nameOnId, pinLast4, reviewRequired, documentType }' })
   @ApiResponse({ status: 409, description: 'ID_ALREADY_REGISTERED' })
-  @ApiResponse({ status: 422, description: 'NOT_PHILHEALTH_ID or UNREADABLE' })
+  @ApiResponse({ status: 422, description: 'NOT_PHILHEALTH_ID, NOT_NATIONAL_ID or UNREADABLE' })
   async scan(@UploadedFile() image: Express.Multer.File | undefined, @Body() dto: IdScanDto) {
     if (dto.consentGiven !== true) {
       throw idVerificationError(
         HttpStatus.BAD_REQUEST,
         IdVerificationErrorCode.CONSENT_REQUIRED,
-        'Please agree to the PhilHealth ID check first.',
+        `Please agree to the ${ID_DOCUMENT_RULES[dto.documentType ?? DEFAULT_ID_DOCUMENT_TYPE].label} check first.`,
       );
     }
     const geo = await this.authService.checkGeoFence(dto.latitude, dto.longitude);
@@ -99,6 +100,7 @@ export class IdentityVerificationController {
       );
     }
     return this.identityVerification.scan(image, {
+      documentType: dto.documentType,
       clientText: dto.clientText,
       attemptNumber: dto.attemptNumber,
       requestReview: dto.requestReview,
@@ -108,7 +110,7 @@ export class IdentityVerificationController {
   @Get('id-verification/status')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "The signed-in citizen's PhilHealth ID status, for their profile" })
+  @ApiOperation({ summary: "The signed-in citizen's ID status, for their profile" })
   status(@Request() req: { user: { id: string } }) {
     return this.identityVerification.profileStatus(req.user.id);
   }
@@ -119,7 +121,7 @@ export class IdentityVerificationController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Throttle({ burst: { ttl: 60000, limit: 5 }, sustained: { ttl: 900000, limit: 10 } })
-  @ApiOperation({ summary: "Claim a new PhilHealth ID scan for the signed-in citizen's account" })
+  @ApiOperation({ summary: "Claim a new ID scan for the signed-in citizen's account" })
   @ApiResponse({ status: 400, description: 'ID_SCAN_EXPIRED or NAME_DOES_NOT_MATCH_ID' })
   @ApiResponse({ status: 409, description: 'ID_ALREADY_REGISTERED' })
   claim(@Request() req: { user: { id: string } }, @Body() dto: IdClaimDto) {

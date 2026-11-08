@@ -117,7 +117,7 @@ describe('PhilHealth ID status and scanning again', () => {
       expect(kit.storage.objects.has(imageKey)).toBe(false);
       expect(kit.prisma.db.consents).toEqual([expect.objectContaining({ user_id: id, status: 'GRANTED' })]);
       expect(kit.prisma.db.audit).toEqual([
-        expect.objectContaining({ action: AuditAction.IDENTITY_VERIFICATION_CLAIMED, actor_id: id, new_values: { outcome: 'AUTO_VERIFIED' } }),
+        expect.objectContaining({ action: AuditAction.IDENTITY_VERIFICATION_CLAIMED, actor_id: id, new_values: { outcome: 'AUTO_VERIFIED', documentType: 'PHILHEALTH' } }),
       ]);
     });
 

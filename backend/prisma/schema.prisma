@@ -672,9 +672,10 @@ model consent_records {
   identity_verifications identity_verifications[]
 }
 
-/// MOD-01/48: one PhilHealth ID scan. Created before the account exists, then claimed by POST /auth/register.
-/// The name and image are sealed (ID_DOCUMENT_ENCRYPTION_KEY); the PIN is kept only as an HMAC and its last 4 digits.
-/// One PhilHealth ID per account: partial unique index uq_identity_verifications_pin_active (migration SQL only).
+/// MOD-01/48: one ID scan (PhilHealth or National ID). Created before the account exists, then claimed by POST /auth/register.
+/// The name and image are sealed (ID_DOCUMENT_ENCRYPTION_KEY); the card number is kept only as an HMAC and its last 4 digits.
+/// The card number is the PhilHealth PIN or the 16-digit PhilSys Card Number, never the PhilSys Number.
+/// One account per card: partial unique index uq_identity_verifications_pin_active (migration SQL only).
 model identity_verifications {
   id                String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   /// null until claimed by a registration.
@@ -684,7 +685,7 @@ model identity_verifications {
   /// SHA-256 (hex) of the token returned to the app; the token itself is never stored.
   claim_token_hash  String                       @unique @db.VarChar(64)
   claim_expires_at  DateTime                     @db.Timestamptz(6)
-  /// HMAC-SHA256(PIN, ID_PIN_PEPPER): duplicate check only. null when the server couldn't read the PIN (review scan).
+  /// HMAC-SHA256(card number, ID_PIN_PEPPER): duplicate check only. null when the server couldn't read the number (review scan).
   pin_hmac          String?                      @db.VarChar(64)
   pin_last4         String?                      @db.VarChar(4)
   /// Sealed JSON { last, first, middle, suffix }. null when the server couldn't read the name (review scan).
@@ -693,7 +694,7 @@ model identity_verifications {
   image_storage_key String?
   /// The phone's own reading agreed with the server's. Information only.
   client_read_ok    Boolean?
-  /// Which name parts matched. No names, no PIN.
+  /// Which name parts matched. No names, no card number.
   match_result      Json?
   attempt_number    Int                          @default(1) @db.SmallInt
   reviewed_by_id    String?                      @db.Uuid
@@ -2284,10 +2285,11 @@ enum readiness_status {
 
 enum id_document_type {
   PHILHEALTH
+  NATIONAL_ID
 }
 
 enum identity_verification_status {
-  /// Server read the card, it is a PhilHealth ID, and (once claimed) the name matched.
+  /// Server read the card, it is the chosen ID, and (once claimed) the name matched.
   AUTO_VERIFIED
   /// Citizen asked for staff review (unreadable or name mismatch).
   PENDING_REVIEW

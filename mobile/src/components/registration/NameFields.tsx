@@ -1,7 +1,7 @@
 /**
- * Registration name fields for the PhilHealth ID check (MOD-01, plan §3 "Why the name is split",
- * §4.2): Last, First, Middle (optional), Suffix (optional), and the "matches your PhilHealth ID"
- * indicator. The citizen types the name; it is never pre-filled from the scan. The match uses
+ * Registration name fields for the ID check (MOD-01, plan §3 "Why the name is split", §4.2):
+ * Last, First, Middle (optional), Suffix (optional), and the "matches your ID" indicator.
+ * The citizen types the name; it is never pre-filled from the scan. The match uses
  * matchIdName from @agap/shared, the same code the server decides with (the parent computes it).
  */
 import React, { useState } from 'react';

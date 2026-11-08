@@ -27,15 +27,15 @@ import type { Language } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { register, geoCheck, IdVerificationError } from '../../src/services/api/auth.api';
 import { useIncidentStore } from '../../src/stores/incident.store';
-import { IdVerificationErrorCode, isCoordinateInBocaue, type IdScanResponse } from '@agap/shared';
-import PhilHealthIdStep, { type IdStep } from '../../src/components/registration/PhilHealthIdStep';
+import { DEFAULT_ID_DOCUMENT_TYPE, IdVerificationErrorCode, isCoordinateInBocaue, type IdDocumentType, type IdScanResponse } from '@agap/shared';
+import IdScanStep, { type IdStep } from '../../src/components/registration/IdScanStep';
 import NameFields, { EMPTY_NAME, type NameValues } from '../../src/components/registration/NameFields';
-import { canCreateAccount, checkTypedName, typedIdName } from '../../src/lib/id-verification';
+import { canCreateAccount, checkTypedName, retryMessageKey, typedIdName } from '../../src/lib/id-verification';
 
 // ─── Validation schema (address fields removed) ──────────────────────────────
 
 const registerSchema = z.object({
-  // MOD-01: the name in parts, checked against the PhilHealth ID (plan §3).
+  // MOD-01: the name in parts, checked against the chosen ID (plan §3).
   lastName:        z.string().min(1, 'Enter your last name.').max(100),
   firstName:       z.string().min(1, 'Enter your first name.').max(100),
   middleName:      z.string().max(100).optional(),
@@ -80,10 +80,10 @@ type RegistrationStep =
   | 'checking'     // server-side geo-fence API call in progress
   | 'outside'      // geo-fence returned inside=false
   | 'geo_error'    // geo-check API threw an error
-  | IdStep         // geo-fence passed → PhilHealth ID: 'id_intro' | 'id_scanning' | 'id_retry'
+  | IdStep         // geo-fence passed → the ID: 'id_choose' | 'id_intro' | 'id_scanning' | 'id_retry'
   | 'form';        // ID scanned → registration form with the name-match indicator
 
-const ID_STEPS: readonly RegistrationStep[] = ['id_intro', 'id_scanning', 'id_retry'];
+const ID_STEPS: readonly RegistrationStep[] = ['id_choose', 'id_intro', 'id_scanning', 'id_retry'];
 
 // ─── SVG logo fallback ───────────────────────────────────────────────────────
 
@@ -125,7 +125,9 @@ export default function RegistrationScreen() {
   const [step, setStep] = useState<RegistrationStep>('permission');
   const [capturedCoords, setCapturedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  // ── PhilHealth ID state (MOD-01, plan §3) ──
+  // ── ID state (MOD-01, plan §3) ──
+  /** Here rather than in the ID step, because that step unmounts on the form. Set on the chooser before it's used. */
+  const [documentType, setDocumentType]       = useState<IdDocumentType>(DEFAULT_ID_DOCUMENT_TYPE);
   const [idScan, setIdScan]                   = useState<IdScanResponse | null>(null);
   const [idNotice, setIdNotice]               = useState<string | null>(null);
   const [reviewChosen, setReviewChosen]       = useState(false);
@@ -214,8 +216,8 @@ export default function RegistrationScreen() {
         return;
       }
       setCapturedCoords({ latitude, longitude });
-      // Inside Bocaue → scan the PhilHealth ID before the form (plan §3).
-      setStep('id_intro');
+      // Inside Bocaue → choose and scan an ID before the form (plan §3).
+      setStep('id_choose');
     } catch {
       setStep('geo_error');
     }
@@ -312,7 +314,7 @@ export default function RegistrationScreen() {
             setApiError(t.registration.createDisabledHint);
             return;
           case IdVerificationErrorCode.ID_ALREADY_REGISTERED:
-            setApiError(t.registration.idErrorAlreadyRegistered);
+            setApiError(t.registration[retryMessageKey('ID_ALREADY_REGISTERED', documentType)] as string);
             return;
           default:
             break;
@@ -330,7 +332,7 @@ export default function RegistrationScreen() {
     }
   }
 
-  // ── PhilHealth ID handlers ──────────────────────────────────────────────────
+  // ── ID handlers ─────────────────────────────────────────────────────────────
 
   function reportEmergencyAsGuest() {
     beginGuestReport();
@@ -345,7 +347,7 @@ export default function RegistrationScreen() {
     setStep('form');
   }
 
-  /** Back to the ID intro for a fresh scan; the typed name and the rest of the form are kept. */
+  /** Back to the ID intro for a fresh scan of the same ID; the typed name and the rest of the form are kept. */
   function resetIdScan(notice: string | null) {
     setIdScan(null);
     setReviewChosen(false);
@@ -365,7 +367,7 @@ export default function RegistrationScreen() {
     });
   }
 
-  // ── Render: PhilHealth ID steps (after the geo-fence passed) ───────────────
+  // ── Render: ID steps (after the geo-fence passed) ──────────────────────────
 
   if (ID_STEPS.includes(step) && capturedCoords) {
     return (
@@ -378,9 +380,14 @@ export default function RegistrationScreen() {
           <View style={styles.logoBlock}>
             <AgapLogo />
           </View>
-          <PhilHealthIdStep
+          <IdScanStep
             step={step as IdStep}
             onStepChange={setStep}
+            documentType={documentType}
+            onDocumentTypeChange={(type) => {
+              setDocumentType(type);
+              setIdNotice(null); // "Your scan expired" was about the last ID, not the one just chosen.
+            }}
             coords={capturedCoords}
             notice={idNotice}
             onVerified={handleIdVerified}
@@ -688,15 +695,15 @@ export default function RegistrationScreen() {
             <Text style={styles.locationBadgeText}>Location confirmed — Bocaue, Bulacan</Text>
           </View>
 
-          {/* ── PhilHealth ID scanned badge ── */}
+          {/* ── ID scanned badge ── */}
           <View style={[styles.locationBadge, styles.idBadge]}>
             <Ionicons name={idScan.reviewRequired ? 'people-outline' : 'card-outline'} size={16} color="#0D6053" />
             <Text style={[styles.locationBadgeText, styles.idBadgeText]}>
               {idScan.reviewRequired
-                ? t.registration.idReviewBadge
+                ? t.registration.idDocument[documentType].reviewBadge
                 : idScan.pinLast4
-                  ? t.registration.idScannedBadge(idScan.pinLast4)
-                  : t.registration.idScannedBadgeNoPin}
+                  ? t.registration.idDocument[documentType].scannedBadge(idScan.pinLast4)
+                  : t.registration.idDocument[documentType].scannedBadgeNoNumber}
             </Text>
             <TouchableOpacity onPress={() => resetIdScan(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.linkText}>{t.registration.idRescanLink}</Text>
@@ -706,7 +713,7 @@ export default function RegistrationScreen() {
           {/* ── Form Fields ── */}
           <View style={styles.formBlock}>
 
-            {/* Name, checked against the PhilHealth ID */}
+            {/* Name, checked against the chosen ID */}
             <NameFields
               value={name}
               onChange={(next) => {

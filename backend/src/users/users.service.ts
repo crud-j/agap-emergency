@@ -96,7 +96,7 @@ export class UsersService {
     // "ID verified" must never sit beside a name nobody checked (plan §11 D8). Withdrawing
     // consent ends the verification; scanning again then checks the new name.
     if (current.identity_verified_at && dto.fullName !== undefined && dto.fullName !== current.full_name) {
-      throw new ConflictException('Your name is verified against your PhilHealth ID and can\'t be changed here.');
+      throw new ConflictException('Your name is verified against your ID and can\'t be changed here.');
     }
 
     const updated = await this.prisma.user.update({

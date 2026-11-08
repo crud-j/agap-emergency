@@ -1,7 +1,8 @@
 /**
- * Registration: scan the PhilHealth ID before the account is created (MOD-01,
- * docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md §3–§4). Intro + consent, scanning, retry (attempt
- * n of 3, a reason per failure), and "Send to MDRRMO for review" after the third failed attempt.
+ * Registration: choose an ID and scan it before the account is created (MOD-01,
+ * docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md §3–§4, docs/plans/NATIONAL_ID_VERIFICATION_PLAN.md
+ * §4.2). Chooser, intro + consent, scanning, retry (attempt n of 3, a reason per failure), and
+ * "Send to MDRRMO for review" after the third failed attempt.
  *
  * The guest "Report an emergency" button is on every state (CLAUDE.md rule 14): the ID check
  * gates account creation, never getting help.
@@ -10,7 +11,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { ID_SCAN_MAX_ATTEMPTS, type IdScanResponse } from '@agap/shared';
+import { ID_DOCUMENT_TYPES, ID_SCAN_MAX_ATTEMPTS, type IdDocumentType, type IdScanResponse } from '@agap/shared';
 import { useTranslations } from '../../hooks/useAccessibility';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { MDRRMO_HOTLINE } from '../../config/hotlines';
@@ -22,10 +23,10 @@ import {
   type CropRect,
   type IdScanFailureReason,
 } from '../../lib/id-verification';
-import { openDocumentScanner, processIdImage, type IdScanOutcome } from '../../services/id-scan/philhealth-scan';
+import { openDocumentScanner, processIdImage, type IdScanOutcome } from '../../services/id-scan/id-scan';
 import IdCameraFallback from './IdCameraFallback';
 
-export type IdStep = 'id_intro' | 'id_scanning' | 'id_retry';
+export type IdStep = 'id_choose' | 'id_intro' | 'id_scanning' | 'id_retry';
 
 /** Same as the registration request's slow notice (plan §4.4). */
 const SLOW_NOTICE_MS = 15_000;
@@ -33,6 +34,9 @@ const SLOW_NOTICE_MS = 15_000;
 interface Props {
   step: IdStep;
   onStepChange: (step: IdStep) => void;
+  /** Held by the parent, because this step unmounts on the form. */
+  documentType: IdDocumentType;
+  onDocumentTypeChange: (documentType: IdDocumentType) => void;
   /** From the Bocaue geo-fence check that ran just before; the scan endpoint checks it again. */
   coords: { latitude: number; longitude: number };
   /** A message to show on the intro, e.g. "your scan expired". */
@@ -44,9 +48,11 @@ interface Props {
   onSignIn?: () => void;
 }
 
-export default function PhilHealthIdStep({
+export default function IdScanStep({
   step,
   onStepChange,
+  documentType,
+  onDocumentTypeChange,
   coords,
   notice,
   onVerified,
@@ -56,6 +62,7 @@ export default function PhilHealthIdStep({
 }: Props) {
   const t = useTranslations();
   const { isOnline } = useNetworkStatus();
+  const idText = t.registration.idDocument[documentType];
 
   const [consent, setConsent] = useState(false);
   const [consentHint, setConsentHint] = useState(false);
@@ -111,6 +118,7 @@ export default function PhilHealthIdStep({
   async function upload(uri: string, crop?: CropRect) {
     onStepChange('id_scanning');
     const outcome = await processIdImage(uri, {
+      documentType,
       ...(crop ? { crop } : {}),
       attemptNumber: nextAttemptNumber(failedAttempts),
       latitude: coords.latitude,
@@ -166,26 +174,73 @@ export default function PhilHealthIdStep({
     onReportEmergency();
   }
 
+  function chooseId(type: IdDocumentType) {
+    onDocumentTypeChange(type);
+    onStepChange('id_intro');
+  }
+
+  /** Consent names the ID, and attempts belong to the card, so neither carries over. `useFallback` is about the phone: it stays. */
+  function chooseDifferentId() {
+    setConsent(false);
+    setConsentHint(false);
+    setFailedAttempts(0);
+    setLastReason(null);
+    onStepChange('id_choose');
+  }
+
   const offline = !isOnline || lastReason === 'OFFLINE';
   const reviewOffered = canOfferReview(failedAttempts) && lastReason !== 'ID_ALREADY_REGISTERED';
 
   return (
     <View style={styles.container}>
+      {step === 'id_choose' && (
+        <View style={styles.card}>
+          <View style={styles.iconWrap}>
+            <Ionicons name="card-outline" size={40} color="#0D6053" />
+          </View>
+          <Text style={styles.heading}>{t.registration.idChooseTitle}</Text>
+          <Text style={styles.body}>{t.registration.idChooseBody}</Text>
+
+          {ID_DOCUMENT_TYPES.map((type) => (
+            <TouchableOpacity
+              key={type}
+              testID={`id-choose-${type}`}
+              style={styles.chooseOption}
+              activeOpacity={0.8}
+              onPress={() => chooseId(type)}
+              accessibilityRole="button"
+            >
+              <Ionicons name="card-outline" size={22} color="#0D6053" />
+              <View style={styles.chooseText}>
+                <Text style={styles.chooseLabel}>{t.registration.idDocument[type].chooseLabel}</Text>
+                <Text style={styles.chooseHint}>{t.registration.idDocument[type].chooseHint}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+            </TouchableOpacity>
+          ))}
+
+          {/* Only registration passes onSignIn: someone scanning from their profile already has an account. */}
+          <Text style={styles.chooseNeither}>
+            {onSignIn ? t.registration.idChooseNeither : t.registration.idChooseNeitherSignedIn}
+          </Text>
+        </View>
+      )}
+
       {step === 'id_intro' && (
         <View style={styles.card}>
           <View style={styles.iconWrap}>
             <Ionicons name="card-outline" size={40} color="#0D6053" />
           </View>
-          <Text style={styles.heading}>{t.registration.idIntroTitle}</Text>
+          <Text style={styles.heading}>{idText.introTitle}</Text>
           <Text style={styles.body}>{t.registration.idIntroBody}</Text>
 
           {notice ? <Banner icon="time-outline" text={notice} tone="warning" /> : null}
 
           <View style={styles.points}>
-            <Point icon="eye-outline" text={t.registration.idWhatWeRead} />
+            <Point icon="eye-outline" text={idText.whatWeRead} />
             <Point icon="help-circle-outline" text={t.registration.idWhyWeRead} />
             <Point icon="trash-outline" text={t.registration.idDeleted} />
-            <Point icon="card-outline" text={t.registration.idOnlyPhilHealth} />
+            <Point icon="card-outline" text={t.registration.idAcceptedIds} />
           </View>
 
           <TouchableOpacity
@@ -202,7 +257,7 @@ export default function PhilHealthIdStep({
             <View style={[styles.checkbox, consent && styles.checkboxActive]}>
               {consent && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
             </View>
-            <Text style={styles.consentText}>{t.registration.idConsentLabel}</Text>
+            <Text style={styles.consentText}>{idText.consentLabel}</Text>
           </TouchableOpacity>
           {consentHint && !consent ? <Text style={styles.errorText}>{t.registration.idConsentRequired}</Text> : null}
 
@@ -211,10 +266,12 @@ export default function PhilHealthIdStep({
           <PrimaryButton
             testID="id-scan-btn"
             icon="scan-outline"
-            label={t.registration.idScanBtn}
+            label={idText.scanBtn}
             dimmed={!consent}
             onPress={() => void startScan(false)}
           />
+
+          <ChooseDifferentIdLink onPress={chooseDifferentId} />
         </View>
       )}
 
@@ -243,7 +300,7 @@ export default function PhilHealthIdStep({
           {offline ? (
             <OfflineCard />
           ) : lastReason ? (
-            <Text style={styles.body}>{t.registration[retryMessageKey(lastReason)] as string}</Text>
+            <Text style={styles.body}>{t.registration[retryMessageKey(lastReason, documentType)] as string}</Text>
           ) : null}
 
           {useFallback ? <Banner icon="camera-outline" text={t.registration.idScannerUnavailable} tone="info" /> : null}
@@ -287,6 +344,8 @@ export default function PhilHealthIdStep({
               </TouchableOpacity>
             </View>
           ) : null}
+
+          <ChooseDifferentIdLink onPress={chooseDifferentId} />
         </View>
       )}
 
@@ -322,6 +381,21 @@ export default function PhilHealthIdStep({
         <IdCameraFallback onCaptured={onFallbackCaptured} onCancel={closeFallback} onReportEmergency={reportEmergency} />
       </Modal>
     </View>
+  );
+}
+
+function ChooseDifferentIdLink({ onPress }: { onPress: () => void }) {
+  const t = useTranslations();
+  return (
+    <TouchableOpacity
+      testID="id-choose-different-btn"
+      style={styles.chooseDifferent}
+      onPress={onPress}
+      hitSlop={{ top: 8, bottom: 8 }}
+      accessibilityRole="button"
+    >
+      <Text style={styles.chooseDifferentText}>{t.registration.idChooseDifferent}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -418,6 +492,23 @@ const styles = StyleSheet.create({
   heading: { fontSize: 22, fontWeight: '800', color: '#111827', textAlign: 'center' },
   body: { fontSize: 15, color: '#4B5563', textAlign: 'center', lineHeight: 22 },
   attempt: { fontSize: 13, fontWeight: '700', color: '#B45309' },
+  chooseOption: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+  },
+  chooseText: { flex: 1 },
+  chooseLabel: { fontSize: 16, fontWeight: '800', color: '#111827' },
+  chooseHint: { fontSize: 13, color: '#4B5563', lineHeight: 19, marginTop: 2 },
+  chooseNeither: { alignSelf: 'stretch', fontSize: 13, color: '#4B5563', lineHeight: 19, textAlign: 'center' },
+  chooseDifferent: { alignItems: 'center', paddingVertical: 8 },
+  chooseDifferentText: { fontSize: 14, fontWeight: '700', color: '#0D6053', textDecorationLine: 'underline' },
   points: {
     alignSelf: 'stretch',
     gap: 10,

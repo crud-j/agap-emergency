@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { IdentityVerificationService } from '../../identity-verification/identity-verification.service';
 
 /**
- * MOD-01 / MOD-48: every 10 minutes, expire PhilHealth ID scans nobody registered with in
+ * MOD-01 / MOD-48: every 10 minutes, expire ID scans nobody registered with in
  * time, release cards held by accounts that never confirmed their phone, and delete every ID
  * image that is no longer needed (plan §5.2a), including deletes that failed earlier. Logs
  * counts only — never names, PINs or storage contents.

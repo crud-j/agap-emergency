@@ -1,16 +1,17 @@
 /**
- * PhilHealth ID verification at registration (MOD-01, docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md
- * §3–§4): the rules the registration screen follows, kept free of native modules so they can be
- * unit-tested. Name matching, PIN parsing and PhilHealth detection come from @agap/shared, the
- * same code the server decides with.
+ * ID verification at registration (MOD-01, docs/plans/PHILHEALTH_ID_VERIFICATION_PLAN.md §3–§4 and
+ * docs/plans/NATIONAL_ID_VERIFICATION_PLAN.md §4): the rules the registration screen follows, kept
+ * free of native modules so they can be unit-tested. Name matching, number parsing and card
+ * detection come from @agap/shared, the same code the server decides with.
  *
- * Nothing here logs. Text read from a card, the PIN and the name on the card are personal data.
+ * Nothing here logs. Text read from a card, its number and the name on it are personal data.
  */
 import {
+  ID_DOCUMENT_RULES,
   ID_SCAN_MAX_ATTEMPTS,
   IdVerificationErrorCode,
-  looksLikePhilHealthId,
   matchIdName,
+  type IdDocumentType,
   type IdName,
   type IdNameMatch,
   type IdProfileStatus,
@@ -18,7 +19,7 @@ import {
 import type { Translations } from '../i18n/translations';
 import { ApiError, NetworkError } from '../services/api/http';
 
-/** An API error the server tagged with a stable PhilHealth ID `code`. */
+/** An API error the server tagged with a stable ID verification `code`. */
 export class IdVerificationError extends ApiError {
   constructor(
     readonly code: IdVerificationErrorCode,
@@ -48,9 +49,10 @@ export function toIdVerificationError(err: unknown): unknown {
 
 /** Why a scan attempt didn't give a usable result: the server's codes plus what the app itself detects. */
 export type IdScanFailureReason =
-  /** The phone's own reading found no PhilHealth heading and PIN. */
+  /** The phone's own reading found no heading and number for the chosen ID. */
   | 'NOT_RECOGNISED'
   | 'NOT_PHILHEALTH_ID'
+  | 'NOT_NATIONAL_ID'
   | 'UNREADABLE'
   /** The picture couldn't be prepared, or the server refused its size or type. */
   | 'IMAGE_PROBLEM'
@@ -67,6 +69,8 @@ export function scanFailureFromError(err: unknown): IdScanFailureReason {
   switch (readIdVerificationCode(err.body)) {
     case IdVerificationErrorCode.NOT_PHILHEALTH_ID:
       return 'NOT_PHILHEALTH_ID';
+    case IdVerificationErrorCode.NOT_NATIONAL_ID:
+      return 'NOT_NATIONAL_ID';
     case IdVerificationErrorCode.UNREADABLE:
       return 'UNREADABLE';
     case IdVerificationErrorCode.IMAGE_TOO_LARGE:
@@ -85,10 +89,16 @@ export function scanFailureFromError(err: unknown): IdScanFailureReason {
 
 /**
  * Does this failure use up one of the citizen's attempts? Only a card that couldn't be read or
- * isn't a PhilHealth ID. A dropped connection or a server fault is not the citizen's scan.
+ * isn't the chosen ID. A dropped connection or a server fault is not the citizen's scan.
  */
 export function countsAsAttempt(reason: IdScanFailureReason): boolean {
-  return reason === 'NOT_RECOGNISED' || reason === 'NOT_PHILHEALTH_ID' || reason === 'UNREADABLE' || reason === 'IMAGE_PROBLEM';
+  return (
+    reason === 'NOT_RECOGNISED' ||
+    reason === 'NOT_PHILHEALTH_ID' ||
+    reason === 'NOT_NATIONAL_ID' ||
+    reason === 'UNREADABLE' ||
+    reason === 'IMAGE_PROBLEM'
+  );
 }
 
 /** "Send to MDRRMO for review" is offered once ID_SCAN_MAX_ATTEMPTS attempts failed. */
@@ -101,19 +111,37 @@ export function nextAttemptNumber(failedAttempts: number): number {
   return failedAttempts + 1;
 }
 
+type RegistrationKey = keyof Translations['registration'];
+
+/** The failures whose sentence names the chosen ID: whole sentences, because Filipino grammar doesn't survive substitution. */
+const CHOSEN_ID_MESSAGES: Record<IdDocumentType, Record<'notRecognised' | 'unreadable' | 'alreadyRegistered', RegistrationKey>> = {
+  PHILHEALTH: {
+    notRecognised: 'idErrorNotRecognised',
+    unreadable: 'idErrorUnreadable',
+    alreadyRegistered: 'idErrorAlreadyRegistered',
+  },
+  NATIONAL_ID: {
+    notRecognised: 'idErrorNotRecognisedNational',
+    unreadable: 'idErrorUnreadableNational',
+    alreadyRegistered: 'idErrorAlreadyRegisteredNational',
+  },
+};
+
 /** The registration string that explains a failure on the retry screen. */
-export function retryMessageKey(reason: IdScanFailureReason): keyof Translations['registration'] {
+export function retryMessageKey(reason: IdScanFailureReason, documentType: IdDocumentType): RegistrationKey {
   switch (reason) {
     case 'NOT_RECOGNISED':
-      return 'idErrorNotRecognised';
+      return CHOSEN_ID_MESSAGES[documentType].notRecognised;
     case 'NOT_PHILHEALTH_ID':
       return 'idErrorNotPhilHealth';
+    case 'NOT_NATIONAL_ID':
+      return 'idErrorNotNationalId';
     case 'UNREADABLE':
-      return 'idErrorUnreadable';
+      return CHOSEN_ID_MESSAGES[documentType].unreadable;
     case 'IMAGE_PROBLEM':
       return 'idErrorImage';
     case 'ID_ALREADY_REGISTERED':
-      return 'idErrorAlreadyRegistered';
+      return CHOSEN_ID_MESSAGES[documentType].alreadyRegistered;
     case 'OUTSIDE_SERVICE_AREA':
       return 'idErrorOutside';
     case 'CONSENT_REQUIRED':
@@ -130,9 +158,43 @@ export function retryMessageKey(reason: IdScanFailureReason): keyof Translations
  * read text at all (no text-recognition module): upload anyway and let the server decide.
  * The server reads the image again and is the only one that can verify.
  */
-export function localReadVerdict(text: string | null): 'ok' | 'not_recognised' | 'unknown' {
+export function localReadVerdict(text: string | null, documentType: IdDocumentType): 'ok' | 'not_recognised' | 'unknown' {
   if (text === null) return 'unknown';
-  return looksLikePhilHealthId(text) ? 'ok' : 'not_recognised';
+  return ID_DOCUMENT_RULES[documentType].looksLike(text) ? 'ok' : 'not_recognised';
+}
+
+/** How Privacy & Consent names each ID's number. English only, like the rest of that screen. */
+const ID_NUMBER_NAMES: Record<IdDocumentType, string> = {
+  PHILHEALTH: 'PhilHealth number',
+  NATIONAL_ID: 'National ID card number',
+};
+
+/**
+ * The Privacy & Consent card for the ID consents a citizen holds, or null when they hold none.
+ * Someone rejected on one card who verified with the other holds both, and gets one card naming both.
+ * Withdrawing either consent withdraws both and erases every row (plan §5.3), so `consentType` is
+ * simply the first one held.
+ */
+export function idConsentCard(granted: readonly IdDocumentType[]): {
+  consentType: string;
+  title: string;
+  whatWeKeep: string;
+  confirmTitle: string;
+  confirmBody: string;
+} | null {
+  const [first] = granted;
+  if (!first) return null;
+  const ids = granted.map((type) => ID_DOCUMENT_RULES[type].label).join(' and ');
+  const numbers = granted.map((type) => ID_NUMBER_NAMES[type]).join(' and ');
+  const lastDigits = granted.length > 1 ? 'their last 4 digits' : 'its last 4 digits';
+  const noPhilSysNumber = granted.includes('NATIONAL_ID') ? ' We never read your PhilSys Number.' : '';
+  return {
+    consentType: ID_DOCUMENT_RULES[first].consentType,
+    title: `${ids} Check`,
+    whatWeKeep: `We keep your ${numbers} only in a form that can't be read back, ${lastDigits}, and the name read from your ID, encrypted. Your ID image is deleted once the check is done.${noPhilSysNumber}`,
+    confirmTitle: `Withdraw ${ids} consent?`,
+    confirmBody: `We will erase your ${numbers}, the name read from your ID, and any stored image. Your account will show as not ID verified until you scan your ID again. You can still sign in and send an SOS.`,
+  };
 }
 
 /** The name parts the citizen typed, as an IdName, or null while last or first name is empty. */

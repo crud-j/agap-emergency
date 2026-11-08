@@ -1,10 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { ID_DOCUMENT_TYPES, type IdDocumentType } from '@agap/shared';
 
 /** Multipart fields sent with the ID image (POST /auth/id-verification). */
 export class IdScanDto {
-  @ApiProperty({ description: 'The citizen agreed to the PhilHealth ID check. Must be true.' })
+  @ApiPropertyOptional({ enum: ID_DOCUMENT_TYPES, description: 'The ID being scanned. Missing means PHILHEALTH: older app builds send none.' })
+  @IsOptional()
+  @IsIn(ID_DOCUMENT_TYPES)
+  documentType?: IdDocumentType;
+
+  @ApiProperty({ description: 'The citizen agreed to the check of this ID. Must be true.' })
   @IsOptional()
   // From the raw field: implicit conversion would already have turned the string 'false' into true.
   @Transform(({ obj }) => obj.consentGiven === true || obj.consentGiven === 'true')

@@ -8,7 +8,7 @@ const KEY_NAME = 'ID_DOCUMENT_ENCRYPTION_KEY';
 const PEPPER_NAME = 'ID_PIN_PEPPER';
 
 /**
- * Seals what AGAP keeps from a PhilHealth ID scan (MOD-01 / MOD-48): the name read from
+ * Seals what AGAP keeps from an ID scan (MOD-01 / MOD-48): the name read from
  * the card and the card image. Both are bound to their verification row (`aad`), so a
  * value copied onto another row fails to open. Its own key: rotating the MFA or medical
  * key never touches ID documents. The PIN is never sealed or stored, only HMAC'd.
@@ -63,7 +63,7 @@ export class IdDocumentCryptoService {
   }
 
   private notConfigured(): ServiceUnavailableException {
-    return new ServiceUnavailableException('PhilHealth ID verification is not configured on this server');
+    return new ServiceUnavailableException('ID verification is not configured on this server');
   }
 
   private aad(verificationId: string): string {

@@ -17,7 +17,7 @@ const TONE = {
 } as const;
 
 /**
- * The citizen's PhilHealth ID status on their profile (plan §8). Shows nothing until it has an
+ * The citizen's ID status on their profile (plan §8). Shows nothing until it has an
  * answer, and nothing on a failed request: it is information, and never in the way of getting help.
  */
 export function IdStatusCard() {

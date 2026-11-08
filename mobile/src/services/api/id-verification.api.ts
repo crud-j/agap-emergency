@@ -5,7 +5,7 @@ import { readJson } from './http';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
-/** The signed-in citizen's PhilHealth ID status, for their profile (plan §8). */
+/** The signed-in citizen's ID status, for their profile (plan §8). */
 export async function getIdVerificationStatus(): Promise<{ status: IdProfileStatus }> {
   return readJson(await authedFetch(`${API_BASE}/v1/auth/id-verification/status`));
 }
