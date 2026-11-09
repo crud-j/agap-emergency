@@ -31,6 +31,9 @@ const proxyApi = process.env.NODE_ENV !== 'production' || process.env.PROXY_API 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Optional: NEXT_DIST_DIR=.next-prod builds next to a running `next dev` without
+  // overwriting its .next folder. Unset = the usual .next.
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   // Empty base URL = same origin. Overrides any NEXT_PUBLIC_API_URL from .env files.
   ...(proxyApi ? { env: { NEXT_PUBLIC_API_URL: '', NEXT_PUBLIC_WS_URL: '' } } : {}),
   // Socket.io's path ends in a slash (/socket.io/?EIO=4…); Next would redirect it away.

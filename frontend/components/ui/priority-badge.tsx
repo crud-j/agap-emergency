@@ -1,11 +1,13 @@
 import type { JSX } from 'react';
+import { PRIORITY_LABELS } from '@agap/shared';
 import { cn } from '@/lib/utils';
 
+// Labels come from @agap/shared (MOD-24): priority sets the order of response, not whether one happens.
 const config: Record<string, { label: string; text: string; bg: string; dot: string }> = {
-  CRITICAL: { label: 'Critical', text: 'text-red-600',     bg: 'bg-red-50',     dot: 'bg-red-500' },
-  HIGH:     { label: 'High',     text: 'text-orange-600',  bg: 'bg-orange-50',  dot: 'bg-orange-500' },
-  MEDIUM:   { label: 'Medium',   text: 'text-amber-600',   bg: 'bg-amber-50',   dot: 'bg-amber-500' },
-  LOW:      { label: 'Low',      text: 'text-emerald-700', bg: 'bg-emerald-50', dot: 'bg-emerald-600' },
+  CRITICAL: { label: PRIORITY_LABELS.CRITICAL, text: 'text-red-600',     bg: 'bg-red-50',     dot: 'bg-red-500' },
+  HIGH:     { label: PRIORITY_LABELS.HIGH,     text: 'text-orange-600',  bg: 'bg-orange-50',  dot: 'bg-orange-500' },
+  MEDIUM:   { label: PRIORITY_LABELS.MEDIUM,   text: 'text-amber-600',   bg: 'bg-amber-50',   dot: 'bg-amber-500' },
+  LOW:      { label: PRIORITY_LABELS.LOW,      text: 'text-emerald-700', bg: 'bg-emerald-50', dot: 'bg-emerald-600' },
 };
 
 interface PriorityBadgeProps {

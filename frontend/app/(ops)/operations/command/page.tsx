@@ -14,7 +14,7 @@ import {
   type Column,
 } from '@/components/ui';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
-import { ACTIVE_STATUSES, titleCase } from '@/lib/incident-format';
+import { ACTIVE_STATUSES, titleCase, priorityLabel } from '@/lib/incident-format';
 import { useIncidents } from '@/features/incidents/hooks';
 import {
   useIncidentIcs,
@@ -650,7 +650,7 @@ export default function CommandPage(): JSX.Element {
         )}
         {selected && (
           <p className="mt-2 text-xs text-agap-textSub">
-            Priority: <strong>{selected.priority}</strong> · Status: <strong>{titleCase(selected.status)}</strong>
+            Priority: <strong>{priorityLabel(selected.priority)}</strong> · Status: <strong>{titleCase(selected.status)}</strong>
             {selected.incident_locations?.barangay && ` · ${selected.incident_locations.barangay}`}
           </p>
         )}

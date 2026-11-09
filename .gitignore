@@ -6,6 +6,7 @@ node_modules/
 dist/
 build/
 .next/
+.next-prod/
 .expo/
 out/
 
@@ -30,6 +31,7 @@ pnpm-debug.log*
 # OSRM routing data (multi-GB, built by infrastructure/osrm/build.sh)
 infrastructure/osrm/data/
 infrastructure/osrm/data.next/
+.next-prod/
 infrastructure/osrm/data.previous/
 
 # Coverage

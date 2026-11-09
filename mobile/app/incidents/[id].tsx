@@ -158,12 +158,19 @@ const C = {
   textSub:     '#6B7280',
   border:      '#E5E7EB',
   green:       '#16A34A',
+  greenText:   '#15803D',
   greenSoft:   '#DCFCE7',
   red:         '#DC2626',
+  redText:     '#B91C1C',
   redSoft:     '#FEF2F2',
   amber:       '#D97706',
+  // Small amber text needs this darker shade for 4.5:1 contrast on amberSoft / white.
+  amberText:   '#A35500',
   amberSoft:   '#FFFBEB',
 };
+
+/** Pads small controls to a 44 × 44 pt touch area without changing how they look. */
+const HIT_SLOP = { top: 6, bottom: 6, left: 6, right: 6 };
 
 const SHADOW = {
   shadowColor: '#1A2B4A',
@@ -188,19 +195,9 @@ function formatTime(iso: string) {
   });
 }
 
-function formatRelative(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return formatDate(iso);
-}
-
 function statusBadge(status: string): { bg: string; text: string; icon?: React.ComponentProps<typeof Ionicons>['name'] } {
-  if (TERMINAL_POSITIVE.has(status)) return { bg: C.greenSoft, text: C.green, icon: 'checkmark-circle' };
-  if (TERMINAL_NEGATIVE.has(status)) return { bg: C.redSoft, text: C.red, icon: 'close-circle' };
+  if (TERMINAL_POSITIVE.has(status)) return { bg: C.greenSoft, text: C.greenText, icon: 'checkmark-circle' };
+  if (TERMINAL_NEGATIVE.has(status)) return { bg: C.redSoft, text: C.redText, icon: 'close-circle' };
   if (ACTIVE_STATUSES.has(status))   return { bg: C.primarySoft, text: C.primary, icon: 'radio-button-on' };
   return { bg: '#F3F4F6', text: C.textSub };
 }
@@ -294,25 +291,35 @@ function OverviewTab({
 
       {/* Progress track — active only */}
       {isActive && (
-        <View style={styles.card}>
+        <View
+          style={styles.card}
+          accessible
+          accessibilityLabel={`Progress: ${CITIZEN_STEPS[Math.min(Math.max(stepIndex, 0), CITIZEN_STEPS.length - 1)]?.label ?? 'Submitted'}`}
+        >
+          {/* Each step is one equal column: the dot sits exactly above its label. */}
           <View style={styles.progressRow}>
             {CITIZEN_STEPS.map((step, i) => {
               const done    = i <= stepIndex;
               const current = i === stepIndex && isActive;
+              const last    = i === CITIZEN_STEPS.length - 1;
               return (
-                <React.Fragment key={step.key}>
-                  <View style={[styles.pDot, done && styles.pDotDone, current && styles.pDotCurrent]} />
-                  {i < CITIZEN_STEPS.length - 1 && (
-                    <View style={[styles.pLine, done && i < stepIndex && styles.pLineDone]} />
-                  )}
-                </React.Fragment>
+                <View key={step.key} style={styles.pStep}>
+                  <View style={styles.pTrack}>
+                    <View style={[styles.pLine, i === 0 && styles.pLineHidden, done && styles.pLineDone]} />
+                    <View style={[styles.pDot, done && styles.pDotDone, current && styles.pDotCurrent]} />
+                    <View style={[styles.pLine, last && styles.pLineHidden, i < stepIndex && styles.pLineDone]} />
+                  </View>
+                  <Text
+                    style={[styles.progressLabel, (done || current) && styles.progressLabelDone]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    {step.label}
+                  </Text>
+                </View>
               );
             })}
-          </View>
-          <View style={styles.progressLabels}>
-            {CITIZEN_STEPS.map((step) => (
-              <Text key={step.key} style={styles.progressLabel} numberOfLines={1}>{step.label}</Text>
-            ))}
           </View>
         </View>
       )}
@@ -360,7 +367,7 @@ function OverviewTab({
 
       {/* Emergency contact reminder */}
       <View style={styles.hotlineCard}>
-        <Ionicons name="call-outline" size={15} color={C.textSub} style={{ marginRight: 10 }} />
+        <Ionicons name="call-outline" size={16} color={C.textSub} style={styles.hotlineIcon} />
         <Text style={styles.hotlineText}>
           For immediate help, call <Text style={styles.hotlineNum}>911</Text> or the{' '}
           <Text style={styles.hotlineNum}>MDRRMO hotline</Text>.
@@ -487,10 +494,10 @@ function NotifRow({ notif, isLast }: { notif: IncidentNotificationEntry; isLast:
         <Ionicons
           name={sent ? 'checkmark-circle' : 'time-outline'}
           size={12}
-          color={sent ? C.green : C.amber}
-          style={{ marginRight: 3 }}
+          color={sent ? C.green : C.amberText}
+          style={{ marginRight: 4 }}
         />
-        <Text style={[styles.notifBadgeText, { color: sent ? C.green : C.amber }]}>
+        <Text style={[styles.notifBadgeText, { color: sent ? C.greenText : C.amberText }]}>
           {sent ? 'Sent' : notif.status}
         </Text>
       </View>
@@ -601,7 +608,6 @@ function ResolutionTab({
 }) {
   const res = raw.resolution;
   const canCancel = CANCELLABLE_STATUSES.has(raw.status);
-  const isTerminalPositive = TERMINAL_POSITIVE.has(raw.status);
   const isTerminalNegative = TERMINAL_NEGATIVE.has(raw.status);
 
   return (
@@ -612,7 +618,7 @@ function ResolutionTab({
             <Text style={styles.cardTitle}>Resolution</Text>
             <View style={[styles.badge, { backgroundColor: C.greenSoft }]}>
               <Ionicons name="checkmark-circle" size={12} color={C.green} style={{ marginRight: 4 }} />
-              <Text style={[styles.badgeText, { color: C.green }]}>Resolved</Text>
+              <Text style={[styles.badgeText, { color: C.greenText }]}>Resolved</Text>
             </View>
           </View>
 
@@ -652,7 +658,7 @@ function ResolutionTab({
             <Text style={styles.cardTitle}>Incident Status</Text>
             <View style={[styles.badge, { backgroundColor: C.redSoft }]}>
               <Ionicons name="close-circle" size={12} color={C.red} style={{ marginRight: 4 }} />
-              <Text style={[styles.badgeText, { color: C.red }]}>{STATUS_LABELS[raw.status] ?? raw.status}</Text>
+              <Text style={[styles.badgeText, { color: C.redText }]}>{STATUS_LABELS[raw.status] ?? raw.status}</Text>
             </View>
           </View>
           <Text style={styles.emptyText}>This incident was marked as {STATUS_LABELS[raw.status]?.toLowerCase() ?? 'terminal'}.</Text>
@@ -684,7 +690,7 @@ function ResolutionTab({
       )}
 
       <View style={styles.hotlineCard}>
-        <Ionicons name="call-outline" size={15} color={C.textSub} style={{ marginRight: 10 }} />
+        <Ionicons name="call-outline" size={16} color={C.textSub} style={styles.hotlineIcon} />
         <Text style={styles.hotlineText}>
           For immediate help, call <Text style={styles.hotlineNum}>911</Text> or the{' '}
           <Text style={styles.hotlineNum}>MDRRMO hotline</Text>.
@@ -826,32 +832,32 @@ export default function IncidentDetailScreen() {
         <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
         <SafeAreaView style={{ flex: 1 }} edges={['top']}>
           <View style={styles.appBar}>
-            <TouchableOpacity onPress={handleBack} style={styles.backBtn} accessibilityLabel="Back">
+            <TouchableOpacity onPress={handleBack} style={styles.backBtn} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Back">
               <Ionicons name="chevron-back" size={22} color={C.navy} />
             </TouchableOpacity>
           </View>
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-            <Ionicons name="alert-circle-outline" size={44} color={C.red} />
-            <Text style={[styles.incidentTitle, { marginTop: 16, textAlign: 'center' }]}>
-              Could not load incident
-            </Text>
-            <Text style={[styles.infoLabel, { textAlign: 'center', marginTop: 6, marginBottom: 24 }]}>
-              {errorMessage}
-            </Text>
+          <View style={styles.errorWrap}>
+            <Ionicons name="alert-circle-outline" size={48} color={C.red} />
+            <Text style={styles.errorTitle}>Could not load incident</Text>
+            <Text style={styles.errorSub}>{errorMessage}</Text>
             {needsSignIn ? (
               <TouchableOpacity
-                style={[styles.liveCard, { paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14 }]}
+                style={styles.primaryBtn}
                 onPress={() => router.replace('/auth/login')}
+                activeOpacity={0.85}
+                accessibilityRole="button"
               >
-                <Text style={styles.liveLabel}>Sign in</Text>
+                <Text style={styles.primaryBtnText}>Sign in</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={[styles.liveCard, { paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14 }]}
+                style={[styles.primaryBtn, !id && { opacity: 0.5 }]}
                 onPress={() => refetch()}
                 disabled={!id}
+                activeOpacity={0.85}
+                accessibilityRole="button"
               >
-                <Text style={styles.liveLabel}>Retry</Text>
+                <Text style={styles.primaryBtnText}>Retry</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -881,7 +887,7 @@ export default function IncidentDetailScreen() {
 
         {/* App bar */}
         <View style={styles.appBar}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn} accessibilityLabel="Back">
+          <TouchableOpacity onPress={handleBack} style={styles.backBtn} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Back">
             <Ionicons name="chevron-back" size={22} color={C.navy} />
           </TouchableOpacity>
 
@@ -900,7 +906,7 @@ export default function IncidentDetailScreen() {
             {/* Online indicator */}
             <View style={styles.onlineChip}>
               <View style={[styles.onlineDot, { backgroundColor: isOnline ? '#4ADE80' : '#9CA3AF' }]} />
-              <Text style={[styles.onlineText, { color: isOnline ? C.green : C.textSub }]}>
+              <Text style={[styles.onlineText, { color: isOnline ? C.greenText : C.textSub }]}>
                 {isOnline ? 'Online' : 'Offline'}
               </Text>
             </View>
@@ -908,6 +914,7 @@ export default function IncidentDetailScreen() {
             <TouchableOpacity
               style={styles.bellBtn}
               onPress={() => router.push('/notifications' as any)}
+              accessibilityRole="button"
               accessibilityLabel="Notifications"
             >
               <Ionicons name="notifications-outline" size={22} color={C.navy} />
@@ -920,8 +927,8 @@ export default function IncidentDetailScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.pageTitle}>Incident Details</Text>
           </View>
-          <TouchableOpacity style={styles.shareBtn} onPress={handleShare} accessibilityLabel="Share report">
-            <Ionicons name="share-outline" size={15} color={C.primary} style={{ marginRight: 5 }} />
+          <TouchableOpacity style={styles.shareBtn} onPress={handleShare} hitSlop={HIT_SLOP} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Share report">
+            <Ionicons name="share-outline" size={16} color={C.primary} style={{ marginRight: 6 }} />
             <Text style={styles.shareBtnText}>Share Report</Text>
           </TouchableOpacity>
         </View>
@@ -963,9 +970,9 @@ export default function IncidentDetailScreen() {
         {/* Stale + refreshing indicator */}
         {isStale && !isRefetching && (
           <View style={styles.staleBanner}>
-            <Ionicons name="time-outline" size={12} color={C.amber} />
+            <Ionicons name="time-outline" size={14} color={C.amberText} />
             <Text style={styles.staleText}>Data may be stale</Text>
-            <TouchableOpacity onPress={() => refetch()}>
+            <TouchableOpacity onPress={() => refetch()} style={styles.refreshBtn} hitSlop={HIT_SLOP} accessibilityRole="button">
               <Text style={styles.refreshLink}>Refresh</Text>
             </TouchableOpacity>
           </View>
@@ -977,6 +984,7 @@ export default function IncidentDetailScreen() {
           showsHorizontalScrollIndicator={false}
           style={styles.tabBar}
           contentContainerStyle={styles.tabBarContent}
+          accessibilityRole="tablist"
         >
           {TABS.map((tab) => {
             const active = activeTab === tab.key;
@@ -986,6 +994,9 @@ export default function IncidentDetailScreen() {
                 style={[styles.tab, active && styles.tabActive]}
                 onPress={() => setActiveTab(tab.key)}
                 activeOpacity={0.75}
+                hitSlop={{ top: 4, bottom: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
               >
                 <Text style={[styles.tabText, active && styles.tabTextActive]}>
                   {tab.label}
@@ -1029,12 +1040,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
+    minHeight: 56,
     backgroundColor: C.white,
     gap: 10,
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: C.bg,
   },
@@ -1044,11 +1056,11 @@ const styles = StyleSheet.create({
   onlineChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: C.bg, borderRadius: 20,
-    paddingHorizontal: 8, paddingVertical: 4,
+    paddingHorizontal: 10, minHeight: 28,
   },
-  onlineDot: { width: 7, height: 7, borderRadius: 3.5 },
-  onlineText: { fontSize: 10, fontWeight: '700' },
-  bellBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  onlineDot: { width: 8, height: 8, borderRadius: 4 },
+  onlineText: { fontSize: 12, fontWeight: '700' },
+  bellBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 
   // ── Page header ─────────────────────────────────────────────────────────────
   pageHeader: {
@@ -1057,61 +1069,63 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: 12,
+    gap: 12,
     backgroundColor: C.white,
   },
-  pageTitle:    { fontSize: 26, fontWeight: '800', color: C.navy, lineHeight: 32 },
+  pageTitle:    { fontSize: 24, fontWeight: '800', color: C.navy, lineHeight: 30 },
   shareBtn: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 7,
-    borderRadius: 20,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 14, minHeight: 36,
+    borderRadius: 18,
     borderWidth: 1, borderColor: `${C.primary}30`,
     backgroundColor: C.primarySoft,
   },
-  shareBtnText: { fontSize: 12, fontWeight: '700', color: C.primary },
+  shareBtnText: { fontSize: 13, fontWeight: '700', color: C.primary },
 
   // ── Incident card ────────────────────────────────────────────────────────────
   incidentCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginHorizontal: 16,
-    marginBottom: 10,
-    padding: 14,
+    marginBottom: 12,
+    padding: 16,
     backgroundColor: C.white,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: C.border,
     ...SHADOW,
   },
-  incidentCardLeft: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginRight: 8 },
+  incidentCardLeft: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginRight: 10 },
   typeIconCircle: {
     width: 48, height: 48, borderRadius: 24,
     alignItems: 'center', justifyContent: 'center',
     flexShrink: 0,
   },
-  incidentTitle: { fontSize: 15, fontWeight: '800', color: C.navy, marginBottom: 3 },
-  incidentRef:   { fontSize: 12, fontWeight: '700', color: C.primary, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginBottom: 5 },
-  incidentMeta:  { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  incidentMetaText: { fontSize: 11, color: C.textSub, flex: 1 },
-  incidentCardRight: { alignItems: 'flex-end', gap: 8, flexShrink: 0 },
+  incidentTitle: { fontSize: 16, fontWeight: '800', color: C.navy, lineHeight: 22, marginBottom: 2 },
+  incidentRef:   { fontSize: 12, fontWeight: '700', color: C.primary, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginBottom: 6 },
+  incidentMeta:  { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
+  incidentMetaText: { fontSize: 12, color: C.textSub, flex: 1, lineHeight: 16 },
+  incidentCardRight: { alignItems: 'flex-end', gap: 8, flexShrink: 0, paddingTop: 2 },
 
   // ── Badge ────────────────────────────────────────────────────────────────────
   badge: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 9, paddingVertical: 5,
-    borderRadius: 20,
+    paddingHorizontal: 10, minHeight: 26,
+    borderRadius: 13,
   },
-  badgeText: { fontSize: 11, fontWeight: '700' },
+  badgeText: { fontSize: 12, fontWeight: '700' },
 
   // ── Stale banner ─────────────────────────────────────────────────────────────
   staleBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginHorizontal: 16, marginBottom: 8,
+    marginHorizontal: 16, marginBottom: 10,
     backgroundColor: C.amberSoft,
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 10, paddingLeft: 12, paddingRight: 4, minHeight: 40,
     borderWidth: 1, borderColor: 'rgba(217,119,6,0.20)',
   },
-  staleText:   { flex: 1, fontSize: 11, color: C.amber },
-  refreshLink: { fontSize: 11, fontWeight: '700', color: C.primary },
+  staleText:   { flex: 1, fontSize: 13, color: C.amberText, fontWeight: '600' },
+  refreshBtn:  { minHeight: 32, paddingHorizontal: 10, justifyContent: 'center' },
+  refreshLink: { fontSize: 13, fontWeight: '700', color: C.primary },
 
   // ── Tab bar ──────────────────────────────────────────────────────────────────
   tabBar: {
@@ -1120,22 +1134,23 @@ const styles = StyleSheet.create({
     borderBottomColor: C.border,
   },
   tabBarContent: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    gap: 6,
+    gap: 8,
   },
   tab: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    minHeight: 38,
+    justifyContent: 'center',
+    borderRadius: 19,
     backgroundColor: C.bg,
   },
   tabActive: { backgroundColor: C.navy },
-  tabText:   { fontSize: 13, fontWeight: '600', color: C.textSub },
+  tabText:   { fontSize: 14, fontWeight: '600', color: C.textMid },
   tabTextActive: { color: C.white, fontWeight: '700' },
 
   // ── Tab content wrapper ───────────────────────────────────────────────────────
-  tabContent: { padding: 14, gap: 12 },
+  tabContent: { padding: 16, gap: 12 },
 
   // ── Generic card ────────────────────────────────────────────────────────────
   card: {
@@ -1153,7 +1168,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   cardTitle: { fontSize: 15, fontWeight: '800', color: C.navy },
-  cardSub:   { fontSize: 11, color: C.textSub },
+  cardSub:   { fontSize: 12, color: C.textSub, fontWeight: '600' },
 
   // ── Description box ──────────────────────────────────────────────────────────
   descBox: {
@@ -1164,36 +1179,39 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
-  descText: { fontSize: 13, color: C.textMid, lineHeight: 20 },
+  descText: { fontSize: 14, color: C.textMid, lineHeight: 21 },
 
   // ── Info grid ────────────────────────────────────────────────────────────────
-  infoGrid: { gap: 10 },
-  infoRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  infoGrid: { gap: 14 },
+  infoRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
   infoIconWrap: {
-    width: 30, height: 30, borderRadius: 15,
+    width: 32, height: 32, borderRadius: 16,
     backgroundColor: C.primarySoft,
     alignItems: 'center', justifyContent: 'center',
     flexShrink: 0,
-    marginTop: 1,
   },
-  infoLabel: { fontSize: 11, color: C.textSub, fontWeight: '600', marginBottom: 1 },
-  infoValue: { fontSize: 13, color: C.navy, fontWeight: '600', lineHeight: 18 },
+  infoLabel: { fontSize: 12, color: C.textSub, fontWeight: '600', marginBottom: 2 },
+  infoValue: { fontSize: 14, color: C.navy, fontWeight: '600', lineHeight: 20 },
 
   // ── Progress track ───────────────────────────────────────────────────────────
-  progressRow:   { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  progressLabels:{ flexDirection: 'row', justifyContent: 'space-between' },
-  progressLabel: { flex: 1, fontSize: 9, color: C.textSub, textAlign: 'center', textTransform: 'uppercase', fontWeight: '600' },
-  pDot:    { width: 10, height: 10, borderRadius: 5, backgroundColor: C.border },
+  progressRow:   { flexDirection: 'row' },
+  pStep:         { flex: 1, alignItems: 'center' },
+  pTrack:        { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', height: 16 },
+  progressLabel: { marginTop: 8, paddingHorizontal: 2, fontSize: 12, color: C.textSub, textAlign: 'center', fontWeight: '600' },
+  progressLabelDone: { color: C.navy },
+  pDot:    { width: 12, height: 12, borderRadius: 6, backgroundColor: C.border },
   pDotDone:{ backgroundColor: C.primary },
-  pDotCurrent: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.white, borderWidth: 3, borderColor: C.primary },
+  pDotCurrent: { width: 16, height: 16, borderRadius: 8, backgroundColor: C.white, borderWidth: 3, borderColor: C.primary },
   pLine:   { flex: 1, height: 2, backgroundColor: C.border },
+  pLineHidden: { backgroundColor: 'transparent' },
   pLineDone: { backgroundColor: C.primary },
 
   // ── Live tracking card ───────────────────────────────────────────────────────
   liveCard: {
     backgroundColor: C.navy,
     borderRadius: 16,
-    padding: 14,
+    padding: 16,
+    minHeight: 72,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1205,8 +1223,8 @@ const styles = StyleSheet.create({
   liveIconWrap:  { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
   liveRow:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
   liveDot:       { width: 7, height: 7, borderRadius: 3.5 },
-  liveLabel:     { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.70)', textTransform: 'uppercase', letterSpacing: 0.4 },
-  liveEta:       { fontSize: 13, fontWeight: '700', color: C.white, lineHeight: 18 },
+  liveLabel:     { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.80)', textTransform: 'uppercase', letterSpacing: 0.4 },
+  liveEta:       { fontSize: 15, fontWeight: '700', color: C.white, lineHeight: 20 },
 
   // ── Timeline ─────────────────────────────────────────────────────────────────
   tlRow:   { flexDirection: 'row', alignItems: 'flex-start', minHeight: 52 },
@@ -1217,25 +1235,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   tlLine:  { flex: 1, width: 2, marginTop: 3, borderRadius: 1 },
-  tlBody:  { flex: 1, paddingLeft: 10, paddingBottom: 14 },
+  tlBody:  { flex: 1, paddingLeft: 12, paddingBottom: 16, paddingTop: 4 },
   tlTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  tlTitle: { fontSize: 13, fontWeight: '700', color: C.navy, flex: 1 },
-  tlTime:  { fontSize: 12, fontWeight: '600', color: C.textSub, marginLeft: 8 },
-  tlNote:  { fontSize: 12, color: C.textMid, lineHeight: 17, marginTop: 2 },
-  tlDate:  { fontSize: 11, color: C.textSub, marginTop: 2 },
+  tlTitle: { fontSize: 14, fontWeight: '700', color: C.navy, flex: 1, lineHeight: 20 },
+  tlTime:  { fontSize: 13, fontWeight: '600', color: C.textSub, marginLeft: 8 },
+  tlNote:  { fontSize: 13, color: C.textMid, lineHeight: 18, marginTop: 2 },
+  tlDate:  { fontSize: 12, color: C.textSub, marginTop: 2 },
 
   // ── Notifications ────────────────────────────────────────────────────────────
-  notifRow:    { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  notifRow:    { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, minHeight: 60 },
   notifBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   notifIconWrap: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: C.primarySoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  notifTitle:   { fontSize: 13, fontWeight: '700', color: C.navy },
-  notifChannel: { fontSize: 11, color: C.textSub, marginTop: 1 },
-  notifBadge:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20 },
-  notifBadgeText: { fontSize: 11, fontWeight: '700' },
+  notifTitle:   { fontSize: 14, fontWeight: '700', color: C.navy, lineHeight: 20 },
+  notifChannel: { fontSize: 12, color: C.textSub, marginTop: 2 },
+  notifBadge:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, minHeight: 26, borderRadius: 13 },
+  notifBadgeText: { fontSize: 12, fontWeight: '700' },
 
   // ── Map ──────────────────────────────────────────────────────────────────────
   mapContainer: {
@@ -1252,21 +1270,21 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: C.bg,
   },
-  mapFallbackText: { fontSize: 12, color: C.textSub, fontWeight: '500' },
+  mapFallbackText: { fontSize: 13, color: C.textSub, fontWeight: '600' },
   locationInfo: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
-    marginBottom: 6,
+    gap: 10,
+    marginBottom: 8,
   },
   locationAddress: { fontSize: 14, fontWeight: '700', color: C.navy, lineHeight: 20 },
-  locationSub:     { fontSize: 12, color: C.textSub, marginTop: 1 },
-  coordsRow:   { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  coordsText:  { fontSize: 11, color: C.textSub, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  locationSub:     { fontSize: 13, color: C.textSub, marginTop: 2 },
+  coordsRow:   { flexDirection: 'row', alignItems: 'center', marginTop: 4, paddingLeft: 1 },
+  coordsText:  { fontSize: 12, color: C.textSub, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 
   // ── Resolution ───────────────────────────────────────────────────────────────
   pendingWrap: { alignItems: 'center', paddingVertical: 20, gap: 10 },
-  emptyText:   { fontSize: 13, color: C.textSub, textAlign: 'center', lineHeight: 19 },
+  emptyText:   { fontSize: 14, color: C.textSub, textAlign: 'center', lineHeight: 20 },
 
   // ── Cancel ───────────────────────────────────────────────────────────────────
   cancelBtn: {
@@ -1279,15 +1297,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(220,38,38,0.22)',
   },
-  cancelBtnText: { fontSize: 15, fontWeight: '700', color: C.red },
+  cancelBtnText: { fontSize: 15, fontWeight: '700', color: C.redText },
 
   // ── Hotline ──────────────────────────────────────────────────────────────────
   hotlineCard: {
     flexDirection: 'row', alignItems: 'flex-start',
-    padding: 14, borderRadius: 12,
+    padding: 14, borderRadius: 14,
     backgroundColor: C.bg,
     borderWidth: 1, borderColor: C.border,
   },
-  hotlineText: { flex: 1, fontSize: 12, lineHeight: 18, color: C.textSub },
+  hotlineIcon: { marginRight: 10, marginTop: 2 },
+  hotlineText: { flex: 1, fontSize: 13, lineHeight: 20, color: C.textSub },
   hotlineNum:  { fontWeight: '700', color: C.textMid },
+
+  // ── Error state ──────────────────────────────────────────────────────────────
+  errorWrap:  { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingBottom: 56 },
+  errorTitle: { fontSize: 18, fontWeight: '800', color: C.navy, marginTop: 16, textAlign: 'center' },
+  errorSub:   { fontSize: 14, color: C.textSub, textAlign: 'center', lineHeight: 21, marginTop: 8, marginBottom: 24 },
+  primaryBtn: {
+    minHeight: 48, minWidth: 160, paddingHorizontal: 28,
+    borderRadius: 14, backgroundColor: C.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  primaryBtnText: { fontSize: 15, fontWeight: '700', color: C.white },
 });

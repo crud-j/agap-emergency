@@ -295,6 +295,9 @@ importers:
       socket.io-client:
         specifier: ^4.8.0
         version: 4.8.3(supports-color@8.1.1)
+      sweetalert2:
+        specifier: 11.26.25
+        version: 11.26.25
       tailwind-merge:
         specifier: ^2.5.2
         version: 2.6.1
@@ -305,6 +308,9 @@ importers:
         specifier: 5.0.15
         version: 5.0.15(@types/react@18.3.31)(immer@11.1.21)(react@18.3.1)(use-sync-external-store@1.7.0(react@18.3.1))
     devDependencies:
+      '@next/eslint-plugin-next':
+        specifier: 14.2.35
+        version: 14.2.35
       '@types/jest':
         specifier: ^29.5.13
         version: 29.5.14
@@ -8478,6 +8484,9 @@ packages:
 
   swagger-ui-dist@5.17.14:
     resolution: {integrity: sha512-CVbSfaLpstV65OnSjbXfVd6Sta3q3F7Cj/yYuvHMp1P90LztOLs6PfUnKEVAeiIVQt9u2SaPwv0LiH/OyMjHRw==}
+
+  sweetalert2@11.26.25:
+    resolution: {integrity: sha512-+hunCOJdJ6FLj04T9YSLvvZXRjsvIkTeTKP2e4VF8CaBias961BTnWiSFAy7F/CM5eq3QK2Rraoc5Gzftslvkg==}
 
   symbol-observable@4.0.0:
     resolution: {integrity: sha512-b19dMThMV4HVFynSAM1++gBHAbk2Tc/osgLIBZMKsyqh34jb2e8Os7T6ZW/Bt3pJFdBTd2JwAnAAEQV7rSNvcQ==}
@@ -19520,6 +19529,8 @@ snapshots:
       sax: 1.6.1
 
   swagger-ui-dist@5.17.14: {}
+
+  sweetalert2@11.26.25: {}
 
   symbol-observable@4.0.0: {}
 

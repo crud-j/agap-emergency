@@ -35,7 +35,7 @@ import { newOutboxItem, type OutboxItem } from '@/src/services/offline/transport
 import { ResponderHeader } from '@/src/components/responder/responder-header';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
-import { categoryIcon, categoryColor, priorityColor, titleCase } from '@/src/lib/incident-visuals';
+import { categoryIcon, categoryColor, priorityColor, priorityLabel, titleCase } from '@/src/lib/incident-visuals';
 import {
   isTransportOpenError, nextAssignmentActions, shouldShareLocation, type NextAction,
 } from '@/src/lib/assignment-progress';
@@ -540,7 +540,7 @@ export default function AssignmentDetailScreen() {
                 <Text style={styles.ref}>{incident?.public_reference ?? ''}</Text>
               </View>
               <View style={[styles.prioPill, { backgroundColor: priorityColor(incident?.priority) }]}>
-                <Text style={styles.prioText}>{titleCase(incident?.priority)}</Text>
+                <Text style={styles.prioText}>{priorityLabel(incident?.priority)}</Text>
               </View>
             </View>
 

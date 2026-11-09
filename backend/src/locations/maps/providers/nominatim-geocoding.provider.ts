@@ -77,6 +77,65 @@ export function toGeocodeCandidate(row: NominatimSearchRow): GeocodeCandidate | 
   };
 }
 
+type NominatimAddress = Record<string, string | undefined>;
+
+/** Address keys Nominatim uses for the named place itself (a hall, store, school, plant). */
+const PLACE_KEYS = [
+  'amenity', 'shop', 'office', 'building', 'healthcare', 'tourism', 'leisure',
+  'craft', 'man_made', 'historic', 'industrial', 'emergency',
+] as const;
+const STREET_KEYS = ['road', 'pedestrian', 'footway', 'path', 'cycleway'] as const;
+/**
+ * Barangays are OSM admin_level 10. In Bocaue they come back as `quarter`, elsewhere
+ * in the Philippines as `village`, `suburb` or `neighbourhood` — try them in that order.
+ */
+const BARANGAY_KEYS = ['quarter', 'village', 'suburb', 'neighbourhood', 'hamlet'] as const;
+/** Named subdivisions / sitios inside a barangay. */
+const SUBDIVISION_KEYS = ['residential', 'neighbourhood', 'hamlet', 'allotments'] as const;
+
+function firstOf(addr: NominatimAddress, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = addr[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Nominatim /reverse address → the parts a dispatcher reads, most specific first:
+ * place name, house number + street, subdivision, barangay, town, province.
+ * e.g. "MacArthur Highway, Antipona, Bocaue, Bulacan" or
+ * "Villa Zaragosa, Biñang 1st, Bocaue, Bulacan". Repeated names are dropped.
+ */
+export function describeNominatimAddress(addr: NominatimAddress = {}) {
+  const barangay = firstOf(addr, BARANGAY_KEYS) ?? null;
+  const municipality = addr.town ?? addr.city ?? addr.municipality ?? 'Bocaue';
+  const province = addr.state ?? addr.province ?? 'Bulacan';
+
+  const road = firstOf(addr, STREET_KEYS);
+  const street = road ? [addr.house_number?.trim(), road].filter(Boolean).join(' ') : undefined;
+  const place = firstOf(addr, PLACE_KEYS);
+  const subdivision = SUBDIVISION_KEYS
+    .map((key) => addr[key]?.trim())
+    .find((value) => value && value !== barangay);
+
+  const seen = new Set<string>();
+  const parts = [place, street, subdivision, barangay, municipality, province].filter((part): part is string => {
+    if (!part) return false;
+    const key = part.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    formattedAddress: parts.join(', ') || null,
+    barangay,
+    municipality,
+    province,
+  };
+}
+
 /**
  * OpenStreetMap / Nominatim geocoder (MOD-12, MOD-39). Default for AGAP: keeps
  * sensitive emergency coordinates off commercial geocoders (Rule 10) and can be
@@ -104,19 +163,9 @@ export class NominatimGeocodingProvider implements GeocodingProvider {
         headers: { 'User-Agent': NOMINATIM_USER_AGENT },
         timeout: 5000,
       });
-      const addr = response.data?.address ?? {};
-      const parts = [
-        addr.village ?? addr.suburb ?? addr.neighbourhood ?? addr.hamlet,
-        addr.town ?? addr.city ?? addr.municipality ?? 'Bocaue',
-        addr.state ?? 'Bulacan',
-      ].filter(Boolean);
-      return {
-        formattedAddress: parts.join(', ') || null,
-        barangay: addr.village ?? addr.suburb ?? addr.neighbourhood ?? null,
-        municipality: addr.town ?? addr.city ?? 'Bocaue',
-        province: addr.state ?? 'Bulacan',
-        raw: response.data,
-      };
+      // Street, subdivision and named place are kept, not only the barangay, so the
+      // dispatcher and crew see where on the barangay the emergency is (MOD-12).
+      return { ...describeNominatimAddress(response.data?.address ?? {}), raw: response.data };
     } catch (err) {
       this.logger.warn(`Geocoding failed for ${lat},${lng}: ${String(err)}`);
       return { formattedAddress: null, barangay: null, municipality: 'Bocaue', province: 'Bulacan' };

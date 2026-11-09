@@ -3,6 +3,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
 import { AuthGate } from '@/components/layout/AuthGate';
 import { RouteGuard } from '@/components/layout/RouteGuard';
+import { PerformanceWorkers } from '@/components/layout/PerformanceWorkers';
 import sidebarStyles from '@/components/layout/Sidebar.module.css';
 
 /** Ops shell — wraps all Operations Center routes with Sidebar + Topbar. */
@@ -15,6 +16,7 @@ export default function OpsLayout({ children }: { children: ReactNode }): JSX.El
           <Topbar />
           <main className={`flex-1 overflow-y-auto p-6 ${sidebarStyles.main}`}><RouteGuard>{children}</RouteGuard></main>
         </div>
+        <PerformanceWorkers />
       </div>
     </AuthGate>
   );

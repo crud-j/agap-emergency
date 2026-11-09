@@ -121,6 +121,57 @@ describe('IncidentsService', () => {
       expect(result).toBeDefined();
     });
 
+    describe('similar report nearby (MOD-26 hint to the reporter)', () => {
+      const guestNear = () => ({
+        type: IncidentType.MEDICAL,
+        idempotencyKey: uuidv4(),
+        reporter: { type: ReporterType.GUEST_REPORTER },
+        lat: 14.7963,
+        lng: 120.9272,
+      });
+      afterEach(() => jest.restoreAllMocks());
+
+      it('tells a bystander an earlier report there is already being assessed', async () => {
+        const earlier = mockIncident({
+          status: IncidentStatus.ASSESSED,
+          public_reference: 'INC-2026-000777',
+          submitted_at: new Date(Date.now() - 6 * 60_000),
+        });
+        jest.spyOn(DuplicateDetectionService.prototype, 'findNearbyRecent').mockResolvedValue(earlier as any);
+
+        const result = await service.create(guestNear(), undefined);
+
+        expect(result.similar_report).toEqual({ stage: 'ASSESSING', minutesAgo: 6 });
+        // Rule 15: nothing about the other report or its reporter leaks.
+        expect(JSON.stringify(result.similar_report)).not.toContain('INC-2026-000777');
+        // Advisory only: the new report is still saved as its own incident.
+        expect(mockPrisma.$transaction).toHaveBeenCalled();
+      });
+
+      it('gives a registered citizen the same hint', async () => {
+        const earlier = mockIncident({ status: IncidentStatus.EN_ROUTE, submitted_at: new Date() });
+        jest.spyOn(DuplicateDetectionService.prototype, 'findNearbyRecent').mockResolvedValue(earlier as any);
+
+        const result = await service.create({ ...guestNear(), reporter: undefined }, 'user-1', UserRole.CITIZEN);
+
+        expect(result.similar_report?.stage).toBe('RESPONDING');
+      });
+
+      it('sends no hint when nothing similar is nearby', async () => {
+        jest.spyOn(DuplicateDetectionService.prototype, 'findNearbyRecent').mockResolvedValue(null);
+        const result = await service.create(guestNear(), undefined);
+        expect(result.similar_report).toBeUndefined();
+      });
+
+      it('still saves the report when the duplicate lookup fails', async () => {
+        jest.spyOn(DuplicateDetectionService.prototype, 'findNearbyRecent').mockRejectedValue(new Error('postgis down'));
+        const result = await service.create(guestNear(), undefined);
+        expect(result).toBeDefined();
+        expect(result.similar_report).toBeUndefined();
+        expect(mockPrisma.$transaction).toHaveBeenCalled();
+      });
+    });
+
     it('returns the existing incident on a duplicate idempotency key', async () => {
       const idempotencyKey = uuidv4();
       const existing = mockIncident({ client_event_id: idempotencyKey });
@@ -428,6 +479,24 @@ describe('IncidentsService', () => {
         intake: { answers: { trapped: ['unknown'] } },
       });
       expect(tx.incident.create.mock.calls[0][0].data.priority).toBe(IncidentPriority.HIGH);
+    });
+
+    // MOD-24 / Rule 8: a reporter sends facts, never a priority.
+    it.each([
+      ['a guest', undefined, undefined],
+      ['a citizen', 'citizen-1', UserRole.CITIZEN],
+    ])('ignores a priority sent by %s and keeps the recommendation', async (_who, actorId, role) => {
+      for (const sent of [IncidentPriority.CRITICAL, IncidentPriority.LOW]) {
+        const tx = captureTx();
+        await service.create({ ...base(), type: IncidentType.FIRE, priority: sent }, actorId, role);
+        expect(tx.incident.create.mock.calls[0][0].data.priority).toBe(IncidentPriority.HIGH);
+      }
+    });
+
+    it.each([UserRole.DISPATCHER, UserRole.SUPERVISOR])('lets a %s set the priority at creation', async (role) => {
+      const tx = captureTx();
+      await service.create({ ...base(), type: IncidentType.FIRE, priority: IncidentPriority.LOW }, 'staff-1', role);
+      expect(tx.incident.create.mock.calls[0][0].data.priority).toBe(IncidentPriority.LOW);
     });
 
     it('stores the landmark and reporter status, and creates no patient for a safe reporter', async () => {

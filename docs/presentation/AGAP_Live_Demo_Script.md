@@ -120,8 +120,8 @@ Jhobert: the **priority suggestion** and the reasons behind it. The dispatcher c
 - 📱 Phone C (bystander) sends a **second Road incident** from the same room. It must be within 15 minutes and 200 m of the first report to count as a possible duplicate.
 - 🖥️ **Triage** → the newer report → **Possible duplicates** → **Merge** → **Confirm merge**. Two reports become one incident. Merge right away: an unmerged report also escalates after 2 minutes. *(25)*
 - On the main report: **Acknowledge → Assess · ready for dispatch**. Together with Step 3's **Mark received**, each step is timestamped and attributed to the dispatcher. *(24)*
-- 🖥️ **Dispatch**: units are ranked by distance, capability and type, with reasons. *(29)* The capability-match line shows only **verified** capabilities. *(28)*
-- Pick **ALPHA-2**, open **Assign Crew** → **responder2**, then **Authorize Dispatch**. Say: *"The system suggests; the dispatcher decides."* *(30)*
+- 🖥️ **Dispatch**: the panel has three steps. **1 Choose units** lists units ranked by distance, capability and type; open **Why these units?** for the reasons. *(29)* The skills line ("Has 2 of 3 needed skills") counts only **verified** capabilities. *(28)*
+- Pick **ALPHA-2**. In **2 Check the crew**, open **Add or change crew** → **responder2**. In **3 Send**, click **Authorize Dispatch** and confirm. Say: *"The system suggests; the dispatcher decides."* *(30)*
 - **Fleet & Units**: ALPHA-2 now shows **Dispatched**. *(27)*
 
 ### Step 5. The crew is notified: Jhobert, then Christian (MOD-18, 31)

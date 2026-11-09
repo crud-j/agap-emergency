@@ -39,6 +39,7 @@ import { SubmitFireReportDto } from './fire-report/dto/submit-fire-report.dto';
 import { SubmitRescueTripDto } from './rescue-trip/dto/submit-rescue-trip.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import { GuestReportLimitInterceptor } from '../emergency-alerts/guest-report-limit/guest-report-limit.interceptor';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole, IncidentStatus } from '@agap/shared';
@@ -91,10 +92,13 @@ export class IncidentsController {
 
   @Post()
   @UseGuards(OptionalJwtAuthGuard)
+  // Guests only: per-phone and per-network caps so a bystander cannot flood the queue.
+  @UseInterceptors(GuestReportLimitInterceptor)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Report a new emergency incident (auth optional)' })
   @ApiResponse({ status: 201, description: 'Incident created' })
   @ApiResponse({ status: 409, description: 'Duplicate idempotency key (returns existing incident)' })
+  @ApiResponse({ status: 429, description: 'Guest report limit reached (no account); call 911 / MDRRMO or sign in' })
   async create(@Body() dto: CreateIncidentDto, @Request() req: any) {
     const actorId = req.user?.id ?? undefined;
     return this.incidentsService.create(dto, actorId, req.user?.role);

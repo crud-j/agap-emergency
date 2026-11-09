@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { ACTIVE_INCIDENT_STATUSES } from '@agap/shared';
+export { priorityLabel } from '@agap/shared';
 import {
   Activity,
   Car,

@@ -22,7 +22,7 @@ import { AmbulanceMarker } from '@/components/map/AmbulanceMarker';
 import { CitizenMarker, reporterLabel } from '@/components/map/CitizenMarker';
 import { HospitalMarker } from '@/components/map/HospitalMarker';
 import { LEG_COLORS, LegChip } from '@/components/map/LegChip';
-import { titleCase } from '@/lib/incident-format';
+import { titleCase, priorityLabel } from '@/lib/incident-format';
 import { useNow } from '@/lib/use-now';
 import { formatAge, isUnitOnMap, type LegChip as LegChipData } from '@/features/map/live-tracking';
 import type { LiveResponderPosition } from '@/features/map/api';
@@ -523,7 +523,7 @@ export function IncidentMapView({
             <div className="text-xs">
               <div className="font-bold text-[#1C2B3A]">{titleCase(selectedInc.category)}</div>
               <div className="font-mono text-[10px] text-[#8795A3]">{selectedInc.public_reference}</div>
-              <div className="text-[#40536D]">{titleCase(selectedInc.priority)} · {titleCase(selectedInc.status)}</div>
+              <div className="text-[#40536D]">{priorityLabel(selectedInc.priority)} · {titleCase(selectedInc.status)}</div>
               <div className="mt-0.5 text-[10px] text-[#40536D]">
                 {reporterLabel(selectedInc.reporter_sex, selectedInc.reporter_is_guest)}
               </div>

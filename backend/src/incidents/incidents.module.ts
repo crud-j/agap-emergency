@@ -21,6 +21,7 @@ import { BarangayCoordinationModule } from '../barangay-coordination/barangay-co
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EmergencyAlertsModule } from '../emergency-alerts/emergency-alerts.module';
 import { LocationsModule } from '../locations/locations.module';
+import { GuestReportLimitModule } from '../emergency-alerts/guest-report-limit/guest-report-limit.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
@@ -36,6 +37,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     EmergencyAlertsModule,
     LocationsModule,
     TransportLegModule,
+    GuestReportLimitModule,
   ],
   controllers: [IncidentsController],
   providers: [

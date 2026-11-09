@@ -40,7 +40,7 @@ Decision support, not decision-making: the system never decides which unit goes,
 |---|---|---|
 | 1 | A dispatcher's memory of who's typically free, or a round of phone calls asking | The incident's category and location |
 | 2 | Whatever a unit says about its own distance and availability when called | Each Available unit's verified capabilities, unit type and base location |
-| 3 | No consistent method as the number of organizations and units grows | The ranked output: a scored list of suitable units with the reasoning behind each rank |
+| 3 | No consistent method as the number of organizations and units grows | The ranked output: an ordered list of suitable units with the reasoning behind each rank |
 
 ---
 
@@ -82,7 +82,7 @@ Decision support, not decision-making: the system never decides which unit goes,
 | 4 | PostGIS calculates the distance from each unit's base to the incident location. | Processing |
 | 5 | The backend combines capability match (50%), distance (35%) and unit-type fit (15%) into a score and sorts the units by it. | Processing |
 | 6 | The backend returns a ranked list with the reasoning for each entry (e.g. "Capability match: 2/3 required", "Distance: 1.2km", "Type: Ambulance (strong match for medical incidents)"). | Database |
-| 7 | The Dispatch screen displays the ranking; the dispatcher may accept the top recommendation or pick any other unit instead. | User Action |
+| 7 | The Dispatch screen displays the ranking as numbered suggestions (1, 2, 3…) showing each unit's type, distance and skills match, with the full reasons under "Why these units?"; the score itself is used only for ordering and is not shown. The dispatcher may accept the top recommendation or pick any other unit instead. | User Action |
 
 **TO-BE Outputs**
 
@@ -97,10 +97,11 @@ Decision support, not decision-making: the system never decides which unit goes,
 ## Owner notes (not part of the report)
 
 **Test before signing:**
-1. Open an Assessed incident → Dispatch and confirm the ranked unit list shows each unit's reason (e.g. distance, capability, availability).
+1. Open an Assessed incident → Dispatch and confirm the ranked unit list shows each unit's type, distance and skills match, and that **Why these units?** opens each unit's reason.
 2. Deliberately select a lower-ranked unit instead of the top recommendation and confirm the dispatch still proceeds — proving the ranking is advisory, not enforced.
 
 **Do not claim:**
+- That the screen shows a points or percentage score for each unit. It shows only the rank number and the reasons; the score stays in the API response.
 - AI-validated or mathematically optimal unit selection — this is a rules-based score, and the dispatcher can always override it.
 - Automatic assignment — the ranking only informs MOD-31's dispatcher-authorized confirmation.
 - Implementation boundary: recommendations are advisory, not autonomous, AI-validated, or guaranteed to be the mathematically optimal choice — real-world factors a dispatcher knows and the software doesn't can always override it, by design.

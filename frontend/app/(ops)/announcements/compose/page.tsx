@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Check, CircleAlert, CloudRain, Construction, DoorOpen, Droplets,
-  ImagePlus, Megaphone, PencilLine, RotateCcw, School, Send, Waves, X,
+  ImagePlus, Megaphone, PencilLine, RotateCcw, School, Send, Sparkles, Waves, X,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -49,11 +49,18 @@ const TEMPLATE_ICONS: Record<string, LucideIcon> = {
 
 const SEVERITIES: Severity[] = ['INFORMATIONAL', 'ADVISORY', 'WARNING', 'CRITICAL'];
 
+// ui-ux-pro-max: visible focus, 3:1 control borders, 4.5:1 helper text,
+// 44px touch targets on small screens, motion only when the user allows it.
+const focusRing =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green focus-visible:ring-offset-2';
+
 const inputCls =
-  'w-full rounded-lg border border-[rgba(168,181,193,0.35)] bg-white px-3 py-2 text-sm text-agap-textMain ' +
-  'placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green focus:border-transparent';
+  'min-h-10 w-full rounded-lg border border-agap-fieldBorder bg-white px-3 py-2 text-sm text-agap-textMain ' +
+  'placeholder:text-agap-hint hover:border-agap-textMid motion-safe:transition-colors ' +
+  'focus:outline-none focus:border-agap-green focus:ring-2 focus:ring-agap-green/30';
 
 const labelCls = 'mb-1.5 block text-xs font-semibold text-agap-textMid';
+const hintCls = 'mt-1 text-xs leading-snug text-agap-hint';
 
 /** Persisted in `template_data` so a draft re-opens exactly as it was left. */
 interface ComposerState {
@@ -69,83 +76,164 @@ interface ComposerState {
 
 // ─── Small building blocks ────────────────────────────────────────────────────
 
-function Section({ step, title, hint, children }: { step: number; title: string; hint?: string; children: ReactNode }) {
+function Section({
+  step, title, hint, done, aside, children,
+}: { step: number; title: string; hint?: string | undefined; done?: boolean | undefined; aside?: ReactNode; children: ReactNode }) {
+  const headingId = `step-${step}-title`;
   return (
-    <section className="rounded-2xl border border-[rgba(168,181,193,0.25)] bg-white p-5">
-      <div className="mb-4 flex items-baseline gap-3">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-agap-textMain text-xs font-bold text-white">
-          {step}
+    <section aria-labelledby={headingId} className="rounded-2xl border border-agap-track bg-white p-5 shadow-card">
+      <div className="mb-4 flex items-start gap-3">
+        <span
+          className={cn(
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white motion-safe:transition-colors',
+            done ? 'bg-agap-green' : 'bg-agap-textMain',
+          )}
+        >
+          {done ? <Check size={14} aria-label={`Step ${step} done`} /> : step}
         </span>
-        <div>
-          <h2 className="text-sm font-bold text-agap-textMain">{title}</h2>
-          {hint && <p className="mt-0.5 text-xs text-agap-textSub">{hint}</p>}
+        <div className="min-w-0 flex-1">
+          <h2 id={headingId} className="text-[15px] font-bold leading-7 text-agap-textMain">{title}</h2>
+          {hint && <p className="text-xs leading-snug text-agap-hint">{hint}</p>}
         </div>
+        {aside}
       </div>
       {children}
     </section>
   );
 }
 
+/** Visible asterisk for sighted users, the word "required" for screen readers. */
+function RequiredMark() {
+  return (
+    <>
+      <span className="text-agap-danger" aria-hidden> *</span>
+      <span className="sr-only"> (required)</span>
+    </>
+  );
+}
+
+/** A toggle chip: selected state is shown by a check icon as well as colour. */
+function SelectChip({
+  on, onClick, icon, children, title,
+}: { on: boolean; onClick: () => void; icon?: ReactNode; children: ReactNode; title?: string | undefined }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      title={title}
+      onClick={onClick}
+      className={cn(
+        'inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold sm:min-h-9',
+        'motion-safe:transition-colors',
+        focusRing,
+        on
+          ? 'border-agap-green bg-agap-green text-white'
+          : 'border-agap-fieldBorder bg-white text-agap-textMid hover:border-agap-green hover:text-agap-textMain',
+      )}
+    >
+      {on ? <Check size={13} aria-hidden /> : icon}
+      {children}
+    </button>
+  );
+}
+
+/** Checkbox presented as a card; the whole card is the hit area. */
+function CheckCard({
+  id, checked, onChange, title, help, compact,
+}: { id: string; checked: boolean; onChange: (v: boolean) => void; title: ReactNode; help?: string | undefined; compact?: boolean | undefined }) {
+  return (
+    <label
+      htmlFor={id}
+      className={cn(
+        'flex min-h-11 cursor-pointer gap-2.5 rounded-lg border px-3 motion-safe:transition-colors',
+        'focus-within:ring-2 focus-within:ring-agap-green focus-within:ring-offset-1',
+        compact ? 'items-center py-2' : 'items-start py-2.5',
+        checked ? 'border-agap-green bg-agap-greenSoft' : 'border-agap-fieldBorder bg-white hover:border-agap-textMid',
+      )}
+    >
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-describedby={help ? `${id}-help` : undefined}
+        className={cn('h-4 w-4 shrink-0 accent-agap-green focus:outline-none', !compact && 'mt-0.5')}
+      />
+      <span className="min-w-0">
+        <span className={cn('block text-sm text-agap-textMain', compact ? 'font-medium' : 'font-semibold')}>{title}</span>
+        {help && <span id={`${id}-help`} className="mt-0.5 block text-xs leading-snug text-agap-hint">{help}</span>}
+      </span>
+    </label>
+  );
+}
+
+function SelectedCount({ n }: { n: number }) {
+  if (n === 0) return null;
+  return (
+    <span className="ml-1.5 rounded-full bg-agap-greenSoft px-1.5 py-0.5 text-[11px] font-bold text-agap-green">
+      {n} selected
+    </span>
+  );
+}
+
 function FieldInput({ f, value, onChange }: { f: TemplateField; value: Values[string]; onChange: (v: Values[string]) => void }) {
   const id = `f-${f.key}`;
-  const req = f.required ? <span className="text-agap-danger"> *</span> : null;
+  const helpId = f.help ? `${id}-help` : undefined;
+  const req = f.required ? <RequiredMark /> : null;
 
   if (f.type === 'checkbox') {
     return (
-      <label htmlFor={id} className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-[rgba(168,181,193,0.35)] px-3 py-2.5">
-        <input
-          id={id}
-          type="checkbox"
-          checked={value === true}
-          onChange={(e) => onChange(e.target.checked)}
-          className="mt-0.5 h-4 w-4 accent-agap-green"
-        />
-        <span>
-          <span className="text-sm font-semibold text-agap-textMain">{f.label}{req}</span>
-          {f.help && <span className="mt-0.5 block text-xs text-agap-textSub">{f.help}</span>}
-        </span>
-      </label>
+      <CheckCard
+        id={id}
+        checked={value === true}
+        onChange={(v) => onChange(v)}
+        title={<>{f.label}{req}</>}
+        help={f.help}
+      />
     );
   }
 
   if (f.type === 'multicheck') {
     const selected = Array.isArray(value) ? value : [];
     return (
-      <fieldset>
-        <legend className={labelCls}>{f.label}{req}</legend>
-        <div className="flex flex-wrap gap-1.5">
+      <fieldset aria-describedby={helpId}>
+        <legend className={cn(labelCls, 'flex items-center')}>
+          <span>{f.label}{req}</span>
+          <SelectedCount n={selected.length} />
+        </legend>
+        <div className="flex flex-wrap gap-2">
           {f.options?.map((o) => {
             const on = selected.includes(o.value);
             return (
-              <button
+              <SelectChip
                 key={o.value}
-                type="button"
-                aria-pressed={on}
+                on={on}
+                title={o.hint}
                 onClick={() => onChange(on ? selected.filter((s) => s !== o.value) : [...selected, o.value])}
-                className={cn(
-                  'rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors',
-                  on
-                    ? 'border-agap-green bg-agap-green text-white'
-                    : 'border-[rgba(168,181,193,0.35)] bg-white text-agap-textMid hover:border-agap-green',
-                )}
               >
                 {o.label}
-              </button>
+              </SelectChip>
             );
           })}
         </div>
+        {f.help && <p id={helpId} className={hintCls}>{f.help}</p>}
       </fieldset>
     );
   }
 
   const v = typeof value === 'string' ? value : '';
+  const common = {
+    id,
+    'aria-required': f.required || undefined,
+    'aria-describedby': helpId,
+  } as const;
   return (
     <div>
       <label htmlFor={id} className={labelCls}>{f.label}{req}</label>
       {f.type === 'textarea' ? (
-        <textarea id={id} rows={3} value={v} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value)} className={cn(inputCls, 'resize-y')} />
+        <textarea {...common} rows={3} value={v} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value)} className={cn(inputCls, 'resize-y')} />
       ) : f.type === 'select' ? (
-        <select id={id} value={v} onChange={(e) => onChange(e.target.value)} className={inputCls}>
+        <select {...common} value={v} onChange={(e) => onChange(e.target.value)} className={cn(inputCls, 'cursor-pointer')}>
           <option value="">Select…</option>
           {f.options?.map((o) => (
             <option key={o.value} value={o.value}>{o.hint ? `${o.label} — ${o.hint}` : o.label}</option>
@@ -153,7 +241,7 @@ function FieldInput({ f, value, onChange }: { f: TemplateField; value: Values[st
         </select>
       ) : (
         <input
-          id={id}
+          {...common}
           type={f.type === 'datetime' ? 'datetime-local' : f.type}
           step={f.step}
           value={v}
@@ -162,7 +250,7 @@ function FieldInput({ f, value, onChange }: { f: TemplateField; value: Values[st
           className={inputCls}
         />
       )}
-      {f.help && <p className="mt-1 text-xs text-agap-textSub">{f.help}</p>}
+      {f.help && <p id={helpId} className={hintCls}>{f.help}</p>}
     </div>
   );
 }
@@ -283,6 +371,7 @@ function Composer(): JSX.Element {
 
   const checks = template ? readiness(template, state.values, common, severity, { manualText: state.manual }) : [];
   const ready = !!template && checks.every((c) => c.ok) && text.title.trim().length >= 3 && text.body.trim().length > 0;
+  const checksDone = checks.filter((c) => c.ok).length;
 
   const setValue = (key: string, v: Values[string]) =>
     setState((s) => ({ ...s, values: { ...s.values, [key]: v } }));
@@ -461,11 +550,22 @@ function Composer(): JSX.Element {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_440px]">
         {/* ── Left: form ── */}
         <div className="min-w-0 space-y-4">
-          <Section step={1} title="What kind of announcement?">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          <Section
+            step={1}
+            title="What kind of announcement?"
+            done={!!template}
+            hint={
+              template
+                ? 'Switching templates clears the details in step 2.'
+                : 'Each template writes the headline, summary, full notice and push text from the details you confirm.'
+            }
+          >
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
               {TEMPLATES.map((t) => {
                 const Icon = TEMPLATE_ICONS[t.key] ?? Megaphone;
                 const on = templateKey === t.key;
+                const sev = severityMeta(t.defaultSeverity);
+                const SevIcon = sev.icon;
                 return (
                   <button
                     key={t.key}
@@ -473,21 +573,33 @@ function Composer(): JSX.Element {
                     aria-pressed={on}
                     onClick={() => !on && pickTemplate(t)}
                     className={cn(
-                      'flex items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors',
+                      'group relative flex min-h-[92px] flex-col gap-2 rounded-xl border p-3 text-left',
+                      'motion-safe:transition-[border-color,background-color,box-shadow]',
+                      focusRing,
                       on
-                        ? 'border-agap-green bg-agap-greenSoft'
-                        : 'border-[rgba(168,181,193,0.35)] bg-white hover:border-agap-green/60',
+                        ? 'border-agap-green bg-agap-greenSoft ring-1 ring-agap-green'
+                        : 'border-agap-track bg-white hover:border-agap-green/70 hover:shadow-card',
                     )}
                   >
-                    <span className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                      on ? 'bg-agap-green text-white' : 'bg-agap-surface text-agap-textMid',
-                    )}>
-                      <Icon size={16} aria-hidden />
+                    {on && (
+                      <span className="absolute right-2.5 top-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-agap-green text-white">
+                        <Check size={12} aria-hidden />
+                      </span>
+                    )}
+                    <span className="flex items-start gap-3 pr-6">
+                      <span className={cn(
+                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg motion-safe:transition-colors',
+                        on ? 'bg-agap-green text-white' : 'bg-agap-surface text-agap-textMid group-hover:text-agap-green',
+                      )}>
+                        <Icon size={17} aria-hidden />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold leading-snug text-agap-textMain">{t.label}</span>
+                        <span className="mt-0.5 block text-xs leading-snug text-agap-hint">{t.description}</span>
+                      </span>
                     </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold text-agap-textMain">{t.label}</span>
-                      <span className="mt-0.5 block text-xs leading-snug text-agap-textSub">{t.description}</span>
+                    <span className={cn('mt-auto inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold', sev.soft, sev.text)}>
+                      <SevIcon size={11} aria-hidden /> Starts as {sev.label}
                     </span>
                   </button>
                 );
@@ -498,7 +610,7 @@ function Composer(): JSX.Element {
           {template && (
             <>
               <Section step={2} title="Confirmed details" hint="Enter only verified information. Leave optional fields blank rather than guessing.">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-x-3 gap-y-4 sm:grid-cols-2">
                   {visibleFields(template, state.values).map((f) => (
                     <div key={f.key} className={cn(!f.half && 'sm:col-span-2')}>
                       <FieldInput f={f} value={state.values[f.key]} onChange={(v) => setValue(f.key, v)} />
@@ -507,104 +619,109 @@ function Composer(): JSX.Element {
                 </div>
 
                 {template.usesActions && (
-                  <div className="mt-4 border-t border-agap-surface pt-4">
-                    <p className={labelCls}>Instructions to residents</p>
-                    <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                  <fieldset className="mt-5 border-t border-agap-surface pt-4">
+                    <legend className={cn(labelCls, 'flex items-center')}>
+                      <span>Instructions to residents</span>
+                      <SelectedCount n={state.actions.length} />
+                    </legend>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {Object.entries(SAFETY_ACTIONS).map(([key, a]) => {
                         const on = state.actions.includes(key);
                         return (
-                          <label key={key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-agap-textMid hover:bg-agap-pearl">
-                            <input
-                              type="checkbox"
-                              checked={on}
-                              onChange={() =>
-                                setState((s) => ({
-                                  ...s,
-                                  actions: on ? s.actions.filter((x) => x !== key) : [...s.actions, key],
-                                }))
-                              }
-                              className="h-4 w-4 accent-agap-green"
-                            />
-                            {a.label}
-                          </label>
+                          <CheckCard
+                            key={key}
+                            id={`action-${key}`}
+                            compact
+                            checked={on}
+                            onChange={() =>
+                              setState((s) => ({
+                                ...s,
+                                actions: on ? s.actions.filter((x) => x !== key) : [...s.actions, key],
+                              }))
+                            }
+                            title={a.label}
+                          />
                         );
                       })}
                     </div>
+                    <label htmlFor="extraAction" className={cn(labelCls, 'mt-3')}>
+                      Other instructions <span className="font-normal text-agap-hint">(optional)</span>
+                    </label>
                     <textarea
+                      id="extraAction"
                       rows={2}
                       value={state.extraAction}
                       onChange={(e) => setState((s) => ({ ...s, extraAction: e.target.value }))}
                       placeholder="Other verified instructions — one per line"
-                      className={cn(inputCls, 'mt-2 resize-y')}
+                      aria-describedby="extraAction-help"
+                      className={cn(inputCls, 'resize-y')}
                     />
-                  </div>
+                    <p id="extraAction-help" className={hintCls}>Each line becomes its own instruction in the notice.</p>
+                  </fieldset>
                 )}
               </Section>
 
               <Section step={3} title="Area, issuer and source">
                 <div className="space-y-4">
-                  <div>
-                    <p className={labelCls}>
-                      Affected area{template.requiresArea && <span className="text-agap-danger"> *</span>}
-                    </p>
-                    <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm font-medium text-agap-textMain">
-                      <input
-                        type="checkbox"
-                        checked={state.wholeMunicipality}
-                        onChange={(e) => setState((s) => ({ ...s, wholeMunicipality: e.target.checked }))}
-                        className="h-4 w-4 accent-agap-green"
-                      />
-                      Buong Bocaue (municipality-wide)
-                    </label>
+                  <fieldset>
+                    <legend className={cn(labelCls, 'flex items-center')}>
+                      <span>Affected area{template.requiresArea && <RequiredMark />}</span>
+                      {!state.wholeMunicipality && <SelectedCount n={barangays.length} />}
+                    </legend>
+                    <CheckCard
+                      id="wholeMunicipality"
+                      checked={state.wholeMunicipality}
+                      onChange={(v) => setState((s) => ({ ...s, wholeMunicipality: v }))}
+                      title="Buong Bocaue (municipality-wide)"
+                      help={state.wholeMunicipality ? 'Uncheck to choose specific barangays.' : 'Choose the affected barangays below.'}
+                    />
                     {!state.wholeMunicipality && (
-                      <>
-                        <div className="flex flex-wrap gap-1.5">
+                      <div className="mt-3 rounded-xl bg-agap-pearl p-3">
+                        <div className="flex flex-wrap gap-2">
                           {BOCAUE_BARANGAYS.map((b) => {
                             const on = barangays.includes(b);
+                            const floodProne = (FLOOD_PRONE_BARANGAYS as readonly string[]).includes(b);
                             return (
-                              <button
+                              <SelectChip
                                 key={b}
-                                type="button"
-                                aria-pressed={on}
+                                on={on}
+                                title={floodProne ? 'Flood-prone barangay' : undefined}
+                                icon={floodProne ? <Droplets size={12} className="text-agap-info" aria-label="Flood-prone" /> : undefined}
                                 onClick={() => setBarangays((list) => (on ? list.filter((x) => x !== b) : [...list, b]))}
-                                className={cn(
-                                  'rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors',
-                                  on
-                                    ? 'border-agap-textMain bg-agap-textMain text-white'
-                                    : 'border-[rgba(168,181,193,0.35)] bg-white text-agap-textMid hover:border-agap-textMain',
-                                )}
                               >
                                 {b}
-                              </button>
+                              </SelectChip>
                             );
                           })}
                         </div>
-                        <div className="mt-2 flex gap-3 text-xs">
-                          <button
+                        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-agap-track pt-3">
+                          <Button
                             type="button"
+                            variant="secondary"
+                            size="sm"
                             onClick={() => setBarangays((list) => Array.from(new Set([...list, ...FLOOD_PRONE_BARANGAYS])))}
-                            className="font-semibold text-agap-green hover:underline"
                           >
-                            + Flood-prone (Lolomboy, Bunlo, Igulot, Bambang)
-                          </button>
+                            <Droplets size={13} aria-hidden /> Add flood-prone (Lolomboy, Bunlo, Igulot, Bambang)
+                          </Button>
                           {barangays.length > 0 && (
-                            <button type="button" onClick={() => setBarangays([])} className="text-agap-textSub hover:underline">
-                              Clear
-                            </button>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => setBarangays([])}>
+                              <X size={13} aria-hidden /> Clear
+                            </Button>
                           )}
                         </div>
-                      </>
+                      </div>
                     )}
-                  </div>
+                  </fieldset>
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
-                      <label htmlFor="issuer" className={labelCls}>Issued by <span className="text-agap-danger">*</span></label>
+                      <label htmlFor="issuer" className={labelCls}>Issued by<RequiredMark /></label>
                       <select
                         id="issuer"
+                        aria-required
                         value={state.issuer}
                         onChange={(e) => setState((s) => ({ ...s, issuer: e.target.value as IssuerKey }))}
-                        className={inputCls}
+                        className={cn(inputCls, 'cursor-pointer')}
                       >
                         <option value="MAYOR">Office of the Mayor</option>
                         <option value="MAYOR_MDRRMO">Office of the Mayor + MDRRMO</option>
@@ -614,7 +731,7 @@ function Composer(): JSX.Element {
                     </div>
                     <div>
                       <label htmlFor="lang" className={labelCls}>Language</label>
-                      <select id="lang" value={language} onChange={(e) => setLanguage(e.target.value as LanguageMode)} className={inputCls}>
+                      <select id="lang" value={language} onChange={(e) => setLanguage(e.target.value as LanguageMode)} className={cn(inputCls, 'cursor-pointer')}>
                         {(Object.keys(LANGUAGE_LABELS) as LanguageMode[]).map((k) => (
                           <option key={k} value={k}>{LANGUAGE_LABELS[k]}</option>
                         ))}
@@ -635,7 +752,7 @@ function Composer(): JSX.Element {
                     <div className="sm:col-span-2">
                       <label htmlFor="source" className={labelCls}>
                         Source / reference
-                        {checks.find((c) => c.label.startsWith('Verified source')) && <span className="text-agap-danger"> *</span>}
+                        {checks.find((c) => c.label.startsWith('Verified source')) && <RequiredMark />}
                       </label>
                       <input
                         id="source"
@@ -663,7 +780,7 @@ function Composer(): JSX.Element {
                 {shownImage ? (
                   <div className="flex flex-col gap-3 sm:flex-row">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={shownImage} alt={imageAlt || 'Selected announcement image'} className="h-36 w-full rounded-xl border border-[rgba(168,181,193,0.25)] object-cover sm:w-56" />
+                    <img src={shownImage} alt={imageAlt || 'Selected announcement image'} className="h-36 w-full rounded-xl border border-agap-track object-cover sm:w-56" />
                     <div className="flex-1 space-y-2">
                       <div>
                         <label htmlFor="alt" className={labelCls}>Image description (for screen readers)</label>
@@ -686,25 +803,46 @@ function Composer(): JSX.Element {
                           </Button>
                         )}
                       </div>
-                      {imageFile && <p className="truncate text-xs text-agap-textSub">{imageFile.name} · uploads when you save</p>}
+                      {imageFile && <p className="truncate text-xs text-agap-hint">{imageFile.name} · uploads when you save</p>}
                     </div>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={() => fileRef.current?.click()}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[rgba(168,181,193,0.6)] bg-agap-pearl px-4 py-8 text-sm font-medium text-agap-textSub transition-colors hover:border-agap-green hover:text-agap-green"
+                    className={cn(
+                      'flex w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-agap-fieldBorder bg-agap-pearl px-4 py-7',
+                      'text-sm font-semibold text-agap-textMid hover:border-agap-green hover:bg-agap-greenSoft hover:text-agap-green motion-safe:transition-colors',
+                      focusRing,
+                    )}
                   >
-                    <ImagePlus size={18} aria-hidden /> Attach an image
+                    <ImagePlus size={20} aria-hidden />
+                    Attach an image
+                    <span className="text-xs font-normal text-agap-hint">JPEG, PNG or WebP · up to 5 MB</span>
                   </button>
                 )}
                 {existingImage.isError && !imagePreview && (
-                  <p className="mt-2 text-xs text-agap-amber">The saved image could not be loaded from storage.</p>
+                  <p className="mt-2 text-xs text-agap-amberText">The saved image could not be loaded from storage.</p>
                 )}
                 <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onPickImage} />
               </Section>
 
-              <Section step={5} title="Review the text" hint={state.manual ? 'Editing by hand — field changes above no longer update the text.' : 'Generated from the fields above.'}>
+              <Section
+                step={5}
+                title="Review the text"
+                hint={state.manual ? 'Editing by hand — field changes above no longer update the text.' : 'Updates live as you change the fields above.'}
+                aside={
+                  state.manual ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-agap-amberSoft px-2 py-1 text-[11px] font-bold text-agap-amberText">
+                      <PencilLine size={12} aria-hidden /> Edited by hand
+                    </span>
+                  ) : (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-agap-greenSoft px-2 py-1 text-[11px] font-bold text-agap-green">
+                      <Sparkles size={12} aria-hidden /> Auto-written
+                    </span>
+                  )
+                }
+              >
                 {state.manual ? (
                   <div className="space-y-3">
                     <div>
@@ -727,12 +865,16 @@ function Composer(): JSX.Element {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="rounded-xl bg-agap-pearl px-4 py-3">
-                      <p className="text-xs font-semibold text-agap-textSub">Headline</p>
-                      <p className="mt-0.5 text-sm font-bold text-agap-textMain">{text.title || '—'}</p>
-                      <p className="mt-2 text-xs font-semibold text-agap-textSub">Summary</p>
-                      <p className="mt-0.5 text-sm text-agap-textMid">{text.summary || '—'}</p>
-                    </div>
+                    <dl className="divide-y divide-agap-track rounded-xl border border-agap-track bg-agap-pearl">
+                      <div className="px-4 py-3">
+                        <dt className="text-xs font-semibold text-agap-hint">Headline</dt>
+                        <dd className="mt-0.5 text-sm font-bold text-agap-textMain">{text.title || <span className="font-normal italic text-agap-hint">Fill the required details to generate it</span>}</dd>
+                      </div>
+                      <div className="px-4 py-3">
+                        <dt className="text-xs font-semibold text-agap-hint">Summary</dt>
+                        <dd className="mt-0.5 text-sm text-agap-textMid">{text.summary || '—'}</dd>
+                      </div>
+                    </dl>
                     <Button type="button" variant="secondary" size="sm" onClick={startManualEdit}>
                       <PencilLine size={14} /> Edit text by hand
                     </Button>
@@ -748,50 +890,95 @@ function Composer(): JSX.Element {
           <AnnouncementPreview model={preview} />
 
           {template && (
-            <div className="space-y-4 rounded-2xl border border-[rgba(168,181,193,0.25)] bg-white p-4">
+            <div className="space-y-4 rounded-2xl border border-agap-track bg-white p-4 shadow-card">
               <div>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <label htmlFor="sev" className="text-xs font-semibold text-agap-textMid">Severity</label>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span id="severity-label" className="text-xs font-semibold text-agap-textMid">Severity</span>
                   {suggested && state.severityTouched && suggested !== severity && (
                     <button
                       type="button"
                       onClick={() => { setState((s) => ({ ...s, severityTouched: false })); setSeverity(suggested); }}
-                      className="text-xs font-semibold text-agap-green hover:underline"
+                      className={cn('inline-flex items-center gap-1 rounded text-xs font-semibold text-agap-green hover:underline', focusRing)}
                     >
-                      Use suggested: {severityMeta(suggested).label}
+                      <Sparkles size={12} aria-hidden /> Use suggested: {severityMeta(suggested).label}
                     </button>
                   )}
                 </div>
-                <select
-                  id="sev"
-                  value={severity}
-                  onChange={(e) => { setSeverity(e.target.value as Severity); setState((s) => ({ ...s, severityTouched: true })); }}
-                  className={inputCls}
-                >
-                  {SEVERITIES.map((s) => (
-                    <option key={s} value={s}>
-                      {severityMeta(s).label} · {severityMeta(s).priority}{suggested === s && !state.severityTouched ? ' (auto)' : ''}
-                    </option>
-                  ))}
-                </select>
+                <div role="radiogroup" aria-labelledby="severity-label" className="grid grid-cols-2 gap-2">
+                  {SEVERITIES.map((s) => {
+                    const m = severityMeta(s);
+                    const SevIcon = m.icon;
+                    const on = severity === s;
+                    const auto = suggested === s && !state.severityTouched;
+                    return (
+                      <label
+                        key={s}
+                        className={cn(
+                          'relative flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2',
+                          'motion-safe:transition-colors focus-within:ring-2 focus-within:ring-agap-green focus-within:ring-offset-1',
+                          on ? cn(m.soft, m.ring, 'border-2') : 'border-agap-fieldBorder bg-white hover:border-agap-textMid',
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="severity"
+                          value={s}
+                          checked={on}
+                          onChange={() => { setSeverity(s); setState((st) => ({ ...st, severityTouched: true })); }}
+                          className="sr-only"
+                        />
+                        <SevIcon size={16} className={cn('shrink-0', m.text)} aria-hidden />
+                        <span className="min-w-0 leading-tight">
+                          <span className={cn('block text-xs font-bold', on ? m.text : 'text-agap-textMain')}>{m.label}</span>
+                          <span className="block text-[11px] text-agap-hint">{m.priority}</span>
+                        </span>
+                        {auto && (
+                          <span className="ml-auto rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-agap-green ring-1 ring-agap-green/40">
+                            Auto
+                          </span>
+                        )}
+                        {on && !auto && <Check size={14} className={cn('ml-auto shrink-0', m.text)} aria-hidden />}
+                      </label>
+                    );
+                  })}
+                </div>
                 {severity === 'CRITICAL' && (
-                  <p className="mt-1.5 text-xs text-agap-textSub">
+                  <p className="mt-2 text-xs leading-snug text-agap-hint">
                     Critical notices are pinned at the top of the citizen app.
                     {needsApproval && ' An MDRRMO Supervisor approves them before release.'}
                   </p>
                 )}
               </div>
 
-              <ul className="space-y-1.5">
-                {checks.map((c) => (
-                  <li key={c.label} className="flex items-center gap-2 text-xs">
-                    {c.ok
-                      ? <Check size={14} className="shrink-0 text-agap-green" aria-label="Done" />
-                      : <CircleAlert size={14} className="shrink-0 text-agap-amber" aria-label="Missing" />}
-                    <span className={c.ok ? 'text-agap-textMid' : 'font-semibold text-agap-textMain'}>{c.label}</span>
-                  </li>
-                ))}
-              </ul>
+              {checks.length > 0 && (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between text-xs">
+                    <span className="font-semibold text-agap-textMid">Ready to publish</span>
+                    <span className={cn('font-bold tabular-nums', checksDone === checks.length ? 'text-agap-green' : 'text-agap-amberText')}>
+                      {checksDone} of {checks.length}
+                    </span>
+                  </div>
+                  <div className="mb-2.5 h-1.5 overflow-hidden rounded-full bg-agap-surface" aria-hidden>
+                    <div
+                      className={cn(
+                        'h-full rounded-full motion-safe:transition-[width] motion-safe:duration-300',
+                        checksDone === checks.length ? 'bg-agap-green' : 'bg-agap-amber',
+                      )}
+                      style={{ width: `${Math.round((checksDone / checks.length) * 100)}%` }}
+                    />
+                  </div>
+                  <ul className="space-y-1.5">
+                    {checks.map((c) => (
+                      <li key={c.label} className="flex items-start gap-2 text-xs">
+                        {c.ok
+                          ? <Check size={14} className="mt-px shrink-0 text-agap-green" aria-label="Done" />
+                          : <CircleAlert size={14} className="mt-px shrink-0 text-agap-amberText" aria-label="Missing" />}
+                        <span className={c.ok ? 'text-agap-hint' : 'font-semibold text-agap-textMain'}>{c.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {error && (
                 <p role="alert" className="rounded-lg border border-[rgba(212,72,88,0.2)] bg-agap-dangerSoft px-3 py-2 text-xs text-agap-danger">
@@ -807,7 +994,7 @@ function Composer(): JSX.Element {
                   <Send size={14} /> {needsApproval ? 'Submit for MDRRMO approval' : <>Review &amp; publish</>}
                 </Button>
               </div>
-              <p className="text-[11px] leading-snug text-agap-textSub">
+              <p className="text-xs leading-snug text-agap-hint">
                 Nothing is sent until you approve it. Drafts are never visible to residents.
               </p>
             </div>

@@ -27,12 +27,12 @@ export const categoryLabel = (c: string) => CATEGORY_LABELS[c] ?? c.replace(/_/g
  */
 export const SEVERITY_META: Record<
   string,
-  { label: string; priority: string; variant: BadgeVariant; icon: LucideIcon; bar: string; text: string }
+  { label: string; priority: string; variant: BadgeVariant; icon: LucideIcon; bar: string; text: string; soft: string; ring: string }
 > = {
-  CRITICAL:      { label: 'Critical', priority: 'Urgent',    variant: 'red',   icon: AlertOctagon,  bar: 'bg-agap-danger', text: 'text-agap-danger' },
-  WARNING:       { label: 'Warning',  priority: 'Important', variant: 'amber', icon: AlertTriangle, bar: 'bg-agap-amber',  text: 'text-agap-amber' },
-  ADVISORY:      { label: 'Advisory', priority: 'Important', variant: 'blue',  icon: Info,          bar: 'bg-agap-info',   text: 'text-agap-info' },
-  INFORMATIONAL: { label: 'Info',     priority: 'Routine',   variant: 'green', icon: Megaphone,     bar: 'bg-agap-green',  text: 'text-agap-green' },
+  CRITICAL:      { label: 'Critical', priority: 'Urgent',    variant: 'red',   icon: AlertOctagon,  bar: 'bg-agap-danger', text: 'text-agap-danger',    soft: 'bg-agap-dangerSoft', ring: 'border-agap-danger' },
+  WARNING:       { label: 'Warning',  priority: 'Important', variant: 'amber', icon: AlertTriangle, bar: 'bg-agap-amber',  text: 'text-agap-amberText', soft: 'bg-agap-amberSoft',  ring: 'border-agap-amber' },
+  ADVISORY:      { label: 'Advisory', priority: 'Important', variant: 'blue',  icon: Info,          bar: 'bg-agap-info',   text: 'text-agap-info',      soft: 'bg-agap-infoSoft',   ring: 'border-agap-info' },
+  INFORMATIONAL: { label: 'Info',     priority: 'Routine',   variant: 'green', icon: Megaphone,     bar: 'bg-agap-green',  text: 'text-agap-green',     soft: 'bg-agap-greenSoft',  ring: 'border-agap-green' },
 };
 
 export const severityMeta = (s: string) => SEVERITY_META[s] ?? SEVERITY_META['INFORMATIONAL']!;

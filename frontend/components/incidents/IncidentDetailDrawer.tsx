@@ -24,7 +24,7 @@ import {
 import { usePriorityRecommendation, useSetIncidentPriority } from '@/features/dispatch/hooks';
 import { useIncidentBarangay } from '@/hooks/useBarangay';
 import { useAiSuggestions } from '@/hooks/useAiAssist';
-import { categoryIcon, formatAffectedCount, titleCase, timeAgo } from '@/lib/incident-format';
+import { categoryIcon, formatAffectedCount, titleCase, priorityLabel, timeAgo } from '@/lib/incident-format';
 import {
   REPORTER_STATUS_LABELS,
   ReporterStatus,
@@ -822,7 +822,7 @@ function PriorityRecommendation({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {PRIORITIES.map((p) => <SelectItem key={p} value={p}>{titleCase(p)}</SelectItem>)}
+              {PRIORITIES.map((p) => <SelectItem key={p} value={p}>{priorityLabel(p)}</SelectItem>)}
             </SelectContent>
           </Select>
           <Button

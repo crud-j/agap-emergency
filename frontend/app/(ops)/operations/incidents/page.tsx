@@ -13,7 +13,7 @@ import { IncidentDetailDrawer } from '@/components/incidents/IncidentDetailDrawe
 import { cn } from '@/lib/utils';
 import { useWsState } from '@/lib/use-ws-state';
 import { useIncidents } from '@/features/incidents/hooks';
-import { categoryIcon, titleCase, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
+import { categoryIcon, titleCase, priorityLabel, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
 import { FIRE_TONE_BADGE, fireQueueBadge } from '@/lib/fire-report-view';
 import { rescueQueueBadge } from '@/lib/rescue-trip-view';
@@ -67,7 +67,11 @@ export default function IncidentQueuePage(): JSX.Element {
 
 function IncidentQueue(): JSX.Element {
   const wsState = useWsState();
-  const linkedId = useSearchParams().get('id');
+  const searchParams = useSearchParams();
+  const linkedId = searchParams.get('id');
+  // The bell adds `n` (the notification id), so a second notice for an already-open
+  // incident still reopens the drawer.
+  const linkNonce = searchParams.get('n');
   const [view, setView] = useState<QueueView>('ACTIVE');
   const [page, setPage] = useState(1);
   const queryStatuses = view === 'ACTIVE'
@@ -96,7 +100,7 @@ function IncidentQueue(): JSX.Element {
     if (!linkedId) return;
     setSelectedId(linkedId);
     setDrawerOpen(true);
-  }, [linkedId]);
+  }, [linkedId, linkNonce]);
 
   const barangayOptions = useMemo(() => {
     const set = new Set<string>();
@@ -239,7 +243,7 @@ function IncidentQueue(): JSX.Element {
 
         <FilterSelect value={status} onChange={setStatus} placeholder="Status" options={STATUSES} />
         <FilterSelect value={category} onChange={setCategory} placeholder="Category" options={CATEGORIES} />
-        <FilterSelect value={priority} onChange={setPriority} placeholder="Priority" options={PRIORITIES} />
+        <FilterSelect value={priority} onChange={setPriority} placeholder="Priority" options={PRIORITIES} labelFor={priorityLabel} />
         <FilterSelect value={barangay} onChange={setBarangay} placeholder="Barangay" options={barangayOptions} />
 
         <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
@@ -292,12 +296,13 @@ function IncidentQueue(): JSX.Element {
 }
 
 function FilterSelect({
-  value, onChange, placeholder, options,
+  value, onChange, placeholder, options, labelFor = titleCase,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   options: string[];
+  labelFor?: (v: string) => string;
 }): JSX.Element {
   return (
     <Select value={value} onValueChange={onChange}>
@@ -307,7 +312,7 @@ function FilterSelect({
       <SelectContent>
         <SelectItem value={ALL}>All {placeholder.toLowerCase()}</SelectItem>
         {options.map((o) => (
-          <SelectItem key={o} value={o}>{titleCase(o)}</SelectItem>
+          <SelectItem key={o} value={o}>{labelFor(o)}</SelectItem>
         ))}
       </SelectContent>
     </Select>

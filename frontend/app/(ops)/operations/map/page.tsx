@@ -15,7 +15,7 @@ import type { MapFacility, MapIncident, MapRoute } from '@/components/incidents/
 import { LEG_COLORS, LegChip } from '@/components/map/LegChip';
 import { isWithinBocaue } from '@/lib/bocaue-geo';
 import { useNow } from '@/lib/use-now';
-import { PRIORITY_RING_COLORS, isRouteLastKnown } from '@agap/shared';
+import { PRIORITY_LABELS, PRIORITY_RING_COLORS, isRouteLastKnown } from '@agap/shared';
 import { AMBULANCE_ICON_URL } from '@/lib/map-icons';
 
 /** The optional hospital layer re-reads GET /hospitals at most every 5 minutes (plan §16.3). */
@@ -36,10 +36,10 @@ const IncidentMapView = dynamic(
 
 // Same palette as the scene markers and reporter-icon rings (@agap/shared PRIORITY_RING_COLORS).
 const LEGEND = [
-  { label: 'Critical', color: PRIORITY_RING_COLORS.CRITICAL },
-  { label: 'High', color: PRIORITY_RING_COLORS.HIGH },
-  { label: 'Medium', color: PRIORITY_RING_COLORS.MEDIUM },
-  { label: 'Low', color: PRIORITY_RING_COLORS.LOW },
+  { label: PRIORITY_LABELS.CRITICAL, color: PRIORITY_RING_COLORS.CRITICAL },
+  { label: PRIORITY_LABELS.HIGH, color: PRIORITY_RING_COLORS.HIGH },
+  { label: PRIORITY_LABELS.MEDIUM, color: PRIORITY_RING_COLORS.MEDIUM },
+  { label: PRIORITY_LABELS.LOW, color: PRIORITY_RING_COLORS.LOW },
 ];
 
 /**

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Bell, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck, Siren, Flame, LifeBuoy } from 'lucide-react';
+import { useEffect, useRef, useState, useTransition } from 'react';
+import { Bell, Loader2, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck, Siren, Flame, LifeBuoy } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useUnreadCount, useNotifications, useMarkRead, useMarkAllRead } from '@/features/notifications/hooks';
@@ -28,8 +28,27 @@ const EVENT_META: Record<string, { icon: typeof AlertCircle; color: string; bg: 
   SURGE_:                    { icon: Siren,        color: '#D44858', bg: '#FDF2F3' },
 };
 
-function incidentLink(incidentId: string): string {
-  return `/operations/incidents?id=${incidentId}`;
+/** `n` makes each notification's link unique, so opening a second notice for an
+ *  incident that is already open on the Incident Queue still reopens its drawer. */
+function incidentLink(incidentId: string, notificationId?: string): string {
+  const id = encodeURIComponent(incidentId);
+  return notificationId
+    ? `/operations/incidents?id=${id}&n=${encodeURIComponent(notificationId)}`
+    : `/operations/incidents?id=${id}`;
+}
+
+/** Where a notification row leads, or null when it has no page of its own. */
+function notificationHref(notif: AppNotification): string | null {
+  // Incident notices (crew help, fire report and rescue notices included) open that incident.
+  if (notif.incident_id) return incidentLink(notif.incident_id, notif.id);
+  if (notif.event_type === 'ANNOUNCEMENT' && typeof notif.data_payload?.announcementId === 'string') {
+    return `/announcements/${encodeURIComponent(notif.data_payload.announcementId)}`;
+  }
+  // MOD-52: the surge page shows the recommendation with its Activate button.
+  if (notif.event_type === 'SURGE_RECOMMENDED') return '/operations/surge';
+  // MOD-39 (C8): the Hospitals page has the receiving status and the registry rows.
+  if (notif.event_type === 'HOSPITAL_STATUS_STALE' || notif.event_type === 'REGISTRY_REVIEW_DUE') return '/hospitals';
+  return null;
 }
 
 function getEventMeta(eventType: string) {
@@ -57,37 +76,30 @@ function timeAgo(iso: string): string {
 function NotifRow({
   notif,
   onRead,
+  onOpen,
 }: {
   notif: AppNotification;
   onRead: (id: string) => void;
+  onOpen: (href: string) => void;
 }) {
-  const router = useRouter();
   const unread = notif.status === 'PENDING';
   const { icon: Icon, color, bg } = getEventMeta(notif.event_type);
+  const href = notificationHref(notif);
 
   const crewNote = crewHelpNote(notif);
 
   function handleClick() {
     if (unread) onRead(notif.id);
-    // Incident notices (crew help, fire report and rescue notices included) open that incident.
-    if (notif.incident_id) {
-      router.push(incidentLink(notif.incident_id));
-    } else if (notif.event_type === 'ANNOUNCEMENT' && typeof notif.data_payload?.announcementId === 'string') {
-      router.push(`/announcements/${notif.data_payload.announcementId}`);
-    } else if (notif.event_type === 'SURGE_RECOMMENDED') {
-      // MOD-52: the surge page shows the recommendation with its Activate button.
-      router.push('/operations/surge');
-    } else if (notif.event_type === 'HOSPITAL_STATUS_STALE' || notif.event_type === 'REGISTRY_REVIEW_DUE') {
-      // MOD-39 (C8): the Hospitals page has the receiving status and the registry rows.
-      router.push('/hospitals');
-    }
+    if (href) onOpen(href);
   }
 
   return (
     <button
+      type="button"
       onClick={handleClick}
       className={cn(
-        'w-full flex items-start gap-3 px-4 py-3 text-left transition-colors',
+        'w-full flex items-start gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-agap-green',
+        href && 'cursor-pointer',
         unread ? 'bg-agap-greenSoft/30 hover:bg-agap-greenSoft/50' : 'hover:bg-agap-surface',
       )}
     >
@@ -138,6 +150,24 @@ export function NotificationBell() {
   const router = useRouter();
   const { toasts, toast, dismiss } = useToast();
   const toastLinks = useRef(new Map<string, string>());
+  // Navigation can take a moment (first visit to a page); the bell shows a spinner
+  // until the new page is on screen, and the dropdown closes at once.
+  const [navigating, startNavigation] = useTransition();
+
+  function openLink(href: string) {
+    setOpen(false);
+    startNavigation(() => router.push(href));
+  }
+
+  // Close with Escape, back to the bell.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
   // A live toast for each new notification (e.g. a unit resolved an incident and
   // it awaits closure). Clicking it opens the incident.
@@ -175,7 +205,7 @@ export function NotificationBell() {
             {...(t.description && { description: t.description })}
             {...(t.variant && { variant: t.variant })}
             {...(t.duration !== undefined && { duration: t.duration })}
-            {...(link && { className: 'cursor-pointer', onClick: () => router.push(link) })}
+            {...(link && { className: 'cursor-pointer', onClick: () => openLink(link) })}
             onOpenChange={(isOpen) => {
               if (!isOpen) {
                 dismiss(t.id);
@@ -188,14 +218,17 @@ export function NotificationBell() {
 
       {/* Bell button */}
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
           'relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-agap-green',
           open ? 'bg-agap-surface text-agap-green' : 'text-agap-textSub hover:bg-agap-surface hover:text-agap-textMain',
         )}
-        aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ''}`}
+        aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ''}${navigating ? ', opening' : ''}`}
+        aria-expanded={open}
+        aria-busy={navigating}
       >
-        <Bell size={16} />
+        {navigating ? <Loader2 size={16} className="animate-spin text-agap-green motion-reduce:animate-none" /> : <Bell size={16} />}
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-agap-danger px-0.5 text-[9px] font-bold text-white leading-none">
             {unread > 99 ? '99+' : unread}
@@ -242,6 +275,7 @@ export function NotificationBell() {
                   key={n.id}
                   notif={n}
                   onRead={(id) => { markRead(id); }}
+                  onOpen={openLink}
                 />
               ))
             )}

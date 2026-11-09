@@ -91,6 +91,7 @@ Avoid wasting a scarce unit on a response that duplicates one already mobilized,
 | 1 | A list of possible duplicates, nearest first, shown to the dispatcher |
 | 2 | The duplicate report marked Duplicate and linked to its master, with both histories kept |
 | 3 | A timeline event and audit-trail entry for every merge |
+| 4 | A notice to the new reporter (registered or guest) when a similar report from the same area is already being handled, showing only its stage (received, assessing, responders on the way, on scene, resolved) and how long ago it was reported — never the other report's reference or reporter |
 
 ---
 

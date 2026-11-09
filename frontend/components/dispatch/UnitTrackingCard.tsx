@@ -40,8 +40,8 @@ export function UnitTrackingCard({
       <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
         <Hourglass size={16} className="mt-0.5 shrink-0" />
         <div>
-          <p className="text-[13px] font-semibold">Awaiting crew acceptance</p>
-          <p className="mt-0.5 text-[12px] leading-relaxed">Tracking starts when the crew accepts.</p>
+          <p className="text-[14px] font-semibold">Waiting for the crew to accept</p>
+          <p className="mt-0.5 text-[13px] leading-relaxed">Their location shows here once they accept.</p>
         </div>
       </div>
     );
@@ -51,7 +51,7 @@ export function UnitTrackingCard({
     const last = dispatches[0]?.status;
     return (
       <div className="rounded-lg border border-agap-track/40 bg-agap-surface px-4 py-3 text-[13px] text-agap-textMid">
-        No unit is currently assigned{last ? ` (last dispatch ${titleCase(last)})` : ''}.
+        No unit assigned right now{last ? ` (last one: ${titleCase(last)})` : ''}.
       </div>
     );
   }
@@ -86,14 +86,14 @@ export function UnitTrackingCard({
                   <Truck size={14} className="shrink-0 text-agap-green" />
                   {callSign}
                 </p>
-                <p className="mt-0.5 text-[11px] text-agap-textSub">
+                <p className="mt-0.5 text-[12px] text-agap-textMid">
                   {unitType ? titleCase(unitType) : 'Unit'}
                   {detail?.resources?.name && detail.resources.name !== callSign ? ` · ${detail.resources.name}` : ''}
                 </p>
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-[15px] font-bold tabular-nums text-agap-textMain">{formatEta(unit?.eta.seconds)}</p>
-                <p className="text-[9px] font-semibold uppercase tracking-wide text-agap-textSub">ETA · estimate</p>
+                <p className="text-[12px] font-medium text-agap-textMid">ETA (estimate)</p>
               </div>
             </div>
 
@@ -112,10 +112,10 @@ export function UnitTrackingCard({
             >
               {lost ? <WifiOff size={12} className="shrink-0" /> : <Clock size={12} className="shrink-0 text-agap-textSub" />}
               {!hasPosition
-                ? 'Accepted — waiting for the crew’s first GPS fix'
+                ? 'Accepted · waiting for their GPS'
                 : lost
-                  ? `Signal lost — last update ${formatAge(updatedAt, now)}. Unit is still assigned.`
-                  : `Last update ${formatAge(updatedAt, now)}`}
+                  ? `Signal lost (last seen ${formatAge(updatedAt, now)}). Unit is still assigned.`
+                  : `Updated ${formatAge(updatedAt, now)}`}
             </p>
 
             {hasPosition && (
@@ -132,7 +132,7 @@ export function UnitTrackingCard({
                   }`}
                 >
                   <LocateFixed size={13} />
-                  {tracked && follow ? 'Following unit' : 'Follow unit'}
+                  {tracked && follow ? 'Following' : 'Follow unit'}
                 </button>
                 <button
                   type="button"
@@ -141,16 +141,16 @@ export function UnitTrackingCard({
                   className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-agap-track/60 bg-white px-2 py-1.5 text-[12px] font-semibold text-agap-textMid transition-colors hover:border-agap-green/40 hover:text-agap-green disabled:opacity-50"
                 >
                   <Crosshair size={13} />
-                  Fit scene + unit
+                  Show scene + unit
                 </button>
               </div>
             )}
           </div>
         );
       })}
-      <p className="flex items-center gap-1 text-[10px] text-agap-textSub">
+      <p className="flex items-center gap-1 text-[12px] text-agap-textSub">
         <Navigation size={10} className="shrink-0" />
-        ETA is an estimate from the routing service — never a guarantee.
+        ETA is an estimate, not a guarantee.
       </p>
     </div>
   );

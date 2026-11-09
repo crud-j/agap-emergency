@@ -8,7 +8,7 @@ import {
   type BadgeVariant, type Column,
 } from '@/components/ui';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
-import { titleCase } from '@/lib/incident-format';
+import { titleCase, priorityLabel } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 import { useApproveMutualAid, useDenyMutualAid, useMutualAidRequests } from '@/features/incidents/command-hooks';
 import type { MutualAidListParams, MutualAidRequest } from '@/features/incidents/command';
@@ -111,7 +111,7 @@ export function RequestsInbox(): JSX.Element {
     {
       key: 'priority',
       header: 'Priority',
-      accessor: (row) => <Badge variant={PRIORITY_VARIANT[row.priority] ?? 'default'}>{titleCase(row.priority)}</Badge>,
+      accessor: (row) => <Badge variant={PRIORITY_VARIANT[row.priority] ?? 'default'}>{priorityLabel(row.priority)}</Badge>,
     },
     {
       key: 'requesting',

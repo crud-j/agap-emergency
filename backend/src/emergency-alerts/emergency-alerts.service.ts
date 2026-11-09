@@ -12,7 +12,7 @@ import { SosAlertDto } from './dto/sos-alert.dto';
 import { RealtimeService } from '../realtime/realtime.service';
 import { BarangayNotifyService } from '../barangay-coordination/barangay-notify.service';
 import { OpsAlertService } from './ops-alert.service';
-import { IncidentStatus, QUEUE_NAMES } from '@agap/shared';
+import { IncidentStatus, QUEUE_NAMES, recommendIntakePriority } from '@agap/shared';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -46,11 +46,16 @@ export class EmergencyAlertsService {
 
     const reference = await this.generateReference();
 
+    // MOD-24: same rule as POST /incidents, so an SOS never falls back to the
+    // schema default. An SOS carries no intake answers, so this is the category default.
+    const { priority } = recommendIntakePriority(dto.incidentType, {});
+
     const incident = await this.prisma.$transaction(async (tx) => {
       const inc = await tx.incident.create({
         data: {
           public_reference: reference,
           category: dto.incidentType as any,
+          priority: priority as any,
           status: IncidentStatus.SUBMITTED as any,
           trigger_method: triggerMethod as any,
           client_event_id: clientEventId,

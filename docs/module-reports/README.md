@@ -22,3 +22,22 @@ The 52 module reports are in this folder. MOD-19 (Offline Emergency Queue and Re
 - **AS-IS:** describes the usual manual process at the MDRRMO / LGU (hotline, logbook, Facebook page, text messages, barangay public address). Check it against your group's own AS-IS data gathering and interviews, and adjust the wording if it differs.
 - **Uncommitted work:** as of 2026-10-31, MOD-15, 23, 32, 34, 48 and 52 (rescue totals) describe parts of the Unit Field Flow plan that are not committed yet, and MOD-21 ("Next actions") and MOD-28 (Units / Responders views) describe the uncommitted page redesigns. Commit that work before printing those reports.
 - **Module Identification:** "Prepared By" is left out on purpose. Fill in the student number, course, group, leader, instructor and dates yourself.
+
+**Before a demo: reset and reseed the database** (dev databases only; it deletes every incident, account and announcement)
+```bash
+cd backend
+pnpm db:reset-data   # empties all tables; keeps migrations and barangay boundaries
+pnpm db:seed         # recreates the accounts, organizations, units, hospitals and the demo incident
+```
+Then restart the backend and sign out and back in on every device, since old sessions point to accounts that no longer exist.
+
+**Demo citizen account** (created by the seed, ready to use: email, phone and PhilHealth ID already verified)
+
+| Field | Value |
+|---|---|
+| Full name | Demo Account Testing |
+| Email | citizenaccountdemo@demo.com |
+| Phone | 09757072301 |
+| Password | `@L03e1t3!@` |
+
+The seed resets this password every time it runs. It is a demo-only account; do not use it for a real person.

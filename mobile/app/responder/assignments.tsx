@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/src/stores/auth.store';
 import type { Assignment } from '@/src/services/api/responders.api';
 import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
-import { categoryIcon, categoryColor, priorityColor, titleCase } from '@/src/lib/incident-visuals';
+import { categoryIcon, categoryColor, priorityColor, priorityLabel, titleCase } from '@/src/lib/incident-visuals';
 import { AgapLogo } from '@/src/components/brand/AgapLogo';
 
 const COLORS = {
@@ -302,7 +302,7 @@ function AssignmentCard({ item, onPress }: { item: Assignment; onPress: () => vo
           <View style={[styles.priorityPill, { backgroundColor: `${priorityAccent}14` }]}>
             <View style={[styles.priorityDot, { backgroundColor: priorityAccent }]} />
             <Text style={[styles.priorityText, { color: priorityAccent }]}>
-              {priority ? titleCase(priority) : 'Priority unavailable'}
+              {priority ? priorityLabel(priority) : 'Priority unavailable'}
             </Text>
           </View>
         </View>

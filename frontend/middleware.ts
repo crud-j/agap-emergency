@@ -33,6 +33,8 @@ export function middleware(request: NextRequest) {
 // v1/ and socket.io/ are the API and Socket.io endpoints next.config.mjs forwards to the backend,
 // which checks each request's own token. They must not reach middleware at all: Next also runs
 // middleware on WebSocket upgrades, and that drops the Socket.io connection.
+// sw.js and route-warmup-worker.js are static scripts with no data in them; a service worker
+// script cannot follow a redirect, and its update checks also run after sign-out.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api|v1/|socket\\.io/).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api|v1/|socket\\.io/|sw\\.js$|route-warmup-worker\\.js$).*)'],
 };

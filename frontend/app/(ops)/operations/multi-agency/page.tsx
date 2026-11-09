@@ -15,7 +15,7 @@ import {
   type Column,
 } from '@/components/ui';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
-import { ACTIVE_STATUSES, titleCase } from '@/lib/incident-format';
+import { ACTIVE_STATUSES, titleCase, priorityLabel } from '@/lib/incident-format';
 import { useIncidents } from '@/features/incidents/hooks';
 import {
   useIncidentAgencies,
@@ -368,7 +368,7 @@ function CreateRequestDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {['CRITICAL','HIGH','MEDIUM','LOW'].map(p => <SelectItem key={p} value={p}>{titleCase(p)}</SelectItem>)}
+                {['CRITICAL','HIGH','MEDIUM','LOW'].map(p => <SelectItem key={p} value={p}>{priorityLabel(p)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -425,7 +425,7 @@ function MutualAidTab(): JSX.Element {
       header: 'Priority',
       accessor: (row) => {
         const v = row.priority === 'CRITICAL' ? 'red' : row.priority === 'HIGH' ? 'amber' : row.priority === 'MEDIUM' ? 'blue' : 'muted';
-        return <Badge variant={v as 'red' | 'amber' | 'blue' | 'muted'}>{titleCase(row.priority)}</Badge>;
+        return <Badge variant={v as 'red' | 'amber' | 'blue' | 'muted'}>{priorityLabel(row.priority)}</Badge>;
       },
     },
     {

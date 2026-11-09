@@ -315,7 +315,7 @@ export default function HomeScreen() {
                     color={isActive ? '#D97706' : '#3B82F6'}
                   />
                   <Text style={[styles.priorityText, { color: isActive ? '#D97706' : '#3B82F6' }]}>
-                    {isActive ? 'HIGH PRIORITY' : 'ACCEPTED'}
+                    {isActive ? 'ACTIVE ASSIGNMENT' : 'ACCEPTED'}
                   </Text>
                 </View>
                 <Text style={styles.timestampText}>

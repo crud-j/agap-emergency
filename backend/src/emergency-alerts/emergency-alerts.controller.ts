@@ -5,6 +5,7 @@ import {
   Param,
   Body,
   UseGuards,
+  UseInterceptors,
   Request,
   ParseUUIDPipe,
   HttpCode,
@@ -16,6 +17,7 @@ import { EmergencyAlertsService } from './emergency-alerts.service';
 import { SosAlertDto } from './dto/sos-alert.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import { GuestReportLimitInterceptor } from './guest-report-limit/guest-report-limit.interceptor';
 
 @ApiTags('alerts')
 @Controller({ path: 'emergency-alerts', version: '1' })
@@ -25,6 +27,7 @@ export class EmergencyAlertsController {
   @Post('sos')
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
+  @UseInterceptors(GuestReportLimitInterceptor)
   @Throttle({ burst: { ttl: 1000, limit: 1 }, sustained: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Trigger a one-button SOS emergency alert (guest OK)' })
@@ -36,6 +39,7 @@ export class EmergencyAlertsController {
   @Post('shake')
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
+  @UseInterceptors(GuestReportLimitInterceptor)
   @Throttle({ burst: { ttl: 1000, limit: 1 }, sustained: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Trigger a shake-to-alert emergency (guest OK)' })

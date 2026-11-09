@@ -73,7 +73,7 @@ function TrendChart({ trend }: { trend: Overview['trend7d'] }): JSX.Element {
   return (
     <div>
       <div className="mb-3 flex items-center gap-4 text-[11px] text-agap-textSub">
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-agap-danger" aria-hidden />Critical</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-agap-danger" aria-hidden />Immediate</span>
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-agap-track" aria-hidden />Other</span>
       </div>
       <div className="flex h-36 items-end gap-2 border-b border-agap-track/50" aria-hidden>
@@ -83,10 +83,10 @@ function TrendChart({ trend }: { trend: Overview['trend7d'] }): JSX.Element {
             <div
               key={d.date}
               className="group relative flex h-full flex-1 flex-col justify-end"
-              title={`${fmtDay(d.date)}: ${d.total} incidents, ${d.critical} critical`}
+              title={`${fmtDay(d.date)}: ${d.total} incidents, ${d.critical} immediate`}
             >
               <span className="pointer-events-none absolute -top-1 left-1/2 z-10 hidden -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-agap-textMain px-2 py-1 text-[11px] text-white shadow-card group-hover:block">
-                {fmtDay(d.date)} · {d.total} total · {d.critical} critical
+                {fmtDay(d.date)} · {d.total} total · {d.critical} immediate
               </span>
               <span className="mb-1 text-center font-mono text-[11px] tabular-nums text-agap-textSub">
                 {d.total > 0 ? d.total : ''}
@@ -116,7 +116,7 @@ function TrendChart({ trend }: { trend: Overview['trend7d'] }): JSX.Element {
       </div>
       <table className="sr-only">
         <caption>Incidents per day, last 7 days</caption>
-        <thead><tr><th>Day</th><th>Total</th><th>Critical</th></tr></thead>
+        <thead><tr><th>Day</th><th>Total</th><th>Immediate</th></tr></thead>
         <tbody>
           {trend.map((d) => (
             <tr key={d.date}><td>{fmtDay(d.date)}</td><td>{d.total}</td><td>{d.critical}</td></tr>
@@ -214,7 +214,7 @@ export function MunicipalOverview(): JSX.Element {
           loading={loading}
         />
         <StatCard
-          label="Critical, active"
+          label="Immediate, active"
           value={data ? criticalActive : '—'}
           trendLabel={data ? `${data.today.critical} reported today · ${vsYesterday(data.today.critical, data.yesterday.critical)}` : undefined}
           icon={<AlertOctagon size={17} />}

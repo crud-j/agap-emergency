@@ -23,6 +23,7 @@ import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import type { Language } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { useAuthStore } from '../../src/stores/auth.store';
+import { useIncidentStore } from '../../src/stores/incident.store';
 import {
   loginWithPassword,
   loginWithPhone,
@@ -66,6 +67,14 @@ function AgapLogo() {
 
 export default function LoginScreen() {
   const router = useRouter();
+  const beginGuestReport = useIncidentStore((state) => state.beginGuestReport);
+
+  // Same guest flow as the registration screen: no account needed to get help
+  // (Rule 14). The backend caps guest reports per phone and per network.
+  function reportEmergencyAsGuest() {
+    beginGuestReport();
+    router.push('/emergency/location');
+  }
   const { loadFromStorage, setPreferences, language } = useAccessibilityStore();
   const t = useTranslations();
 
@@ -485,7 +494,13 @@ export default function LoginScreen() {
               <Text style={styles.createAccountText}>{t.login.createAccount}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity activeOpacity={0.85} style={styles.emergencyButtonContainer}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={styles.emergencyButtonContainer}
+              onPress={reportEmergencyAsGuest}
+              accessibilityRole="button"
+              accessibilityLabel={t.login.guestReport}
+            >
               <LinearGradient
                 // White highlight overlaid on red base background
                 colors={['rgba(255,255,255,0.35)', 'rgba(255,255,255,0)', 'rgba(0,0,0,0.05)']}

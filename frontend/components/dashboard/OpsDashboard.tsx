@@ -117,9 +117,9 @@ export function OpsDashboard(): JSX.Element {
 
       {/* ── KPI grid — most urgent first ─────────────────────────────────── */}
       <section aria-label="Live counts" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6 xl:gap-3 [&>a>div]:min-h-[148px] [&>a>div]:rounded-2xl [&>a>div]:border-agap-track/60 [&>a>div]:p-4 [&>a>div>div:first-child>span:first-child]:text-xs [&>a>div>div:last-child>span:last-child]:text-xs">
-        <KpiLink href="/operations/incidents" label="Critical incidents" value={summary?.critical} destination="incident queue">
+        <KpiLink href="/operations/incidents" label="Immediate-priority incidents" value={summary?.critical} destination="incident queue">
           <StatCard
-            label="Critical"
+            label="Immediate"
             value={summary?.critical ?? '—'}
             icon={<AlertOctagon size={17} aria-hidden="true" />}
             variant={summary && summary.critical > 0 ? 'critical' : 'default'}

@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { MapPin, Clock, AlertTriangle } from 'lucide-react';
 import type { IncidentListItem } from '@/hooks/useDispatch';
-import { categoryIcon, priorityClasses, statusClasses, titleCase, timeAgo } from '@/lib/incident-format';
+import { categoryIcon, priorityClasses, statusClasses, titleCase, priorityLabel, timeAgo } from '@/lib/incident-format';
 import { computeSla, formatCountdown } from '@/lib/sla';
 
 export function IncidentQueue({
@@ -107,7 +107,7 @@ function IncidentRow({
           </div>
           <div className="mt-1 flex items-center gap-1.5 flex-wrap">
             <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${prio.bg} ${prio.text}`}>
-              {titleCase(inc.priority)}
+              {priorityLabel(inc.priority)}
             </span>
             <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${status.bg} ${status.text}`}>
               {titleCase(inc.status)}

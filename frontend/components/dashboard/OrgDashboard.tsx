@@ -7,7 +7,7 @@ import { Badge, StatCard } from '@/components/ui';
 import { DashboardBanners } from '@/components/dashboard/DashboardBanners';
 import { DashboardPanel } from '@/components/dashboard/DashboardPanel';
 import { useAuthUser } from '@/lib/use-auth';
-import { titleCase } from '@/lib/incident-format';
+import { titleCase, priorityLabel } from '@/lib/incident-format';
 import { useResources } from '@/features/resources/hooks';
 import { useMutualAidRequests } from '@/features/incidents/command-hooks';
 
@@ -118,7 +118,7 @@ export function OrgDashboard(): JSX.Element {
                     </p>
                   </div>
                   <Badge variant={r.priority === 'CRITICAL' ? 'red' : r.priority === 'HIGH' ? 'amber' : 'muted'}>
-                    {titleCase(r.priority)}
+                    {priorityLabel(r.priority)}
                   </Badge>
                 </li>
               ))}

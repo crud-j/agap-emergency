@@ -1,16 +1,20 @@
 import React, { Component, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Animated, StatusBar, Easing, ActivityIndicator, Alert,
+  Animated, StatusBar, Easing, ActivityIndicator, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useIncidentStore } from '@/src/stores/incident.store';
 import { useAuthStore } from '@/src/stores/auth.store';
-import { submitIncident, uploadIncidentPhoto, uploadIncidentVideo } from '@/src/services/api/incidents.api';
+import {
+  submitIncident, uploadIncidentPhoto, uploadIncidentVideo, type SimilarReportHint,
+} from '@/src/services/api/incidents.api';
+import { ApiError } from '@/src/services/api/http';
+import { MDRRMO_HOTLINE, MDRRMO_HOTLINE_DISPLAY } from '@/src/config/hotlines';
 import type { CreateIncidentInput } from '@agap/shared';
-import { isCoordinateInBocaue, ReporterType } from '@agap/shared';
+import { DUPLICATE_DETECTION_RADIUS_METERS, isCoordinateInBocaue, ReporterType } from '@agap/shared';
 import { colors, cardShadow, radius } from '@/src/theme/tokens';
 import { useQuery } from '@tanstack/react-query';
 import { getMapConfig } from '@/src/services/api/locations.api';
@@ -150,9 +154,52 @@ function MediaStatusCard({ state }: { state: MediaState }) {
   );
 }
 
+/** Plain-language status of the earlier report; the wording never names who sent it. */
+const SIMILAR_STAGE_TEXT: Record<SimilarReportHint['stage'], { title: string; body: string }> = {
+  RECEIVED: {
+    title: 'Someone already reported this',
+    body: 'MDRRMO received a similar report from this area. Your report adds details and helps confirm it.',
+  },
+  ASSESSING: {
+    title: 'MDRRMO is already assessing this',
+    body: 'A dispatcher is already reviewing a similar report from this area. Your report has been added for them to check.',
+  },
+  RESPONDING: {
+    title: 'Responders are already on the way',
+    body: 'A team is already heading to a similar report in this area. Your report has been added in case more help is needed.',
+  },
+  ON_SCENE: {
+    title: 'Responders are already at the scene',
+    body: 'A team is already at a similar report in this area. If you need help where you are, tell the responders or call the hotline.',
+  },
+  RESOLVED: {
+    title: 'A similar report here was just resolved',
+    body: 'If help is still needed, your new report has been sent and a dispatcher will review it.',
+  },
+};
+
+function SimilarReportCard({ hint }: { hint: SimilarReportHint }) {
+  const text = SIMILAR_STAGE_TEXT[hint.stage];
+  const when = hint.minutesAgo < 1 ? 'just now' : `${hint.minutesAgo} min ago`;
+  return (
+    <View
+      style={[styles.infoCard, styles.warnCard, { marginTop: 0, marginBottom: 8 }]}
+      accessible
+      accessibilityLabel={`${text.title}. ${text.body} First reported ${when}.`}
+    >
+      <Ionicons name="people" size={18} color={colors.amber} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.similarTitle}>{text.title}</Text>
+        <Text style={styles.infoCardText}>{text.body}</Text>
+        <Text style={styles.similarMeta}>First reported {when} · within {DUPLICATE_DETECTION_RADIUS_METERS} m of you</Text>
+      </View>
+    </View>
+  );
+}
+
 function SuccessView({
   location, styleUrl, mapAvailable, isGuestReport, reference, onSignIn,
-  responder, routeGeometry, etaSeconds, citizenSex, priority, mediaState,
+  responder, routeGeometry, etaSeconds, citizenSex, priority, mediaState, similarReport,
 }: {
   location: LatLngLite | null;
   styleUrl: string;
@@ -166,6 +213,7 @@ function SuccessView({
   citizenSex: 'MALE' | 'FEMALE' | null;
   priority: string | null;
   mediaState: MediaState;
+  similarReport: SimilarReportHint | null;
 }) {
   const scale = useRef(new Animated.Value(0.6)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -187,6 +235,7 @@ function SuccessView({
         The MDRRMO Operations Center has been notified.{'\n'}A dispatcher will review your report shortly.
       </Text>
       {reference && <Text style={styles.reference}>Report reference: {reference}</Text>}
+      {similarReport && <SimilarReportCard hint={similarReport} />}
       {location && (
         <MapPreview
           location={location}
@@ -225,7 +274,50 @@ function SuccessView({
 
 // ─── Failed ───────────────────────────────────────────────────────────────────
 
-function FailedView({ error, onRetry, onHome }: { error: string | null; onRetry: () => void; onHome: () => void }) {
+function FailedView({
+  error, limited, onRetry, onHome, onSignIn,
+}: {
+  error: string | null;
+  /** The backend refused a guest report because this phone/network sent too many. */
+  limited: boolean;
+  onRetry: () => void;
+  onHome: () => void;
+  onSignIn: () => void;
+}) {
+  if (limited) {
+    return (
+      <View style={styles.center}>
+        <View style={[styles.iconWrap, styles.iconWrapDanger]}>
+          <Ionicons name="hand-left" size={44} color={colors.danger} />
+        </View>
+        <Text style={styles.heading}>Report Not Sent</Text>
+        <Text style={styles.sub}>
+          {error ?? 'Too many reports were sent from this phone without an account.'}
+        </Text>
+
+        <TouchableOpacity
+          style={[styles.primaryBtn, styles.callBtn]}
+          onPress={() => void Linking.openURL('tel:911').catch(() => undefined)}
+          accessibilityRole="button"
+        >
+          <Ionicons name="call" size={18} color={colors.white} style={{ marginRight: 8 }} />
+          <Text style={styles.primaryBtnText}>Call 911</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.ghostBtn}
+          onPress={() => void Linking.openURL(`tel:${MDRRMO_HOTLINE}`).catch(() => undefined)}
+          accessibilityRole="button"
+          accessibilityLabel={`Call MDRRMO hotline ${MDRRMO_HOTLINE_DISPLAY}`}
+        >
+          <Text style={styles.ghostBtnText}>Call MDRRMO · {MDRRMO_HOTLINE_DISPLAY}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.ghostBtn} onPress={onSignIn} accessibilityRole="button">
+          <Text style={styles.ghostBtnText}>Sign in to report</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.center}>
       <View style={[styles.iconWrap, styles.iconWrapDanger]}>
@@ -264,10 +356,12 @@ export default function TransmissionScreen() {
   const user = useAuthStore((s) => s.user);
   const [txState, setTxState] = useState<TransmissionState>('submitting');
   const [error, setError] = useState<string | null>(null);
+  const [limited, setLimited] = useState(false);
   const [publicReference, setPublicReference] = useState<string | null>(null);
   const [incidentId, setIncidentId] = useState<string | null>(null);
   const [incidentPriority, setIncidentPriority] = useState<string | null>(null);
   const [mediaState, setMediaState] = useState<MediaState>('none');
+  const [similarReport, setSimilarReport] = useState<SimilarReportHint | null>(null);
 
   // Live responder position over the incident room (no-op for guests: no token).
   const live = useIncidentTracking(incidentId ?? undefined);
@@ -349,6 +443,7 @@ export default function TransmissionScreen() {
       setIncidentId(result.id);
       setPublicReference(result.public_reference ?? null);
       setIncidentPriority(result.priority ?? null);
+      setSimilarReport(result.similar_report ?? null);
       setTxState('success');
 
       // Media uploads run after the incident is persisted and never block it,
@@ -398,9 +493,13 @@ export default function TransmissionScreen() {
       }
 
       if (accessToken && !draft.isGuestReport) {
-        setTimeout(() => router.replace(`/tracking/${result.id}` as any), 2500);
+        // Leave time to read the "already being handled" notice before tracking opens.
+        setTimeout(() => router.replace(`/tracking/${result.id}` as any), result.similar_report ? 7000 : 2500);
       }
     } catch (err) {
+      // 429 on a guest report: the per-phone / per-network cap was reached. Retrying
+      // would hit it again, so the screen offers the hotlines and sign-in instead.
+      setLimited(err instanceof ApiError && err.status === 429);
       // Never hold an emergency for later delivery — tell the reporter now so
       // they can retry or call a hotline instead of waiting on a reconnect.
       setError(
@@ -431,13 +530,16 @@ export default function TransmissionScreen() {
             citizenSex={citizenSex}
             priority={incidentPriority}
             mediaState={mediaState}
+            similarReport={similarReport}
           />
         )}
         {txState === 'failed'     && (
           <FailedView
             error={error}
+            limited={limited}
             onRetry={() => { setTxState('submitting'); transmit(); }}
             onHome={() => router.replace('/home' as any)}
+            onSignIn={() => router.replace('/auth/login')}
           />
         )}
       </SafeAreaView>
@@ -527,6 +629,8 @@ const styles = StyleSheet.create({
   infoCardText: {
     flex: 1, fontSize: 13, fontWeight: '500', color: colors.textMid, lineHeight: 20,
   },
+  similarTitle: { fontSize: 14, fontWeight: '800', color: '#92400E', marginBottom: 2 },
+  similarMeta: { fontSize: 12, fontWeight: '600', color: '#92400E', marginTop: 4 },
 
   // ─── Buttons ───────────────────────────────────────────────────────────────
   primaryBtn: {
@@ -542,4 +646,5 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, marginTop: 8,
   },
   ghostBtnText: { fontSize: 15, fontWeight: '600', color: colors.textMid },
+  callBtn: { flexDirection: 'row', backgroundColor: colors.danger },
 });

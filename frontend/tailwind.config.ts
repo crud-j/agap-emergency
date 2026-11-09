@@ -23,9 +23,15 @@ const config: Config = {
           textSub:    '#7A8FA3',
           track:      '#D8E3EC',
           danger:     '#CF3B4E',
+          dangerDeep: '#A51F2E',
           dangerSoft: '#FDF0F2',
           amber:      '#C96A00',
           amberSoft:  '#FFF8EB',
+          // WCAG AA companions (announcements first): small amber text 5.5:1,
+          // helper text 5.0:1, form-control borders 3.0:1 on white.
+          amberText:  '#A35500',
+          hint:       '#5E7185',
+          fieldBorder:'#8496A9',
           info:       '#2563EB',
           infoSoft:   '#EBF4FF',
           // Sidebar (dark navy rail)

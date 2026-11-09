@@ -53,3 +53,6 @@ export function titleCase(value?: string | null): string {
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+/** MOD-24 display label for a stored priority (shared with the web console). */
+export { priorityLabel } from '@agap/shared';

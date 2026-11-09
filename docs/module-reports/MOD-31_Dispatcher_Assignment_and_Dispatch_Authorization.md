@@ -27,7 +27,7 @@ Enforce one of AGAP's core rules directly in the workflow: dispatch recommendati
 **Tasks Performed**
 1. Opens the Dispatch screen for a validated incident (Acknowledged or Assessed), showing the ranked unit recommendation from MOD-30.
 2. Lets the dispatcher select a unit and choose its crew before confirming.
-3. Requires an explicit "Authorize Dispatch" click as the authorization step — nothing is sent automatically before it.
+3. Requires an explicit "Authorize Dispatch" click, followed by a confirmation dialog that lists the units, crew and notes, as the authorization step — nothing is sent automatically before it.
 4. Persists every assignment, authorization and acceptance with timestamps and writes each to the audit trail.
 
 ---
@@ -77,7 +77,7 @@ Enforce one of AGAP's core rules directly in the workflow: dispatch recommendati
 |---|---|---|
 | 1 | From a validated incident (Acknowledged, Assessed or Dispatch Pending), the dispatcher opens the Dispatch screen, which already shows the ranked unit recommendation from MOD-30. | User Action |
 | 2 | The dispatcher selects a unit, picks its crew members from the responder list, and may add dispatch notes. | User Action |
-| 3 | The dispatcher clicks Authorize Dispatch — this explicit click is the authorization; nothing is sent automatically before it. | User Action |
+| 3 | The dispatcher clicks Authorize Dispatch and confirms the summary dialog (units, crew, notes) — this explicit confirmation is the authorization; nothing is sent automatically before it. A notification then confirms which units were sent, or a message explains which unit failed. | User Action |
 | 4 | The backend validates the request, authenticates the dispatcher, and persists the assignment with an identifier and timestamp. | Database |
 | 5 | A dispatch-created event is broadcast live to the operations screens, and each crew member gets a "New assignment" push on their phone (MOD-18). | Notification |
 

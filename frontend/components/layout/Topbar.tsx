@@ -74,7 +74,9 @@ export function Topbar(): JSX.Element {
   }
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-agap-track/60 bg-white px-5">
+    // z-[1100]: the bell dropdown hangs below the bar, so the bar must sit above the
+    // dispatch page's z-[1000] map overlays, but below drawers (1200) and dialogs (1300).
+    <header className="relative z-[1100] flex h-14 shrink-0 items-center justify-between border-b border-agap-track/60 bg-white px-5">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1 text-sm" aria-label="Breadcrumb">
         {crumbs.map((crumb, i) => (

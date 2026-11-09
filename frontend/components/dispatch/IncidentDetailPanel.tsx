@@ -16,6 +16,7 @@ import {
   priorityClasses,
   statusClasses,
   titleCase,
+  priorityLabel,
   DISPATCHABLE_STATUSES,
 } from '@/lib/incident-format';
 
@@ -61,7 +62,7 @@ export function IncidentDetailPanel({ incidentId }: { incidentId: string | null 
           </div>
           <div className="flex flex-col items-end gap-1">
             <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded ${prio.bg} ${prio.text}`}>
-              {titleCase(incident.priority)}
+              {priorityLabel(incident.priority)}
             </span>
             <span className={`text-[11px] font-semibold uppercase px-2 py-0.5 rounded ${status.bg} ${status.text}`}>
               {titleCase(incident.status)}

@@ -1061,6 +1061,43 @@ async function main() {
     console.log('  ID_PIN_PEPPER is not set: skipped the seeded PhilHealth ID scan rows');
   }
 
+  // Demo citizen for presentations: a second, ready-to-use citizen account (email, phone and
+  // PhilHealth ID already verified, so no OTP or ID scan is needed on stage). The password is
+  // reset on every seed so the demo login always works. Demo-only — never a real person's account.
+  const PRESENTATION_CITIZEN_EMAIL = 'citizenaccountdemo@demo.com';
+  const presentationHash = await bcrypt.hash('@L03e1t3!@', 12);
+  const presentationCitizen = await prisma.user.upsert({
+    where: { email: PRESENTATION_CITIZEN_EMAIL },
+    update: { ...SEEDED_ID_VERIFIED, password_hash: presentationHash, must_change_password: false },
+    create: {
+      full_name: 'Demo Account Testing',
+      email: PRESENTATION_CITIZEN_EMAIL,
+      phone_number: '+639757072301', // 09757072301, stored the way login normalizes it
+      password_hash: presentationHash,
+      role: user_role.CITIZEN,
+      is_email_verified: true,
+      ...SEEDED_ID_VERIFIED,
+    },
+  });
+  if (idPepper) {
+    // Its own fake PIN: the one-ID-per-account check would refuse a second account on 0010.
+    const claimHash = createHash('sha256').update(`seed:${PRESENTATION_CITIZEN_EMAIL}`).digest('hex');
+    const scan = {
+      user_id: presentationCitizen.id,
+      status: 'AUTO_VERIFIED' as const,
+      pin_hmac: createHmac('sha256', idPepper).update('000000000020', 'utf8').digest('hex'), // 00-000000002-0
+      pin_last4: '0020',
+      image_storage_key: null,
+      claim_expires_at: SEEDED_ID_VERIFIED.identity_verified_at,
+    };
+    await prisma.identity_verifications.upsert({
+      where: { claim_token_hash: claimHash },
+      update: scan,
+      create: { ...scan, claim_token_hash: claimHash },
+    });
+  }
+  console.log(`  Demo citizen ready: ${PRESENTATION_CITIZEN_EMAIL}`);
+
   await prisma.incident.upsert({
     where: { id: DEMO_INCIDENT_ID },
     update: {},
@@ -1295,6 +1332,7 @@ async function main() {
   console.log('    ORG_ADMINISTRATOR      : orgadmin@bocauehospital.gov.ph (Bocaue General Hospital)');
   console.log('    ANNOUNCEMENTS_PUBLISHER: announcements@lgu.bocaue.gov.ph');
   console.log('    CITIZEN                : citizen@demo.agap');
+  console.log('    CITIZEN                : citizenaccountdemo@demo.com / 09757072301 (own demo password, see docs/module-reports/README.md)');
   console.log('    BYSTANDER              : bystander@demo.agap');
   console.log('\n  Demo dispatch flow (ready to track end-to-end):');
   console.log('    Rescuer : responder1@mdrrmo.bocaue.gov.ph /', DEV_PASSWORD, '(crewed on ALPHA-1)');

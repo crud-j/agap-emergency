@@ -3,16 +3,41 @@ import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
 import { File, UploadTask, UploadType } from 'expo-file-system';
 import { authedFetch } from './authed-fetch';
 import { apiFetch, ApiError } from './http';
+import { getDeviceId } from '../readiness/device-readiness';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+/** How far along an earlier report of the same emergency nearby is (MOD-26). */
+export type SimilarReportStage = 'RECEIVED' | 'ASSESSING' | 'RESPONDING' | 'ON_SCENE' | 'RESOLVED';
+
+/**
+ * Sent back when someone already reported the same kind of emergency close by in the
+ * last few minutes. Stage and age only, never who reported it.
+ */
+export interface SimilarReportHint {
+  stage: SimilarReportStage;
+  minutesAgo: number;
+}
+
+export interface SubmittedIncident {
+  id: string;
+  public_reference: string;
+  priority?: string;
+  similar_report?: SimilarReportHint;
+}
 
 export async function submitIncident(
   payload: CreateIncidentInput,
   token?: string,
-): Promise<{ id: string; public_reference: string; priority?: string }> {
-  return apiFetch<{ id: string; public_reference: string; priority?: string }>(`${API_BASE}/v1/incidents`, {
+): Promise<SubmittedIncident> {
+  // Guests send the random per-install id so the backend can cap reports per phone
+  // without an account. It is not tied to the hardware or to the person.
+  const headers: Record<string, string> = token
+    ? { Authorization: `Bearer ${token}` }
+    : { 'X-Device-Id': await getDeviceId() };
+  return apiFetch<SubmittedIncident>(`${API_BASE}/v1/incidents`, {
     method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers,
     body: JSON.stringify(payload),
   });
 }

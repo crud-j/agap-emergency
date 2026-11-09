@@ -151,7 +151,7 @@ export function SupervisorDashboard(): JSX.Element {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Active" value={summary?.active ?? '—'} icon={<Activity size={17} />} loading={summaryQ.isLoading} />
         <StatCard
-          label="Critical"
+          label="Immediate"
           value={summary?.critical ?? '—'}
           icon={<AlertOctagon size={17} />}
           variant={summary && summary.critical > 0 ? 'critical' : 'default'}

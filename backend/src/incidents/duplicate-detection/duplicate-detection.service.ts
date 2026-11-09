@@ -12,6 +12,44 @@ export interface DuplicateCandidate {
   distanceMeters: number;
 }
 
+/**
+ * How far along the earlier, similar report is, in words a reporter understands.
+ * Sent back to whoever submits a nearby same-category report so they know help is
+ * already moving (MOD-26 + MOD-42). Never carries the other report's reference,
+ * reporter or patient (Rule 15) — only its stage and age.
+ */
+export type SimilarReportStage = 'RECEIVED' | 'ASSESSING' | 'RESPONDING' | 'ON_SCENE' | 'RESOLVED';
+
+export interface SimilarReportHint {
+  stage: SimilarReportStage;
+  /** Whole minutes since the earlier report was submitted. */
+  minutesAgo: number;
+}
+
+const STAGE_BY_STATUS: Record<string, SimilarReportStage> = {
+  SUBMITTED: 'RECEIVED',
+  RECEIVED: 'RECEIVED',
+  ACKNOWLEDGED: 'ASSESSING',
+  ASSESSED: 'ASSESSING',
+  DISPATCH_PENDING: 'ASSESSING',
+  DISPATCHED: 'RESPONDING',
+  EN_ROUTE: 'RESPONDING',
+  ON_SCENE: 'ON_SCENE',
+  TRANSPORTING: 'ON_SCENE',
+  ASSISTING: 'ON_SCENE',
+  RESOLVED: 'RESOLVED',
+};
+
+/** The reporter-safe summary of an earlier similar report, or null for statuses that don't apply. */
+export function toSimilarReportHint(
+  earlier: { status: string; submitted_at: Date },
+  now = Date.now(),
+): SimilarReportHint | null {
+  const stage = STAGE_BY_STATUS[earlier.status];
+  if (!stage) return null;
+  return { stage, minutesAgo: Math.max(0, Math.floor((now - earlier.submitted_at.getTime()) / 60_000)) };
+}
+
 // Statuses that can no longer be a duplicate target (already resolved/merged).
 const NON_CANDIDATE_STATUSES = ['CLOSED', 'FALSE_ALERT', 'CANCELLED', 'DUPLICATE'];
 

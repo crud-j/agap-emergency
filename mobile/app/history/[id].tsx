@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { colors, cardShadow, radius } from '../../src/theme/tokens';
 import { useAuthStore } from '../../src/stores/auth.store';
+import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import {
   getIncidentHistoryDetail,
   type IncidentHistoryDetail,
@@ -104,6 +105,16 @@ const TERMINAL_POSITIVE = new Set(['RESOLVED', 'CLOSED', 'REFERRED']);
 const TERMINAL_NEGATIVE = new Set(['CANCELLED', 'FALSE_ALERT', 'DUPLICATE', 'UNABLE_TO_RESPOND']);
 const DELIVERED = new Set(['SENT', 'DELIVERED']);
 
+// Text shades with at least 4.5:1 contrast. The shared textSub (#8795A3) is ~3.2:1 on
+// white, too light for small text; icons keep the shared colours.
+const SUB        = '#5E7185';
+const GREEN_TEXT = '#15803D';
+const RED_TEXT   = '#B91C1C';
+const AMBER_TEXT = '#A35500';
+
+/** Pads small controls to a 44 × 44 pt touch area without changing how they look. */
+const HIT_SLOP = { top: 6, bottom: 6, left: 6, right: 6 };
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string) {
@@ -124,8 +135,8 @@ function titleCase(s: string): string {
 }
 
 function statusBadgeStyle(status: string): { bg: string; fg: string; icon: IoniconName } {
-  if (TERMINAL_POSITIVE.has(status)) return { bg: '#DCFCE7', fg: '#16A34A', icon: 'checkmark-circle' };
-  if (TERMINAL_NEGATIVE.has(status)) return { bg: '#FEF2F2', fg: '#DC2626', icon: 'close-circle' };
+  if (TERMINAL_POSITIVE.has(status)) return { bg: '#DCFCE7', fg: GREEN_TEXT, icon: 'checkmark-circle' };
+  if (TERMINAL_NEGATIVE.has(status)) return { bg: '#FEF2F2', fg: RED_TEXT, icon: 'close-circle' };
   return { bg: colors.primarySoft, fg: colors.primary, icon: 'radio-button-on' };
 }
 
@@ -141,6 +152,7 @@ export default function HistoryIncidentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router  = useRouter();
   const token   = useAuthStore((s) => s.accessToken);
+  const { isOnline } = useNetworkStatus();
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
 
   const { data, isLoading, isError, refetch } = useQuery<IncidentHistoryDetail>({
@@ -191,7 +203,7 @@ export default function HistoryIncidentDetailScreen() {
         <StatusBar barStyle="dark-content" backgroundColor={colors.white} />
         <SafeAreaView style={{ flex: 1 }} edges={['top']}>
           <View style={styles.appBar}>
-            <TouchableOpacity style={styles.backBtn} onPress={handleBack} accessibilityLabel="Back">
+            <TouchableOpacity style={styles.backBtn} onPress={handleBack} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Back">
               <Ionicons name="chevron-back" size={20} color={colors.text} />
             </TouchableOpacity>
             <View style={{ flex: 1 }} />
@@ -200,7 +212,7 @@ export default function HistoryIncidentDetailScreen() {
             <Ionicons name="alert-circle-outline" size={48} color={colors.danger} />
             <Text style={styles.errorTitle}>Could not load incident</Text>
             <Text style={styles.errorSub}>Check your connection and try again.</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()}>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()} activeOpacity={0.85} accessibilityRole="button">
               <Text style={styles.retryText}>Try Again</Text>
             </TouchableOpacity>
           </View>
@@ -232,7 +244,7 @@ export default function HistoryIncidentDetailScreen() {
 
         {/* ── App bar ────────────────────────────────────────────────────────── */}
         <View style={styles.appBar}>
-          <TouchableOpacity style={styles.backBtn} onPress={handleBack} accessibilityLabel="Back">
+          <TouchableOpacity style={styles.backBtn} onPress={handleBack} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Back">
             <Ionicons name="chevron-back" size={20} color={colors.text} />
           </TouchableOpacity>
 
@@ -242,18 +254,21 @@ export default function HistoryIncidentDetailScreen() {
             </View>
             <View>
               <Text style={styles.brandName}>AGAP</Text>
-              <Text style={styles.brandTagline}>Incident Management Platform</Text>
+              <Text style={styles.brandTagline} numberOfLines={1}>Incident Management Platform</Text>
             </View>
           </View>
 
           <View style={styles.appBarRight}>
             <View style={styles.onlineChip}>
-              <View style={[styles.onlineDot, { backgroundColor: '#4ADE80' }]} />
-              <Text style={[styles.onlineText, { color: '#16A34A' }]}>Online</Text>
+              <View style={[styles.onlineDot, { backgroundColor: isOnline ? '#4ADE80' : '#9CA3AF' }]} />
+              <Text style={[styles.onlineText, { color: isOnline ? GREEN_TEXT : SUB }]}>
+                {isOnline ? 'Online' : 'Offline'}
+              </Text>
             </View>
             <TouchableOpacity
               style={styles.bellBtn}
               onPress={() => router.push('/notifications' as any)}
+              accessibilityRole="button"
               accessibilityLabel="Notifications"
             >
               <Ionicons name="notifications-outline" size={20} color={colors.text} />
@@ -267,8 +282,8 @@ export default function HistoryIncidentDetailScreen() {
             <Text style={styles.pageTitle}>Incident Details</Text>
             <Text style={styles.pageSubtitle}>Complete information about this incident.</Text>
           </View>
-          <TouchableOpacity style={styles.shareBtn} onPress={handleShare} accessibilityLabel="Share report">
-            <Ionicons name="share-social-outline" size={13} color={colors.primary} style={{ marginRight: 5 }} />
+          <TouchableOpacity style={styles.shareBtn} onPress={handleShare} hitSlop={HIT_SLOP} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Share report">
+            <Ionicons name="share-social-outline" size={16} color={colors.primary} style={{ marginRight: 6 }} />
             <Text style={styles.shareBtnText}>Share Report</Text>
           </TouchableOpacity>
         </View>
@@ -295,7 +310,7 @@ export default function HistoryIncidentDetailScreen() {
 
           <View style={styles.incidentCardRight}>
             <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-              <Ionicons name={badge.icon} size={11} color={badge.fg} style={{ marginRight: 4 }} />
+              <Ionicons name={badge.icon} size={13} color={badge.fg} style={{ marginRight: 4 }} />
               <Text style={[styles.statusBadgeText, { color: badge.fg }]}>{statusLabel}</Text>
             </View>
             <View style={styles.typeChip}>
@@ -311,6 +326,7 @@ export default function HistoryIncidentDetailScreen() {
           showsHorizontalScrollIndicator={false}
           style={styles.tabBar}
           contentContainerStyle={styles.tabBarContent}
+          accessibilityRole="tablist"
         >
           {TABS.map((tab) => {
             const active = activeTab === tab.key;
@@ -320,6 +336,9 @@ export default function HistoryIncidentDetailScreen() {
                 style={[styles.tab, active && styles.tabActive]}
                 onPress={() => setActiveTab(tab.key)}
                 activeOpacity={0.75}
+                hitSlop={{ top: 4, bottom: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
               >
                 <Text style={[styles.tabText, active && styles.tabTextActive]}>
                   {tab.label}
@@ -428,7 +447,7 @@ function OverviewTab({
         <SectionCard
           title="Incident Timeline"
           action={
-            <TouchableOpacity onPress={onViewTimeline}>
+            <TouchableOpacity onPress={onViewTimeline} style={styles.linkBtn} hitSlop={HIT_SLOP} accessibilityRole="button">
               <Text style={styles.viewAllLink}>View All</Text>
             </TouchableOpacity>
           }
@@ -450,7 +469,7 @@ function OverviewTab({
         <SectionCard
           title="Notifications Sent"
           action={
-            <TouchableOpacity onPress={onViewNotifications}>
+            <TouchableOpacity onPress={onViewNotifications} style={styles.linkBtn} hitSlop={HIT_SLOP} accessibilityRole="button">
               <Text style={styles.viewAllLink}>View All</Text>
             </TouchableOpacity>
           }
@@ -463,7 +482,7 @@ function OverviewTab({
 
       {/* 911 reminder */}
       <View style={styles.hotlineCard}>
-        <Ionicons name="call-outline" size={13} color={colors.textSub} style={{ marginRight: 8, marginTop: 1 }} />
+        <Ionicons name="call-outline" size={16} color={colors.textSub} style={{ marginRight: 10, marginTop: 2 }} />
         <Text style={styles.hotlineText}>
           AGAP complements — never replaces —{' '}
           <Text style={styles.hotlineNum}>911</Text> and the{' '}
@@ -564,7 +583,7 @@ function LocationTab({ data }: { data: IncidentHistoryDetail }) {
             )}
 
             {hasCoords && (
-              <TouchableOpacity style={styles.mapBtn} onPress={openMap} activeOpacity={0.85}>
+              <TouchableOpacity style={styles.mapBtn} onPress={openMap} activeOpacity={0.85} accessibilityRole="button">
                 <Ionicons name="map-outline" size={15} color={colors.primary} style={{ marginRight: 7 }} />
                 <Text style={styles.mapBtnText}>View on Map</Text>
               </TouchableOpacity>
@@ -638,7 +657,7 @@ function ResolutionTab({ data }: { data: IncidentHistoryDetail }) {
 
         {r.followUpRequired && (
           <View style={styles.followUpBanner}>
-            <Ionicons name="alert-circle" size={14} color={colors.amber} style={{ marginRight: 6 }} />
+            <Ionicons name="alert-circle" size={16} color={AMBER_TEXT} style={{ marginRight: 8 }} />
             <Text style={styles.followUpText}>Follow-up action required</Text>
           </View>
         )}
@@ -664,12 +683,12 @@ function LocationMiniCard({ data }: { data: IncidentHistoryDetail }) {
   }
 
   return (
-    <View style={[styles.miniCard, { flex: 1, marginRight: 6 }]}>
+    <View style={styles.miniCard}>
       <View style={styles.miniCardHeader}>
         <Ionicons name="location-outline" size={13} color={colors.primary} style={{ marginRight: 5 }} />
         <Text style={styles.miniCardTitle}>Location</Text>
         {hasCoords && (
-          <TouchableOpacity onPress={openMap} style={{ marginLeft: 'auto' }}>
+          <TouchableOpacity onPress={openMap} style={styles.miniHeaderLink} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Open map">
             <Text style={styles.viewAllLink}>Map</Text>
           </TouchableOpacity>
         )}
@@ -679,8 +698,8 @@ function LocationMiniCard({ data }: { data: IncidentHistoryDetail }) {
       </View>
       <Text style={styles.miniLocText} numberOfLines={2}>{address}</Text>
       {hasCoords && (
-        <TouchableOpacity style={styles.miniMapBtn} onPress={openMap} activeOpacity={0.8}>
-          <Ionicons name="open-outline" size={11} color={colors.primary} style={{ marginRight: 4 }} />
+        <TouchableOpacity style={styles.miniMapBtn} onPress={openMap} activeOpacity={0.8} accessibilityRole="button">
+          <Ionicons name="open-outline" size={14} color={colors.primary} style={{ marginRight: 5 }} />
           <Text style={styles.miniMapBtnText}>View on Map</Text>
         </TouchableOpacity>
       )}
@@ -698,7 +717,7 @@ function ResolutionMiniCard({ data }: { data: IncidentHistoryDetail }) {
   const iconBg    = isPos ? '#DCFCE7' : isNeg ? '#FEF2F2' : colors.surface;
 
   return (
-    <View style={[styles.miniCard, { flex: 1, marginLeft: 6 }]}>
+    <View style={styles.miniCard}>
       <View style={styles.miniCardHeader}>
         <Ionicons name="flag-outline" size={13} color={colors.primary} style={{ marginRight: 5 }} />
         <Text style={styles.miniCardTitle}>Resolution</Text>
@@ -814,7 +833,7 @@ function NotifRow({
   const icon    = NOTIF_ICONS[notif.channel?.toUpperCase()] ?? 'notifications-outline';
   const sent    = DELIVERED.has(notif.status?.toUpperCase());
   const failed  = notif.status?.toUpperCase() === 'FAILED';
-  const tintFg  = sent ? '#16A34A' : failed ? colors.danger : colors.amber;
+  const tintFg  = sent ? GREEN_TEXT : failed ? RED_TEXT : AMBER_TEXT;
   const tintBg  = sent ? '#DCFCE7' : failed ? '#FEF2F2' : '#FFFBEB';
   const checkIcon: IoniconName = sent ? 'checkmark-circle' : failed ? 'close-circle' : 'time-outline';
 
@@ -830,7 +849,7 @@ function NotifRow({
         </Text>
       </View>
       <View style={[styles.notifBadge, { backgroundColor: tintBg }]}>
-        <Ionicons name={checkIcon} size={11} color={tintFg} style={{ marginRight: 3 }} />
+        <Ionicons name={checkIcon} size={12} color={tintFg} style={{ marginRight: 4 }} />
         <Text style={[styles.notifBadgeText, { color: tintFg }]}>
           {sent ? 'Sent' : titleCase(notif.status)}
         </Text>
@@ -846,15 +865,15 @@ const styles = StyleSheet.create({
   // ── App bar ─────────────────────────────────────────────────────────────────
   appBar: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 10, paddingVertical: 8,
+    paddingHorizontal: 12, paddingVertical: 6, minHeight: 56,
     backgroundColor: colors.white, gap: 10,
   },
   backBtn: {
-    width: 34, height: 34, borderRadius: 17,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: colors.bg,
     alignItems: 'center', justifyContent: 'center',
   },
-  brandRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  brandRow: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
   brandIcon: {
     width: 30, height: 30, borderRadius: 8,
     backgroundColor: '#1A2B4A',
@@ -862,94 +881,94 @@ const styles = StyleSheet.create({
   },
   brandIconText: { color: colors.white, fontWeight: '900', fontSize: 15 },
   brandName:     { fontSize: 13, fontWeight: '800', color: '#1A2B4A' },
-  brandTagline:  { fontSize: 9, color: colors.textSub, fontWeight: '500' },
+  brandTagline:  { fontSize: 11, color: SUB, fontWeight: '500' },
   appBarRight:   { flexDirection: 'row', alignItems: 'center', gap: 6 },
   onlineChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: colors.bg, borderRadius: 20,
-    paddingHorizontal: 8, paddingVertical: 4,
+    paddingHorizontal: 10, minHeight: 28,
   },
-  onlineDot:   { width: 6, height: 6, borderRadius: 3 },
-  onlineText:  { fontSize: 10, fontWeight: '700' },
-  bellBtn:     { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  onlineDot:   { width: 8, height: 8, borderRadius: 4 },
+  onlineText:  { fontSize: 12, fontWeight: '700' },
+  bellBtn:     { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 
   // ── Page header ─────────────────────────────────────────────────────────────
   pageHeader: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    paddingHorizontal: 16, paddingTop: 6, paddingBottom: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12,
     backgroundColor: colors.white,
   },
   pageTitle:    { fontSize: 24, fontWeight: '800', color: '#1A2B4A', lineHeight: 30 },
-  pageSubtitle: { fontSize: 12, color: colors.textSub, marginTop: 2 },
+  pageSubtitle: { fontSize: 13, color: SUB, marginTop: 2, lineHeight: 18 },
   shareBtn: {
-    flexDirection: 'row', alignItems: 'center',
-    marginTop: 4, paddingHorizontal: 11, paddingVertical: 7,
-    borderRadius: 20,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 14, minHeight: 36,
+    borderRadius: 18,
     borderWidth: 1, borderColor: `${colors.primary}28`,
     backgroundColor: colors.primarySoft,
   },
-  shareBtnText: { fontSize: 12, fontWeight: '700', color: colors.primary },
+  shareBtnText: { fontSize: 13, fontWeight: '700', color: colors.primary },
 
   // ── Incident summary card ────────────────────────────────────────────────────
   incidentCard: {
     flexDirection: 'row', alignItems: 'flex-start',
-    marginHorizontal: 16, marginBottom: 10,
-    padding: 14, backgroundColor: colors.white,
+    marginHorizontal: 16, marginBottom: 12,
+    padding: 16, backgroundColor: colors.white,
     borderRadius: radius.xl, borderWidth: 1, borderColor: colors.border,
     ...cardShadow,
   },
-  incidentCardLeft: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginRight: 8 },
+  incidentCardLeft: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginRight: 10 },
   typeCircle: {
     width: 46, height: 46, borderRadius: 23,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
-  incidentTitle:    { fontSize: 14, fontWeight: '800', color: '#1A2B4A', marginBottom: 2 },
-  incidentRef:      { fontSize: 12, fontWeight: '700', color: colors.primary, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginBottom: 5 },
-  incidentMeta:     { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  incidentMetaText: { fontSize: 11, color: colors.textSub, flex: 1 },
-  incidentCardRight:{ alignItems: 'flex-end', gap: 8, flexShrink: 0 },
+  incidentTitle:    { fontSize: 16, fontWeight: '800', color: '#1A2B4A', lineHeight: 22, marginBottom: 2 },
+  incidentRef:      { fontSize: 12, fontWeight: '700', color: colors.primary, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginBottom: 6 },
+  incidentMeta:     { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
+  incidentMetaText: { fontSize: 12, color: SUB, flex: 1, lineHeight: 16 },
+  incidentCardRight:{ alignItems: 'flex-end', gap: 8, flexShrink: 0, paddingTop: 2 },
   statusBadge: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 8, paddingVertical: 5, borderRadius: 20,
+    paddingHorizontal: 10, minHeight: 26, borderRadius: 13,
   },
-  statusBadgeText: { fontSize: 11, fontWeight: '700' },
+  statusBadgeText: { fontSize: 12, fontWeight: '700' },
   typeChip: {
     alignItems: 'flex-end', backgroundColor: colors.bg,
-    borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 5,
+    borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6,
   },
-  typeChipLabel: { fontSize: 9, color: colors.textSub, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4 },
-  typeChipValue: { fontSize: 11, fontWeight: '700', color: '#1A2B4A', marginTop: 1 },
+  typeChipLabel: { fontSize: 11, color: SUB, fontWeight: '600' },
+  typeChipValue: { fontSize: 13, fontWeight: '700', color: '#1A2B4A', marginTop: 1 },
 
   // ── Tab bar ──────────────────────────────────────────────────────────────────
   tabBar: { backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },
-  tabBarContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 6 },
+  tabBarContent: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
   tab: {
-    paddingHorizontal: 15, paddingVertical: 8,
-    borderRadius: 20, backgroundColor: colors.bg,
+    paddingHorizontal: 16, minHeight: 38, justifyContent: 'center',
+    borderRadius: 19, backgroundColor: colors.bg,
   },
   tabActive:     { backgroundColor: '#1A2B4A' },
-  tabText:       { fontSize: 12, fontWeight: '600', color: colors.textSub },
+  tabText:       { fontSize: 14, fontWeight: '600', color: colors.textMid },
   tabTextActive: { color: colors.white, fontWeight: '700' },
 
   // ── Track Transmission banner ─────────────────────────────────────────────────
-  trackWrap: { paddingHorizontal: 14, paddingTop: 14 },
+  trackWrap: { paddingHorizontal: 16, paddingTop: 16 },
   trackBtn: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#1A2B4A', borderRadius: radius.lg,
-    paddingVertical: 13, paddingHorizontal: 16,
+    paddingVertical: 14, paddingHorizontal: 16, minHeight: 64,
     ...cardShadow, shadowColor: '#1A2B4A', shadowOpacity: 0.2,
   },
   trackLeft:       { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
   trackIconCircle: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center', justifyContent: 'center',
   },
-  trackTitle: { fontSize: 14, fontWeight: '700', color: colors.white },
-  trackSub:   { fontSize: 11, color: 'rgba(255,255,255,0.60)', marginTop: 1 },
+  trackTitle: { fontSize: 15, fontWeight: '700', color: colors.white },
+  trackSub:   { fontSize: 12, color: 'rgba(255,255,255,0.78)', marginTop: 2 },
 
   // ── Tab content ──────────────────────────────────────────────────────────────
-  tabContent: { paddingHorizontal: 14, paddingTop: 14, gap: 12 },
+  tabContent: { paddingHorizontal: 16, paddingTop: 16, gap: 12 },
 
   // ── Section card ─────────────────────────────────────────────────────────────
   sectionCard: {
@@ -961,8 +980,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between', marginBottom: 14,
   },
-  sectionTitle: { fontSize: 14, fontWeight: '800', color: '#1A2B4A', flex: 1 },
-  viewAllLink:  { fontSize: 12, fontWeight: '700', color: colors.primary },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: '#1A2B4A', flex: 1 },
+  linkBtn:      { minHeight: 32, paddingHorizontal: 4, justifyContent: 'center' },
+  viewAllLink:  { fontSize: 13, fontWeight: '700', color: colors.primary },
 
   // ── Description box ──────────────────────────────────────────────────────────
   descBox: {
@@ -970,21 +990,21 @@ const styles = StyleSheet.create({
     padding: 12, marginBottom: 14,
     borderWidth: 1, borderColor: colors.border,
   },
-  descText:  { fontSize: 13, color: colors.textMid, lineHeight: 20 },
-  emptyNote: { fontSize: 13, color: colors.textSub, fontStyle: 'italic' },
+  descText:  { fontSize: 14, color: colors.textMid, lineHeight: 21 },
+  emptyNote: { fontSize: 14, color: SUB, fontStyle: 'italic', lineHeight: 20 },
   emptyCenter: { alignItems: 'center', paddingVertical: 20, gap: 4 },
 
   // ── Info grid ────────────────────────────────────────────────────────────────
-  infoGrid: { gap: 12 },
-  infoRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  infoGrid: { gap: 14 },
+  infoRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
   infoIconWrap: {
-    width: 30, height: 30, borderRadius: 15,
+    width: 32, height: 32, borderRadius: 16,
     backgroundColor: colors.primarySoft,
     alignItems: 'center', justifyContent: 'center',
-    flexShrink: 0, marginTop: 1,
+    flexShrink: 0,
   },
-  infoLabel: { fontSize: 11, color: colors.textSub, fontWeight: '600', marginBottom: 1 },
-  infoValue: { fontSize: 13, color: '#1A2B4A', fontWeight: '600', lineHeight: 18 },
+  infoLabel: { fontSize: 12, color: SUB, fontWeight: '600', marginBottom: 2 },
+  infoValue: { fontSize: 14, color: '#1A2B4A', fontWeight: '600', lineHeight: 20 },
 
   // ── Timeline rows ─────────────────────────────────────────────────────────────
   tlRow:   { flexDirection: 'row', alignItems: 'flex-start', minHeight: 48 },
@@ -994,37 +1014,39 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1,
   },
   tlLine:    { flex: 1, width: 2, marginTop: 2, borderRadius: 1 },
-  tlBody:    { flex: 1, paddingLeft: 10, paddingBottom: 14 },
+  tlBody:    { flex: 1, paddingLeft: 12, paddingBottom: 16, paddingTop: 3 },
   tlHeadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  tlLabel:   { flex: 1, fontSize: 13, fontWeight: '700', color: '#1A2B4A' },
-  tlTime:    { fontSize: 11, fontWeight: '600', color: colors.textSub, marginLeft: 8 },
-  tlNote:    { marginTop: 2, fontSize: 12, lineHeight: 17, color: colors.textSub },
-  tlDate:    { marginTop: 2, fontSize: 11, color: colors.textSub },
+  tlLabel:   { flex: 1, fontSize: 14, fontWeight: '700', color: '#1A2B4A', lineHeight: 20 },
+  tlTime:    { fontSize: 13, fontWeight: '600', color: SUB, marginLeft: 8 },
+  tlNote:    { marginTop: 2, fontSize: 13, lineHeight: 18, color: SUB },
+  tlDate:    { marginTop: 2, fontSize: 12, color: SUB },
 
   // ── Notification rows ────────────────────────────────────────────────────────
-  notifRow:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 11 },
+  notifRow:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, minHeight: 60 },
   notifBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   notifIconWrap: {
     width: 34, height: 34, borderRadius: 17,
     backgroundColor: colors.primarySoft,
     alignItems: 'center', justifyContent: 'center', marginRight: 11,
   },
-  notifTitle:     { fontSize: 13, fontWeight: '700', color: '#1A2B4A' },
-  notifMeta:      { fontSize: 11, color: colors.textSub, marginTop: 1 },
-  notifBadge:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 7, paddingVertical: 4, borderRadius: 20 },
-  notifBadgeText: { fontSize: 10, fontWeight: '700' },
+  notifTitle:     { fontSize: 14, fontWeight: '700', color: '#1A2B4A', lineHeight: 20 },
+  notifMeta:      { fontSize: 12, color: SUB, marginTop: 2 },
+  notifBadge:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, minHeight: 26, borderRadius: 13, marginLeft: 8 },
+  notifBadgeText: { fontSize: 12, fontWeight: '700' },
 
   // ── Split row ────────────────────────────────────────────────────────────────
-  splitRow: { flexDirection: 'row' },
+  splitRow: { flexDirection: 'row', gap: 12 },
 
   // ── Mini cards ───────────────────────────────────────────────────────────────
   miniCard: {
+    flex: 1,
     backgroundColor: colors.white, borderRadius: radius.xl,
     borderWidth: 1, borderColor: colors.border,
     padding: 14, ...cardShadow,
   },
-  miniCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  miniCardTitle:  { fontSize: 12, fontWeight: '800', color: '#1A2B4A' },
+  miniCardHeader: { flexDirection: 'row', alignItems: 'center', minHeight: 24, marginBottom: 10 },
+  miniCardTitle:  { fontSize: 14, fontWeight: '800', color: '#1A2B4A' },
+  miniHeaderLink: { marginLeft: 'auto', paddingHorizontal: 4, minHeight: 24, justifyContent: 'center' },
 
   miniMapPlaceholder: {
     height: 72, borderRadius: radius.md,
@@ -1032,20 +1054,21 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center', marginBottom: 10,
   },
-  miniLocText: { fontSize: 11, fontWeight: '600', color: '#1A2B4A', lineHeight: 16, marginBottom: 8 },
+  miniLocText: { fontSize: 13, fontWeight: '600', color: '#1A2B4A', lineHeight: 18, marginBottom: 10 },
   miniMapBtn: {
+    marginTop: 'auto',
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 7, borderRadius: radius.md,
+    minHeight: 40, borderRadius: radius.md,
     backgroundColor: colors.primarySoft,
     borderWidth: 1, borderColor: `${colors.primary}22`,
   },
-  miniMapBtnText: { fontSize: 11, fontWeight: '700', color: colors.primary },
+  miniMapBtnText: { fontSize: 13, fontWeight: '700', color: colors.primary },
 
   miniResIconWrap:   { alignItems: 'center', marginBottom: 10 },
   miniResIconCircle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  miniResOutcome:    { fontSize: 12, fontWeight: '700', color: '#1A2B4A', textAlign: 'center', marginBottom: 4 },
-  miniResNotes:      { fontSize: 11, color: colors.textSub, lineHeight: 15, textAlign: 'center' },
-  miniResDate:       { fontSize: 10, color: colors.textSub, marginTop: 6, textAlign: 'center' },
+  miniResOutcome:    { fontSize: 13, fontWeight: '700', color: '#1A2B4A', textAlign: 'center', marginBottom: 4, lineHeight: 18 },
+  miniResNotes:      { fontSize: 12, color: SUB, lineHeight: 17, textAlign: 'center' },
+  miniResDate:       { fontSize: 12, color: SUB, marginTop: 6, textAlign: 'center' },
 
   // ── Location tab ──────────────────────────────────────────────────────────────
   mapTile: {
@@ -1053,22 +1076,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center', marginBottom: 14, gap: 6,
   },
-  mapTileText: { fontSize: 11, color: colors.textSub, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  mapTileText: { fontSize: 12, color: SUB, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   locRow:       { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
   locIconCircle: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: colors.dangerSoft,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
-  locAddress: { fontSize: 14, fontWeight: '700', color: '#1A2B4A', lineHeight: 20 },
-  locSub:     { fontSize: 12, color: colors.textSub, marginTop: 1 },
+  locAddress: { fontSize: 15, fontWeight: '700', color: '#1A2B4A', lineHeight: 21 },
+  locSub:     { fontSize: 13, color: SUB, marginTop: 2 },
   mapBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    minHeight: 46, borderRadius: radius.md,
+    minHeight: 48, borderRadius: radius.md,
     backgroundColor: colors.primarySoft,
     borderWidth: 1, borderColor: `${colors.primary}22`,
   },
-  mapBtnText: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  mapBtnText: { fontSize: 15, fontWeight: '700', color: colors.primary },
 
   // ── Resolution tab ────────────────────────────────────────────────────────────
   resHeadRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
@@ -1079,20 +1102,20 @@ const styles = StyleSheet.create({
     marginTop: 14, padding: 12, borderRadius: radius.md,
     backgroundColor: colors.amberSoft,
   },
-  followUpText: { fontSize: 13, fontWeight: '700', color: colors.amber },
+  followUpText: { flex: 1, fontSize: 14, fontWeight: '700', color: AMBER_TEXT },
 
   // ── Hotline ───────────────────────────────────────────────────────────────────
   hotlineCard: {
     flexDirection: 'row', alignItems: 'flex-start',
-    padding: 13, borderRadius: radius.md,
+    padding: 14, borderRadius: radius.lg,
     backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border,
   },
-  hotlineText: { flex: 1, fontSize: 12, lineHeight: 18, color: colors.textSub },
+  hotlineText: { flex: 1, fontSize: 13, lineHeight: 20, color: SUB },
   hotlineNum:  { fontWeight: '700', color: colors.textMid },
 
   // ── Error state ───────────────────────────────────────────────────────────────
   errorTitle: { fontSize: 17, fontWeight: '800', color: '#1A2B4A', marginTop: 14, marginBottom: 6, textAlign: 'center' },
-  errorSub:   { fontSize: 13, color: colors.textSub, textAlign: 'center', marginBottom: 24, lineHeight: 19 },
-  retryBtn:   { paddingHorizontal: 28, paddingVertical: 13, borderRadius: radius.lg, backgroundColor: colors.primary },
-  retryText:  { fontSize: 14, fontWeight: '700', color: colors.white },
+  errorSub:   { fontSize: 14, color: SUB, textAlign: 'center', marginBottom: 24, lineHeight: 21 },
+  retryBtn:   { minHeight: 48, minWidth: 160, paddingHorizontal: 28, borderRadius: radius.lg, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  retryText:  { fontSize: 15, fontWeight: '700', color: colors.white },
 });

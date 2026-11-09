@@ -5,18 +5,20 @@ import { EmergencyAlertsService } from './emergency-alerts.service';
 import { OpsAlertService } from './ops-alert.service';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
+import { GuestReportLimitModule } from './guest-report-limit/guest-report-limit.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
   imports: [
     RealtimeModule,
     BarangayCoordinationModule,
+    GuestReportLimitModule,
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.SLA_MONITOR }),
   ],
   controllers: [EmergencyAlertsController],
   providers: [EmergencyAlertsService, OpsAlertService],
-  exports: [EmergencyAlertsService, OpsAlertService],
+  exports: [EmergencyAlertsService, OpsAlertService, GuestReportLimitModule],
 })
 export class EmergencyAlertsModule {}

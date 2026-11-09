@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from '
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import {
-  Siren, Truck, MapPin, Users, Sparkles, CheckCircle2, ExternalLink,
+  Siren, Truck, MapPin, Users, CheckCircle2, ExternalLink,
   Search, X, Navigation, UserCheck, ChevronDown, ChevronUp,
-  Wifi, ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, AlertTriangle,
+  Wifi, ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, AlertTriangle, Info, Plus,
 } from 'lucide-react';
 import {
   Button, PriorityBadge, StatusChip, Badge, Skeleton,
@@ -30,7 +30,8 @@ import {
 import { LegChip } from '@/components/map/LegChip';
 import { useNow } from '@/lib/use-now';
 import { UnitTrackingCard } from '@/components/dispatch/UnitTrackingCard';
-import { categoryIcon, formatAffectedCount, titleCase, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
+import { alertMessage, confirmAction, escapeHtml, notify } from '@/components/ui/alerts';
+import { categoryIcon, formatAffectedCount, titleCase, priorityLabel, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
 import type { ResourceRecommendation } from '@/features/dispatch/api';
 import type { MapIncident } from '@/components/incidents/IncidentMapView';
@@ -186,6 +187,30 @@ export default function DispatchPage(): JSX.Element {
     [incidents],
   );
 
+  // Toast when an incident joins the queue after the page has loaded. The first load
+  // only records what is already there. Skipped while a confirmation is open.
+  const seenIds = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (isLoading) return;
+    const pending = incidents.filter((i) => PRE_DISPATCH.includes(i.status));
+    if (!seenIds.current) {
+      seenIds.current = new Set(pending.map((i) => i.id));
+      return;
+    }
+    const fresh = pending.filter((i) => !seenIds.current!.has(i.id));
+    for (const i of pending) seenIds.current.add(i.id);
+    if (!fresh.length) return;
+    const first = [...fresh].sort((a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9))[0]!;
+    const place = first.incident_locations?.barangay;
+    void notify(first.priority === 'CRITICAL' ? 'warning' : 'info', {
+      title: fresh.length > 1 ? `${fresh.length} new incidents in the queue` : `New incident · ${priorityLabel(first.priority)}`,
+      text: `${first.public_reference} · ${titleCase(first.category)}${place ? ` · ${place}` : ''}`,
+      actionText: 'Open',
+    }).then((open) => {
+      if (open) setSelectedId(first.id);
+    });
+  }, [incidents, isLoading]);
+
   const criticalCount = useMemo(() => incidents.filter((i) => ACTIVE_STATUSES.includes(i.status) && i.priority === 'CRITICAL').length, [incidents]);
   const awaitingCount = queue.length;
   const activeCount = useMemo(() => incidents.filter((i) => ACTIVE_STATUSES.includes(i.status)).length, [incidents]);
@@ -310,10 +335,10 @@ export default function DispatchPage(): JSX.Element {
 
           {/* Stats Grid */}
           <dl className="grid shrink-0 grid-cols-2 gap-px bg-slate-200/50 p-[1px] sm:grid-cols-4">
-            <StatCard value={criticalCount} label="Critical" tone="danger" pulse={criticalCount > 0} />
-            <StatCard value={awaitingCount} label="Awaiting" tone="amber" />
+            <StatCard value={criticalCount} label="Immediate" tone="danger" pulse={criticalCount > 0} />
+            <StatCard value={awaitingCount} label="Waiting" tone="amber" />
             <StatCard value={activeCount} label="Active" tone="info" />
-            <StatCard value={availableCount} label="Units" tone="green" />
+            <StatCard value={availableCount} label="Free units" tone="green" />
           </dl>
 
           {/* Header & Search */}
@@ -340,7 +365,7 @@ export default function DispatchPage(): JSX.Element {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search reference, barangay..."
+                placeholder="Search reference or barangay"
                 className="h-full w-full bg-transparent text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none"
               />
               {search && (
@@ -373,7 +398,7 @@ export default function DispatchPage(): JSX.Element {
                   {search.trim() ? 'No matching incidents' : 'Queue is clear'}
                 </p>
                 <p className="mt-1 max-w-[200px] text-xs leading-relaxed text-slate-500">
-                  {search.trim() ? 'Try adjusting your search terms.' : 'All incidents have been successfully dispatched.'}
+                  {search.trim() ? 'Try another reference or barangay.' : 'No report is waiting for a unit.'}
                 </p>
               </div>
             ) : (
@@ -497,7 +522,7 @@ function StatCard({ value, label, tone, pulse }: { value: number; label: string;
     <div className={`flex flex-col items-center justify-center gap-1.5 p-3 sm:py-4 ${t.bg} transition-colors hover:bg-slate-50`}>
       <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${t.dot} ${pulse ? 'animate-pulse' : ''} shadow-sm`} />
       <dd className={`font-mono text-xl font-bold leading-none tabular-nums tracking-tight sm:text-2xl ${t.num}`}>{value}</dd>
-      <dt className={`text-[9px] font-bold uppercase tracking-[0.15em] ${t.label}`}>{label}</dt>
+      <dt className={`text-[12px] font-semibold ${t.label}`}>{label}</dt>
     </div>
   );
 }
@@ -525,22 +550,25 @@ function QueueRow({ incident, selected, onSelect }: { incident: IncidentListItem
         <Icon size={18} aria-hidden="true" />
       </span>
 
+      {/* What and where first; the reference number is secondary. */}
       <div className="min-w-0 flex-1 pt-0.5">
         <div className="flex items-center justify-between gap-2">
-          <p className="truncate font-mono text-[13px] font-bold text-slate-900 tracking-tight">{incident.public_reference}</p>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              {incident.priority}
-            </span>
-          </div>
+          <p className="truncate text-[14px] font-bold text-slate-900">
+            {titleCase(incident.category)}
+            {incident.incident_locations?.barangay && (
+              <span className="font-medium text-slate-600"> · {incident.incident_locations.barangay}</span>
+            )}
+          </p>
+          <span className="flex shrink-0 items-center gap-1.5">
+            <span aria-hidden="true" className={`h-2 w-2 rounded-full ${dot}`} />
+            <span className="text-[12px] font-semibold text-slate-700">{priorityLabel(incident.priority)}</span>
+          </span>
         </div>
-        <p className="mt-1 truncate text-[12px] font-medium text-slate-500">
-          {incident.incident_locations?.barangay ?? titleCase(incident.category)}
-        </p>
-        <div className="mt-2 flex items-center justify-between">
+        <div className="mt-1.5 flex items-center justify-between gap-2">
           <StatusChip status={incident.status} />
-          <span className="text-[11px] text-slate-400 font-medium">{timeAgo(incident.submitted_at)}</span>
+          <span className="truncate text-[12px] text-slate-500">
+            <span className="font-mono">{incident.public_reference}</span> · {timeAgo(incident.submitted_at)}
+          </span>
         </div>
       </div>
     </button>
@@ -678,8 +706,8 @@ function DispatchDetail({
 
       {/* Tabs */}
       <div role="tablist" aria-label="Incident views" className="flex gap-6 border-b border-slate-200/60 bg-white/80 px-6 backdrop-blur-sm">
-        <TabButton id="dispatch" active={tab === 'dispatch'} onClick={() => setTab('dispatch')}>Dispatch Control</TabButton>
-        <TabButton id="route" active={tab === 'route'} onClick={() => setTab('route')}>Location & Route</TabButton>
+        <TabButton id="dispatch" active={tab === 'dispatch'} onClick={() => setTab('dispatch')}>Dispatch</TabButton>
+        <TabButton id="route" active={tab === 'route'} onClick={() => setTab('route')}>Location</TabButton>
       </div>
 
       {/* Stepper */}
@@ -744,7 +772,7 @@ function DispatchDetail({
                 onPartialDispatch={setDispatchIssue}
               />
             ) : (
-              <PreDispatchActions incidentId={incident.id} status={incident.status} />
+              <PreDispatchActions incidentId={incident.id} reference={incident.public_reference} status={incident.status} />
             )}
           </div>
         )}
@@ -774,18 +802,58 @@ function TabButton({ id, active, onClick, children }: { id: string; active: bool
 
 // ─── Pre-dispatch lifecycle advance ──────────────────────────────────────────
 
-function PreDispatchActions({ incidentId, status }: { incidentId: string; status: string }): JSX.Element {
+const STATUS_ADVANCE: Record<string, { to: string; label: string; question: string; done: string; step: number; hint: string }> = {
+  SUBMITTED: {
+    to: 'RECEIVED',
+    label: 'Mark as Received',
+    question: 'Mark this incident as received?',
+    done: 'Marked as received',
+    step: 1,
+    hint: 'New report. Confirm you have seen it.',
+  },
+  RECEIVED: {
+    to: 'ACKNOWLEDGED',
+    label: 'Acknowledge Incident',
+    question: 'Acknowledge this incident?',
+    done: 'Incident acknowledged',
+    step: 2,
+    hint: 'Acknowledge it to start choosing units.',
+  },
+};
+
+function PreDispatchActions({ incidentId, reference, status }: { incidentId: string; reference: string; status: string }): JSX.Element {
   const update = useUpdateIncidentStatus();
-  const next = status === 'SUBMITTED' ? { to: 'RECEIVED', label: 'Mark as Received' } : status === 'RECEIVED' ? { to: 'ACKNOWLEDGED', label: 'Acknowledge Incident' } : null;
+  const next = STATUS_ADVANCE[status] ?? null;
+
+  async function advance() {
+    if (!next || update.isPending) return;
+    const ok = await confirmAction({
+      title: next.question,
+      text: `${reference} moves to ${titleCase(next.to)}. This is recorded in the incident history.`,
+      confirmText: next.label,
+    });
+    if (!ok) return;
+    try {
+      await update.mutateAsync({ id: incidentId, status: next.to });
+      void notify('success', { title: next.done, text: reference });
+    } catch (err) {
+      void notify('error', { title: 'Status not changed', text: (err as Error)?.message ?? 'Transition failed.' });
+    }
+  }
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-[13px] font-medium text-slate-600 leading-relaxed">
-        Advance this incident to acknowledge and assess it before a unit can be dispatched.
-      </p>
+      {next ? (
+        <div>
+          <p className="text-[12px] font-semibold text-slate-500">Step {next.step} of 2 before dispatch</p>
+          <p className="mt-0.5 text-[15px] font-bold text-slate-900">{next.hint}</p>
+        </div>
+      ) : (
+        <p className="text-[14px] text-slate-700">No dispatch action for this status.</p>
+      )}
       {update.isError && <p className="text-[13px] font-semibold text-red-600">{(update.error as Error)?.message ?? 'Transition failed.'}</p>}
       {next && (
-        <Button variant="primary" className="w-full shadow-md" loading={update.isPending} onClick={() => update.mutate({ id: incidentId, status: next.to })}>
+        <Button variant="primary" className="w-full shadow-md" loading={update.isPending} onClick={() => void advance()}>
           {next.label}
         </Button>
       )}
@@ -817,6 +885,8 @@ function RecommendationPanel({
   const [crewTarget, setCrewTarget] = useState<string | null>(null);
   const [showCrew, setShowCrew] = useState(false);
   const [notes, setNotes] = useState('');
+  // The note is optional, so it stays folded away until asked for (or already has text).
+  const [showNotes, setShowNotes] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -897,8 +967,36 @@ function RecommendationPanel({
     });
   }
 
+  /** Escaped summary of what is about to be sent, for the confirmation dialog. */
+  function dispatchSummaryHtml(): string {
+    const rows = unitIds.map((id) => {
+      const crew = (crewByUnit[id] ?? []).map((c) => crewNames.get(c) ?? 'Responder');
+      const type = units.get(id)?.resourceType;
+      return `<li class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+        <p class="text-[14px] font-bold text-agap-textMain">${escapeHtml(unitLabel(id))}${type ? ` <span class="font-medium text-agap-hint">· ${escapeHtml(resourceTypeLabel(type))}</span>` : ''}</p>
+        <p class="mt-0.5 text-[13px] text-agap-textMid">${crew.length ? `Crew: ${escapeHtml(crew.join(', '))}` : 'Crew: none selected'}</p>
+      </li>`;
+    });
+    const header = incident
+      ? `<p class="text-[13px] text-agap-textMid"><span class="font-mono font-semibold text-agap-textMain">${escapeHtml(incident.public_reference)}</span> · ${escapeHtml(titleCase(incident.category))} · ${escapeHtml(priorityLabel(incident.priority))}</p>`
+      : '';
+    const note = notes.trim()
+      ? `<p class="mt-3 text-[13px] text-agap-textMid"><span class="font-semibold text-agap-textMain">Notes:</span> ${escapeHtml(notes.trim())}</p>`
+      : '';
+    return `${header}<ul class="mt-3 space-y-2">${rows.join('')}</ul>${note}
+      <p class="mt-3 text-[12px] text-agap-hint">The selected crew receives the assignment on the responder app.</p>`;
+  }
+
   async function authorize() {
     if (!unitIds.length || sending) return;
+    const count = unitIds.length;
+    const ok = await confirmAction({
+      title: count > 1 ? `Dispatch ${count} units?` : `Dispatch ${unitLabel(unitIds[0]!)}?`,
+      html: dispatchSummaryHtml(),
+      confirmText: count > 1 ? `Authorize ${count} units` : 'Authorize dispatch',
+      icon: 'warning',
+    });
+    if (!ok) return;
     setSending(true);
     setError(null);
     onBusyChange?.(true);
@@ -921,63 +1019,86 @@ function RecommendationPanel({
     }
     setSending(false);
     onBusyChange?.(false);
+    const ref = incident?.public_reference ?? 'the incident';
     if (!failure) {
       onDispatched();
+      void notify('success', {
+        title: sent.length > 1 ? `${sent.length} units dispatched` : `${unitLabel(sent[0]!)} dispatched`,
+        text: `${sent.map(unitLabel).join(', ')} → ${ref}. Waiting for the crew to accept.`,
+      });
       return;
     }
     // Units already sent stay sent; the rest stay selected so the dispatcher can retry.
     setUnitIds((prev) => prev.filter((x) => !sent.includes(x)));
     setError(`${failure} — try another unit.`);
     if (sent.length) {
-      onPartialDispatch?.(
-        `Dispatched ${sent.map(unitLabel).join(', ')}. Not dispatched — ${failure}. Use “Dispatch another unit” to send the rest.`,
-      );
+      const message = `Dispatched ${sent.map(unitLabel).join(', ')}. Not dispatched — ${failure}. Use “Dispatch another unit” to send the rest.`;
+      onPartialDispatch?.(message);
+      void alertMessage({ icon: 'warning', title: 'Only some units were dispatched', text: message });
+    } else {
+      void alertMessage({ icon: 'error', title: 'Dispatch not sent', text: `${failure}. Choose another unit and try again.` });
     }
   }
 
   const ranked = recommendations ?? [];
   const showFallback = !isLoading && !isError && ranked.length === 0;
 
+  const preselected = (plan?.unitIds.length ?? 0) > 0;
+
+  // Three short steps (choose units → check crew → send). Explanations stay one
+  // click away ("Why these units?") instead of on screen all the time.
   return (
-    <div className="space-y-4">
-      <UnitsNeeded plan={plan} unitLabel={unitLabel} />
-
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-amber-500 shrink-0" />
-          <h3 className="text-[14px] font-bold text-slate-900">Recommended Units</h3>
-        </div>
-        <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">System Match</span>
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
-        </div>
-      ) : isError ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
-          <p className="text-[13px] font-medium text-red-700">Couldn&apos;t load recommendations.</p>
-          <Button variant="secondary" size="sm" className="mt-3 bg-white" onClick={() => void refetch()}>Retry Loading</Button>
-        </div>
-      ) : showFallback ? (
-        <FallbackUnits units={availableUnits ?? []} selectedIds={unitIds} onToggle={toggleUnit} />
-      ) : (
-        <div className="space-y-2">
-          {ranked.map((r) => <RecommendationRow key={r.resourceId} rec={r} selected={unitIds.includes(r.resourceId)} onSelect={() => toggleUnit(r.resourceId)} />)}
-        </div>
-      )}
-
-      {unitIds.length > 0 && (
-        <SelectedUnits
-          unitIds={unitIds}
-          crewByUnit={crewByUnit}
-          unitLabel={unitLabel}
-          crewName={(id) => crewNames.get(id) ?? 'Responder'}
-          homeCrewCount={(id) => units.get(id)?.crewIds.length ?? 0}
+    <div className="space-y-6">
+      {/* ── Step 1: units ── */}
+      <section aria-labelledby="dispatch-step-units" className="space-y-3">
+        <StepHeading
+          id="dispatch-step-units"
+          step={1}
+          title="Choose units"
+          hint={preselected ? 'Suggested units are already selected.' : 'Select one or more units.'}
         />
-      )}
+        <UnitsNeeded plan={plan} />
 
-      {/* Crew selection */}
+        {isLoading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
+          </div>
+        ) : isError ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
+            <p className="text-[13px] font-medium text-red-700">Couldn&apos;t load suggested units.</p>
+            <Button variant="secondary" size="sm" className="mt-3 bg-white" onClick={() => void refetch()}>Try again</Button>
+          </div>
+        ) : showFallback ? (
+          <FallbackUnits units={availableUnits ?? []} selectedIds={unitIds} onToggle={toggleUnit} />
+        ) : (
+          <ul className="space-y-2" aria-label="Suggested units">
+            {ranked.map((r) => (
+              <li key={r.resourceId}>
+                <RecommendationRow rec={r} selected={unitIds.includes(r.resourceId)} onSelect={() => toggleUnit(r.resourceId)} />
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {(ranked.length > 0 || (plan?.needs.length ?? 0) > 0) && <WhySuggested plan={plan} ranked={ranked} />}
+      </section>
+
+      {/* ── Step 2: crew ── */}
+      <section aria-labelledby="dispatch-step-crew" className="space-y-3">
+        <StepHeading id="dispatch-step-crew" step={2} title="Check the crew" hint="Only the crew gets the alert on their phone." />
+        {unitIds.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-300 px-4 py-3 text-[13px] text-slate-600">Choose a unit first.</p>
+        ) : (
+          <SelectedUnits
+            unitIds={unitIds}
+            crewByUnit={crewByUnit}
+            unitLabel={unitLabel}
+            crewName={(id) => crewNames.get(id) ?? 'Responder'}
+            homeCrewCount={(id) => units.get(id)?.crewIds.length ?? 0}
+          />
+        )}
+
+      {/* Crew picker (folded) */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden transition-all duration-300">
         <button
           type="button"
@@ -989,11 +1110,12 @@ function RecommendationPanel({
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
               <UserCheck size={14} aria-hidden="true" />
             </div>
-            <span className="text-[13px] font-bold text-slate-900">Assign Crew</span>
-            {crewIds.length > 0 && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">{crewIds.length}</span>}
-            <span className="text-[11px] font-medium text-slate-500 hidden sm:inline-block">— {respondersLoading ? 'loading…' : `${availableResponders.length} available`}</span>
+            <span className="text-[13px] font-bold text-slate-900">Add or change crew</span>
+            <span className="text-[12px] font-medium text-slate-500">
+              {respondersLoading ? 'Loading…' : `${availableResponders.length} free`}
+            </span>
           </div>
-          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-transform">
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-transform" aria-hidden="true">
             {showCrew ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </div>
         </button>
@@ -1002,14 +1124,14 @@ function RecommendationPanel({
           <div id="dispatch-crew-list" className="p-3 space-y-2 max-h-64 overflow-y-auto scrollbar-thin bg-slate-50/50">
             {unitIds.length > 1 && target && (
               <div role="group" aria-label="Add crew to unit" className="flex flex-wrap items-center gap-1.5 pb-1">
-                <span className="text-[11px] font-semibold text-slate-500">Add crew to:</span>
+                <span className="text-[12px] font-semibold text-slate-600">Crew for:</span>
                 {unitIds.map((id) => (
                   <button
                     key={id}
                     type="button"
                     onClick={() => setCrewTarget(id)}
                     aria-pressed={id === target}
-                    className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${FOCUS_RING} ${
+                    className={`min-h-9 rounded-full px-3 py-1 text-[12px] font-bold transition-colors ${FOCUS_RING} ${
                       id === target ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-100'
                     }`}
                   >
@@ -1019,7 +1141,7 @@ function RecommendationPanel({
               </div>
             )}
             {!target ? (
-              <p className="py-5 text-center text-[12px] font-medium text-slate-500">Select a unit first.</p>
+              <p className="py-5 text-center text-[13px] font-medium text-slate-600">Choose a unit first.</p>
             ) : respondersLoading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-[12px] font-medium text-slate-500">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-emerald-500" />
@@ -1032,8 +1154,8 @@ function RecommendationPanel({
               </div>
             ) : availableResponders.length === 0 ? (
               <div className="space-y-1.5 py-5 text-center">
-                <p className="text-[13px] font-bold text-slate-700">No responders available.</p>
-                <p className="text-[12px] text-slate-500">Personnel must set their status to Available in the app.</p>
+                <p className="text-[13px] font-bold text-slate-700">No crew is free right now.</p>
+                <p className="text-[12px] text-slate-600">Crew appear here when they set themselves Available in the app.</p>
               </div>
             ) : (
               availableResponders.map((r) => {
@@ -1055,11 +1177,8 @@ function RecommendationPanel({
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className={`truncate text-[13px] font-bold ${selected ? 'text-emerald-900' : 'text-slate-900'}`}>{r.full_name}</p>
-                      {r.organization && <p className="truncate text-[11px] font-medium text-slate-500 mt-0.5">{r.organization.name}</p>}
+                      {r.organization && <p className="truncate text-[12px] font-medium text-slate-500 mt-0.5">{r.organization.name}</p>}
                     </div>
-                    <span className="shrink-0 rounded-md bg-emerald-100/50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-inset ring-emerald-500/20">
-                      Avail
-                    </span>
                   </button>
                 );
               })
@@ -1068,23 +1187,40 @@ function RecommendationPanel({
         )}
       </div>
 
-      <div className="space-y-3 pt-2">
-        <label htmlFor="dispatch-notes" className="block text-[13px] font-bold text-slate-700">
-          Dispatch Notes <span className="font-normal text-slate-400 ml-1">(Optional)</span>
-        </label>
-        <textarea
-          id="dispatch-notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="e.g. Approach from MacArthur Highway..."
-          rows={2}
-          className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] font-medium text-slate-900 shadow-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-all"
-        />
+      </section>
+
+      {/* ── Step 3: send ── */}
+      <section aria-labelledby="dispatch-step-send" className="space-y-3">
+        <StepHeading id="dispatch-step-send" step={3} title="Send" />
+        {showNotes || notes ? (
+          <div className="space-y-1.5">
+            <label htmlFor="dispatch-notes" className="block text-[13px] font-bold text-slate-700">
+              Note for the crew <span className="ml-1 font-normal text-slate-500">(optional)</span>
+            </label>
+            <textarea
+              id="dispatch-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. Approach from MacArthur Highway"
+              rows={2}
+              autoFocus={showNotes && !notes}
+              className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-[14px] font-medium text-slate-900 shadow-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-all"
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowNotes(true)}
+            className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[13px] font-semibold text-emerald-700 hover:bg-emerald-50 ${FOCUS_RING}`}
+          >
+            <Plus size={15} aria-hidden="true" /> Add a note for the crew
+          </button>
+        )}
         {error && <p role="alert" className="text-[13px] font-semibold text-red-600">{error}</p>}
 
         <Button
           variant="primary"
-          className="w-full h-12 text-[14px] font-bold shadow-md transition-all active:scale-[0.98] mt-2 bg-gradient-to-b from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border border-emerald-800/20"
+          className="w-full h-12 text-[15px] font-bold shadow-md transition-all active:scale-[0.98] bg-gradient-to-b from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border border-emerald-800/20"
           disabled={unitIds.length === 0}
           loading={sending}
           onClick={() => void authorize()}
@@ -1092,6 +1228,23 @@ function RecommendationPanel({
           <Siren size={16} aria-hidden="true" />
           {unitIds.length > 1 ? `Authorize Dispatch (${unitIds.length} units)` : 'Authorize Dispatch'}
         </Button>
+        {unitIds.length === 0 && <p className="text-center text-[12px] text-slate-500">Choose at least one unit to dispatch.</p>}
+      </section>
+    </div>
+  );
+}
+
+function StepHeading({ id, step, title, hint }: { id: string; step: number; title: string; hint?: string | undefined }): JSX.Element {
+  return (
+    <div className="flex items-start gap-2.5">
+      <span aria-hidden="true" className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[12px] font-bold text-white">
+        {step}
+      </span>
+      <div className="min-w-0">
+        <h3 id={id} className="text-[15px] font-bold leading-6 text-slate-900">
+          <span className="sr-only">Step {step}: </span>{title}
+        </h3>
+        {hint && <p className="text-[12px] text-slate-600">{hint}</p>}
       </div>
     </div>
   );
@@ -1100,130 +1253,191 @@ function RecommendationPanel({
 function RecommendationRow({ rec, selected, onSelect }: { rec: ResourceRecommendation; selected: boolean; onSelect: () => void; }): JSX.Element {
   const required = rec.requiredCapabilities.length;
   const matched = rec.matchedCapabilities.length;
-  const capVariant = required === 0 ? 'muted' : matched >= required ? 'green' : matched > 0 ? 'amber' : 'red';
-  const capLabel = required === 0 ? 'No spec required' : `${matched}/${required} capability`;
+  // Equipment / skills the incident needs (MOD-29). Icon + text, never colour alone.
+  const skills =
+    required === 0
+      ? null
+      : matched >= required
+        ? { text: 'Has the needed skills', cls: 'text-emerald-700', Icon: CheckCircle2 }
+        : { text: `Has ${matched} of ${required} needed skills`, cls: matched > 0 ? 'text-amber-700' : 'text-red-700', Icon: AlertTriangle };
+  const distance = rec.distanceMeters == null ? 'Distance unknown' : `${km(rec.distanceMeters)} away`;
 
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`group w-full rounded-xl border p-4 text-left transition-all duration-200 ${FOCUS_RING} ${
-        selected ? 'border-emerald-500 bg-emerald-50 shadow-[0_4px_12px_rgba(16,185,129,0.15)] ring-1 ring-inset ring-emerald-500/20' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+      className={`group flex min-h-16 w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200 ${FOCUS_RING} ${
+        selected ? 'border-emerald-500 bg-emerald-50 ring-1 ring-inset ring-emerald-500/20' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
       }`}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className={`flex h-7 w-7 items-center justify-center rounded-lg text-[12px] font-bold shadow-sm transition-colors ${
-            selected ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200'
-          }`}>
-            {rec.rank}
-          </span>
-          <span className={`flex items-center gap-2 text-[14px] font-bold tracking-tight ${selected ? 'text-emerald-900' : 'text-slate-900'}`}>
-            <Truck size={14} className={selected ? 'text-emerald-600' : 'text-slate-400'} />
+      {/* MOD-30: the rank number shows the suggested order; the score is not shown.
+          The reasons are under "Why these units?". */}
+      <span
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-bold transition-colors ${
+          selected ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 group-hover:bg-slate-200'
+        }`}
+        aria-label={`Suggestion ${rec.rank}`}
+      >
+        {rec.rank}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className={`text-[15px] font-bold tracking-tight ${selected ? 'text-emerald-900' : 'text-slate-900'}`}>
             {rec.callSign ?? rec.resourceName}
           </span>
-        </div>
-        <span className="font-mono text-[12px] font-bold text-slate-400 tabular-nums">
-          {rec.score.toFixed(0)} <span className="text-[10px] uppercase tracking-wider">pts</span>
+          {rec.rank === 1 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[12px] font-semibold text-amber-900">Best match</span>
+          )}
         </span>
-      </div>
-
-      {/* Score bar */}
-      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-        <div className={`h-full rounded-full transition-all duration-500 ${selected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`} style={{ width: `${Math.min(100, Math.max(0, rec.score))}%` }} />
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <Badge variant="muted" className="bg-slate-100">{titleCase(rec.resourceType)}</Badge>
-        <Badge variant={capVariant}>{capLabel}</Badge>
-        <Badge variant="blue">{km(rec.distanceMeters)}</Badge>
-      </div>
-      <p className="mt-2 text-[12px] font-medium leading-relaxed text-slate-500">{rec.rationale}</p>
+        <span className="mt-0.5 block text-[13px] text-slate-600">
+          {resourceTypeLabel(rec.resourceType)} · {distance}
+        </span>
+        {skills && (
+          <span className={`mt-0.5 flex items-center gap-1 text-[12px] font-semibold ${skills.cls}`}>
+            <skills.Icon size={13} aria-hidden="true" /> {skills.text}
+          </span>
+        )}
+      </span>
+      <SelectMark selected={selected} />
     </button>
+  );
+}
+
+/** Round check on the right of a selectable row: filled when selected (shape + colour). */
+function SelectMark({ selected }: { selected: boolean }): JSX.Element {
+  return selected ? (
+    <CheckCircle2 size={22} className="shrink-0 text-emerald-600" aria-hidden="true" />
+  ) : (
+    <span aria-hidden="true" className="h-[22px] w-[22px] shrink-0 rounded-full border-2 border-slate-300" />
+  );
+}
+
+/** The reasons behind the suggestions, folded away until asked for. */
+function WhySuggested({ plan, ranked }: { plan: UnitSelectionPlan | null; ranked: ResourceRecommendation[] }): JSX.Element {
+  const needs = plan?.needs.filter((n) => n.need.reasons.length > 0) ?? [];
+  return (
+    <details className="group rounded-xl border border-slate-200 bg-white">
+      <summary className={`flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-xl px-4 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 ${FOCUS_RING} [&::-webkit-details-marker]:hidden`}>
+        <span className="flex items-center gap-2">
+          <Info size={15} className="text-slate-500" aria-hidden="true" /> Why these units?
+        </span>
+        <ChevronDown size={15} className="text-slate-500 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
+      </summary>
+      <div className="space-y-3 border-t border-slate-100 px-4 py-3 text-[13px] leading-relaxed text-slate-700">
+        {needs.length > 0 && (
+          <div>
+            <p className="font-semibold text-slate-900">From the report</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              {needs.map((n) => (
+                <li key={n.need.resourceType}>
+                  <span className="font-medium">{resourceTypeLabel(n.need.resourceType)}:</span> {n.need.reasons.join(' · ')}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {ranked.length > 0 && (
+          <div>
+            <p className="font-semibold text-slate-900">Each unit</p>
+            <ul className="mt-1 space-y-1">
+              {ranked.map((r) => (
+                <li key={r.resourceId}>
+                  <span className="font-medium">{r.rank}. {r.callSign ?? r.resourceName}:</span> {r.rationale}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <p className="text-[12px] text-slate-500">Suggestions only. You decide which units to send.</p>
+      </div>
+    </details>
   );
 }
 
 function FallbackUnits({ units, selectedIds, onToggle }: { units: { id: string; name: string; call_sign: string | null; resource_type: string; base_barangay: string | null }[]; selectedIds: string[]; onToggle: (id: string) => void; }): JSX.Element {
   if (units.length === 0) {
-    return <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-800">No units available right now.</div>;
+    return <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-800">No units are free right now.</div>;
   }
   return (
-    <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/50 p-1">
-      <p className="px-3 pt-2 text-[12px] font-medium text-slate-500">No ranked recommendations available. Showing active units:</p>
-      {units.map((u) => (
-        <button
-          key={u.id}
-          type="button"
-          onClick={() => onToggle(u.id)}
-          aria-pressed={selectedIds.includes(u.id)}
-          className={`flex min-h-12 w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border p-3 text-left transition-all ${FOCUS_RING} ${
-            selectedIds.includes(u.id) ? 'border-emerald-500 bg-emerald-50 shadow-sm' : 'border-transparent hover:bg-white hover:border-slate-200 hover:shadow-sm'
-          }`}
-        >
-          <span className="flex items-center gap-2 text-[13px] font-bold text-slate-900">
-            <Truck size={14} className="text-slate-400" />
-            {u.call_sign ?? u.name}
-          </span>
-          <span className="text-[11px] font-medium text-slate-500">
-            {titleCase(u.resource_type)}{u.base_barangay ? ` · ${u.base_barangay}` : ''}
-          </span>
-        </button>
-      ))}
+    <div className="space-y-2">
+      <p className="text-[13px] text-slate-600">No suggestions for this report. Free units:</p>
+      {units.map((u) => {
+        const selected = selectedIds.includes(u.id);
+        return (
+          <button
+            key={u.id}
+            type="button"
+            onClick={() => onToggle(u.id)}
+            aria-pressed={selected}
+            className={`flex min-h-14 w-full items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-all ${FOCUS_RING} ${
+              selected ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+            }`}
+          >
+            <Truck size={16} className="shrink-0 text-slate-500" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[14px] font-bold text-slate-900">{u.call_sign ?? u.name}</span>
+              <span className="block text-[13px] text-slate-600">
+                {resourceTypeLabel(u.resource_type)}{u.base_barangay ? ` · ${u.base_barangay}` : ''}
+              </span>
+            </span>
+            <SelectMark selected={selected} />
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 // ─── MOD-29/30 units needed (pre-selection) ─────────────────────────────────
 
-function UnitsNeeded({ plan, unitLabel }: { plan: UnitSelectionPlan | null; unitLabel: (id: string) => string }): JSX.Element {
+/**
+ * What the report needs, as short chips: "2 × Ambulance" plus one status
+ * (covered / on the way / using another type / short). The reasons from the
+ * report are under "Why these units?".
+ */
+function UnitsNeeded({ plan }: { plan: UnitSelectionPlan | null }): JSX.Element {
   return (
-    <section aria-label="Units needed" className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <ClipboardList size={16} className="shrink-0 text-emerald-600" aria-hidden="true" />
-          <h3 className="text-[14px] font-bold text-slate-900">Units Needed</h3>
-        </div>
-        <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">Auto-selected</span>
-      </div>
-
+    <div aria-label="Units this report needs" role="group" className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
+      <p className="flex items-center gap-1.5 text-[13px] font-semibold text-emerald-900">
+        <ClipboardList size={15} className="shrink-0 text-emerald-700" aria-hidden="true" /> This report needs
+      </p>
       {!plan ? (
-        <Skeleton className="mt-3 h-10 w-full rounded-lg" />
+        <Skeleton className="mt-2 h-8 w-full rounded-lg" />
       ) : plan.needs.length === 0 ? (
-        <p className="mt-2 text-[12px] font-medium text-slate-600">No unit type suggested for this report. Choose the units below.</p>
+        <p className="mt-1 text-[13px] text-slate-700">No unit type suggested. Choose units below.</p>
       ) : (
-        <ul className="mt-3 space-y-2.5">
+        <ul className="mt-2 flex flex-wrap gap-2">
           {plan.needs.map((n) => {
             const wanted = Math.max(0, n.need.count - n.responding);
+            const status =
+              n.short > 0 && n.unitIds.length === 0
+                ? { text: 'none free', cls: 'text-red-700', Icon: AlertTriangle }
+                : n.short > 0
+                  ? { text: `only ${n.unitIds.length} of ${wanted} free`, cls: 'text-amber-800', Icon: AlertTriangle }
+                  : wanted === 0
+                    ? { text: 'already on the way', cls: 'text-blue-700', Icon: Truck }
+                    : { text: 'selected', cls: 'text-emerald-700', Icon: CheckCircle2 };
             return (
-              <li key={n.need.resourceType} className="text-[13px]">
-                <p className="font-bold text-slate-900">
-                  {n.need.count} × {resourceTypeLabel(n.need.resourceType)}
-                  <span className="ml-1.5 font-medium text-slate-500">— {n.need.reasons.join(' · ')}</span>
-                </p>
-                <p className="mt-0.5 text-[12px] font-medium">
-                  {n.responding > 0 && <span className="text-blue-700">{n.responding} already responding. </span>}
-                  {n.unitIds.length > 0 && <span className="text-emerald-700">Selected: {n.unitIds.map(unitLabel).join(', ')}. </span>}
-                  {n.alternativeUsed && (
-                    <span className="text-amber-700">
-                      No {resourceTypeLabel(n.need.resourceType).toLowerCase()} available, using {resourceTypeLabel(n.alternativeUsed).toLowerCase()}.{' '}
-                    </span>
-                  )}
-                  {n.short > 0 && (
-                    <span className={n.unitIds.length ? 'text-amber-700' : 'text-red-700'}>
-                      {n.unitIds.length ? `Only ${n.unitIds.length} of ${wanted} available.` : 'None available right now.'}
-                    </span>
-                  )}
-                </p>
+              <li key={n.need.resourceType} className="flex flex-wrap items-center gap-x-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[13px] ring-1 ring-inset ring-emerald-200">
+                <span className="font-bold text-slate-900">{n.need.count} × {resourceTypeLabel(n.need.resourceType)}</span>
+                <span className={`flex items-center gap-1 font-semibold ${status.cls}`}>
+                  <status.Icon size={13} aria-hidden="true" /> {status.text}
+                </span>
+                {n.alternativeUsed && (
+                  <span className="text-amber-800">
+                    · no {resourceTypeLabel(n.need.resourceType).toLowerCase()} free, using {resourceTypeLabel(n.alternativeUsed).toLowerCase()}
+                  </span>
+                )}
+                {n.responding > 0 && wanted > 0 && (
+                  <span className="text-blue-700">· {n.responding} on the way</span>
+                )}
               </li>
             );
           })}
         </ul>
       )}
-      <p className="mt-3 text-[11px] font-medium text-slate-500">
-        Suggested from the report. Review the units and crew, then authorize.
-      </p>
-    </section>
+    </div>
   );
 }
 
@@ -1237,28 +1451,32 @@ function SelectedUnits({
   homeCrewCount: (id: string) => number;
 }): JSX.Element {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-[13px] font-bold text-slate-900">
-        Selected ({unitIds.length} unit{unitIds.length === 1 ? '' : 's'})
-      </p>
-      <ul className="mt-2 space-y-1.5">
-        {unitIds.map((id) => {
-          const crew = crewByUnit[id] ?? [];
-          return (
-            <li key={id} className="flex flex-wrap items-baseline gap-x-2 text-[12px]">
-              <span className="font-bold text-slate-800">{unitLabel(id)}</span>
+    <ul className="space-y-2" aria-label={`${unitIds.length} selected unit${unitIds.length === 1 ? '' : 's'}`}>
+      {unitIds.map((id) => {
+        const crew = crewByUnit[id] ?? [];
+        return (
+          <li
+            key={id}
+            className={`flex items-start gap-3 rounded-xl border px-3.5 py-2.5 ${crew.length ? 'border-slate-200 bg-white' : 'border-amber-300 bg-amber-50'}`}
+          >
+            {crew.length ? (
+              <Users size={16} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+            ) : (
+              <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
+            )}
+            <div className="min-w-0">
+              <p className="text-[14px] font-bold text-slate-900">{unitLabel(id)}</p>
               {crew.length > 0 ? (
-                <span className="font-medium text-slate-600">Crew: {crew.map(crewName).join(', ')}</span>
+                <p className="text-[13px] text-slate-700">{crew.map(crewName).join(', ')}</p>
               ) : (
-                <span className="flex items-center gap-1 font-medium text-amber-700">
-                  <AlertTriangle size={12} aria-hidden="true" />
-                  {homeCrewCount(id) > 0 ? 'Home crew not on duty. Assign crew or the unit gets no alert.' : 'No crew assigned. Assign crew or the unit gets no alert.'}
-                </span>
+                <p className="text-[13px] font-medium text-amber-900">
+                  {homeCrewCount(id) > 0 ? 'Usual crew is off duty.' : 'No crew yet.'} Add crew so the unit gets the alert.
+                </p>
               )}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

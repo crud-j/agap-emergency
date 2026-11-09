@@ -12,7 +12,11 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentStatusService } from './incident-status/incident-status.service';
-import { DuplicateDetectionService } from './duplicate-detection/duplicate-detection.service';
+import {
+  DuplicateDetectionService,
+  toSimilarReportHint,
+  type SimilarReportHint,
+} from './duplicate-detection/duplicate-detection.service';
 import { PriorityService } from './priority/priority.service';
 import { BarangayNotifyService } from '../barangay-coordination/barangay-notify.service';
 import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
@@ -90,7 +94,11 @@ export class IncidentsService {
     @Optional() private readonly opsAlert?: OpsAlertService,
   ) {}
 
-  async create(dto: CreateIncidentDto, actorId?: string, actorRole?: UserRole): Promise<Incident> {
+  async create(
+    dto: CreateIncidentDto,
+    actorId?: string,
+    actorRole?: UserRole,
+  ): Promise<Incident & { similar_report?: SimilarReportHint }> {
     if ((dto.lat === undefined) !== (dto.lng === undefined)) {
       throw new BadRequestException('Latitude and longitude must be provided together.');
     }
@@ -118,15 +126,27 @@ export class IncidentsService {
     const hasIntakeAnswers = Object.keys(intakeAnswers).length > 0;
     const landmark = dto.intake?.landmark?.trim() || null;
 
+    // MOD-26: look for an earlier report of the same emergency nearby — from anyone,
+    // registered or guest. Advisory only: the new report is always saved, and only a
+    // dispatcher can merge it. A failed lookup must never block the report.
+    let similarReport: SimilarReportHint | null = null;
     if (dto.lat !== undefined && dto.lng !== undefined) {
-      const possible = await this.duplicateService.findNearbyRecent(dto.lat, dto.lng, category);
-      if (possible) {
-        this.logger.warn(`Possible duplicate of ${possible.id} detected`);
+      try {
+        const possible = await this.duplicateService.findNearbyRecent(dto.lat, dto.lng, category);
+        if (possible) {
+          this.logger.warn(`Possible duplicate of ${possible.id} detected`);
+          similarReport = toSimilarReportHint(possible);
+        }
+      } catch (err) {
+        this.logger.warn(`Duplicate lookup failed; report continues: ${String(err)}`);
       }
     }
 
+    // MOD-24 / Rule 8: the reporter sends facts, never a priority. Only a Dispatcher
+    // or Supervisor may set one at creation; anyone else gets the rule's recommendation.
     const recommendation = this.priorityService.recommend(category, intakeAnswers);
-    const priority = dto.priority ?? recommendation.priority;
+    const canSetPriority = actorRole === UserRole.DISPATCHER || actorRole === UserRole.SUPERVISOR;
+    const priority = (canSetPriority ? dto.priority : undefined) ?? recommendation.priority;
 
     // Keep caller estimates as ranges; never turn a range into a fabricated count.
     // Intake answers are also flattened into hazard_flags so older consumers
@@ -294,7 +314,9 @@ export class IncidentsService {
     // Tag the incident with its barangay. Never throws; the incident is already saved.
     void this.barangayNotify?.notifyForIncident(incident.id);
 
-    return incident;
+    // Tell the reporter a similar report is already being handled, so a bystander
+    // knows MDRRMO is on it. Stage and age only — nothing about the other reporter.
+    return similarReport ? { ...incident, similar_report: similarReport } : incident;
   }
 
   /**

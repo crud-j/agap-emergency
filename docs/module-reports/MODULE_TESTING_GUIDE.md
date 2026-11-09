@@ -502,7 +502,7 @@ Run this once first. Most of the per-module checks below reuse it.
 2. 🖥️ **Dispatch** on a Fire incident (for example `DEMO06` Industrial Assessed, or a new Assessed Fire). The BFP truck shows "Capability match: n/m required".
 3. **Add.** 🖥️ (orgadmin) **Registry** → **Capabilities** on BRAVO-1 → under **Add a capability**, Rescue, tap **+ Rope Rescue**. It moves to **Assigned** as **Unverified**, the row's Capabilities button shows an amber 1, and the table chip reads "Rope Rescue · unverified".
 4. 🖥️ (dispatcher1) **Dispatch** on the Assessed **Rescue** incident. BRAVO-1's reason reads "Capability match: 1/2 required (SEARCH_AND_RESCUE) (1 unverified not counted)". The ranking is the same as before step 3.
-5. **Verify.** 🖥️ (supervisor) **Fleet & Units → Registry** → **Capabilities** on BRAVO-1 → **Verify** on Rope Rescue. Back on the same Rescue incident in **Dispatch**, BRAVO-1 now shows "2/2 required" and a higher score.
+5. **Verify.** 🖥️ (supervisor) **Fleet & Units → Registry** → **Capabilities** on BRAVO-1 → **Verify** on Rope Rescue. Back on the same Rescue incident in **Dispatch**, BRAVO-1 now shows "2/2 required" and ranks higher.
 6. **Other organization.** 🖥️ (orgadmin) CHARLIE-1 (BFP) has no Capabilities or Edit button ("View only"). 🔌 `POST /v1/resources/<CHARLIE-1 id>/capabilities` as orgadmin returns 403.
 7. 🖥️ (orgadmin) The dialog has no **Verify** button. 🔌 `PATCH …/capabilities/<id>/verify` as orgadmin returns 403.
 8. 🖥️ (admin) **Audit Log**, entity `resource_capability`, module `MOD-29`: one row each for the add (`CREATE`), the verify (`UPDATE`, `is_verified` false → true) and, after you remove Rope Rescue again with the **X**, the remove (`DELETE`). Each names BRAVO-1 and ROPE_RESCUE.
