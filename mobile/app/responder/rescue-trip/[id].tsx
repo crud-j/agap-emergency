@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { goBack as leaveScreen } from '@/src/lib/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   RESCUE_ACCESS,
@@ -160,12 +161,12 @@ export default function RescueTripScreen() {
     if (saveState === 'saving') return;
     const dirty = JSON.stringify(form) !== JSON.stringify(formFromLatestTrip(summary?.trips[0]));
     if (!dirty) {
-      router.canGoBack() ? router.back() : router.replace('/responder/home' as never);
+      leaveScreen('/responder/home');
       return;
     }
     Alert.alert('Leave without sending?', 'This rescue trip has not been sent.', [
       { text: 'Stay', style: 'cancel' },
-      { text: 'Leave', style: 'destructive', onPress: () => router.back() },
+      { text: 'Leave', style: 'destructive', onPress: () => leaveScreen('/responder/home') },
     ]);
   }
 

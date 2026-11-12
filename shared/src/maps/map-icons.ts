@@ -1,21 +1,8 @@
 /**
- * Map marker identity rules shared by every map (ops dashboard, ops map,
- * responder app, citizen app). Platform helpers turn these into image sources:
- * `frontend/lib/map-icons.ts` and `mobile/src/lib/map-icons.ts`.
+ * Map marker rules shared by every map (ops dashboard, ops map, responder app,
+ * citizen app). The reporter's scene marker is their consented profile photo
+ * (`reporter_has_photo`) or the neutral priority pin; it is never the patient.
  */
-
-/** Reporter icon variant. The icon represents the REPORTER, never the patient. */
-export type CitizenIconKind = 'male' | 'female';
-
-/**
- * MALE / FEMALE → that icon. PREFER_NOT_TO_SAY, null (never asked, guest,
- * legacy) or anything unexpected → null, meaning "draw the neutral pin".
- */
-export function citizenIconKind(sex: string | null | undefined): CitizenIconKind | null {
-  if (sex === 'MALE') return 'male';
-  if (sex === 'FEMALE') return 'female';
-  return null;
-}
 
 /**
  * The ambulance artwork is a side view facing RIGHT, so it is never rotated by
@@ -30,7 +17,7 @@ export function isWestbound(heading: number | null | undefined): boolean {
   return h > 180 && h < 360;
 }
 
-/** Ring colour around the reporter icon, so priority stays readable at a glance. */
+/** Ring colour around the reporter photo, so priority stays readable at a glance. */
 export const PRIORITY_RING_COLORS = {
   CRITICAL: '#DC2626',
   HIGH: '#EA580C',

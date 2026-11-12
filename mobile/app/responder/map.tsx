@@ -12,6 +12,7 @@ import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
 import { useResponderLocationShare } from '@/src/hooks/useResponderLocationShare';
 import { useTransportRoute } from '@/src/hooks/useTransportRoute';
 import { useTranslations } from '@/src/hooks/useAccessibility';
+import { useReporterPhotoUri } from '@/src/hooks/useReporterPhoto';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { categoryColor } from '@/src/lib/incident-visuals';
@@ -136,6 +137,11 @@ export default function MapScreen() {
       : null;
 
   const incidentStatus = primaryAssignment?.incidents?.status ?? null;
+  // The reporter's photo, only with their consent and while the incident is active.
+  const reporterPhotoUri = useReporterPhotoUri(
+    primaryAssignment?.incident_id,
+    primaryAssignment?.incidents?.reporter_has_photo,
+  );
   const transport = useTransportRoute({
     dispatchId: primaryAssignment?.id,
     incidentId: primaryAssignment?.incident_id,
@@ -279,7 +285,7 @@ export default function MapScreen() {
                 destination={transport.destinationMarker}
                 incidentDimmed={incidentStatus === 'TRANSPORTING' && !!transport.destinationMarker}
                 responderIcon="ambulance"
-                citizenSex={incident?.reporter_sex ?? null}
+                citizenPhotoUri={reporterPhotoUri}
                 priority={incident?.priority}
                 pitch={canShare && responderPoint ? 50 : 0}
                 navigationHeading={canShare && responderPoint?.heading != null ? responderPoint.heading : null}

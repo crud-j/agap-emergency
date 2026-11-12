@@ -27,6 +27,8 @@ import { getMapConfig } from '@/src/services/api/locations.api';
 import { useResponderLocationShare } from '@/src/hooks/useResponderLocationShare';
 import { useTransportRoute } from '@/src/hooks/useTransportRoute';
 import { useTranslations } from '@/src/hooks/useAccessibility';
+import { useReporterPhotoUri } from '@/src/hooks/useReporterPhoto';
+import { ReporterPhotoCard } from '@/src/components/responder/reporter-photo-card';
 import { NavigateButton } from '@/src/components/responder/navigate-button';
 import { OutboxBanner, TransportBanners } from '@/src/components/responder/transport-banners';
 import { useTransportOutbox } from '@/src/hooks/useTransportOutbox';
@@ -109,6 +111,8 @@ export default function AssignmentDetailScreen() {
   });
 
   const incident = data?.incidents ?? null;
+  // The reporter's photo, only with their consent and while the incident is active.
+  const reporterPhotoUri = useReporterPhotoUri(incident?.id, incident?.reporter_has_photo);
   const unit = data?.resources ?? null;
   const loc = incident?.incident_locations ?? null;
   const accent = categoryColor(incident?.category);
@@ -506,7 +510,7 @@ export default function AssignmentDetailScreen() {
                     destination={transport.destinationMarker}
                     incidentDimmed={incidentStatus === 'TRANSPORTING' && !!transport.destinationMarker}
                     responderIcon="ambulance"
-                    citizenSex={incident?.reporter_sex ?? null}
+                    citizenPhotoUri={reporterPhotoUri}
                     priority={incident?.priority}
                     pitch={shareEnabled && myPoint != null ? 50 : 0}
                     navigationHeading={shareEnabled && myPoint?.heading != null ? myPoint.heading : null}
@@ -543,6 +547,9 @@ export default function AssignmentDetailScreen() {
                 <Text style={styles.prioText}>{priorityLabel(incident?.priority)}</Text>
               </View>
             </View>
+
+            {/* The reporter's face, so the crew can find them on arrival (never labelled the patient). */}
+            {reporterPhotoUri && <ReporterPhotoCard uri={reporterPhotoUri} />}
 
             {/* Sharing status */}
             <View style={styles.shareStrip}>

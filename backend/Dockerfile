@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM node:22-alpine AS base
+# Debian (glibc), not Alpine: the ONNX runtime used by the on-server profile photo check
+# (onnxruntime-node) ships glibc binaries only.
+FROM node:22-bookworm-slim AS base
 RUN npm install -g pnpm@9
 WORKDIR /app
 
@@ -30,7 +32,7 @@ RUN pnpm db:generate
 RUN pnpm build
 
 # Production stage
-FROM node:22-alpine AS production
+FROM node:22-bookworm-slim AS production
 RUN npm install -g pnpm
 WORKDIR /app
 COPY --from=build /app/backend/dist ./dist
@@ -38,5 +40,7 @@ COPY --from=build /app/backend/package.json ./
 COPY --from=build /app/backend/node_modules ./node_modules
 COPY --from=build /app/backend/prisma ./prisma
 ENV NODE_ENV=production
+# Downloaded once on first start (~150 MB). Mount a volume here to keep it across deploys.
+ENV PROFILE_PHOTO_MODEL_DIR=/app/.cache/models
 EXPOSE 3000
 CMD ["node", "dist/main"]

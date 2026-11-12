@@ -10,13 +10,12 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ScreenHeader } from '../../src/components/ui/screen-header';
 import { createContact } from '../../src/services/api/contacts.api';
 
 export default function AddContactScreen() {
-  const router = useRouter();
   const qc = useQueryClient();
 
   const [name, setName] = useState('');
@@ -29,7 +28,7 @@ export default function AddContactScreen() {
     mutationFn: createContact,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['emergency-contacts'] });
-      router.back();
+      goBack();
     },
     onError: (err: Error) => setError(err.message),
   });

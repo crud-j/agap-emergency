@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { forgotPassword } from '../../src/services/api/auth.api';
 
@@ -46,7 +47,7 @@ export default function ForgotPasswordScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.container}>
 
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBack()}>
             <Ionicons name="arrow-back" size={22} color="#111827" />
           </TouchableOpacity>
 

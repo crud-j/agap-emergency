@@ -144,7 +144,11 @@ Form behaviour:
 - On a mismatch, show the name as read from the card so the citizen can fix spelling. Example: *"Your PhilHealth ID shows:
   DELA CRUZ, JUAN SANTOS"*. This is the citizen's own card, so showing it back is fine.
 - **Create account** is disabled until the name matches, or until the citizen has chosen "Send for review".
-- Never pre-fill the name fields from the scan. The citizen types the name, as specified, and the system checks it.
+- ~~Never pre-fill the name fields from the scan.~~ **Changed 2026-11-09 (owner's request):** after a scan that read a name,
+  the fields are filled from it in title case and stay editable. A notice asks the citizen to check the spelling, and the
+  match indicator shows straight away. A name the citizen typed or corrected is never overwritten, and a review scan
+  fills nothing. The server re-checks the submitted name against the card exactly as before. See the National ID plan's
+  Progress log, "Change — 2026-11-09: name filled from the scan".
 - Keep the scanned image in memory and the app cache only. Delete the cached file after upload, and on leaving the screen.
 
 ### 4.3 Fallback when the phone has no Google document scanner

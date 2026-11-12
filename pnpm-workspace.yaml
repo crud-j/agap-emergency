@@ -12,8 +12,14 @@ allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
   msgpackr-extract: true
+  # CPU binaries (win32, linux glibc, darwin) ship in the package; the install script only downloads
+  # optional CUDA GPU files. Used by the on-server profile photo check (@huggingface/transformers).
+  onnxruntime-node: false
   prisma: true
   protobufjs: true
+  # Uses its prebuilt @img/sharp-<platform> binary (Windows and Alpine/musl included); the install script
+  # only builds from source when a global libvips or --build-from-source is present.
+  sharp: false
   # Its only install script is opencollective-postinstall (a donation banner).
   tesseract.js: false
   unrs-resolver: true

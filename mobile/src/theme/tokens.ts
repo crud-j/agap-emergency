@@ -17,12 +17,18 @@ export const colors = {
   text: '#1C2B3A',
   textMid: '#40536D',
   textSub: '#8795A3',
+  /** Secondary text that must stay readable: 5.1:1 on white, 4.6:1 on bg (WCAG AA). textSub is 3.1:1 — decoration only. */
+  textMuted: '#5F7084',
 
   danger: '#D44858',
   dangerSoft: '#FDF0F1',
+  /** Red for text and for white-on-red buttons: 6.1:1 (danger is 4.3:1, short of AA for body text). */
+  dangerStrong: '#B42F3F',
 
   amber: '#D97706',
   amberSoft: '#FFFBEB',
+  /** Amber text on amberSoft: 4.8:1. */
+  amberText: '#B45309',
 
   info: '#3B82F6',
   infoSoft: '#EFF6FF',

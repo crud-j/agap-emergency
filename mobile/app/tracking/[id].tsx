@@ -9,6 +9,7 @@ import { getMapConfig } from '@/src/services/api/locations.api';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { useIncidentTracking } from '@/src/hooks/useIncidentTracking';
 import { useRouteLine } from '@/src/hooks/useRouteLine';
+import { useProfilePhotoUri } from '@/src/components/profile/profile-avatar';
 import { useTranslations } from '@/src/hooks/useAccessibility';
 import { formatDuration } from '@/src/lib/transport-target';
 import { otherSceneUnits } from '@/src/lib/incident-tracking';
@@ -120,7 +121,9 @@ export default function TrackingScreen() {
       : null;
   const transportEtaSeconds =
     transportUnit?.eta.seconds ?? transportUnit?.route?.durationSeconds ?? null;
-  const citizenSex = user?.sex === 'MALE' || user?.sex === 'FEMALE' ? user.sex : null;
+  // The reporter sees their own photo on the map only when responders see it too (consent).
+  const ownPhotoUri = useProfilePhotoUri();
+  const citizenPhotoUri = user?.profile_photo_shared_with_responders ? ownPhotoUri : null;
   const responderSignalLost = unitPosition
     ? isSignalLost(unitPosition.updatedAt, now)
     : false;
@@ -201,7 +204,7 @@ export default function TrackingScreen() {
                 routeGeometry={routeGeometry}
                 destination={destinationMarker}
                 responderIcon="ambulance"
-                citizenSex={citizenSex}
+                citizenPhotoUri={citizenPhotoUri}
                 priority={incident?.priority}
                 pitch={20}
                 supports3dBuildings={mapConfig?.supports3dBuildings ?? false}

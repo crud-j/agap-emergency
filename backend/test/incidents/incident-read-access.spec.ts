@@ -15,7 +15,6 @@ function makeController(participation: Participation) {
   const incidents = {
     findById: jest.fn().mockResolvedValue({ id: 'inc-1', status: 'TRANSPORTING', barangay_notices: [] }),
     findReporterView: jest.fn().mockResolvedValue({ id: 'inc-1', status: 'TRANSPORTING' }),
-    getReporterSex: jest.fn().mockResolvedValue(null),
     getReporterIdVerified: jest.fn().mockResolvedValue(null),
     listEvents: jest.fn().mockResolvedValue([]),
     getTimeline: jest.fn().mockResolvedValue({ timeline: [] }),
@@ -26,6 +25,7 @@ function makeController(participation: Participation) {
   const transport = { listTransports: jest.fn().mockResolvedValue([]) };
   const controller = new IncidentsController(
     incidents as any, {} as any, {} as any, {} as any, transport as any, participants as any,
+    {} as any, {} as any, { isAvailable: jest.fn().mockResolvedValue(false) } as any,
   );
   return { controller, incidents, participants, transport };
 }

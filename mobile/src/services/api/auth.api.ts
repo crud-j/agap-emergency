@@ -42,6 +42,13 @@ export interface SafeUser {
   profile_completeness: number;
   last_login_at: string | null;
   created_at: string;
+  /** Profile picture (MOD-01). Only on GET/PATCH /users/me; absent on login responses. */
+  has_profile_photo?: boolean;
+  profile_photo_updated_at?: string | null;
+  /** Null when the photo can be changed now. */
+  profile_photo_next_change_at?: string | null;
+  /** The user lets the dispatchers and crew of their active reports see the photo (consent). */
+  profile_photo_shared_with_responders?: boolean;
 }
 
 export interface AuthResponse extends AuthTokens {

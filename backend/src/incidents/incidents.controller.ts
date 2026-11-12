@@ -27,6 +27,7 @@ import { FireReportService } from './fire-report/fire-report.service';
 import { RescueTripService } from './rescue-trip/rescue-trip.service';
 import { IncidentHandoverService } from './incident-handover/incident-handover.service';
 import { TransportService } from './transport/transport.service';
+import { ReporterPhotoService } from './reporter-photo/reporter-photo.service';
 import { StartTransportDto } from './transport/dto/start-transport.dto';
 import { RecordArrivalDto } from './transport/dto/record-arrival.dto';
 import { UpdateTransportDto } from './transport/dto/update-transport.dto';
@@ -67,6 +68,7 @@ export class IncidentsController {
     private readonly participants: IncidentParticipantService,
     private readonly fireReportService: FireReportService,
     private readonly rescueTripService: RescueTripService,
+    private readonly reporterPhoto: ReporterPhotoService,
   ) {}
 
   /**
@@ -150,18 +152,39 @@ export class IncidentsController {
     if (participation === 'reporter') return this.incidentsService.findReporterView(id);
 
     const { barangay_notices, ...incident } = (await this.incidentsService.findById(id)) as any;
-    // reporter_sex (reporter map icon) is for staff and assigned crew only.
+    // reporter_has_photo (consented reporter photo) is for staff and assigned crew only.
     // The barangay notice (short code, report status) is ops-only.
+    const reporter_has_photo = await this.reporterPhoto.isAvailable(id);
     if (participation === 'staff') {
       return {
         ...incident,
         barangay_notices,
-        reporter_sex: await this.incidentsService.getReporterSex(id),
+        reporter_has_photo,
         // Information for the dispatcher only: nothing in priority, recommendations or dispatch reads it (rule 8).
         reporterIdVerified: await this.incidentsService.getReporterIdVerified(id),
       };
     }
-    return { ...incident, reporter_sex: await this.incidentsService.getReporterSex(id) };
+    return { ...incident, reporter_has_photo };
+  }
+
+  @Get(':id/reporter-photo')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "The reporter's profile photo (JPEG) for this incident's staff and assigned crew. "
+      + 'Only while the reporter consents and the incident is active; 404 otherwise (MOD-01/22/32)',
+  })
+  async getReporterPhoto(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: AuthedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Never the reporter themselves through this route (they have /users/me/photo), never a stranger.
+    await this.requireParticipation(req, id, ['staff', 'crew']);
+    const jpeg = await this.reporterPhoto.read(id, req.user);
+    // Consent can be withdrawn at any time: never kept in a browser or proxy cache.
+    res.setHeader('Cache-Control', 'private, no-store');
+    return new StreamableFile(jpeg, { type: 'image/jpeg', length: jpeg.length });
   }
 
   @Get(':id/detail')

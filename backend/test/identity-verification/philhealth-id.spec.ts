@@ -249,6 +249,29 @@ describe('matchIdName', () => {
     expect(match({ last: 'Dela Cruz', first: 'Juan', middle: 'Santos' }, { ...ID, last: 'DELA CRU2' }).matches).toBe(false);
   });
 
+  it('counts letters OCR merged or split (LI→U, RN→M, CL→D, VV→W) as one slip', () => {
+    const card = (last: string) => ({ last, first: 'JUAN' });
+    // Typed correctly, card misread.
+    expect(match({ last: 'Maligaya', first: 'Juan' }, card('MAUGAYA')).matches).toBe(true);
+    expect(match({ last: 'Villanueva', first: 'Juan' }, card('VIUANUEVA')).matches).toBe(true);
+    expect(match({ last: 'Cornejo', first: 'Juan' }, card('COMEJO')).matches).toBe(true);
+    expect(match({ last: 'Claveria', first: 'Juan' }, card('DAVERIA')).matches).toBe(true);
+    // The other way: one letter on the card read as two.
+    expect(match({ last: 'Medina', first: 'Juan' }, card('RNEDINA')).matches).toBe(true);
+    expect(match({ last: 'Wenceslao', first: 'Juan' }, card('VVENCESLAO')).matches).toBe(true);
+  });
+
+  it('still allows only one slip, and none in a short word, with OCR merges', () => {
+    const card = (last: string) => ({ last, first: 'JUAN' });
+    // A merge plus another slip is two.
+    expect(match({ last: 'Maligaya', first: 'Juan' }, card('MAUGAJA')).matches).toBe(false);
+    // Short card words stay exact: `LUZ` is not `LILZ`, `RAM` is not `RARN`.
+    expect(match({ last: 'Lilz', first: 'Juan' }, card('LUZ')).matches).toBe(false);
+    expect(match({ last: 'Dela Cruz', first: 'Ram' }, { last: 'DELA CRUZ', first: 'RARN' }).matches).toBe(false);
+    // A different name that happens to share letters doesn't pass.
+    expect(match({ last: 'Mariano', first: 'Juan' }, card('MAUGAYA')).matches).toBe(false);
+  });
+
   it('matches the name parsed from the card text', () => {
     const onId = parsePhilHealthName(CARD_TEXT);
     expect(onId).not.toBeNull();

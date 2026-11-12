@@ -47,7 +47,12 @@ model User {
   /// MOD-01: set when the PhilHealth ID name matched at registration or staff approved it.
   /// Information only — never affects priority, recommendations or dispatch (rule 8).
   identity_verified_at                                                     DateTime?                      @db.Timestamptz(6)
-  identity_verifications                                                   identity_verifications[]       @relation("IdentityVerificationUser")
+  /// MOD-01: the user's live selfie, stored privately as `<bucket>:<key>` (`local:<key>` on disk).
+  /// Never a public URL; only served through GET /users/me/photo.
+  profile_photo_location                                                   String?                        @db.VarChar(512)
+  /// When the current profile photo was set. It can be changed again 5 months after this.
+  profile_photo_updated_at                                                 DateTime?                      @db.Timestamptz(6)
+  identity_verifications                                                  identity_verifications[]       @relation("IdentityVerificationUser")
   reviewed_identity_verifications                                          identity_verifications[]       @relation("IdentityVerificationReviewer")
   account_lifecycle_events_account_lifecycle_events_performed_by_idTousers account_lifecycle_events[]     @relation("account_lifecycle_events_performed_by_idTousers")
   account_lifecycle_events_account_lifecycle_events_user_idTousers         account_lifecycle_events[]     @relation("account_lifecycle_events_user_idTousers")

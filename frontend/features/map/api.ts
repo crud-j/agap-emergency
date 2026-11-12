@@ -126,8 +126,8 @@ export interface IncidentLocationItem {
   status: string;
   lat: number | null;
   lng: number | null;
-  /** Reporter map icon (staff-only, WP3.6). null = neutral pin. */
-  reporter_sex: 'MALE' | 'FEMALE' | null;
+  /** Reporter agreed to show their photo and the incident is active (staff-only). false = neutral pin. */
+  reporter_has_photo: boolean;
   reporter_is_guest: boolean | null;
 }
 
@@ -149,7 +149,7 @@ export async function fetchIncidentLocations(params?: {
     status: string;
     incident_locations: { latitude: number | string | null; longitude: number | string | null } | null;
     incident_reporters?: { is_guest: boolean } | null;
-    reporter_sex?: 'MALE' | 'FEMALE' | null;
+    reporter_has_photo?: boolean;
   }> }>(`/incidents?${qs}`, getToken());
 
   return (res.data ?? []).map((inc) => ({
@@ -160,7 +160,7 @@ export async function fetchIncidentLocations(params?: {
     status: inc.status,
     lat: inc.incident_locations?.latitude != null ? Number(inc.incident_locations.latitude) : null,
     lng: inc.incident_locations?.longitude != null ? Number(inc.incident_locations.longitude) : null,
-    reporter_sex: inc.reporter_sex ?? null,
+    reporter_has_photo: inc.reporter_has_photo ?? false,
     reporter_is_guest: inc.incident_reporters?.is_guest ?? null,
   }));
 }

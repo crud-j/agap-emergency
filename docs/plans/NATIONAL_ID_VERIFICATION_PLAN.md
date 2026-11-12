@@ -975,6 +975,160 @@ The owner then shared a photo of their own card. Its layout, recorded in the lay
 - G1;
 - the open decision on a phone/server number mismatch.
 
+### Change — 2026-11-09: name filled from the scan (owner's request)
+
+**Why.** The owner asked that the name read from a valid ID fill the registration fields, so the citizen doesn't retype
+what the card already shows. This reverses "never pre-fill" (PhilHealth plan §4.2, MOD-01 business rule 3); both now
+say what's below.
+
+**Changed (mobile only; no server, shared or API change).** The scan response already carried `nameOnId`.
+- `mobile/src/lib/id-verification.ts`: `toNameCase` (`DELA CRUZ` → `Dela Cruz`; Roman numerals stay capitals), and
+  `prefillNameFromId(current, nameOnId, previouslyFilled)`. The suffix chips move here as `NAME_SUFFIXES`.
+- `mobile/app/auth/registration.tsx`: `handleIdVerified` fills the fields and shows the match straight away.
+- `mobile/src/components/registration/NameFields.tsx`: a "We filled in your name from your ID. Check the spelling…"
+  notice replaces the "type your name" helper while the name came from the card.
+- `mobile/src/i18n/translations.ts`: `nameFilledFromId` in `en` and `fil`.
+
+**Rules kept:**
+- The fields stay editable and the server re-checks the submitted name against the card, so the check is unchanged.
+- A review scan (`nameOnId` null) fills nothing; the citizen types the name as before.
+- A name the citizen typed or corrected is never overwritten. A rescan refills only while the fields still hold exactly
+  what the last scan filled.
+- A suffix the chips don't offer is left as "None", so the match shows the mismatch and the citizen picks one.
+
+**Risk.** An OCR misread now lands in the fields instead of being caught by the citizen's typing. Since the filled name
+always matches the card's reading, the match indicator can't catch it either: the notice asking the citizen to check
+the spelling is the safeguard. Whether each name was read *exactly* right is still unconfirmed (Status above), so this
+matters most until the Phase 0 target is met.
+
+**Tests.** Mobile `id-verification.test.ts` 43 → 51: title case, the filled name matching the card with the shared
+matcher, suffix mapping, no middle name, no fill on a review scan, no overwrite of a typed or corrected name, refill on
+rescan, and the notice in both languages. Invented names only.
+
+**Not yet checked on a phone:** the filled form after a real scan.
+
+### Change — 2026-11-09: OCR letter merges count as one slip (owner's report)
+
+**Evidence.** On a real card the server read the surname with `LI` merged into `U` (a 7-letter surname read as 6
+letters). The fill showed the misread, the owner corrected it, and the match then failed ("Doesn't match your ID") and
+offered MDRRMO review. Plain edit distance counts a merge as **two** edits (substitute, delete), and the matcher allows
+one slip, so a correctly typed name was refused.
+
+**Changed:** `shared/src/validation/philhealth-id.ts`. It's used by both IDs, the phone and the server.
+- `OCR_MERGES`: `LI`/`IL`/`LL`/`II` ↔ `U`, `RN` ↔ `M`, `CL` ↔ `D`, `VV` ↔ `W`.
+- `editDistance` counts one merge or split as **one** edit, in either direction.
+
+**Unchanged:** still one slip at most, still only in a card word of 5+ letters (shorter words exact), same word count
+and order, swap still fails.
+
+**Tests.** `philhealth-id.spec.ts`: 2 new tests.
+- Merges and splits pass in both directions.
+- A merge plus another slip fails, a short word stays exact, and a different name sharing letters fails.
+- Identity-verification specs 356 → 358 and mobile 249, all passing. Shared built, backend typechecks. Invented names only.
+
+**Next:** restart the backend fully (a `shared` change) and scan the same card again. Typing the correct spelling should
+now show "Matches your ID". The fill itself still shows the misread until the reading improves.
+
+### Change — 2026-11-10: image clean-up before OCR (owner's request)
+
+**Evidence.** The owner's next failing log line (patterns only): first read `conf=32`, `heading=false`, `number=false`,
+`digitRuns=none`, 35 lines, mostly junk (`x`); second read 12 lines; `phone=read` but `phoneNumberSeen=0/4`. That is
+the "OCR can't see through the card's print → image clean-up (a new dependency, needs approval)" row of the table in
+"second read and failure log". The owner asked for a more accurate scanner and auto-crop, which is taken as that approval.
+
+**Measured on the one sample in the owner's folder** (a tight landscape card photo stored sideways with EXIF orientation 8),
+re-encoded the way the app uploads it (1600 px, JPEG 0.85). Signals only, no card text was printed:
+
+| Pipeline | Heading | Number | Name | Time |
+|---|---|---|---|---|
+| Today: raw block, then raw auto | yes | no | no | ~7 s → `UNREADABLE` |
+| Darkest-ink grey, lighting flattened, block | yes | yes | yes | 1.5 s |
+| Same, Otsu black-and-white, block | yes | yes | yes | 1.2 s |
+
+**Changed**
+- **New dependency: `sharp` 0.34.4** (backend, exact pin). Prebuilt binaries for Windows and Alpine/musl; its install
+  script only builds from source with a global libvips, so `allowBuilds: sharp: false` in `pnpm-workspace.yaml`.
+- `backend/src/identity-verification/id-image-prep.ts` (new), in memory only:
+  - `uprightIdImage`: applies the EXIF orientation (a raw read of the sample, stored sideways, found nothing), and
+    reports a portrait image (the card on its side). The original bytes are kept when there's no orientation.
+  - `prepareIdImage(upright, turn, scale)`: each pixel's **brightest channel** (black/navy ink stays dark; the pink and
+    blue waves and the coloured fine-line background fade), lighting flattened by dividing by a heavy blur, and an
+    **Otsu** black-and-white copy. Untuned: no threshold was fitted to the sample.
+  - Never throws; an image it can't decode gives `null`, and the scan then reads the original bytes only, as before.
+- `identity-verification.service.ts`, `readCard`, in stages:
+  - **National ID:** cleaned reads first (grey and black-and-white, block and auto layout), then the same at **1.3×** if
+    the reads haven't settled, then today's raw reads only if the card still isn't whole.
+  - **PhilHealth:** today's raw reads first, unchanged; cleaned reads only if raw didn't read the whole card. A PhilHealth
+    card that reads today reads exactly the same way.
+  - **Settled** = whole card, at least two reads found the number, and each name part has a clear winner of ≥ 2 votes.
+  - **A portrait image** tries both quarter turns and keeps the one whose read has the heading (or higher confidence).
+  - "Wrong card" is still decided only by the raw read's confidence (`MIN_OCR_CONFIDENCE` was set on raw reads; cleaned
+    images read with higher confidence).
+  - The name-column read uses the cleaned image when there is one.
+- `shared/src/validation/id-document-rules.ts`:
+  - `voteIdName`: each name part is the value most reads gave (ties: most confident read). On the sample, the single
+    most confident read's middle name disagreed with the majority.
+  - `combineIdReads(rules, texts, confirmingTexts)`: reads of a **resized** copy can back up or contradict the number,
+    **never supply it alone**. Found by testing: on one upload setting, two 1.3× reads of the same pixels agreed on the
+    **same wrong number**, which every other setting read differently. With this rule that scan is refused (retry).
+  - `nameVoteCounts` for the log (counts only).
+- Log line: reads are listed by name (`raw/block[…]`, `clean/auto[…]`, `binary@1.3/block[…]`), plus `cleaned=`,
+  `turned=`, `nameVotes=last=3/4,…`. Outcome `passed after N reads` replaces `second read passed`.
+
+**Result on the sample, 8 variants** (6 upload sizes/qualities, the original EXIF file, a sideways copy):
+- 6 pass, **all with the same number**; 7 of 8 give the same voted name (the odd one is a 1200 px upload, smaller than the app sends).
+- 2 are refused as unreadable (a different JPEG quality, and a sideways copy re-encoded twice). **None accepts a wrong number.**
+- Time: 3–13 s for a pass (the app's own setting: ~5 s, 4 reads); up to ~19 s for a refusal. Today's refusal took ~7 s.
+
+**Not changed, and why**
+- **Phone upload settings (1600 px, JPEG 0.85):** 1200–2000 px and quality 0.80–0.92 were measured. None was reliably
+  better, and 0.92 at 1600 px did worse. Small changes flip single reads, which is why the server now votes.
+- **Phone auto-crop:** ML Kit's document scanner already runs in full mode (edge detection, perspective correction).
+  The sample was already a tight crop, so cropping wasn't its problem. A server-side crop by edge density was tried and
+  found the wrong box (aspect 2.9), so it wasn't added. The server now fixes orientation (EXIF and sideways cards).
+- A digits-only read of the number strip lost the dashes (`8-4-4`) and was dropped. Upscaling every read to 2400 px did worse.
+
+**Tests:** identity-verification 358 → 397 (13 suites). New: `id-image-prep.spec.ts` (synthetic coloured bands and black
+blocks, no card drawn), `id-cleaned-reads.spec.ts` (stage order, early stop, voting, 1.3× confirm-only, raw fallback,
+wrong-card rule, sideways turn, name column on the cleaned image, PhilHealth unchanged, log holds no card data), and
+vote/confirm tests in `national-id.spec.ts`. Two log-format assertions updated (`first[`/`second[` → `raw/block[`/`raw/auto[`).
+Existing tests use undecodable fake JPEGs, so they exercise the raw path unchanged. Full backend: only `auth-phase3`
+failed under full-suite load (known), and it passes alone (59/59). Shared, backend, mobile and frontend typecheck clean.
+e2e not run.
+
+**Handling:** while measuring layout, an agent rendered a 64-px blurred thumbnail of the sample expecting it to be
+illegible; it wasn't, and the agent saw the card's text and face. The file was deleted at once, and nothing from it was
+recorded or used. Same steps as earlier samples: delete the chat transcript, and tell the card's owner.
+
+**Not yet proven:** one card. The Phase 0 target (name and full number exactly right on ≥ 8 of 10) still applies. The
+number misread found here shows OCR can be confidently wrong; the open recommendation (send a scan to review when the
+phone's number differs from the server's) would catch that case, and is still the owner's call.
+
+### Change — 2026-11-10: scan speed (owner's report)
+
+**Evidence.** A phone scan took ~35 s and failed. Its log showed `Invalid resolution 25 dpi. Using 70 instead` on every
+cleaned read, both automatic-layout reads finding **0 lines** (`conf=95`), and `clean@1.3/auto` timing out at 20 s.
+
+**Cause:** sharp writes PNGs with a pHYs of 1000 px/m (25 dpi). Tesseract rejected it, assumed 70 dpi, and took every
+letter for a giant. The agent's harness had filtered Tesseract's warnings, so this was missed on the sample.
+
+**Changed**
+- `id-image-prep.ts`: cleaned PNGs carry the card's real resolution, `cardDpi(width)` (the card's 85.6 mm filling the
+  width; 1600 px ≈ 475 dpi).
+- `identity-verification.service.ts`:
+  - Block and auto reads of each cleaned image run **at once** (each layout has its own worker).
+  - Cleaned reads time out after **8 s** (`CLEANED_READ_TIMEOUT_MS`), not 20 s. `IdOcrService.read` takes an optional timeout.
+  - **National ID skips the raw reads once any cleaned read saw the heading**: the card is the right one, and the raw read
+    (the slowest, ~6 s) never added to the cleaned reads. With no heading, raw still runs and still decides "wrong card".
+  - **Time budget** `SCAN_READ_BUDGET_MS` = 12 s: no new stage or pair starts after it; the small name-column read may.
+    PhilHealth's first two raw reads are unaffected.
+
+**Sample, same 8 variants:** no DPI warning, no timeout, same outcomes (6 pass with the same number, 2 refused, none
+wrong). Passing 2.2–7.2 s (the app's setting 2.7 s); refused 5.5–7.7 s.
+
+**Tests:** identity-verification 397 → 399, all passing: reads run in parallel with the short timeout, the budget stops
+new reads, raw is skipped once the heading is seen; five existing cleaned-read tests updated for paired reads.
+
 ---
 
 ## 10. Test checklist

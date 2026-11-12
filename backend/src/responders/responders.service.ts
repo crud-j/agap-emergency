@@ -34,15 +34,16 @@ import {
   NOTIFICATION_EVENT_TYPES,
   type CrewHelpNeed,
 } from '@agap/shared';
-import { REPORTER_SEX_INCLUDE, reporterSexFrom } from '../common/utils/reporter-sex';
+import { REPORTER_PHOTO_INCLUDE, reporterPhotoAvailable, type ReporterPhotoSource } from '../common/utils/reporter-photo';
 
 /**
- * Crew-only by construction: adds `incidents.reporter_sex` (reporter map icon)
- * and strips the raw users.sex so PREFER_NOT_TO_SAY never leaves the server.
+ * Crew-only by construction: adds `incidents.reporter_has_photo` (the reporter consented
+ * to show their photo and the incident is active) and strips the account fields it was
+ * derived from. The image itself comes from GET /incidents/:id/reporter-photo.
  */
-function withReporterSex<
+function withReporterPhoto<
   T extends {
-    incidents: { incident_reporters: { is_guest: boolean; users: { sex: string | null } | null } | null };
+    incidents: { status: string; incident_reporters: (ReporterPhotoSource & { is_guest: boolean }) | null };
   },
 >(dispatch: T) {
   const { incident_reporters, ...incident } = dispatch.incidents;
@@ -51,7 +52,7 @@ function withReporterSex<
     incidents: {
       ...incident,
       incident_reporters: incident_reporters ? { is_guest: incident_reporters.is_guest } : null,
-      reporter_sex: reporterSexFrom(incident_reporters),
+      reporter_has_photo: reporterPhotoAvailable(incident_reporters, incident.status),
     },
   };
 }
@@ -270,7 +271,7 @@ export class RespondersService {
         status: { notIn: ['COMPLETED', 'CANCELLED'] },
       },
       include: {
-        incidents: { include: { incident_locations: true, incident_reporters: REPORTER_SEX_INCLUDE } },
+        incidents: { include: { incident_locations: true, incident_reporters: REPORTER_PHOTO_INCLUDE } },
         resources: true,
       },
       orderBy: { created_at: 'desc' },
@@ -279,7 +280,7 @@ export class RespondersService {
       where: { incident_id: d.incident_id, status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
     })));
     return dispatches.map((dispatch, index) => ({
-      ...withReporterSex(dispatch),
+      ...withReporterPhoto(dispatch),
       active_dispatch_count: activeCounts[index],
     }));
   }
@@ -288,7 +289,7 @@ export class RespondersService {
     const dispatch = await this.prisma.dispatches.findUnique({
       where: { id: dispatchId },
       include: {
-        incidents: { include: { incident_locations: true, incident_reporters: REPORTER_SEX_INCLUDE } },
+        incidents: { include: { incident_locations: true, incident_reporters: REPORTER_PHOTO_INCLUDE } },
         resources: true,
         dispatch_crew: true,
       },
@@ -299,7 +300,7 @@ export class RespondersService {
     const activeDispatchCount = await this.prisma.dispatches.count({
       where: { incident_id: dispatch.incident_id, status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
     });
-    return { ...withReporterSex(dispatch), active_dispatch_count: activeDispatchCount };
+    return { ...withReporterPhoto(dispatch), active_dispatch_count: activeDispatchCount };
   }
 
   async acceptAssignment(dispatchId: string, userId: string) {

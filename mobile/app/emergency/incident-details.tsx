@@ -17,6 +17,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import * as Location from 'expo-location';
 import {
   IncidentType,
@@ -222,8 +223,7 @@ export default function IncidentDetailsScreen() {
 
   useEffect(() => {
     void locate();
-  // setLocation is a stable Zustand action
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Once, on opening the screen (setLocation is a stable Zustand action).
   }, []);
 
   async function locate() {
@@ -374,7 +374,7 @@ export default function IncidentDetailsScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             hitSlop={HIT_SLOP}
             accessibilityRole="button"
             accessibilityLabel="Back"

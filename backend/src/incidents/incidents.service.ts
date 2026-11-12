@@ -35,7 +35,7 @@ import {
 } from '@agap/shared';
 import { Prisma, type Incident } from '@prisma/client';
 import { EmergencyContactNotificationService } from '../emergency-contacts/emergency-contact-notification.service';
-import { REPORTER_SEX_INCLUDE, reporterSexFrom, type ReporterSex } from '../common/utils/reporter-sex';
+import { REPORTER_PHOTO_INCLUDE, reporterPhotoAvailable } from '../common/utils/reporter-photo';
 import { OpsAlertService } from '../emergency-alerts/ops-alert.service';
 import { addAgencyParticipant } from './agency-participants';
 import { FIRE_REPORT_INCLUDE } from './fire-report/fire-report.service';
@@ -424,18 +424,6 @@ export class IncidentsService {
     };
   }
 
-  /**
-   * Derived reporter map-icon sex. Callers must restrict this to staff and
-   * assigned crew (see IncidentsController.findOne).
-   */
-  async getReporterSex(incidentId: string): Promise<ReporterSex> {
-    const reporter = await this.prisma.incidentReporter.findUnique({
-      where: { incident_id: incidentId },
-      ...REPORTER_SEX_INCLUDE,
-    });
-    return reporterSexFrom(reporter);
-  }
-
   async findAll(params: {
     page?: number | undefined;
     perPage?: number | undefined;
@@ -463,7 +451,7 @@ export class IncidentsService {
       include: {
         incident_locations: true,
         incident_reporters: {
-          select: { ...REPORTER_SEX_INCLUDE.select, reporter_status: true },
+          select: { ...REPORTER_PHOTO_INCLUDE.select, reporter_status: true },
         },
         // Lets the queue show why an incident was raised to CRITICAL (MOD-24).
         incident_details: { select: { priority_reasons: true } },
@@ -492,14 +480,14 @@ export class IncidentsService {
     const total = await this.prisma.incident.count({ where });
 
     return {
-      // Ops-only list: expose the derived reporter_sex (map icon) and strip the
-      // raw users.sex so PREFER_NOT_TO_SAY never leaves the server.
+      // Ops-only list: expose only whether the reporter's photo may be shown (consent,
+      // active incident) and strip the account fields it was derived from.
       data: data.map(({ incident_reporters, ...incident }) => ({
         ...incident,
         incident_reporters: incident_reporters
           ? { is_guest: incident_reporters.is_guest, reporter_status: incident_reporters.reporter_status }
           : null,
-        reporter_sex: reporterSexFrom(incident_reporters),
+        reporter_has_photo: reporterPhotoAvailable(incident_reporters, incident.status),
       })),
       meta: {
         total,

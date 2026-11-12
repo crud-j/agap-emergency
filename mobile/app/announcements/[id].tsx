@@ -11,13 +11,19 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   getAnnouncementById,
   announcementImageSource,
   type Announcement,
 } from '@/src/services/api/announcements.api';
+import {
+  CATEGORY_LABELS,
+  pastNoticeState,
+  type PastNoticeState,
+} from '@/src/components/announcements/announcement-labels';
 
 const TEAL = '#0D6053';
 
@@ -30,19 +36,40 @@ const SEVERITY_CONFIG: Record<string, { color: string; bg: string; icon: string;
   INFORMATIONAL: { color: '#0D6053', bg: '#EEF7F4', icon: 'megaphone',          label: 'Info',     priority: 'Routine' },
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  FLOOD_ALERT: 'Flood',
-  WEATHER_ADVISORY: 'Weather',
-  EVACUATION_ORDER: 'Evacuation',
-  CLASS_SUSPENSION: 'Class suspension',
-  ROAD_CLOSURE: 'Traffic',
-  PUBLIC_ADVISORY: 'Public advisory',
-  MUNICIPAL_SERVICE: 'Municipal service',
-  FIRE_ADVISORY: 'Fire',
-  INDUSTRIAL_HAZARD: 'Industrial hazard',
-  POST_DISASTER_UPDATE: 'Post-disaster',
-  RESCUE_UPDATE: 'Rescue',
-  GENERAL_INFORMATION: 'General',
+// A notice that is no longer in force says so before anything else, so nobody
+// acts on a withdrawn or replaced evacuation order opened from Past announcements.
+const PAST_NOTICE_BANNER: Record<PastNoticeState, {
+  title: string;
+  detail: string | null;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  color: string;
+  bg: string;
+  border: string;
+}> = {
+  withdrawn: {
+    title: 'This announcement was withdrawn',
+    detail: null,
+    icon: 'close-circle',
+    color: '#B4232F',
+    bg: '#FDF0F1',
+    border: 'rgba(180,35,47,0.25)',
+  },
+  replaced: {
+    title: 'This announcement was replaced',
+    detail: 'A newer announcement took its place. Check Announcements for the current notice.',
+    icon: 'swap-horizontal',
+    color: '#B45309',
+    bg: '#FFFBEB',
+    border: 'rgba(180,83,9,0.25)',
+  },
+  ended: {
+    title: 'This announcement is no longer active',
+    detail: 'It is kept for reference. Check Announcements for current notices.',
+    icon: 'time',
+    color: '#4B5563',
+    bg: '#F3F4F6',
+    border: 'rgba(75,85,99,0.2)',
+  },
 };
 
 /** Always shown in Bocaue time, whatever the phone's zone setting. */
@@ -86,7 +113,6 @@ function NoticeBody({ text }: { text: string }) {
 }
 
 export default function AnnouncementDetailScreen() {
-  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -98,7 +124,9 @@ export default function AnnouncementDetailScreen() {
 
   const cfg = SEVERITY_CONFIG[data?.severity ?? ''] ?? SEVERITY_CONFIG.INFORMATIONAL;
   const image = data ? announcementImageSource(data) : null;
-  const cancelled = data?.status === 'CANCELLED';
+  const pastState = data ? pastNoticeState(data) : null;
+  const banner = pastState ? PAST_NOTICE_BANNER[pastState] : null;
+  const cancelled = pastState === 'withdrawn';
   const actions = (data?.action_required ?? '')
     .split('\n')
     .map((s) => s.trim())
@@ -117,7 +145,7 @@ export default function AnnouncementDetailScreen() {
       <SafeAreaView edges={['top']} style={styles.header}>
         <TouchableOpacity
           style={styles.iconBtn}
-          onPress={() => router.back()}
+          onPress={() => goBack()}
           accessibilityRole="button"
           accessibilityLabel="Back"
         >
@@ -149,21 +177,25 @@ export default function AnnouncementDetailScreen() {
             <TouchableOpacity onPress={() => refetch()} style={styles.retryBtn} accessibilityRole="button">
               <Text style={styles.retryText}>Try again</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.back()} style={styles.ghostBtn} accessibilityRole="button">
+            <TouchableOpacity onPress={() => goBack()} style={styles.ghostBtn} accessibilityRole="button">
               <Text style={styles.ghostText}>Go back</Text>
             </TouchableOpacity>
           </View>
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Correction status — shown first so nobody acts on a withdrawn notice */}
-          {cancelled && (
-            <View style={styles.cancelBox} accessibilityRole="alert">
-              <Ionicons name="close-circle" size={18} color="#B4232F" style={{ marginRight: 8, marginTop: 1 }} />
+          {/* No-longer-in-force status — shown first so nobody acts on an old notice */}
+          {banner && (
+            <View
+              style={[styles.cancelBox, { backgroundColor: banner.bg, borderColor: banner.border }]}
+              accessibilityRole="alert"
+            >
+              <Ionicons name={banner.icon} size={18} color={banner.color} style={{ marginRight: 8, marginTop: 1 }} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.cancelTitle}>This announcement was cancelled</Text>
-                {data.correction_note ? <Text style={styles.cancelNote}>{data.correction_note}</Text> : null}
-                {data.cancelled_at ? <Text style={styles.cancelMeta}>{fmtDate(data.cancelled_at)}</Text> : null}
+                <Text style={[styles.cancelTitle, { color: banner.color }]}>{banner.title}</Text>
+                {banner.detail ? <Text style={styles.cancelNote}>{banner.detail}</Text> : null}
+                {cancelled && data.correction_note ? <Text style={styles.cancelNote}>{data.correction_note}</Text> : null}
+                {cancelled && data.cancelled_at ? <Text style={styles.cancelMeta}>{fmtDate(data.cancelled_at)}</Text> : null}
               </View>
             </View>
           )}

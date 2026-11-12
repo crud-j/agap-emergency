@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type JSX } from 'react';
 import dynamic from 'next/dynamic';
-import { Hospital } from 'lucide-react';
+import { Hospital, UserRound } from 'lucide-react';
 import { Card } from '@/components/ui';
 import { ConnectionIndicator } from '@/components/layout/ConnectionIndicator';
 import { IncidentDetailDrawer } from '@/components/incidents/IncidentDetailDrawer';
@@ -214,9 +214,8 @@ export default function MapPage(): JSX.Element {
             Hospital (dashed grey = location not verified)
           </span>
           <span className="flex items-center gap-2 text-xs text-agap-textMid">
-            {/* eslint-disable-next-line @next/next/no-img-element -- legend icon */}
-            <img src="/map-icons/citizen-female.png" alt="" width={14} height={14} className="rounded-full" />
-            Reporter (when shared)
+            <UserRound size={13} className="rounded-full bg-[#E6F2EF] text-[#0D6053]" aria-hidden />
+            Reporter photo (with their consent)
           </span>
           <span className="flex items-center gap-2 text-xs text-agap-textMid">
             <span className="h-2.5 w-2.5 rounded-full border border-[#3B82F6] bg-[#3B82F6]/20" />

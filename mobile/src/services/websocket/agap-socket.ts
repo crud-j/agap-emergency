@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import { useAuthStore } from '../../stores/auth.store';
+import { onSessionEnd, useAuthStore } from '../../stores/auth.store';
 import { refreshAccessToken } from '../api/authed-fetch';
 
 /**
@@ -100,6 +100,10 @@ export function disconnectSocket(): void {
   socket?.disconnect();
   socket = null;
 }
+
+// Logout or another account signing in closes the socket, so it never outlives the
+// session and the next account doesn't reuse the previous user's incident rooms.
+onSessionEnd(disconnectSocket);
 
 /**
  * Watch an incident's room on the shared socket. `onJoin` receives the gateway's

@@ -1,31 +1,26 @@
 /**
  * Registration name fields for the ID check (MOD-01, plan §3 "Why the name is split", §4.2):
  * Last, First, Middle (optional), Suffix (optional), and the "matches your ID" indicator.
- * The citizen types the name; it is never pre-filled from the scan. The match uses
- * matchIdName from @agap/shared, the same code the server decides with (the parent computes it).
+ * After a scan the parent fills these from the name the server read (prefillNameFromId); they stay
+ * editable and the citizen checks the spelling. The match uses matchIdName from @agap/shared, the
+ * same code the server decides with (the parent computes it).
  */
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { IdName, IdNameMatch } from '@agap/shared';
 import { useTranslations } from '../../hooks/useAccessibility';
-import { formatNameOnId } from '../../lib/id-verification';
+import { NAME_SUFFIXES, formatNameOnId, type NameFieldValues } from '../../lib/id-verification';
 
-export interface NameValues {
-  last: string;
-  first: string;
-  middle: string;
-  suffix: string;
-}
+export type NameValues = NameFieldValues;
 
 export const EMPTY_NAME: NameValues = { last: '', first: '', middle: '', suffix: '' };
-
-/** The suffixes the shared matcher knows (plan §6). '' = none. */
-const SUFFIXES = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV'] as const;
 
 interface Props {
   value: NameValues;
   onChange: (value: NameValues) => void;
+  /** The fields were filled from the card: ask the citizen to check them instead of type them. */
+  filledFromId?: boolean;
   /** The name the server read from the card; null when the scan went to staff review. */
   nameOnId: IdName | null;
   /** The match to show (set on blur and on submit); null hides the indicator. */
@@ -42,6 +37,7 @@ type Field = 'last' | 'first' | 'middle';
 export default function NameFields({
   value,
   onChange,
+  filledFromId = false,
   nameOnId,
   shownMatch,
   onNameBlur,
@@ -89,7 +85,14 @@ export default function NameFields({
 
   return (
     <View style={styles.block}>
-      <Text style={styles.helper}>{t.registration.nameHelper}</Text>
+      {filledFromId ? (
+        <View testID="name-filled-from-id" style={[styles.notice, styles.noticeInfo]} accessibilityLiveRegion="polite">
+          <Ionicons name="scan-outline" size={16} color="#0D6053" />
+          <Text style={[styles.noticeText, { color: '#0D6053' }]}>{t.registration.nameFilledFromId}</Text>
+        </View>
+      ) : (
+        <Text style={styles.helper}>{t.registration.nameHelper}</Text>
+      )}
 
       {input('last', t.registration.lastName, t.registration.lastNamePlaceholder, 'familyName', errors?.lastName)}
       {input('first', t.registration.firstName, t.registration.firstNamePlaceholder, 'givenName', errors?.firstName)}
@@ -98,7 +101,7 @@ export default function NameFields({
       <View style={styles.inputWrapper}>
         <Text style={styles.inputLabel}>{t.registration.suffix}</Text>
         <View style={styles.chips}>
-          {SUFFIXES.map((suffix) => {
+          {NAME_SUFFIXES.map((suffix) => {
             const selected = value.suffix === suffix;
             return (
               <TouchableOpacity

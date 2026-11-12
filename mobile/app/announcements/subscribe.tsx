@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { subscribeToSms, unsubscribeFromSms } from '@/src/services/api/announcements.api';
 
 const TEAL = '#0D6053';
@@ -48,7 +48,6 @@ function isValidPHPhone(raw: string): boolean {
 }
 
 export default function SmsSubscribeScreen() {
-  const router = useRouter();
 
   const [step, setStep] = useState<Step>('form');
   const [phone, setPhone] = useState('');
@@ -119,7 +118,7 @@ export default function SmsSubscribeScreen() {
     return (
       <View style={styles.root}>
         <SafeAreaView edges={['top']} style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} accessibilityLabel="Back">
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBack()} accessibilityLabel="Back">
             <Ionicons name="chevron-back" size={24} color="#111827" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>SMS Subscription</Text>
@@ -138,7 +137,7 @@ export default function SmsSubscribeScreen() {
           <Text style={styles.successHint}>
             You can still read announcements in the app. For emergencies, call 911.
           </Text>
-          <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.doneBtn} onPress={() => goBack()}>
             <Text style={styles.doneBtnText}>Done</Text>
           </TouchableOpacity>
         </View>
@@ -150,7 +149,7 @@ export default function SmsSubscribeScreen() {
     return (
       <View style={styles.root}>
         <SafeAreaView edges={['top']} style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} accessibilityLabel="Back">
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBack()} accessibilityLabel="Back">
             <Ionicons name="chevron-back" size={24} color="#111827" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>SMS Subscription</Text>
@@ -169,7 +168,7 @@ export default function SmsSubscribeScreen() {
           <Text style={styles.successHint}>
             Reply <Text style={{ fontWeight: '700' }}>STOP</Text> to any SMS to opt out at any time.
           </Text>
-          <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.doneBtn} onPress={() => goBack()}>
             <Text style={styles.doneBtnText}>Done</Text>
           </TouchableOpacity>
         </View>
@@ -184,7 +183,7 @@ export default function SmsSubscribeScreen() {
     >
       <View style={styles.root}>
         <SafeAreaView edges={['top']} style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} accessibilityLabel="Back">
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBack()} accessibilityLabel="Back">
             <Ionicons name="chevron-back" size={24} color="#111827" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>SMS Subscription</Text>

@@ -25,7 +25,8 @@ export interface AssignmentIncident {
   category: string;
   status: string;
   priority: string;
-  reporter_sex: 'MALE' | 'FEMALE' | null;
+  /** The reporter agreed to show their profile photo and the incident is active. Never the patient. */
+  reporter_has_photo: boolean;
   description: string | null;
   number_of_patients: number | null;
   incident_locations: AssignmentIncidentLocation | null;

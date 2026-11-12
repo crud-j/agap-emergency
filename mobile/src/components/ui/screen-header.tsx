@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 
 /**
  * Shared top bar for pushed detail screens: a back button, a centered-left
@@ -10,14 +10,13 @@ import { useRouter } from 'expo-router';
  * consistent with the AGAP design language.
  */
 export function ScreenHeader({ title, right }: { title: string; right?: React.ReactNode }) {
-  const router = useRouter();
   return (
     <SafeAreaView edges={['top']} style={styles.safe}>
       <View style={styles.row}>
         <TouchableOpacity
           style={styles.backBtn}
           activeOpacity={0.7}
-          onPress={() => router.back()}
+          onPress={() => goBack()}
           accessibilityRole="button"
           accessibilityLabel="Back"
         >

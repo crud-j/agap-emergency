@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { colors } from '@/src/theme/tokens';
 import { IncidentChat } from '@/src/components/chat/incident-chat';
 
@@ -13,12 +14,11 @@ import { IncidentChat } from '@/src/components/chat/incident-chat';
  */
 export default function IncidentChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
 
   return (
     <View style={styles.root}>
       <SafeAreaView edges={['top']} style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} accessibilityLabel="Back">
+        <TouchableOpacity onPress={() => goBack()} style={styles.iconBtn} accessibilityLabel="Back">
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ alignItems: 'center' }}>

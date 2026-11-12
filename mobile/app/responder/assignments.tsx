@@ -83,7 +83,6 @@ export default function AssignmentsScreen() {
   const user = useAuthStore((s) => s.user);
   const { assignments, isLoading, isError, isRefreshing, refetch } = useResponderAssignments();
 
-  const firstName = user?.full_name?.split(' ')[0] ?? 'Responder';
   const initials = (user?.full_name?.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('') ?? 'R').toUpperCase();
   const pendingCount = assignments.filter((item) => ['PENDING', 'SENT'].includes(String(item.status ?? '').toUpperCase())).length;
   const unknownCount = assignments.filter((item) => getStatus(item).label === 'Assignment status unavailable').length;

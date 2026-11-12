@@ -19,7 +19,8 @@ import {
 import { MapErrorOverlay } from '@/components/map/MapErrorOverlay';
 import { resolveMissingStyleImages } from '@/components/map/missing-style-images';
 import { AmbulanceMarker } from '@/components/map/AmbulanceMarker';
-import { CitizenMarker, reporterLabel } from '@/components/map/CitizenMarker';
+import { CitizenMarker, REPORTER_PHOTO_NOTE, reporterLabel } from '@/components/map/CitizenMarker';
+import { useReporterPhotoUrl } from '@/features/map/reporter-photo';
 import { HospitalMarker } from '@/components/map/HospitalMarker';
 import { LEG_COLORS, LegChip } from '@/components/map/LegChip';
 import { titleCase, priorityLabel } from '@/lib/incident-format';
@@ -54,8 +55,8 @@ export interface MapIncident {
   status: string;
   lat: number | null;
   lng: number | null;
-  /** Staff-only reporter map icon (WP3.6); null/undefined → neutral pin. */
-  reporter_sex?: 'MALE' | 'FEMALE' | null;
+  /** The reporter agreed to show their profile photo and the incident is active; else the neutral pin. */
+  reporter_has_photo?: boolean | null;
   reporter_is_guest?: boolean | null;
 }
 
@@ -475,12 +476,8 @@ export function IncidentMapView({
                 onSelect(inc.id);
               }}
             >
-              <div title={`${inc.public_reference} · ${reporterLabel(inc.reporter_sex, inc.reporter_is_guest)}`}>
-                <CitizenMarker
-                  reporterSex={inc.reporter_sex}
-                  priority={inc.priority}
-                  selected={inc.id === selectedId}
-                />
+              <div title={`${inc.public_reference} · ${reporterLabel(inc.reporter_has_photo, inc.reporter_is_guest)}`}>
+                <ReporterSceneMarker incident={inc} selected={inc.id === selectedId} />
               </div>
             </Marker>
           );
@@ -524,9 +521,7 @@ export function IncidentMapView({
               <div className="font-bold text-[#1C2B3A]">{titleCase(selectedInc.category)}</div>
               <div className="font-mono text-[10px] text-[#8795A3]">{selectedInc.public_reference}</div>
               <div className="text-[#40536D]">{priorityLabel(selectedInc.priority)} · {titleCase(selectedInc.status)}</div>
-              <div className="mt-0.5 text-[10px] text-[#40536D]">
-                {reporterLabel(selectedInc.reporter_sex, selectedInc.reporter_is_guest)}
-              </div>
+              <ReporterPopupPhoto incident={selectedInc} />
               {selectedUnit && (
                 <div
                   className={`mt-0.5 text-[10px] ${
@@ -553,6 +548,35 @@ export function IncidentMapView({
       </Map>
 
       {tileError && <MapErrorOverlay onRetry={() => { setTileError(false); setMapKey((k) => k + 1); }} />}
+    </div>
+  );
+}
+
+/** The scene marker: the reporter's consented photo once it has loaded, the priority pin until then. */
+function ReporterSceneMarker({ incident, selected }: { incident: MapIncident; selected: boolean }): JSX.Element {
+  const photoUrl = useReporterPhotoUrl(incident.id, incident.reporter_has_photo);
+  return <CitizenMarker photoUrl={photoUrl} priority={incident.priority} selected={selected} />;
+}
+
+/** Popup: the reporter photo large enough to recognise someone, labelled as the reporter (rule 2). */
+function ReporterPopupPhoto({ incident }: { incident: MapIncident }): JSX.Element {
+  const photoUrl = useReporterPhotoUrl(incident.id, incident.reporter_has_photo);
+  const label = reporterLabel(incident.reporter_has_photo, incident.reporter_is_guest);
+  if (!photoUrl) return <div className="mt-0.5 text-[10px] text-[#40536D]">{label}</div>;
+  return (
+    <div className="mt-1.5 flex items-center gap-2">
+      {/* eslint-disable-next-line @next/next/no-img-element -- private object URL, never a public image */}
+      <img
+        src={photoUrl}
+        alt={`Reporter of ${incident.public_reference}`}
+        width={72}
+        height={72}
+        className="h-[72px] w-[72px] shrink-0 rounded-lg object-cover"
+      />
+      <div className="max-w-[140px]">
+        <div className="text-[10px] font-semibold text-[#1C2B3A]">{label}</div>
+        <div className="text-[10px] leading-tight text-[#8795A3]">{REPORTER_PHOTO_NOTE}</div>
+      </div>
     </div>
   );
 }

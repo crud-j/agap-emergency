@@ -13,6 +13,7 @@ import { IncidentHandoverService } from './incident-handover/incident-handover.s
 import { TransportService } from './transport/transport.service';
 import { TransportRequestCacheService } from './transport/transport-request-cache.service';
 import { TransportLegModule } from './transport/transport-leg.module';
+import { ReporterPhotoService } from './reporter-photo/reporter-photo.service';
 import { MediaModule } from '../media/media.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AuditModule } from '../audit/audit.module';
@@ -52,6 +53,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     IncidentHandoverService,
     TransportService,
     TransportRequestCacheService,
+    ReporterPhotoService,
   ],
   exports: [IncidentsService, IncidentStatusService, TransportService, TransportLegModule],
 })

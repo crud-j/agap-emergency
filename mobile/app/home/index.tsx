@@ -12,6 +12,7 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useAuthStore } from '../../src/stores/auth.store';
+import { ProfileAvatar } from '../../src/components/profile/profile-avatar';
 import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { useActiveIncident } from '../../src/hooks/useActiveIncident';
@@ -390,9 +391,11 @@ export default function HomeScreen() {
               )}
             </TouchableOpacity>
             <TouchableOpacity style={styles.avatarBtn} onPress={() => router.push('/profile')}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarInitial}>{user?.full_name?.[0]?.toUpperCase() ?? 'U'}</Text>
-              </View>
+              <ProfileAvatar
+                style={styles.avatar}
+                textStyle={styles.avatarInitial}
+                initial={user?.full_name?.[0]?.toUpperCase() ?? 'U'}
+              />
               {(user?.profile_completeness ?? 0) < 100 && (
                 <View style={styles.avatarBadge} />
               )}

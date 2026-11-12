@@ -8,10 +8,8 @@ import {
   ImagePlus, Megaphone, PencilLine, RotateCcw, School, Send, Sparkles, Waves, X,
   type LucideIcon,
 } from 'lucide-react';
-import {
-  Button, Skeleton,
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from '@/components/ui';
+import { Button, Skeleton } from '@/components/ui';
+import { confirmAction, escapeHtml, notify } from '@/components/ui/alerts';
 import { cn } from '@/lib/utils';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { AnnouncementPreview, type PreviewModel } from '@/components/announcements/AnnouncementPreview';
@@ -283,9 +281,13 @@ function Composer(): JSX.Element {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageAlt, setImageAlt] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  // True while the publish confirmation is up; its own button shows the progress.
+  const [confirming, setConfirming] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // A new draft created by a save whose next step failed, so a retry updates it
+  // instead of creating a second copy.
+  const createdId = useRef<string | null>(null);
 
   const create = useCreateAnnouncement();
   const update = useUpdateAnnouncement();
@@ -322,7 +324,7 @@ function Composer(): JSX.Element {
     setImageAlt(existing.image_alt_text ?? '');
   }, [existing, loadedId]);
 
-  const pickTemplate = useCallback((t: AnnouncementTemplate) => {
+  const applyTemplate = useCallback((t: AnnouncementTemplate) => {
     setTemplateKey(t.key);
     setState((s) => ({
       ...s,
@@ -376,25 +378,55 @@ function Composer(): JSX.Element {
   const setValue = (key: string, v: Values[string]) =>
     setState((s) => ({ ...s, values: { ...s.values, [key]: v } }));
 
+  // Switching templates clears step 2 and any hand edits, so ask once there is something to lose.
+  const hasDetails =
+    state.manual ||
+    Object.values(state.values).some((v) => (Array.isArray(v) ? v.length > 0 : v !== '' && v !== false && v != null));
+
+  async function pickTemplate(t: AnnouncementTemplate) {
+    if (template && hasDetails) {
+      const ok = await confirmAction({
+        title: `Switch to “${t.label}”?`,
+        text: `The details in step 2${state.manual ? ' and your hand edits to the text' : ''} are cleared. The barangays, issuer, source, contact and image you set stay.`,
+        confirmText: 'Switch template',
+        cancelText: 'Keep current',
+        icon: 'warning',
+      });
+      if (!ok) return;
+    }
+    applyTemplate(t);
+  }
+
   function startManualEdit() {
     setManualText({ title: text.title, summary: text.summary, body: text.body });
     setState((s) => ({ ...s, manual: true }));
   }
 
-  function backToGenerated() {
-    setState((s) => ({ ...s, manual: false }));
+  async function backToGenerated() {
+    const ok = await confirmAction({
+      title: 'Discard your edits?',
+      text: 'The text goes back to what the template writes from your details. Your hand edits are lost.',
+      confirmText: 'Discard edits',
+      cancelText: 'Keep editing',
+      tone: 'danger',
+      icon: 'warning',
+    });
+    if (ok) setState((s) => ({ ...s, manual: false }));
   }
 
   // ── Image ──
   function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setError('Image must be JPEG, PNG, or WebP.'); return; }
-    if (file.size > 5 * 1024 * 1024) { setError('Image must be under 5 MB.'); return; }
+    const reject = (text: string) => {
+      if (fileRef.current) fileRef.current.value = '';
+      void notify('warning', { title: 'Image not attached', text });
+    };
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { reject('It must be a JPEG, PNG or WebP file.'); return; }
+    if (file.size > 5 * 1024 * 1024) { reject('It must be under 5 MB.'); return; }
     if (imagePreview) URL.revokeObjectURL(imagePreview);
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
-    setError(null);
   }
   function clearImage() {
     if (imagePreview) URL.revokeObjectURL(imagePreview);
@@ -450,55 +482,116 @@ function Composer(): JSX.Element {
     };
   }
 
-  async function save(): Promise<string | null> {
+  type SaveResult = { id: string } | { error: string; title: string };
+
+  async function save(): Promise<SaveResult> {
     const body = buildBody();
-    if (!body) { setError('Choose a template first.'); return null; }
-    if (body.title.length < 3 || !body.body) { setError('Headline and announcement text are required.'); return null; }
-    setError(null);
+    if (!body) return { title: 'Draft not saved', error: 'Choose a template first.' };
+    if (body.title.length < 3 || !body.body) return { title: 'Draft not saved', error: 'Headline and announcement text are required.' };
+    const draftId = editId ?? createdId.current;
+    let savedId: string;
     try {
-      const saved = editId
-        ? await update.mutateAsync({ id: editId, body })
+      const saved = draftId
+        ? await update.mutateAsync({ id: draftId, body })
         : await create.mutateAsync(body);
-      if (imageFile) {
-        try {
-          await upload.mutateAsync({ id: saved.id, file: imageFile });
-        } catch (e) {
-          // The draft is saved; tell the operator the image specifically failed.
-          setError(`Draft saved, but the image did not upload: ${e instanceof Error ? e.message : 'unknown error'}`);
-          if (!editId) router.replace(`/announcements/compose?id=${saved.id}`);
-          return null;
-        }
-      }
-      return saved.id;
+      savedId = saved.id;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save the draft.');
-      return null;
+      return { title: 'Draft not saved', error: e instanceof Error ? e.message : 'Could not save the draft.' };
     }
+    if (!editId) createdId.current = savedId;
+    if (imageFile) {
+      try {
+        await upload.mutateAsync({ id: savedId, file: imageFile });
+      } catch (e) {
+        // The draft is saved; tell the operator the image specifically failed.
+        return {
+          title: 'Image not uploaded',
+          error: `Draft saved, but the image did not upload: ${e instanceof Error ? e.message : 'unknown error'}`,
+        };
+      }
+    }
+    return { id: savedId };
+  }
+
+  /** After a failed step, point the URL at the draft that was saved so a refresh reopens it. */
+  function rememberSavedDraft() {
+    if (!editId && createdId.current) router.replace(`/announcements/compose?id=${createdId.current}`);
   }
 
   async function onSaveDraft() {
-    const id = await save();
-    if (id) router.push(`/announcements?saved=${id}`);
+    setError(null);
+    const result = await save();
+    if ('id' in result) {
+      router.push(`/announcements?saved=${result.id}`);
+      return;
+    }
+    setError(result.error);
+    void notify('error', { title: result.title, text: result.error });
+    rememberSavedDraft();
   }
 
   // Phase 7: with approval on, a CRITICAL notice goes to an MDRRMO Supervisor instead.
   const needsApproval = !!policy.data?.criticalNeedsApproval && severity === 'CRITICAL';
 
-  async function onConfirmPublish() {
-    const id = await save();
-    if (!id) { setConfirmOpen(false); return; }
+  function publishSummaryHtml(): string {
+    const sev = severityMeta(severity);
+    const area = state.wholeMunicipality || barangays.length === 0 ? 'All of Bocaue' : barangays.join(', ');
+    const lead = needsApproval
+      ? `An MDRRMO Supervisor reviews this notice for <strong class="text-agap-textMain">${escapeHtml(preview.issuingOffice)}</strong> before anything is sent.`
+      : `You are approving this notice for release by <strong class="text-agap-textMain">${escapeHtml(preview.issuingOffice)}</strong>.`;
+    const after = needsApproval
+      ? 'It is locked while it waits. Once approved it appears in the citizen app and goes to push and SMS subscribers. If it is returned, you will see the reason on the Announcements page.'
+      : 'It appears in the citizen app immediately and is sent by push and SMS to subscribers. Corrections are issued by cancelling it with a note — published text cannot be edited.';
+    return (
+      `<p>${lead}</p>` +
+      `<div class="mt-3 rounded-xl border border-agap-track bg-agap-pearl px-4 py-3">` +
+      `<p class="font-bold text-agap-textMain">${escapeHtml(text.title)}</p>` +
+      (text.summary ? `<p class="mt-1 text-[13px] text-agap-textMid">${escapeHtml(text.summary)}</p>` : '') +
+      `<p class="mt-2 text-[12px] font-semibold ${sev.text}">${escapeHtml(sev.label)} · ${escapeHtml(sev.priority)}` +
+      `<span class="font-normal text-agap-textSub"> · ${escapeHtml(area)}</span></p>` +
+      `</div>` +
+      `<p class="mt-3 text-[13px]">${escapeHtml(after)}</p>`
+    );
+  }
+
+  async function onPublish() {
+    setError(null);
+    let releasedId: string | null = null;
+    let failure: string | null = null;
+    setConfirming(true);
     try {
-      if (needsApproval) {
-        await submit.mutateAsync({ id });
-        router.push(`/announcements?submitted=${id}`);
-      } else {
-        await publish.mutateAsync(id);
-        router.push(`/announcements?published=${id}`);
+      const ok = await confirmAction({
+        title: needsApproval ? 'Submit for MDRRMO approval?' : 'Publish as an official announcement?',
+        html: publishSummaryHtml(),
+        icon: needsApproval ? 'question' : 'warning',
+        confirmText: needsApproval ? 'Submit for approval' : 'Approve & publish',
+        cancelText: 'Back',
+        // Saves, then releases, with progress and any failure shown in the popup.
+        onConfirm: async () => {
+          const result = await save();
+          if (!('id' in result)) {
+            failure = result.error;
+            throw new Error(result.error);
+          }
+          try {
+            if (needsApproval) await submit.mutateAsync({ id: result.id });
+            else await publish.mutateAsync(result.id);
+          } catch (e) {
+            failure = `Saved as draft, but not ${needsApproval ? 'submitted' : 'published'}: ${e instanceof Error ? e.message : 'unknown error'}`;
+            throw new Error(failure);
+          }
+          releasedId = result.id;
+        },
+      });
+      if (ok && releasedId) {
+        router.push(`/announcements?${needsApproval ? 'submitted' : 'published'}=${releasedId}`);
+        return;
       }
-    } catch (e) {
-      setConfirmOpen(false);
-      setError(`Saved as draft, but not ${needsApproval ? 'submitted' : 'published'}: ${e instanceof Error ? e.message : 'unknown error'}`);
-      if (!editId) router.replace(`/announcements/compose?id=${id}`);
+      // Closed after a failure: keep the reason on the page next to the buttons.
+      if (failure) setError(failure);
+      rememberSavedDraft();
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -529,8 +622,6 @@ function Composer(): JSX.Element {
       </div>
     );
   }
-
-  const sevMeta = severityMeta(severity);
 
   return (
     <div className="space-y-5">
@@ -987,10 +1078,10 @@ function Composer(): JSX.Element {
               )}
 
               <div className="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
-                <Button variant="secondary" className="flex-1" loading={busy && !confirmOpen} onClick={onSaveDraft} disabled={busy}>
+                <Button variant="secondary" className="flex-1" loading={busy && !confirming} onClick={onSaveDraft} disabled={busy || confirming}>
                   Save draft
                 </Button>
-                <Button variant="primary" className="flex-1" disabled={!ready || busy} onClick={() => setConfirmOpen(true)}>
+                <Button variant="primary" className="flex-1" disabled={!ready || busy || confirming} onClick={onPublish}>
                   <Send size={14} /> {needsApproval ? 'Submit for MDRRMO approval' : <>Review &amp; publish</>}
                 </Button>
               </div>
@@ -1001,41 +1092,6 @@ function Composer(): JSX.Element {
           )}
         </aside>
       </div>
-
-      {/* Approval confirmation */}
-      <Dialog open={confirmOpen} onOpenChange={(o) => !busy && setConfirmOpen(o)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{needsApproval ? 'Submit for MDRRMO approval?' : 'Publish as an official announcement?'}</DialogTitle>
-            <DialogDescription>
-              {needsApproval
-                ? <>An MDRRMO Supervisor reviews this notice for <span className="font-semibold text-agap-textMain">{preview.issuingOffice}</span> before anything is sent.</>
-                : <>You are approving this notice for release by <span className="font-semibold text-agap-textMain">{preview.issuingOffice}</span>.</>}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 rounded-xl bg-agap-pearl px-4 py-3 text-sm">
-            <p className="font-bold text-agap-textMain">{text.title}</p>
-            <p className="text-agap-textMid">{text.summary}</p>
-            <p className={cn('flex items-center gap-1.5 text-xs font-semibold', sevMeta.text)}>
-              <sevMeta.icon size={13} aria-hidden /> {sevMeta.label}
-              <span className="font-normal text-agap-textSub">
-                · {state.wholeMunicipality || barangays.length === 0 ? 'All of Bocaue' : barangays.join(', ')}
-              </span>
-            </p>
-          </div>
-          <p className="text-xs text-agap-textSub">
-            {needsApproval
-              ? 'It is locked while it waits. Once approved it appears in the citizen app and goes to push and SMS subscribers. If it is returned, you will see the reason on the Announcements page.'
-              : 'It appears in the citizen app immediately and is sent by push and SMS to subscribers. Corrections are issued by cancelling it with a note — published text cannot be edited.'}
-          </p>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={busy}>Back</Button>
-            <Button variant="primary" loading={busy} onClick={onConfirmPublish}>
-              <Send size={14} /> {needsApproval ? 'Submit for approval' : <>Approve &amp; publish</>}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { colors, cardShadow, radius } from '@/src/theme/tokens';
 import { ResponderHeader } from '@/src/components/responder/responder-header';
@@ -104,7 +105,7 @@ export default function AssessmentScreen() {
     try {
       await submitAssessment(incidentId, payload, token);
       setSaveState('synced');
-      setTimeout(() => router.back(), 900);
+      setTimeout(() => goBack(), 900);
     } catch {
       setSaveState('error');
     }

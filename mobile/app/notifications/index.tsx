@@ -7,6 +7,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useNotificationList, useMarkNotificationRead, useMarkAllNotificationsRead } from '@/src/hooks/useNotifications';
 import type { AppNotification } from '@/src/services/api/notifications.api';
 import { useAccessibilityStore } from '@/src/stores/accessibility.store';
@@ -208,7 +209,7 @@ export default function NotificationsScreen() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             style={styles.backBtn}
             accessibilityRole="button"
             accessibilityLabel="Go back"

@@ -67,3 +67,5 @@ mobile/android/app/build/
 
 # Local-disk fallback for incident media when object storage is down
 backend/uploads/
+# Downloaded ML model files (profile photo check, ~150 MB)
+backend/.cache/

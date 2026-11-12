@@ -30,7 +30,14 @@ import { useIncidentStore } from '../../src/stores/incident.store';
 import { DEFAULT_ID_DOCUMENT_TYPE, IdVerificationErrorCode, isCoordinateInBocaue, type IdDocumentType, type IdScanResponse } from '@agap/shared';
 import IdScanStep, { type IdStep } from '../../src/components/registration/IdScanStep';
 import NameFields, { EMPTY_NAME, type NameValues } from '../../src/components/registration/NameFields';
-import { canCreateAccount, checkTypedName, retryMessageKey, typedIdName } from '../../src/lib/id-verification';
+import PasswordStrengthMeter from '../../src/components/registration/PasswordStrengthMeter';
+import {
+  canCreateAccount,
+  checkTypedName,
+  prefillNameFromId,
+  retryMessageKey,
+  typedIdName,
+} from '../../src/lib/id-verification';
 
 // ─── Validation schema (address fields removed) ──────────────────────────────
 
@@ -55,14 +62,6 @@ const registerSchema = z.object({
   path: ['confirmPassword'],
 });
 
-const PASSWORD_REQUIREMENTS = [
-  { key: 'length', labelKey: 'passwordReqLength', test: (value: string) => value.length >= 8 },
-  { key: 'maximum', labelKey: 'passwordReqMaximum', test: (value: string) => value.length <= 128 },
-  { key: 'lowercase', labelKey: 'passwordReqLowercase', test: (value: string) => /[a-z]/.test(value) },
-  { key: 'uppercase', labelKey: 'passwordReqUppercase', test: (value: string) => /[A-Z]/.test(value) },
-  { key: 'number', labelKey: 'passwordReqNumber', test: (value: string) => /\d/.test(value) },
-  { key: 'symbol', labelKey: 'passwordReqSymbol', test: (value: string) => /[^A-Za-z0-9\s]/.test(value) },
-] as const;
 
 function normalizePhoneForOtp(value: string): string {
   const phone = value.trim();
@@ -136,11 +135,12 @@ export default function RegistrationScreen() {
 
   // ── Form state ──
   const [name, setName]                       = useState<NameValues>(EMPTY_NAME);
+  /** What the last scan filled into the name fields; null when the citizen typed the name themselves. */
+  const [nameFilled, setNameFilled]           = useState<NameValues | null>(null);
   const [mobileNumber, setMobileNumber]       = useState('');
   const [email, setEmail]                     = useState('');
   const [password, setPassword]               = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const passwordIsStrong = PASSWORD_REQUIREMENTS.every((requirement) => requirement.test(password));
 
   // The same matcher the server decides with. Live for the button; shown on blur / submit.
   const typedName = typedIdName(name);
@@ -343,7 +343,14 @@ export default function RegistrationScreen() {
     setIdScan(result);
     setIdNotice(null);
     setReviewChosen(false);
-    setNameChecked(false);
+    // Fill the name from the card unless the citizen already typed their own; they check the spelling.
+    const filled = prefillNameFromId(name, result.nameOnId, nameFilled);
+    if (filled) {
+      setName(filled);
+      setNameFilled(filled);
+    }
+    // A filled name shows its match straight away, so a misread is visible before submit.
+    setNameChecked(filled !== null);
     setStep('form');
   }
 
@@ -720,6 +727,7 @@ export default function RegistrationScreen() {
                 setName(next);
                 setNameChecked(false);
               }}
+              filledFromId={nameFilled !== null && idScan.nameOnId !== null}
               nameOnId={idScan.nameOnId}
               shownMatch={nameChecked ? nameMatch : null}
               onNameBlur={() => setNameChecked(typedName !== null)}
@@ -826,42 +834,7 @@ export default function RegistrationScreen() {
                   />
                 </TouchableOpacity>
               </View>
-              {fieldErrors.password ? (
-                <Text style={styles.fieldError}>{fieldErrors.password}</Text>
-              ) : (
-                <Text style={styles.helperText}>{t.registration.passwordHelper}</Text>
-              )}
-              <View style={styles.passwordRequirements} accessibilityLiveRegion="polite">
-                <View style={styles.passwordStrengthHeader}>
-                  <Text style={styles.passwordStrengthLabel}>{t.registration.passwordRequirements}</Text>
-                  {password.length > 0 && (
-                    <Text style={[
-                      styles.passwordStrengthStatus,
-                      passwordIsStrong ? styles.passwordStrengthMet : styles.passwordStrengthPending,
-                    ]}>
-                      {passwordIsStrong ? t.registration.passwordStrong : t.registration.passwordInProgress}
-                    </Text>
-                  )}
-                </View>
-                {PASSWORD_REQUIREMENTS.map((requirement) => {
-                  const met = requirement.test(password);
-                  return (
-                    <View key={requirement.key} style={styles.passwordRequirementRow}>
-                      <Ionicons
-                        name={met ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={15}
-                        color={met ? '#15803D' : '#9CA3AF'}
-                      />
-                      <Text style={[
-                        styles.passwordRequirementText,
-                        met && styles.passwordRequirementTextMet,
-                      ]}>
-                        {t.registration[requirement.labelKey]}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
+              <PasswordStrengthMeter password={password} error={fieldErrors.password} />
             </View>
 
             {/* Confirm Password */}
@@ -904,7 +877,7 @@ export default function RegistrationScreen() {
               ) : confirmPassword.length > 0 ? (
                 <Text style={[
                   styles.passwordMatch,
-                  confirmPassword === password ? styles.passwordRequirementTextMet : styles.passwordMatchPending,
+                  confirmPassword === password ? styles.passwordMatchMet : styles.passwordMatchPending,
                 ]}>
                   {confirmPassword === password
                     ? t.registration.passwordsMatch
@@ -1333,52 +1306,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
     paddingHorizontal: 4,
   },
-  passwordRequirements: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    gap: 7,
-  },
-  passwordStrengthHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 1,
-  },
-  passwordStrengthLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#374151',
-  },
-  passwordStrengthStatus: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  passwordStrengthMet: {
-    color: '#15803D',
-  },
-  passwordStrengthPending: {
-    color: '#6B7280',
-  },
-  passwordRequirementRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  passwordRequirementText: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  passwordRequirementTextMet: {
-    color: '#15803D',
-  },
   passwordMatch: {
     fontSize: 12,
     marginTop: 6,
     paddingHorizontal: 4,
+  },
+  passwordMatchMet: {
+    color: '#15803D',
   },
   passwordMatchPending: {
     color: '#B45309',

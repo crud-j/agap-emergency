@@ -1,25 +1,23 @@
 import type { JSX } from 'react';
 import { priorityRingColor } from '@agap/shared';
-import { citizenIconFor } from '@/lib/map-icons';
 
 interface CitizenMarkerProps {
-  /** Staff-only derived reporter sex; null → neutral priority pin. */
-  reporterSex: string | null | undefined;
+  /** Object URL of the reporter's consented profile photo; null → neutral priority pin. */
+  photoUrl: string | null;
   priority: string;
   selected: boolean;
 }
 
 /**
  * Incident scene marker drawn for the REPORTER (never the patient). A registered
- * reporter who chose Male/Female gets that icon inside a ring coloured by the
- * incident's priority; everyone else (guest, unknown, "prefer not to say") keeps
- * the neutral priority-coloured pin.
+ * reporter who agreed to show their profile photo to responders gets that photo
+ * inside a ring coloured by the incident's priority; everyone else (guest, no
+ * photo, no consent, still loading, offline) keeps the neutral priority pin.
  */
-export function CitizenMarker({ reporterSex, priority, selected }: CitizenMarkerProps): JSX.Element {
+export function CitizenMarker({ photoUrl, priority, selected }: CitizenMarkerProps): JSX.Element {
   const color = priorityRingColor(priority);
-  const icon = citizenIconFor(reporterSex);
 
-  if (!icon) {
+  if (!photoUrl) {
     return (
       <div
         style={{
@@ -36,7 +34,7 @@ export function CitizenMarker({ reporterSex, priority, selected }: CitizenMarker
     );
   }
 
-  const size = selected ? 40 : 32;
+  const size = selected ? 44 : 36;
   return (
     <div
       className="overflow-hidden rounded-full bg-white"
@@ -49,17 +47,19 @@ export function CitizenMarker({ reporterSex, priority, selected }: CitizenMarker
         transition: 'all 0.15s',
       }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- tiny static marker icon inside a map overlay */}
-      <img src={icon} alt="" width={size} height={size} draggable={false} className="h-full w-full object-cover" />
+      {/* eslint-disable-next-line @next/next/no-img-element -- private object URL inside a map overlay */}
+      <img src={photoUrl} alt="" width={size} height={size} draggable={false} className="h-full w-full object-cover" />
     </div>
   );
 }
 
 /** Popup / tooltip wording — always "Reporter", never "Patient". */
-export function reporterLabel(reporterSex: string | null | undefined, isGuest: boolean | null | undefined): string {
+export function reporterLabel(hasPhoto: boolean | null | undefined, isGuest: boolean | null | undefined): string {
   if (isGuest) return 'Guest report';
-  if (reporterSex === 'MALE') return 'Reporter: Male (registered)';
-  if (reporterSex === 'FEMALE') return 'Reporter: Female (registered)';
+  if (hasPhoto) return 'Reporter photo (shared with consent)';
   if (isGuest === false) return 'Reporter (registered)';
   return 'Reporter';
 }
+
+/** Under the larger popup photo: the face is the caller's, who may not be the one hurt. */
+export const REPORTER_PHOTO_NOTE = 'The person who reported it. May not be the patient.';

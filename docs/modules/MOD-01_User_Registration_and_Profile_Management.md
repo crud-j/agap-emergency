@@ -540,7 +540,7 @@ OTP → account ACTIVE
 
 | Item | Comes from | Where it ends up |
 |---|---|---|
-| Last, first, middle name and suffix | Typed by the citizen | `users.full_name`, joined as `First Middle Last Suffix` |
+| Last, first, middle name and suffix | Filled from the scan, checked and corrected by the citizen (typed on a review scan) | `users.full_name`, joined as `First Middle Last Suffix` |
 | Name on the card | Server OCR | Sealed in `identity_verifications.name_on_id_sealed` |
 | PhilHealth number (PIN) | Server OCR | Only as an HMAC (`pin_hmac`) and its last 4 digits (`pin_last4`) |
 | Image of the card | Phone's scanner | Sealed in private storage until the check is done |
@@ -552,7 +552,7 @@ The date of birth, address and photo on the card are **not** extracted or stored
 
 1. Only a PhilHealth ID is accepted.
 2. Every citizen account goes through the scan. Seeded demo citizens are pre-verified. Staff accounts are provisioned by administrators and do not scan.
-3. The name fields are never pre-filled from the scan. The citizen types the name and the system checks it.
+3. After a scan that read a name, the name fields are filled from it and stay editable; the citizen checks the spelling. A name the citizen typed or corrected is never overwritten, and a review scan fills nothing. The server checks the submitted name against the card either way.
 4. One card holds one account at a time, enforced by a partial unique index on `pin_hmac`. Expired, rejected and released scans do not block a new scan.
 5. A scan token is valid for 30 minutes.
 6. An account under review can sign in and send an SOS.
@@ -606,3 +606,41 @@ With the flag on, the server refuses to start if the key or the pepper is missin
 - **MOD-47 (RBAC):** reviewers are System Administrators and MDRRMO Org Administrators only.
 - **MOD-49 (Administration):** the ID Reviews page.
 - **MOD-21 (Dispatch Dashboard):** the reporter label, for information only.
+
+---
+
+## 23. Profile Photo and the Responder Map
+
+### Overview
+
+A registered citizen can set a profile picture from a live front-camera selfie, once every 5 months. The server re-encodes it to a 640 px square JPEG with no metadata and checks it for sunglasses and missing clothing with a local CLIP model before storing it privately. A failed check never lets a photo through: the app is asked to try again (503).
+
+The citizen can also turn on **Show my photo to responders**. The incident's dispatchers and assigned crew then see the photo on their maps in place of the plain pin, so the crew can find the person who called. It replaces the earlier male/female map icon.
+
+### Business rules
+
+- Showing the photo is a separate consent from taking it. It is off by default and can be turned off at any time (`consent_records.consent_type = PROFILE_PHOTO_RESPONDERS`).
+- It is the REPORTER's photo, never the patient's. Every map and card labels it "Reporter" and says the person may not be the patient.
+- It is shown only while the incident is active (`ACTIVE_INCIDENT_STATUSES`: submitted to transporting/assisting). After resolution, closure, cancellation, false alert or duplicate, the route returns 404.
+- Only staff and the crew on a dispatch of that incident can fetch it. The reporter themselves, other citizens and guests cannot.
+- Consent is checked on every request, and the image is sent `Cache-Control: private, no-store`, so turning it off takes effect at once.
+- Every image served is audited (`READ`, entity `ReporterPhoto`, with the incident). The audit row never holds the image or where it is stored.
+- A photo that fails to load never delays the map or the assignment. The plain priority pin is shown instead.
+- Guests have no photo and always get the plain pin.
+
+### Endpoints
+
+| Method | Path | Who | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/users/me/photo` | The owner | Own photo (JPEG) |
+| `POST` | `/v1/users/me/photo` | The owner | Set the photo from a live selfie; 409 within 5 months |
+| `PUT` | `/v1/users/me/photo/responder-sharing` | The owner | `{ "enabled": true \| false }`: turn sharing on or off |
+| `GET` | `/v1/incidents/:id/reporter-photo` | Staff, the incident's crew | The reporter's photo; 404 when it may not be shown |
+
+`GET /v1/users/me` returns `has_profile_photo`, `profile_photo_updated_at`, `profile_photo_next_change_at` and `profile_photo_shared_with_responders`. The ops incident list, `GET /v1/incidents/:id` (staff and crew) and the responder assignments return `reporter_has_photo` only. They never return the consent record, the photo date or the storage location.
+
+### Where it appears
+
+- **Ops console (MOD-21/22):** the scene marker shows the photo in a priority-coloured ring. The popup shows it at 72 px with the note "May not be the patient".
+- **Responder app (MOD-32):** the map marker, and a Reporter card on the assignment screen.
+- **Citizen app (MOD-42):** the reporter sees their own photo on their tracking map only while sharing is on, so they see what responders see.

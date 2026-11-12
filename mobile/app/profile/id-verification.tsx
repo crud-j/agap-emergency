@@ -3,6 +3,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   DEFAULT_ID_DOCUMENT_TYPE,
@@ -72,7 +73,7 @@ export default function IdVerificationScreen() {
 
   useEffect(() => {
     void locate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on opening the screen
+    // Once, on opening the screen.
   }, []);
 
   function restartScan(message: string | null) {
@@ -163,7 +164,7 @@ export default function IdVerificationScreen() {
           <Message>
             <Ionicons name="location-outline" size={40} color="#D97706" />
             <Text style={styles.body}>{t.profile.idRescanOutside}</Text>
-            <Action label={t.profile.idRescanDone} onPress={() => router.back()} />
+            <Action label={t.profile.idRescanDone} onPress={() => goBack()} />
           </Message>
         )}
 
@@ -225,7 +226,7 @@ export default function IdVerificationScreen() {
             <Text testID="id-rescan-result" style={styles.body}>
               {outcome === 'AUTO_VERIFIED' ? t.profile.idRescanVerified : t.profile.idRescanUnderReview}
             </Text>
-            <Action label={t.profile.idRescanDone} onPress={() => router.back()} />
+            <Action label={t.profile.idRescanDone} onPress={() => goBack()} />
           </Message>
         )}
 

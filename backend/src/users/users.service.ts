@@ -15,6 +15,8 @@ import {
   overallStatus,
   sortChecks,
 } from './readiness/readiness.evaluator';
+import { profilePhotoInfo } from './profile-photo/profile-photo.service';
+import { ACTIVE_RESPONDER_PHOTO_CONSENT } from '../common/utils/reporter-photo';
 
 const MEDICAL_CONSENT_TYPE = 'MEDICAL_PROFILE';
 const READINESS_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -72,6 +74,25 @@ const SAFE_USER_SELECT = {
   created_at: true,
 } satisfies Prisma.UserSelect;
 
+/** What {@link withProfilePhoto} needs on top of the safe fields. */
+const PROFILE_PHOTO_SELECT = {
+  profile_photo_updated_at: true,
+  consent_records: ACTIVE_RESPONDER_PHOTO_CONSENT,
+} satisfies Prisma.UserSelect;
+
+/**
+ * The user's own profile: adds whether they have a photo, when they may next change it,
+ * and whether they let the staff and crew of their reports see it.
+ */
+function withProfilePhoto<T extends { profile_photo_updated_at: Date | null; consent_records?: unknown[] | null }>(user: T) {
+  const { profile_photo_updated_at, consent_records, ...rest } = user;
+  return {
+    ...rest,
+    ...profilePhotoInfo(profile_photo_updated_at),
+    profile_photo_shared_with_responders: (consent_records?.length ?? 0) > 0,
+  };
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -83,10 +104,10 @@ export class UsersService {
   async findMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: SAFE_USER_SELECT,
+      select: { ...SAFE_USER_SELECT, ...PROFILE_PHOTO_SELECT },
     });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    return withProfilePhoto(user);
   }
 
   async updateMe(userId: string, dto: UpdateProfileDto) {
@@ -113,7 +134,7 @@ export class UsersService {
         ...(dto.highContrast !== undefined && { high_contrast: dto.highContrast }),
         ...(dto.reducedMotion !== undefined && { reduced_motion: dto.reducedMotion }),
       },
-      select: SAFE_USER_SELECT,
+      select: { ...SAFE_USER_SELECT, ...PROFILE_PHOTO_SELECT },
     });
 
     if (sexChanged) {
@@ -130,7 +151,7 @@ export class UsersService {
       });
     }
 
-    return updated;
+    return withProfilePhoto(updated);
   }
 
   async deleteMe(userId: string) {

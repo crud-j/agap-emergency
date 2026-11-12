@@ -4,6 +4,7 @@ import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAt
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isModalAlertOpen } from './alerts';
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -33,11 +34,16 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onEscapeKeyDown, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // Escape closes an open confirmation first, not the dialog behind it.
+      onEscapeKeyDown={(e) => {
+        if (isModalAlertOpen()) e.preventDefault();
+        onEscapeKeyDown?.(e);
+      }}
       className={cn(
         // Inset from the screen edges and scrollable, so a tall form never runs off
         // a short or narrow window.

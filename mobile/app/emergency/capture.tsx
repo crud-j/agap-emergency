@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useIncidentStore } from '@/src/stores/incident.store';
 import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
 
@@ -180,7 +181,7 @@ export default function CaptureScreen() {
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         {/* Top bar */}
         <View style={styles.topBar}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} accessibilityLabel="Close">
+          <TouchableOpacity style={styles.iconBtn} onPress={() => goBack()} accessibilityLabel="Close">
             <Ionicons name="close" size={26} color="#FFFFFF" />
           </TouchableOpacity>
 

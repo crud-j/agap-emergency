@@ -2,6 +2,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/src/stores/auth.store';
+import { ProfileAvatar } from '@/src/components/profile/profile-avatar';
 import { useResponderSummary } from '@/src/hooks/useResponderSummary';
 import { AvailabilityControl } from '@/src/components/responder/availability-control';
 import { AgapLogo } from '@/src/components/brand/AgapLogo';
@@ -106,9 +107,7 @@ export default function ProfileScreen() {
         {/* Identity card */}
         <View style={styles.card}>
           <View style={styles.identityRow}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
+            <ProfileAvatar style={styles.avatar} textStyle={styles.avatarText} initial={initials} />
             <View style={styles.identityText}>
               <Text style={styles.name}>{user.full_name ?? 'Responder'}</Text>
               <Text style={styles.role}>MDRRMO Responder</Text>

@@ -1720,7 +1720,7 @@ function CitizenPhotoStrip({
             <DialogDescription className="text-xs text-agap-textSub">
               {rejectTarget?.file_name} will be marked as not credible. The reporter is warned that
               submitting false evidence may affect their reporting standing. This never changes the
-              incident's status or blocks dispatch.
+              incident&apos;s status or blocks dispatch.
             </DialogDescription>
           </DialogHeader>
           <textarea

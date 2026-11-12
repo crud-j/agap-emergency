@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { resetPassword } from '../../src/services/api/auth.api';
 
@@ -54,7 +55,7 @@ export default function ResetPasswordScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
 
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBack()}>
             <Ionicons name="arrow-back" size={22} color="#111827" />
           </TouchableOpacity>
 

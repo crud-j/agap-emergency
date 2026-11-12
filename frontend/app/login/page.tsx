@@ -50,8 +50,10 @@ export default function LoginPage(): ReactElement {
   useEffect(() => {
     // Rehydrate the persisted language preference from localStorage
     useAccessibilityStore.persist.rehydrate();
-    router.prefetch('/dashboard');
-    router.prefetch('/operations/dispatch');
+    // No router.prefetch of the console here: signed out, middleware answers a prefetch with
+    // a redirect to /login, the router caches it (staleTimes), and the router.replace after
+    // sign-in then lands back on /login until a reload. Pages are warmed after sign-in instead
+    // (components/layout/PerformanceWorkers.tsx).
     if (!passkeysSupported()) setMode('password');
 
     // "Choose an account": people who have signed in on this browser before.

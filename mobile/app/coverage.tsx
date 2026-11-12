@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, StatusBar 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { getMapConfig } from '@/src/services/api/locations.api';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
@@ -45,7 +45,6 @@ class MapErrorBoundary extends Component<
  * are locked to Bocaue by <BocaueScopedMap> (maxBounds + min/max zoom on the camera).
  */
 export default function CoverageScreen() {
-  const router = useRouter();
   const token = useAuthStore((s) => s.accessToken);
   const mapAvailable = useMemo(() => isNativeMapAvailable(), []);
   const [boundaryKey, setBoundaryKey] = useState(0);
@@ -87,7 +86,7 @@ export default function CoverageScreen() {
         <View style={styles.header} pointerEvents="box-none">
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >

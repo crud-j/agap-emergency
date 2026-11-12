@@ -34,8 +34,8 @@ export interface IncidentListItem {
   incident_reporters?: { is_guest: boolean; reporter_status?: string | null } | null;
   /** Structured caller intake (MOD-09 / MOD-24). The list endpoint loads only priority_reasons. */
   incident_details?: IncidentIntakeDetails | null;
-  /** Reporter map icon, staff-only (WP3.6). PREFER_NOT_TO_SAY / guest / unknown → null. */
-  reporter_sex?: 'MALE' | 'FEMALE' | null;
+  /** Staff and crew only: the reporter agreed to show their profile photo and the incident is active. */
+  reporter_has_photo?: boolean;
   hazard_flags?: string[];
   /** Barangay tag (ops-only). The list loads the name and last report; the detail loads the full notice. */
   barangay_notices?: Array<{

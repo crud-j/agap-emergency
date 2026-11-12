@@ -281,6 +281,68 @@ export function frameToPhotoCrop(
   };
 }
 
+/** The suffixes the shared matcher knows (plan §6), as the registration chips show them. '' = none. */
+export const NAME_SUFFIXES = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV'] as const;
+
+/** The four registration name inputs. */
+export interface NameFieldValues {
+  last: string;
+  first: string;
+  middle: string;
+  suffix: string;
+}
+
+/**
+ * A card's capitals as a person would type them: `DELA CRUZ` → `Dela Cruz`, `MA. CLARA` → `Ma. Clara`,
+ * `O'NEIL-REYES` → `O'Neil-Reyes`. The matcher ignores case, so this changes how the name looks, never
+ * whether it matches. Roman numerals (II, III, IV) stay capitals.
+ */
+export function toNameCase(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    // No Unicode property escapes: Hermes compatibility (same caution as the shared parser).
+    .replace(/(^|[\s\-'’.])([^\s\-'’.])/g, (_, before: string, letter: string) => before + letter.toUpperCase())
+    .replace(/\b(i{2,3}|iv)\b/gi, (numeral) => numeral.toUpperCase());
+}
+
+/** The chip for a suffix read from the card (`JR`, `jr.`, `III`), or '' when it isn't one the chips offer. */
+function suffixChip(read: string | undefined): string {
+  if (!read) return '';
+  const key = read.replace(/\./g, '').trim().toUpperCase();
+  return NAME_SUFFIXES.find((chip) => chip && chip.replace(/\./g, '').toUpperCase() === key) ?? '';
+}
+
+function sameName(a: NameFieldValues, b: NameFieldValues): boolean {
+  return a.last === b.last && a.first === b.first && a.middle === b.middle && a.suffix === b.suffix;
+}
+
+/**
+ * The name fields filled from the card after a successful scan, or null to leave them as they are.
+ *
+ * Fills only when the citizen hasn't typed a name of their own: the fields are empty, or still
+ * hold exactly what an earlier scan filled in. A name they typed or corrected is never
+ * overwritten. A review scan has no name to fill (`nameOnId` is null). The citizen still checks
+ * the spelling, and the server re-checks the submitted name against the card as before.
+ */
+export function prefillNameFromId(
+  current: NameFieldValues,
+  nameOnId: IdName | null,
+  previouslyFilled: NameFieldValues | null,
+): NameFieldValues | null {
+  if (!nameOnId) return null;
+  const empty = !current.last.trim() && !current.first.trim() && !current.middle.trim() && !current.suffix;
+  const untouched = previouslyFilled !== null && sameName(current, previouslyFilled);
+  if (!empty && !untouched) return null;
+  return {
+    last: toNameCase(nameOnId.last),
+    first: toNameCase(nameOnId.first),
+    middle: nameOnId.middle ? toNameCase(nameOnId.middle) : '',
+    suffix: suffixChip(nameOnId.suffix),
+  };
+}
+
 /** The card's name the way the card prints it: `LAST, FIRST MIDDLE SUFFIX`. Shown only to the card's owner. */
 export function formatNameOnId(name: IdName): string {
   const given = [name.first, name.middle, name.suffix].filter((part) => part && part.trim()).join(' ');

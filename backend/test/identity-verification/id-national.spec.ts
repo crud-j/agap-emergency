@@ -1085,9 +1085,10 @@ describe('National ID', () => {
       expect(logged).toContain('NATIONAL_ID');
       expect(logged).toContain('phone=read');
       expect(logged).toContain('outcome=UNREADABLE');
-      expect(logged).toContain('first[conf=60 card=true number=true name=false');
+      expect(logged).toContain('cleaned=no');
+      expect(logged).toContain('raw/block[conf=60 card=true number=true name=false');
       expect(logged).toContain('digitRuns=4-4-4-4');
-      expect(logged).toContain('second[conf=45 card=false number=false name=false');
+      expect(logged).toContain('raw/auto[conf=45 card=false number=false name=false');
     });
 
     it('a rescued scan logs that the second read saved it', async () => {
@@ -1096,7 +1097,7 @@ describe('National ID', () => {
         await postScan({ documentType: 'NATIONAL_ID' });
       });
       expect(logged).toContain('phone=none');
-      expect(logged).toContain('outcome=second read passed');
+      expect(logged).toContain('outcome=passed after 2 reads');
     });
 
     it('those log lines hold no card number, name or card text, including a 12-digit run', async () => {

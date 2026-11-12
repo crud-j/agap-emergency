@@ -25,6 +25,7 @@ import {
   type Announcement,
 } from '@/src/services/api/announcements.api';
 import { BottomNav } from '@/src/components/ui/bottom-nav';
+import { categoryLabel } from '@/src/components/announcements/announcement-labels';
 import { useAccessibilityStore } from '@/src/stores/accessibility.store';
 
 const TEAL = '#0D6053';
@@ -62,22 +63,6 @@ const CATEGORIES = [
   { value: 'PUBLIC_ADVISORY',    label: 'Advisory' },
 ];
 
-const CATEGORY_LABELS: Record<string, string> = {
-  FLOOD_ALERT: 'Flood',
-  WEATHER_ADVISORY: 'Weather',
-  EVACUATION_ORDER: 'Evacuation',
-  CLASS_SUSPENSION: 'Class suspension',
-  ROAD_CLOSURE: 'Traffic',
-  PUBLIC_ADVISORY: 'Public advisory',
-  MUNICIPAL_SERVICE: 'Municipal service',
-  FIRE_ADVISORY: 'Fire',
-  INDUSTRIAL_HAZARD: 'Industrial hazard',
-  POST_DISASTER_UPDATE: 'Post-disaster',
-  RESCUE_UPDATE: 'Rescue',
-  GENERAL_INFORMATION: 'General',
-};
-
-const categoryLabel = (c: string) => CATEGORY_LABELS[c] ?? c.replace(/_/g, ' ');
 
 function areaLabel(a: Announcement): string {
   return a.scope === 'MUNICIPALITY_WIDE' || a.target_barangays.length === 0
@@ -405,7 +390,7 @@ export default function AnnouncementsScreen() {
           <Text style={styles.headerSub}>Office of the Mayor · MDRRMO Bocaue</Text>
         </View>
         <Pressable
-          onPress={() => router.push({ pathname: '/archive', params: { tab: 'announcements' } } as never)}
+          onPress={() => router.push('/announcements/past' as never)}
           onPressIn={() => {
             if (!reducedMotion) {
               Animated.spring(archiveScale, {
@@ -429,12 +414,12 @@ export default function AnnouncementsScreen() {
             }
           }}
           accessibilityRole="button"
-          accessibilityLabel="Open archived announcements"
+          accessibilityLabel="View past announcements"
           style={styles.archivePressable}
         >
           <Animated.View style={[styles.archiveButton, { transform: [{ scale: archiveScale }] }]}>
-            <Ionicons name="archive-outline" size={17} color={TEAL} />
-            <Text style={styles.archiveButtonText}>Archive</Text>
+            <Ionicons name="time-outline" size={17} color={TEAL} />
+            <Text style={styles.archiveButtonText}>Past notices</Text>
           </Animated.View>
         </Pressable>
       </SafeAreaView>

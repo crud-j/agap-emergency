@@ -557,7 +557,7 @@ function RescueByBarangayCard({ totals }: { totals: BarangayRescueTotal[] }): JS
           Rescue by Barangay
         </CardTitle>
         <span className="text-xs text-agap-textSub">
-          {rescued} rescued · ~{waiting} still waiting · from rescue crews' trip logs
+          {rescued} rescued · ~{waiting} still waiting · from rescue crews&apos; trip logs
         </span>
       </CardHeader>
       {totals.length === 0 ? (

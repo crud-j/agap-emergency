@@ -19,7 +19,7 @@ import {
 } from '@/src/config/bocaue-geo';
 import { BocaueBarangayBoundaryLayer } from './bocaue-boundary-layer';
 import { isSignalLost, isWestbound, priorityRingColor, toLngLat } from '@agap/shared';
-import { AMBULANCE_ICON, citizenIconFor } from '@/src/lib/map-icons';
+import { AMBULANCE_ICON } from '@/src/lib/map-icons';
 import { SERVICE_AREA_BOUNDS, needsServiceAreaBounds } from '@/src/lib/transport-target';
 import type { ExtraUnitMarker } from '@/src/lib/incident-tracking';
 import { colors } from '@/src/theme/tokens';
@@ -72,7 +72,7 @@ export function LiveTrackingMap({
   responder,
   routeGeometry,
   responderIcon = 'ambulance',
-  citizenSex = null,
+  citizenPhotoUri = null,
   priority,
   pitch: externalPitch = 0,
   navigationHeading = null,
@@ -90,7 +90,11 @@ export function LiveTrackingMap({
   otherUnits?: ExtraUnitMarker[];
   routeGeometry?: Array<[number, number]> | null;
   responderIcon?: 'ambulance';
-  citizenSex?: 'MALE' | 'FEMALE' | null;
+  /**
+   * The REPORTER's profile photo for the scene marker, shown only with their consent
+   * (never the patient's). null → the neutral incident pin.
+   */
+  citizenPhotoUri?: string | null;
   priority?: string | null;
   /** Camera tilt in degrees (0 = top-down). Responders get 50° en-route, citizens 20°. */
   pitch?: number;
@@ -128,7 +132,8 @@ export function LiveTrackingMap({
   const responderSignalLost = responder?.updatedAt
     ? isSignalLost(responder.updatedAt, now)
     : false;
-  const citizenIcon = citizenIconFor(citizenSex);
+  const [failedPhotoUri, setFailedPhotoUri] = useState<string | null>(null);
+  const citizenPhoto = citizenPhotoUri && citizenPhotoUri !== failedPhotoUri ? citizenPhotoUri : null;
 
   // is3d: use external pitch + bearing from navigationHeading
   // flat: pitch=0, north-up bearing (undefined)
@@ -328,9 +333,15 @@ export function LiveTrackingMap({
         {incident && (
           <Marker id="incident" lngLat={[incident.lng, incident.lat]}>
             <View style={incidentDimmed && styles.dimmed}>
-              {citizenIcon ? (
+              {citizenPhoto ? (
                 <View style={[styles.citizenMarker, { borderColor: priorityRingColor(priority) }]}>
-                  <Image source={citizenIcon} style={styles.citizenImage} resizeMode="contain" />
+                  <Image
+                    source={{ uri: citizenPhoto }}
+                    style={styles.citizenImage}
+                    resizeMode="cover"
+                    onError={() => setFailedPhotoUri(citizenPhoto)}
+                    accessibilityIgnoresInvertColors
+                  />
                 </View>
               ) : (
                 <View style={[styles.pin, styles.incidentPin]}>

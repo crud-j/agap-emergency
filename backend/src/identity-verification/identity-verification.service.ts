@@ -13,6 +13,7 @@ import {
   combineIdReads,
   composeFullName,
   matchIdName,
+  nameVoteCounts,
   phoneReadSupport,
   type IdCardReleaseReason,
   type IdClaimResponse,
@@ -25,8 +26,9 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MediaService } from '../media/media.service';
 import { IdDocumentCryptoService } from './id-document-crypto.service';
-import { imageSize, regionInPixels, type PixelRegion } from './id-image-size';
-import { IdOcrService, type OcrResult } from './id-ocr.service';
+import { prepareIdImage, turnIdImage, uprightIdImage, type PreparedIdImage, type QuarterTurn } from './id-image-prep';
+import { imageSize, regionInPixels, type ImageSize, type PixelRegion } from './id-image-size';
+import { IdOcrService, type OcrLayout, type OcrResult } from './id-ocr.service';
 
 /**
  * Below this OCR confidence, text that isn't the chosen ID is treated as unreadable (retry)
@@ -124,16 +126,84 @@ export function typedNameFrom(parts: {
 type IdRules = (typeof ID_DOCUMENT_RULES)[IdDocumentType];
 
 /** The ID's name column in this image's pixels, or null: the ID has none, or the image's size can't be read. */
-function nameRegionOf(rules: IdRules, image: Buffer): PixelRegion | null {
+function nameRegionOf(rules: IdRules, size: ImageSize | null): PixelRegion | null {
   if (!rules.nameRegion) return null;
-  const size = imageSize(image);
   return size ? regionInPixels(rules.nameRegion, size) : null;
 }
 
-const readsWholeCard = (rules: IdRules, read: OcrResult): boolean => {
-  const found = combineIdReads(rules, [read.text]);
+const readsWholeCard = (rules: IdRules, reads: readonly OcrResult[]): boolean => {
+  const found = combineIdReads(rules, reads.map((read) => read.text));
   return found.number !== null && found.name !== null;
 };
+
+/** One OCR pass over the card, named for the log: which image (`raw`, `clean`, `binary`) and which layout. */
+interface CardRead {
+  label: string;
+  read: OcrResult | null;
+  /** A read of a resized copy: it can back up or contradict the number, never supply it (combineIdReads). */
+  confirmOnly?: boolean;
+}
+
+const textsByConfidence = (reads: readonly CardRead[]): string[] =>
+  reads
+    .flatMap(({ read }) => (read ? [read] : []))
+    .sort((a, b) => b.confidence - a.confidence)
+    .map((read) => read.text);
+
+/** What the reads found between them, each kind most confident first. `first`: texts that go before all others. */
+function combineCardReads(rules: IdRules, reads: readonly CardRead[], first: readonly string[] = []) {
+  return combineIdReads(
+    rules,
+    [...first, ...textsByConfidence(reads.filter((entry) => !entry.confirmOnly))],
+    textsByConfidence(reads.filter((entry) => entry.confirmOnly)),
+  );
+}
+
+/**
+ * The cleaned images, in order: grey, then black-and-white. Each is read with both layouts at once: block and
+ * auto have a worker each, so the pair takes about as long as its slower read.
+ */
+const CLEANED_IMAGES = ['clean', 'binary'] as const;
+const LAYOUTS: readonly OcrLayout[] = ['block', 'auto'];
+
+/**
+ * No new read starts after this long; a read already running finishes. A scan that can't settle in this time
+ * won't settle with more reads either, and the citizen is waiting with the camera in hand.
+ */
+export const SCAN_READ_BUDGET_MS = 12_000;
+
+/** A cleaned read normally takes 1–2 s. One that takes this long is stuck, and its worker restarts. */
+export const CLEANED_READ_TIMEOUT_MS = 8_000;
+
+/**
+ * Which reads go first. The National ID's coloured waves and fine-line background drown its text in a raw
+ * read, so its cleaned reads go first. PhilHealth keeps the raw read it was tuned on, and only falls back to
+ * cleaned reads when that fails, so a PhilHealth card that reads today reads exactly the same way.
+ */
+const CLEANED_FIRST: Record<IdDocumentType, boolean> = { NATIONAL_ID: true, PHILHEALTH: false };
+
+/** The second cleaned stage reads the image this much larger: on a real card, it read what 1× missed. */
+const RESCALED_READ = 1.3;
+
+/** The value most of `values` share has at least two votes and more than any other value. */
+function clearWinner(values: readonly string[]): boolean {
+  const counts = [...values.reduce((tally, value) => tally.set(value, (tally.get(value) ?? 0) + 1), new Map<string, number>()).values()];
+  counts.sort((a, b) => b - a);
+  return (counts[0] ?? 0) >= 2 && (counts[0] ?? 0) > (counts[1] ?? 0);
+}
+
+/**
+ * Enough reads to stop: the card is whole, at least two reads found the number (one read's number may be one
+ * digit off, and nothing else would catch it), and every name part has a clear winner of at least two votes.
+ */
+function settledReads(rules: IdRules, reads: readonly CardRead[]): boolean {
+  const combined = combineCardReads(rules, reads);
+  if (!combined.number || !combined.name) return false;
+  const texts = textsByConfidence(reads);
+  if (texts.filter((text) => rules.parseNumber(text) !== null).length < 2) return false;
+  const names = texts.flatMap((text) => rules.parseName(text) ?? []);
+  return (['last', 'first', 'middle', 'suffix'] as const).every((part) => clearWinner(names.map((name) => name[part] ?? '')));
+}
 
 /**
  * For the server log: which stage of one read failed. Yes/no answers and counts only, never card text,
@@ -224,42 +294,50 @@ export class IdentityVerificationService {
     const image = this.checkImage(file, documentType);
     const attemptNumber = Math.min(Math.max(Math.trunc(input.attemptNumber ?? 1), 1), 99);
 
-    // A failed read is tried once more with automatic layout, and the two reads of this one image can
-    // complete each other. A read that passes first time is never repeated. Each ID's parsers run only for
-    // that ID, so a PIN can't be stored as a PhilSys card number or the reverse.
-    const firstRead = await this.ocr.read(image);
-    const retried = firstRead !== null && !readsWholeCard(rules, firstRead);
-    const secondRead = retried ? await this.ocr.read(image, 'auto') : null;
-    const serverTexts = [firstRead, secondRead]
-      .filter((read): read is OcrResult => read !== null)
-      .sort((a, b) => b.confidence - a.confidence)
-      .map((read) => read.text);
-    let combined = combineIdReads(rules, serverTexts);
+    // Several reads of this one image complete each other (combineIdReads): a layout that keeps the name can
+    // drop the number, and each name part is voted across the reads that found a name. Each ID's parsers run
+    // only for that ID, so a PIN can't be stored as a PhilSys card number or the reverse.
+    const { reads, prepared, turn } = await this.readCard(image, rules, documentType);
+    const serverTexts = textsByConfidence(reads);
+    let combined = combineCardReads(rules, reads);
 
     // The whole card was read, heading and number, but not the name: read the name column alone, away from
     // the photo beside it, whose noise lands on every name line. It runs only when no other read found a
     // name, so its name is the only one. The heading, a single agreed number and the typed-name check still
-    // apply, as for any read.
-    const nameColumn = combined.headingSeen && combined.number && !combined.name ? nameRegionOf(rules, image) : null;
-    const nameRead = nameColumn ? await this.ocr.read(image, 'block', nameColumn) : null;
+    // apply, as for any read. It reads the cleaned image when there is one.
+    const nameColumn =
+      combined.headingSeen && combined.number && !combined.name
+        ? nameRegionOf(rules, prepared ? prepared.size : imageSize(image))
+        : null;
+    const nameRead = !nameColumn
+      ? null
+      : prepared
+        ? await this.ocr.read(prepared.clean, 'block', nameColumn, CLEANED_READ_TIMEOUT_MS)
+        : await this.ocr.read(image, 'block', nameColumn);
     const allTexts = nameRead ? [nameRead.text, ...serverTexts] : serverTexts;
-    if (nameRead) combined = combineIdReads(rules, allTexts);
+    if (nameRead) combined = combineCardReads(rules, reads, [nameRead.text]);
     const { headingSeen, number, name: nameOnId, numberConflict } = combined;
 
+    // The raw whole-card read is what MIN_OCR_CONFIDENCE was set on; cleaned images read with higher
+    // confidence, so they never decide "wrong card" on their own.
+    const rawFirst = reads.find((entry) => entry.label === 'raw/block')?.read ?? null;
     let failure: ScanFailure | null = null;
     if (!number || !nameOnId) {
       // A read that saw this ID's heading didn't find the wrong card: it failed to read the right one.
       failure =
-        firstRead && !headingSeen && firstRead.confidence >= MIN_OCR_CONFIDENCE
+        rawFirst && !headingSeen && rawFirst.confidence >= MIN_OCR_CONFIDENCE
           ? rules.wrongCardCode
           : IdVerificationErrorCode.UNREADABLE;
     }
-    if (retried) {
+    // Logged when the first read alone didn't read the whole card, as before cleaned reads existed.
+    const firstRead = reads[0]?.read ?? null;
+    if (firstRead !== null && !readsWholeCard(rules, [firstRead])) {
       this.logger.warn(
         `ID scan needed a second read (${documentType}): phone=${phoneReadSummary(rules, input.clientText, allTexts)} conflict=${numberConflict} ` +
-          `first[${readSummary(rules, firstRead)}] second[${readSummary(rules, secondRead)}] ` +
+          `cleaned=${prepared ? 'yes' : 'no'} turned=${turn} nameVotes=${nameVoteCounts(rules, serverTexts)} ` +
+          reads.map(({ label, read }) => `${label}[${readSummary(rules, read)}] `).join('') +
           `nameColumn[${nameColumn ? readSummary(rules, nameRead) : 'not run'}] ` +
-          `outcome=${failure ?? (nameRead ? 'name column read passed' : 'second read passed')}`,
+          `outcome=${failure ?? (nameRead ? 'name column read passed' : `passed after ${reads.length} reads`)}`,
       );
     }
     if (failure && (input.requestReview !== true || attemptNumber < ID_SCAN_MAX_ATTEMPTS)) {
@@ -618,6 +696,114 @@ export class IdentityVerificationService {
       if (row.image_storage_key && (await this.deleteImage(row.id, row.image_storage_key))) deleted++;
     }
     return { expired, deleted, failed: stale.length - deleted };
+  }
+
+  /**
+   * Reads the card in stages:
+   * - raw: the image as uploaded, block layout, then automatic layout if that missed anything. A read that
+   *   timed out isn't repeated.
+   * - cleaned: the darkest-ink copies (id-image-prep), grey and black-and-white, each with both layouts; then,
+   *   if the reads still haven't settled, the same at 1.3× scale, since a read that fails at one size often
+   *   passes at another. A cleaned stage stops as soon as the reads have settled (settledReads). A portrait image
+   *   (the card on its side) tries both quarter turns first.
+   * National ID: cleaned first; raw only if no cleaned read saw the heading. Once the heading is seen the card
+   * is the right one, and a raw read of its busy background (the slowest read, ~6 s) has never added to the
+   * cleaned reads; without it, a raw read can still tell the wrong card from an unreadable one.
+   * PhilHealth: raw first, exactly as before cleaned reads existed, and cleaned only if raw didn't read the whole
+   * card (CLEANED_FIRST). An image that can't be decoded gets the raw stage only.
+   * After SCAN_READ_BUDGET_MS no new stage or pair of reads starts; the first stage always runs.
+   */
+  private async readCard(
+    image: Buffer,
+    rules: IdRules,
+    documentType: IdDocumentType,
+  ): Promise<{ reads: CardRead[]; prepared: PreparedIdImage | null; turn: number }> {
+    const reads: CardRead[] = [];
+    const deadline = Date.now() + SCAN_READ_BUDGET_MS;
+    const overBudget = (): boolean => Date.now() >= deadline;
+    const whole = (): boolean => {
+      const found = combineCardReads(rules, reads);
+      return found.number !== null && found.name !== null;
+    };
+    const settled = (): boolean => settledReads(rules, reads);
+    const headingSeen = (): boolean => combineCardReads(rules, reads).headingSeen;
+    const upright = await uprightIdImage(image);
+    let raw = upright?.upright ?? image;
+    let prepared: PreparedIdImage | null = null;
+    let turn: QuarterTurn = 0;
+    let cleanedFailed = false;
+
+    const rawStage = async (): Promise<void> => {
+      const first = await this.ocr.read(raw);
+      reads.push({ label: 'raw/block', read: first });
+      if (first !== null && !whole() && !(CLEANED_FIRST[documentType] && overBudget())) {
+        reads.push({ label: 'raw/auto', read: await this.ocr.read(raw, 'auto') });
+      }
+    };
+
+    /** The card's quarter turn, for an image on its side: the turn whose read looks most like the card. */
+    const chooseTurn = async (portrait: Buffer): Promise<PreparedIdImage | null> => {
+      let best: { prepared: PreparedIdImage; read: OcrResult; turn: QuarterTurn; score: number } | null = null;
+      for (const quarter of [90, 270] as const) {
+        const candidate = await prepareIdImage(portrait, quarter);
+        if (!candidate) return null;
+        const read = await this.ocr.read(candidate.clean, 'block', undefined, CLEANED_READ_TIMEOUT_MS);
+        if (!read) continue;
+        const score = (rules.hasHeading(read.text) ? 100 : 0) + read.confidence;
+        if (!best || score > best.score) best = { prepared: candidate, read, turn: quarter, score };
+      }
+      if (!best) return null;
+      turn = best.turn;
+      reads.push({ label: 'clean/block', read: best.read });
+      // A raw read after this one should see the card the same way up.
+      raw = (await turnIdImage(portrait, best.turn)) ?? raw;
+      return best.prepared;
+    };
+
+    const cleanedStage = async (scale: number): Promise<void> => {
+      if (!upright || cleanedFailed) return;
+      const suffix = scale === 1 ? '' : `@${scale}`;
+      const images =
+        scale === 1
+          ? upright.portrait
+            ? await chooseTurn(upright.upright)
+            : await prepareIdImage(upright.upright)
+          : await prepareIdImage(upright.upright, turn, scale);
+      if (!images) {
+        cleanedFailed = true;
+        return;
+      }
+      if (scale === 1) prepared = images;
+      for (const kind of CLEANED_IMAGES) {
+        if (settled() || overBudget()) return;
+        const steps = LAYOUTS.map((layout) => ({ layout, label: `${kind}${suffix}/${layout}` })).filter(
+          ({ label }) => !reads.some((entry) => entry.label === label),
+        );
+        const results = await Promise.all(
+          steps.map(({ layout }) => this.ocr.read(images[kind], layout, undefined, CLEANED_READ_TIMEOUT_MS)),
+        );
+        steps.forEach(({ label }, i) => {
+          const read = results[i] ?? null;
+          reads.push(scale === 1 ? { label, read } : { label, read, confirmOnly: true });
+        });
+        // A read that failed or timed out restarts its worker; more reads now would only queue behind it.
+        if (results.some((read) => read === null)) {
+          cleanedFailed = true;
+          return;
+        }
+      }
+    };
+
+    if (CLEANED_FIRST[documentType]) {
+      await cleanedStage(1);
+      if (!settled() && !overBudget()) await cleanedStage(RESCALED_READ);
+      if (!whole() && !headingSeen() && !overBudget()) await rawStage();
+    } else {
+      await rawStage();
+      if (!whole() && !overBudget()) await cleanedStage(1);
+      if (!whole() && !overBudget()) await cleanedStage(RESCALED_READ);
+    }
+    return { reads, prepared, turn };
   }
 
   /** Refuses a new claim while the account is verified or holds a check, on either ID. */

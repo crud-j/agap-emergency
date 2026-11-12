@@ -10,7 +10,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ScreenHeader } from '../../src/components/ui/screen-header';
 import {
@@ -19,7 +20,6 @@ import {
 } from '../../src/services/api/contacts.api';
 
 export default function EditContactScreen() {
-  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
 
@@ -49,7 +49,7 @@ export default function EditContactScreen() {
     mutationFn: (dto: Parameters<typeof updateContact>[1]) => updateContact(id!, dto),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['emergency-contacts'] });
-      router.back();
+      goBack();
     },
     onError: (err: Error) => setError(err.message),
   });

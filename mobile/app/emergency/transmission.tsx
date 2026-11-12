@@ -23,6 +23,7 @@ import { FALLBACK_MAP_STYLE_URL } from '@/src/config/bocaue-geo';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { useIncidentTracking } from '@/src/hooks/useIncidentTracking';
 import { useRouteLine } from '@/src/hooks/useRouteLine';
+import { useProfilePhotoUri } from '@/src/components/profile/profile-avatar';
 
 type ResponderPoint = LatLngLite & { heading?: number };
 
@@ -60,14 +61,14 @@ class MapErrorBoundary extends Component<{ children: React.ReactNode }, { failed
  * because LiveTrackingMap fills its container via StyleSheet.absoluteFill.
  */
 function MapPreview({
-  location, styleUrl, mapAvailable, responder, routeGeometry, citizenSex, priority,
+  location, styleUrl, mapAvailable, responder, routeGeometry, citizenPhotoUri, priority,
 }: {
   location: LatLngLite | null;
   styleUrl: string;
   mapAvailable: boolean;
   responder: (ResponderPoint & { updatedAt?: string }) | null;
   routeGeometry: Array<[number, number]> | null;
-  citizenSex: 'MALE' | 'FEMALE' | null;
+  citizenPhotoUri: string | null;
   priority?: string | null;
 }) {
   if (!mapAvailable) {
@@ -94,7 +95,7 @@ function MapPreview({
             responder={responder}
             routeGeometry={routeGeometry}
             responderIcon="ambulance"
-            citizenSex={citizenSex}
+            citizenPhotoUri={citizenPhotoUri}
             priority={priority}
           />
         </React.Suspense>
@@ -199,7 +200,7 @@ function SimilarReportCard({ hint }: { hint: SimilarReportHint }) {
 
 function SuccessView({
   location, styleUrl, mapAvailable, isGuestReport, reference, onSignIn,
-  responder, routeGeometry, etaSeconds, citizenSex, priority, mediaState, similarReport,
+  responder, routeGeometry, etaSeconds, citizenPhotoUri, priority, mediaState, similarReport,
 }: {
   location: LatLngLite | null;
   styleUrl: string;
@@ -210,7 +211,7 @@ function SuccessView({
   responder: (ResponderPoint & { updatedAt?: string }) | null;
   routeGeometry: Array<[number, number]> | null;
   etaSeconds: number | null;
-  citizenSex: 'MALE' | 'FEMALE' | null;
+  citizenPhotoUri: string | null;
   priority: string | null;
   mediaState: MediaState;
   similarReport: SimilarReportHint | null;
@@ -243,7 +244,7 @@ function SuccessView({
           mapAvailable={mapAvailable}
           responder={responder}
           routeGeometry={routeGeometry}
-          citizenSex={citizenSex}
+          citizenPhotoUri={citizenPhotoUri}
           priority={priority}
         />
       )}
@@ -373,7 +374,9 @@ export default function TransmissionScreen() {
         updatedAt: live.responder.updatedAt,
       }
     : null;
-  const citizenSex = user?.sex === 'MALE' || user?.sex === 'FEMALE' ? user.sex : null;
+  // The reporter sees their own photo on the map only when responders see it too (consent).
+  const ownPhotoUri = useProfilePhotoUri();
+  const citizenPhotoUri = user?.profile_photo_shared_with_responders ? ownPhotoUri : null;
 
   const mapAvailable = useMemo(() => isNativeMapAvailable(), []);
   const { data: mapConfig } = useQuery({
@@ -527,7 +530,7 @@ export default function TransmissionScreen() {
             responder={responderPoint}
             routeGeometry={route.geometry ?? null}
             etaSeconds={live.etaSeconds}
-            citizenSex={citizenSex}
+            citizenPhotoUri={citizenPhotoUri}
             priority={incidentPriority}
             mediaState={mediaState}
             similarReport={similarReport}

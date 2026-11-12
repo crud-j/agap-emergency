@@ -181,7 +181,7 @@ export default function DispatchPage(): JSX.Element {
           status: i.status,
           lat: i.incident_locations?.latitude ?? null,
           lng: i.incident_locations?.longitude ?? null,
-          reporter_sex: i.reporter_sex ?? null,
+          reporter_has_photo: i.reporter_has_photo ?? false,
           reporter_is_guest: i.incident_reporters?.is_guest ?? null,
         })),
     [incidents],

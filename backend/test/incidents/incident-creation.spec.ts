@@ -518,14 +518,27 @@ describe('IncidentsService', () => {
     it('returns guest reporter flags for the operations queue without reporter contact details', async () => {
       await service.findAll({});
 
-      // Only the guest flag, the reporter's safety status, and the account's sex
-      // (for reporter_sex) are loaded — no reporter name, phone or callback number.
+      // Only the guest flag, the reporter's safety status, and what reporter_has_photo
+      // needs (photo date, active consent) are loaded — no name, phone, callback number or photo location.
       expect(mockPrisma.incident.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           include: {
             incident_locations: true,
             incident_reporters: {
-              select: { is_guest: true, reporter_status: true, users: { select: { sex: true } } },
+              select: {
+                is_guest: true,
+                reporter_status: true,
+                users: {
+                  select: {
+                    profile_photo_updated_at: true,
+                    consent_records: {
+                      where: { consent_type: 'PROFILE_PHOTO_RESPONDERS', status: 'GRANTED' },
+                      select: { id: true },
+                      take: 1,
+                    },
+                  },
+                },
+              },
             },
             incident_details: { select: { priority_reasons: true } },
             barangay_notices: expect.any(Object),
@@ -542,18 +555,21 @@ describe('IncidentsService', () => {
       );
     });
 
-    it('exposes the derived reporter_sex and strips the raw account value', async () => {
+    it('exposes only whether the reporter photo may be shown and strips the account fields', async () => {
+      const photoAt = new Date('2026-11-01T00:00:00Z');
+      const consent = [{ id: 'consent-1' }];
       mockPrisma.incident.findMany.mockResolvedValueOnce([
-        { id: 'a', incident_reporters: { is_guest: false, users: { sex: 'FEMALE' } } },
-        { id: 'b', incident_reporters: { is_guest: false, users: { sex: 'PREFER_NOT_TO_SAY' } } },
-        { id: 'c', incident_reporters: { is_guest: true, users: null } },
+        { id: 'a', status: 'EN_ROUTE', incident_reporters: { is_guest: false, users: { profile_photo_updated_at: photoAt, consent_records: consent } } },
+        { id: 'b', status: 'EN_ROUTE', incident_reporters: { is_guest: false, users: { profile_photo_updated_at: photoAt, consent_records: [] } } },
+        { id: 'c', status: 'CLOSED', incident_reporters: { is_guest: false, users: { profile_photo_updated_at: photoAt, consent_records: consent } } },
+        { id: 'd', status: 'EN_ROUTE', incident_reporters: { is_guest: true, users: null } },
       ]);
 
       const { data } = await service.findAll({});
 
-      expect(data.map((i: any) => i.reporter_sex)).toEqual(['FEMALE', null, null]);
+      expect(data.map((i: any) => i.reporter_has_photo)).toEqual([true, false, false, false]);
       expect(data[1]!.incident_reporters).toEqual({ is_guest: false });
-      expect(JSON.stringify(data)).not.toContain('PREFER_NOT_TO_SAY');
+      expect(JSON.stringify(data)).not.toContain('consent');
     });
 
     it('filters the operations archive to the requested terminal incident statuses', async () => {

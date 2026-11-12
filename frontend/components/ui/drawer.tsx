@@ -4,6 +4,7 @@ import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAt
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isModalAlertOpen } from './alerts';
 
 export const Drawer = DialogPrimitive.Root;
 export const DrawerTrigger = DialogPrimitive.Trigger;
@@ -37,11 +38,16 @@ interface DrawerContentProps extends ComponentPropsWithoutRef<typeof DialogPrimi
 export const DrawerContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   DrawerContentProps
->(({ className, children, side = 'right', width = 'w-[480px]', ...props }, ref) => (
+>(({ className, children, side = 'right', width = 'w-[480px]', onEscapeKeyDown, ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DrawerOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // Escape closes an open confirmation first, not the drawer behind it.
+      onEscapeKeyDown={(e) => {
+        if (isModalAlertOpen()) e.preventDefault();
+        onEscapeKeyDown?.(e);
+      }}
       className={cn(
         'fixed top-0 z-[1210] h-full bg-white shadow-[−4px_0_40px_rgba(135,149,163,0.12)] border-l border-[rgba(168,181,193,0.20)] flex flex-col',
         'data-[state=open]:animate-in data-[state=closed]:animate-out duration-300',

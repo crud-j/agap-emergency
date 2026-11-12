@@ -3,8 +3,7 @@
 import { useState, type JSX } from 'react';
 import {
   Network, Plus, Package, ArrowRightLeft, CheckCircle2,
-  XCircle, Clock, AlertTriangle, Shield, Building2, ClipboardList,
-  HandshakeIcon,
+  XCircle, Clock, Shield, Building2,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,

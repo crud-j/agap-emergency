@@ -22,7 +22,7 @@ import {
 } from '@/features/map/live-tracking';
 import { destinationHistory } from '@/features/incidents/transport-history';
 import type { AuditLogEntry } from '@/features/audit/api';
-import { reporterLabel } from '@/components/map/CitizenMarker';
+import { REPORTER_PHOTO_NOTE, reporterLabel } from '@/components/map/CitizenMarker';
 import type { LatestUnitPosition, LiveResponderPosition } from '@/features/map/api';
 
 const seeded: LiveResponderPosition = {
@@ -161,14 +161,15 @@ describe('WP5 dispatch-dashboard live tracking', () => {
     });
 
     it('always says Reporter (never Patient) in the scene popup', () => {
-      expect(reporterLabel('FEMALE', false)).toBe('Reporter: Female (registered)');
-      expect(reporterLabel('MALE', false)).toBe('Reporter: Male (registered)');
-      expect(reporterLabel(null, false)).toBe('Reporter (registered)');
-      expect(reporterLabel(null, true)).toBe('Guest report');
+      expect(reporterLabel(true, false)).toBe('Reporter photo (shared with consent)');
+      expect(reporterLabel(false, false)).toBe('Reporter (registered)');
+      expect(reporterLabel(false, true)).toBe('Guest report');
       expect(reporterLabel(null, null)).toBe('Reporter');
-      for (const label of [reporterLabel('FEMALE', false), reporterLabel(null, true)]) {
+      for (const label of [reporterLabel(true, false), reporterLabel(false, true)]) {
         expect(label).not.toMatch(/patient/i);
       }
+      // The note under the photo says the opposite way round: it may NOT be the patient.
+      expect(REPORTER_PHOTO_NOTE).toMatch(/may not be the patient/i);
     });
   });
 

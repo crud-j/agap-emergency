@@ -212,14 +212,44 @@ export function parsePhilHealthName(text: string): IdName | null {
   return pinLine > 0 ? search(0, pinLine) : null;
 }
 
+/**
+ * Letter pairs OCR reads as one letter, or one letter it splits into a pair: `SOLIMAN` read as
+ * `SOUMAN`, `VILLANUEVA` as `VIUANUEVA`, `CORNEJO` as `COMEJO`. Plain edit distance counts each as
+ * two edits; it is one slip of the reader, so it counts as one. Thin strokes (I, L) merging at
+ * card resolution are the usual cause.
+ */
+const OCR_MERGES: ReadonlyArray<readonly [pair: string, single: string]> = [
+  ['LI', 'U'], ['IL', 'U'], ['LL', 'U'], ['II', 'U'],
+  ['RN', 'M'],
+  ['CL', 'D'],
+  ['VV', 'W'],
+];
+
+/**
+ * Edit distance between a typed word and the card's word, where one OCR merge or split (OCR_MERGES)
+ * counts as one edit, like any other single slip.
+ */
 function editDistance(a: string, b: string): number {
+  let beforePrevious: number[] = [];
   let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i++) {
     const current = [i];
     for (let j = 1; j <= b.length; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      current[j] = Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, (previous[j - 1] ?? 0) + cost);
+      let best = Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, (previous[j - 1] ?? 0) + cost);
+      for (const [pair, single] of OCR_MERGES) {
+        // Two typed letters read as one (typed LI, card U).
+        if (i >= 2 && b[j - 1] === single && a.slice(i - 2, i) === pair) {
+          best = Math.min(best, (beforePrevious[j - 1] ?? 0) + 1);
+        }
+        // One typed letter split into two (typed M, card RN).
+        if (j >= 2 && a[i - 1] === single && b.slice(j - 2, j) === pair) {
+          best = Math.min(best, (previous[j - 2] ?? 0) + 1);
+        }
+      }
+      current[j] = best;
     }
+    beforePrevious = previous;
     previous = current;
   }
   return previous[b.length] ?? 0;

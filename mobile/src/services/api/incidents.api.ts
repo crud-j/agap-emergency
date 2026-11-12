@@ -3,6 +3,7 @@ import type { PhotoCaptureMeta } from '@/src/types/incident-capture';
 import { File, UploadTask, UploadType } from 'expo-file-system';
 import { authedFetch } from './authed-fetch';
 import { apiFetch, ApiError } from './http';
+import { responseToJpegDataUri } from './jpeg-data-uri';
 import { getDeviceId } from '../readiness/device-readiness';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
@@ -143,6 +144,20 @@ export async function getMyStanding(): Promise<ReporterStanding> {
   const res = await authedFetch(`${API_BASE}/v1/incidents/mine/standing`);
   if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
   return res.json();
+}
+
+/**
+ * The REPORTER's consented profile photo for an incident the signed-in responder is crewed
+ * on (MOD-32), as a `data:` URI. Null when it may not be shown (404: no consent, no photo,
+ * or the incident ended). Never the patient's photo.
+ */
+export async function fetchReporterPhotoDataUri(incidentId: string): Promise<string | null> {
+  const res = await authedFetch(`${API_BASE}/v1/incidents/${encodeURIComponent(incidentId)}/reporter-photo`, {
+    headers: { Accept: 'image/jpeg' },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
+  return responseToJpegDataUri(res);
 }
 
 export async function listMyIncidents(): Promise<IncidentSummary[]> {

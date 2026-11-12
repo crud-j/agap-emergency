@@ -12,12 +12,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/src/lib/navigation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ScreenHeader } from '../../src/components/ui/screen-header';
-// Reporter map icon lives on this screen but is account data (users.sex), not
-// medical data — it is shown in every state, including before medical consent.
-import { MapIconCard } from '../../src/components/profile/map-icon-card';
 import { checkConsent, MEDICAL_CONSENT_TYPE } from '../../src/services/api/consent.api';
 import { ApiError } from '../../src/services/api/http';
 import {
@@ -211,9 +209,6 @@ export default function MedicalScreen() {
           >
             <Text style={styles.btnText}>Manage Consent</Text>
           </TouchableOpacity>
-          <View style={styles.gateMapIcon}>
-            <MapIconCard />
-          </View>
         </View>
       </View>
     );
@@ -271,7 +266,6 @@ function ProfileForm({
   exists: boolean;
   onSaved: (profile: MedicalProfile) => void;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState(!exists);
 
   if (!editing && profile) {
@@ -283,7 +277,7 @@ function ProfileForm({
       profile={profile}
       exists={exists}
       onSaved={onSaved}
-      onDone={(saved) => (saved ? setEditing(false) : router.back())}
+      onDone={(saved) => (saved ? setEditing(false) : goBack())}
     />
   );
 }
@@ -335,8 +329,6 @@ function ProfileSummary({ profile, onEdit }: { profile: MedicalProfile; onEdit: 
         </View>
         <Text style={styles.heroMeta}>Last reviewed {formatDate(reviewedAt)}</Text>
       </View>
-
-      <MapIconCard />
 
       {needsReview && (
         <TouchableOpacity style={styles.reviewNudge} onPress={onEdit} activeOpacity={0.85} accessibilityRole="button">
@@ -533,8 +525,6 @@ function ProfileEditor({
         ) : (
           <Text style={styles.editNote}>Changes save automatically as you go.</Text>
         )}
-
-        <MapIconCard />
 
         <View style={styles.card}>
           <SectionHeading
@@ -846,7 +836,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF7ED', padding: 14, borderRadius: 12, marginBottom: 16,
   },
   gateText: { flex: 1, fontSize: 13, color: '#B45309', lineHeight: 18 },
-  gateMapIcon: { alignSelf: 'stretch', marginTop: 28 },
   btn: {
     height: 46, minWidth: 160, borderRadius: 12, backgroundColor: '#0D6053',
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32,

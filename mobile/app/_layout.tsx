@@ -2,7 +2,7 @@ import '../global.css';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useGlobalSearchParams, useRouter, useSegments } from 'expo-router';
 import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -18,6 +18,7 @@ import {
 } from '../src/services/push/push-registration';
 import { useLiveIncidentRefresh } from '../src/hooks/useLiveIncidentRefresh';
 import { AgapSplash } from '../src/components/splash/AgapSplash';
+import { loadDevRoute, saveDevRoute, type DevRoute } from '../src/lib/dev-route-restore';
 
 // Wire React Native's AppState into TanStack Query's focus manager so
 // refetchOnWindowFocus works when the app comes back to the foreground.
@@ -60,20 +61,45 @@ function AuthGuard() {
   // Home, history, SOS and responder tabs refetch when an incident changes.
   useLiveIncidentRefresh();
 
+  // Dev builds: the screen open before a Metro reload, reopened once at launch.
+  const params = useGlobalSearchParams();
+  const devRoute = useRef<DevRoute | null>(null);
+  const [devRouteLoaded, setDevRouteLoaded] = useState(!__DEV__);
+
   useEffect(() => {
     loadFromStorage();
     loadAccessibility();
+    if (__DEV__) {
+      void loadDevRoute().then((route) => {
+        devRoute.current = route;
+        setDevRouteLoaded(true);
+      });
+    }
   }, []);
 
   useEffect(() => {
+    if (!__DEV__ || !devRouteLoaded) return;
+    saveDevRoute(segments as string[], params as Record<string, string | string[]>);
+  }, [segments, params, devRouteLoaded]);
+
+  useEffect(() => {
     // Wait until both SecureStore and accessibility prefs have been read.
-    if (isLoading || !accessibilityLoaded) return;
+    if (isLoading || !accessibilityLoaded || !devRouteLoaded) return;
 
     // Typed routes declare segments as a non-empty tuple, but at the app root it
     // is [] at runtime — widen the type so this check isn't flagged as impossible.
     const atRoot   = (segments as string[]).length === 0;
     const inPublic = PUBLIC_SEGMENTS.some((s) => segments[0] === s);
     const inAuthOnly = AUTH_ONLY_SEGMENTS.some((s) => segments[0] === s);
+
+    // After a dev reload, reopen the last screen. This effect runs again once it
+    // opens, so the checks below still redirect a screen this session can't see.
+    if (atRoot && devRoute.current) {
+      const route = devRoute.current;
+      devRoute.current = null;
+      router.replace(route as never);
+      return;
+    }
 
     if (isAuthenticated) {
       // Authenticated users can still enter the emergency flow from home.
@@ -90,7 +116,7 @@ function AuthGuard() {
         router.replace('/auth/login');
       }
     }
-  }, [isAuthenticated, isLoading, accessibilityLoaded, segments, user?.role]);
+  }, [isAuthenticated, isLoading, accessibilityLoaded, devRouteLoaded, segments, user?.role]);
 
   // A tapped push opens its assignment (responder) or incident. Held until the session
   // is loaded, and declared after the redirect above so a cold start lands home → target.
@@ -160,6 +186,7 @@ export default function RootLayout() {
             <Stack.Screen name="announcements/index" options={{ animation: 'none' }} />
             <Stack.Screen name="announcements/[id]" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="announcements/subscribe" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="announcements/past" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="archive/index" options={{ animation: 'none' }} />
             <Stack.Screen name="profile/index" options={{ animation: 'none' }} />
           </Stack>

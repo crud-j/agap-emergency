@@ -35,12 +35,18 @@ export class IdOcrService implements OnModuleDestroy {
 
   /**
    * The text on the card, or null when it couldn't be read in time. Never throws. `region`: read only that
-   * part of the image, e.g. the name column away from the photo.
+   * part of the image, e.g. the name column away from the photo. `timeoutMs`: a shorter limit for a read that
+   * is one of several, so one stuck read can't hold the whole scan.
    */
-  async read(image: Buffer, layout: OcrLayout = 'block', region?: PixelRegion): Promise<OcrResult | null> {
+  async read(
+    image: Buffer,
+    layout: OcrLayout = 'block',
+    region?: PixelRegion,
+    timeoutMs: number = OCR_TIMEOUT_MS,
+  ): Promise<OcrResult | null> {
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<'timeout'>((resolve) => {
-      timer = setTimeout(() => resolve('timeout'), OCR_TIMEOUT_MS);
+      timer = setTimeout(() => resolve('timeout'), timeoutMs);
     });
     const work = this.getWorker(layout).then((worker) =>
       region ? worker.recognize(image, { rectangle: region }) : worker.recognize(image),
@@ -50,7 +56,7 @@ export class IdOcrService implements OnModuleDestroy {
     try {
       const result = await Promise.race([work, timeout]);
       if (result === 'timeout') {
-        this.logger.warn(`ID reading timed out after ${OCR_TIMEOUT_MS} ms; restarting the OCR worker`);
+        this.logger.warn(`ID reading timed out after ${timeoutMs} ms; restarting the OCR worker`);
         void this.reset(layout);
         return null;
       }

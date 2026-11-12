@@ -3,7 +3,23 @@ import * as SecureStore from 'expo-secure-store';
 import type { SafeUser, AuthTokens } from '../services/api/auth.api';
 import { queryClient } from '../lib/query-client';
 import { useIncidentStore } from './incident.store';
-import { disconnectSocket } from '../services/websocket/agap-socket';
+
+/**
+ * Called when a session ends (logout) or switches to another account, before the
+ * tokens change. The realtime socket registers here instead of this store importing
+ * it, because the socket reads this store (an import both ways is a require cycle).
+ */
+type SessionEndListener = () => void;
+const sessionEndListeners = new Set<SessionEndListener>();
+
+export function onSessionEnd(listener: SessionEndListener): () => void {
+  sessionEndListeners.add(listener);
+  return () => { sessionEndListeners.delete(listener); };
+}
+
+function endSession(): void {
+  sessionEndListeners.forEach((listener) => listener());
+}
 
 // NOTE: expo-secure-store rejects keys that are not /^[\w.-]+$/ (alphanumeric,
 // "_", ".", "-"). Colons are INVALID and make setItemAsync throw, which would
@@ -63,7 +79,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const anotherAccount = get().user?.id !== user.id;
     if (anotherAccount) {
       useIncidentStore.getState().reset();
-      disconnectSocket();
+      endSession();
     }
     await Promise.all([
       SecureStore.setItemAsync(KEYS.accessToken, tokens.accessToken),
@@ -86,7 +102,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: async () => {
     // Close the realtime socket first, so it never outlives the session (even when
     // revoking it doesn't reach the server) and the next account starts clean.
-    disconnectSocket();
+    endSession();
     const { user, accessToken } = get();
     await Promise.all([
       SecureStore.deleteItemAsync(KEYS.accessToken),

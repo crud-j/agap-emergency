@@ -27,6 +27,12 @@ interface DataTableProps<T extends object> {
   filterValue?: string | undefined;
   filterKeys?: (keyof T)[] | undefined;
   className?: string;
+  /**
+   * Rows scroll inside the card under a pinned column header. Give the card a
+   * bounded height through `className` (e.g. a flex-1 / min-h-0 slot); without one
+   * it lays out exactly as before.
+   */
+  stickyHeader?: boolean;
 }
 
 type SortDir = 'asc' | 'desc' | null;
@@ -43,6 +49,7 @@ export function DataTable<T extends object>({
   filterValue = '',
   filterKeys = [],
   className,
+  stickyHeader = false,
 }: DataTableProps<T>): JSX.Element {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
@@ -102,8 +109,14 @@ export function DataTable<T extends object>({
   }
 
   return (
-    <div className={cn('rounded-2xl bg-white border border-[rgba(168,181,193,0.20)] shadow-card overflow-hidden', className)}>
-      <div className="overflow-x-auto">
+    <div
+      className={cn(
+        'rounded-2xl bg-white border border-[rgba(168,181,193,0.20)] shadow-card overflow-hidden',
+        stickyHeader && 'flex flex-col',
+        className,
+      )}
+    >
+      <div className={stickyHeader ? 'min-h-0 flex-1 overflow-auto' : 'overflow-x-auto'}>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[rgba(168,181,193,0.20)] bg-agap-surface/60">
@@ -112,6 +125,8 @@ export function DataTable<T extends object>({
                   key={col.key}
                   className={cn(
                     'px-4 py-3 text-left text-xs font-semibold text-agap-textSub uppercase tracking-wide whitespace-nowrap',
+                    // Opaque (the row tint is see-through) so rows don't show through it.
+                    stickyHeader && 'sticky top-0 z-[1] bg-[#F4F7F8] shadow-[inset_0_-1px_0_rgba(168,181,193,0.20)]',
                     col.headerClassName,
                     col.width,
                   )}

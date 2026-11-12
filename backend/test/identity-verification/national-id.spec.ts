@@ -12,12 +12,14 @@ import {
   looksLikeNationalId,
   looksLikePhilHealthId,
   matchIdName,
+  nameVoteCounts,
   nationalIdLineShapes,
   nationalIdReadSignals,
   parseNationalIdName,
   parsePhilHealthName,
   parsePhilHealthPin,
   parsePhilSysCardNumber,
+  voteIdName,
 } from '@agap/shared';
 
 // MOD-01 / plan §6 — National ID reading. Invented names and fake numbers only. The layout is from plan
@@ -507,6 +509,65 @@ describe('combining reads of one image', () => {
 
   it('never takes a 12-digit run as the number', () => {
     expect(combineIdReads(rules, ['PAMBANSANG PAGKAKAKILANLAN\n0000 0000 0012', NAME]).number).toBeNull();
+  });
+
+  it('a confirming read backs up or contradicts the number, but never supplies it alone', () => {
+    const other = `${NAME}\n0000-0000-0000-0002`;
+    expect(combineIdReads(rules, [NAME], [HEADING_NUMBER, HEADING_NUMBER])).toMatchObject({ number: null, numberConflict: false });
+    expect(combineIdReads(rules, [HEADING_NUMBER, NAME], [HEADING_NUMBER]).number).toBe(PCN_DIGITS);
+    expect(combineIdReads(rules, [HEADING_NUMBER, NAME], [other])).toMatchObject({ number: null, numberConflict: true });
+  });
+
+  it('a confirming read still counts for the heading and the name', () => {
+    expect(combineIdReads(rules, [PCN], [HEADING_NUMBER, NAME])).toMatchObject({
+      headingSeen: true,
+      number: PCN_DIGITS,
+      name: { last: 'DELA CRUZ', first: 'JUAN' },
+    });
+  });
+
+  it('votes each name part across the reads', () => {
+    const named = (last: string, first: string, middle?: string) =>
+      ['Apelyido/Last Name', last, 'Mga Pangalan/Given Names', first, ...(middle ? ['Gitnang Apelyido/Middle Name', middle] : [])].join('\n');
+    const reads = [HEADING_NUMBER, named('DELA CRUS', 'JUAN', 'SANTOS'), named('DELA CRUZ', 'JUAM', 'SANTOS'), named('DELA CRUZ', 'JUAN', 'SAMTOS')];
+    expect(combineIdReads(rules, reads).name).toEqual({ last: 'DELA CRUZ', first: 'JUAN', middle: 'SANTOS' });
+  });
+});
+
+describe('voteIdName', () => {
+  it('takes the most common value of each part, and the earliest on a tie', () => {
+    expect(voteIdName([{ last: 'A', first: 'X' }, { last: 'B', first: 'Y' }, { last: 'B', first: 'Z' }])).toEqual({ last: 'B', first: 'X' });
+  });
+
+  it('counts a missing middle name as a vote, so a card without one keeps none', () => {
+    const noMiddle = { last: 'REYES', first: 'ANA' };
+    expect(voteIdName([noMiddle, noMiddle, { ...noMiddle, middle: 'CRUZ' }])).toEqual(noMiddle);
+    expect(voteIdName([noMiddle, { ...noMiddle, middle: 'CRUZ' }, { ...noMiddle, middle: 'CRUZ' }])).toEqual({ ...noMiddle, middle: 'CRUZ' });
+  });
+
+  it('keeps a suffix only when most reads have it', () => {
+    const name = { last: 'REYES', first: 'ANA' };
+    expect(voteIdName([{ ...name, suffix: 'JR' }, { ...name, suffix: 'JR' }, name])).toEqual({ ...name, suffix: 'JR' });
+  });
+
+  it('is null with no names, and the one name with one', () => {
+    expect(voteIdName([])).toBeNull();
+    expect(voteIdName([{ last: 'REYES', first: 'ANA' }])).toEqual({ last: 'REYES', first: 'ANA' });
+  });
+});
+
+describe('nameVoteCounts', () => {
+  const rules = ID_DOCUMENT_RULES.NATIONAL_ID;
+  const named = (last: string) => `Apelyido/Last Name\n${last}\nMga Pangalan/Given Names\nJUAN`;
+
+  it('counts how many reads agree with the voted name, as counts only', () => {
+    const counts = nameVoteCounts(rules, [named('DELA CRUZ'), named('DELA CRUS'), named('DELA CRUZ'), 'nothing']);
+    expect(counts).toBe('last=2/3,first=3/3,middle=3/3');
+    for (const secret of ['DELA', 'CRUZ', 'JUAN']) expect(counts).not.toContain(secret);
+  });
+
+  it('says none when no read found a name', () => {
+    expect(nameVoteCounts(rules, ['nothing'])).toBe('none');
   });
 });
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking, Platform, Switch,
 } from 'react-native';
@@ -10,9 +10,12 @@ import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import type { Language } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { logout as logoutApi } from '../../src/services/api/auth.api';
-import { updateUserPreferences } from '../../src/services/api/users.api';
+import { getMe, updateUserPreferences } from '../../src/services/api/users.api';
+import { ChangePhotoModal } from '../../src/components/profile/change-photo-modal';
+import { ProfileAvatar } from '../../src/components/profile/profile-avatar';
+import { formatPhotoDate, photoLockedUntil } from '../../src/lib/profile-photo';
 import { BottomNav } from '../../src/components/ui/bottom-nav';
-import { MapIconCard } from '../../src/components/profile/map-icon-card';
+import { PhotoSharingCard } from '../../src/components/profile/photo-sharing-card';
 import { VerifiedReporterBadge } from '../../src/components/reporter/verified-reporter';
 import { IdStatusCard } from '../../src/components/profile/id-status-card';
 
@@ -31,10 +34,38 @@ export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const t = useTranslations();
-  const { user, accessToken, logout } = useAuthStore();
+  const { user, accessToken, logout, updateUser } = useAuthStore();
   const language = useAccessibilityStore((s) => s.language);
   const shakeToAlert = useAccessibilityStore((s) => s.shakeToAlert);
   const setPreferences = useAccessibilityStore((s) => s.setPreferences);
+
+  // ── Profile picture (MOD-01) ──────────────────────────────────────────────
+  const [photoModal, setPhotoModal] = useState(false);
+  const canHavePhoto = !!user && !user.is_guest;
+  const lockedUntil = photoLockedUntil(user);
+
+  // Fresh photo fields on every visit: the photo may have changed on another device.
+  useEffect(() => {
+    if (!accessToken || !canHavePhoto) return;
+    let cancelled = false;
+    getMe()
+      .then((me) => {
+        if (cancelled) return;
+        void updateUser({
+          has_profile_photo: !!me.has_profile_photo,
+          profile_photo_updated_at: me.profile_photo_updated_at ?? null,
+          profile_photo_next_change_at: me.profile_photo_next_change_at ?? null,
+          profile_photo_shared_with_responders: !!me.profile_photo_shared_with_responders,
+        });
+      })
+      .catch(() => { /* keep what we have */ });
+    return () => { cancelled = true; };
+  }, [accessToken, canHavePhoto, updateUser]);
+
+  function proceedToSelfie() {
+    setPhotoModal(false);
+    router.push('/profile/selfie' as never);
+  }
 
   const completeness = user?.profile_completeness ?? 0;
   const roleLabel = user?.is_guest
@@ -98,9 +129,25 @@ export default function ProfileScreen() {
 
           {/* ── Identity card ─────────────────────────────────────────── */}
           <View style={styles.identityCard}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarInitial}>{user?.full_name?.[0]?.toUpperCase() ?? 'U'}</Text>
-            </View>
+            <ProfileAvatar
+              style={styles.avatar}
+              textStyle={styles.avatarInitial}
+              initial={user?.full_name?.[0]?.toUpperCase() ?? 'U'}
+            />
+            {canHavePhoto && (
+              <TouchableOpacity
+                style={styles.changePhotoBtn}
+                activeOpacity={0.7}
+                onPress={() => setPhotoModal(true)}
+                accessibilityRole="button"
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={styles.changePhotoText}>
+                  {user?.has_profile_photo ? t.profilePhoto.change : t.profilePhoto.add}
+                </Text>
+                <Ionicons name="create-outline" size={14} color="#9FDCC6" style={{ marginLeft: 5 }} />
+              </TouchableOpacity>
+            )}
             <Text style={styles.name} numberOfLines={1}>{user?.full_name ?? ''}</Text>
 
             <View style={styles.roleRow}>
@@ -146,8 +193,8 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           ) : null}
 
-          {/* ── Map icon (optional reporter sex) ──────────────────────── */}
-          <MapIconCard promptOnce />
+          {/* ── Responder map photo (separate consent, MOD-01/48) ─────── */}
+          <PhotoSharingCard />
 
           {/* ── Emergency hotlines (safety — rule 9) ──────────────────── */}
           <View style={styles.hotlineCard}>
@@ -228,6 +275,13 @@ export default function ProfileScreen() {
       </SafeAreaView>
 
       <BottomNav />
+
+      <ChangePhotoModal
+        visible={photoModal}
+        lockedUntil={lockedUntil ? formatPhotoDate(lockedUntil, language) : null}
+        onCancel={() => setPhotoModal(false)}
+        onProceed={proceedToSelfie}
+      />
     </View>
   );
 }
@@ -339,8 +393,14 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#245248',
     ...Platform.select({ ios: { shadowColor: '#12362F', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.16, shadowRadius: 18 }, android: { elevation: 4 } }),
   },
-  avatar: { width: 78, height: 78, borderRadius: 22, backgroundColor: '#E2F0EA', alignItems: 'center', justifyContent: 'center', marginBottom: 14, borderWidth: 1, borderColor: '#A8C9BB' },
-  avatarInitial: { fontSize: 32, fontWeight: '800', color: '#0D6053' },
+  avatar: { width: 88, height: 88, borderRadius: 44, backgroundColor: '#E2F0EA', alignItems: 'center', justifyContent: 'center', marginBottom: 10, borderWidth: 3, borderColor: '#DDEFE8', overflow: 'hidden' },
+  avatarImage: { width: '100%', height: '100%' },
+  avatarInitial: { fontSize: 34, fontWeight: '800', color: '#0D6053' },
+  changePhotoBtn: {
+    flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 10, backgroundColor: 'rgba(221, 239, 232, 0.12)', borderWidth: 1, borderColor: 'rgba(159, 220, 198, 0.35)',
+  },
+  changePhotoText: { fontSize: 12.5, fontWeight: '800', color: '#9FDCC6' },
   name: { fontSize: 23, fontWeight: '800', color: '#FFFFFF', marginBottom: 9, letterSpacing: -0.4 },
   roleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 9, marginBottom: 18 },
   roleBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DDEFE8', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9 },

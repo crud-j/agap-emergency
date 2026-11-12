@@ -12,6 +12,8 @@ import {
   idStatusView,
   localReadVerdict,
   nextAttemptNumber,
+  prefillNameFromId,
+  toNameCase,
   readIdVerificationCode,
   retryMessageKey,
   scanFailureFromError,
@@ -367,5 +369,58 @@ describe('idStatusView', () => {
     expect(idStatusView('UNDER_REVIEW')).toMatchObject({ labelKey: 'idStatusUnderReview', canScanAgain: false });
     expect(idStatusView('NOT_APPROVED')).toMatchObject({ labelKey: 'idStatusNotApproved', canScanAgain: true });
     expect(idStatusView('NOT_VERIFIED')).toMatchObject({ labelKey: 'idStatusNotVerified', canScanAgain: true });
+  });
+});
+
+describe('name filled from the card', () => {
+  const EMPTY = { last: '', first: '', middle: '', suffix: '' };
+  const FILLED = { last: 'Dela Cruz', first: 'Juan', middle: 'Santos', suffix: '' };
+
+  it('turns card capitals into the way a person types a name', () => {
+    expect(toNameCase('DELA CRUZ')).toBe('Dela Cruz');
+    expect(toNameCase('MA. CLARA')).toBe('Ma. Clara');
+    expect(toNameCase("O'NEIL-REYES")).toBe("O'Neil-Reyes");
+    expect(toNameCase('  PEÑA   SANTOS ')).toBe('Peña Santos');
+    expect(toNameCase('IVAN III')).toBe('Ivan III');
+  });
+
+  it('fills empty fields from the card, and the filled name matches it', () => {
+    const filled = prefillNameFromId(EMPTY, ON_ID, null);
+    expect(filled).toEqual(FILLED);
+    expect(checkTypedName(typedIdName(filled!), ON_ID)?.matches).toBe(true);
+  });
+
+  it('maps a suffix read from the card onto a chip, or leaves none', () => {
+    expect(prefillNameFromId(EMPTY, { ...ON_ID, suffix: 'JR' }, null)?.suffix).toBe('Jr.');
+    expect(prefillNameFromId(EMPTY, { ...ON_ID, suffix: 'III' }, null)?.suffix).toBe('III');
+    expect(prefillNameFromId(EMPTY, { ...ON_ID, suffix: 'ESQ' }, null)?.suffix).toBe('');
+    const withSuffix = prefillNameFromId(EMPTY, { ...ON_ID, suffix: 'JR.' }, null)!;
+    expect(checkTypedName(typedIdName(withSuffix), { ...ON_ID, suffix: 'JR.' })?.matches).toBe(true);
+  });
+
+  it('leaves the middle name empty when the card shows none', () => {
+    expect(prefillNameFromId(EMPTY, { last: 'REYES', first: 'ANA' }, null)).toEqual({
+      last: 'Reyes', first: 'Ana', middle: '', suffix: '',
+    });
+  });
+
+  it('never fills on a review scan (no name read)', () => {
+    expect(prefillNameFromId(EMPTY, null, null)).toBeNull();
+  });
+
+  it('never overwrites a name the citizen typed or corrected', () => {
+    const typed = { last: 'Dela Cruz', first: 'Juana', middle: '', suffix: '' };
+    expect(prefillNameFromId(typed, ON_ID, null)).toBeNull();
+    expect(prefillNameFromId(typed, ON_ID, FILLED)).toBeNull();
+  });
+
+  it('refills on a rescan while the fields still hold what the last scan filled', () => {
+    const rescan = { last: 'DELA CRUZ', first: 'JUAN', middle: 'SANTOS', suffix: 'SR' };
+    expect(prefillNameFromId(FILLED, rescan, FILLED)).toEqual({ ...FILLED, suffix: 'Sr.' });
+  });
+
+  it('has the notice in both languages', () => {
+    expect(en.registration.nameFilledFromId).toBeTruthy();
+    expect(fil.registration.nameFilledFromId).toBeTruthy();
   });
 });
