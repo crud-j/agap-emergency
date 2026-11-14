@@ -1,7 +1,8 @@
 # Handoff: session 2026-11-14 night → 2026-11-15 (SMS fixes, AI summary, AI provider, Risk areas)
 
 **Date:** 2026-11-15
-**For:** the next agent, starting cold. **This is the current handoff; read it first.** It summarises the session and links the detailed handoffs.
+**Superseded:** read [`2026-11-15_risk-pin-place-finding.md`](./2026-11-15_risk-pin-place-finding.md) first; it links back here. Everything open in this file is still open.
+**For:** the next agent, starting cold. It summarises the session and links the detailed handoffs.
 **First task:** ask the user how the checks in "Waiting on the user" went, starting with the **Risk areas browser check** (newest). Don't start new work on your own.
 
 **Detailed handoffs from this session (newest first):**
