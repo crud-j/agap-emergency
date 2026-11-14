@@ -38,6 +38,7 @@ export class MapboxTileProvider implements TileProvider {
       // the Mapbox Maps SDK. Return null so clients fall back to their demo style rather
       // than silently ignoring a URL they cannot render. Static image API is unaffected.
       styleUrl: null,
+      satelliteStyleUrl: null,
       attribution: '© Mapbox © OpenStreetMap',
       staticMapSupported: Boolean(token),
       supports3dBuildings: false,

@@ -19,9 +19,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
-import { AreaSuggestionQuery, CreateRiskAreaDto, UpdateRiskAreaDto } from './dto/risk-area.dto';
+import { AreaSuggestionQuery, CreateRiskAreaDto, PlaceSearchQuery, UpdateRiskAreaDto } from './dto/risk-area.dto';
 import { ApproveRiskAreaProposalDto, ListRiskAreaProposalsQuery } from './dto/risk-area-proposal.dto';
 import { HotspotDiscoveryService } from './hotspot-discovery.service';
+import { RiskPlaceSearchService } from './place-search.service';
 import { DEFAULT_RISK_MAP_PERIOD, RiskMapQuery } from './dto/risk-map.dto';
 
 @ApiTags('risk')
@@ -32,6 +33,7 @@ export class RiskIntelligenceController {
   constructor(
     private readonly riskIntelligenceService: RiskIntelligenceService,
     private readonly hotspots: HotspotDiscoveryService,
+    private readonly places: RiskPlaceSearchService,
   ) {}
 
   @Get('map')
@@ -57,6 +59,19 @@ export class RiskIntelligenceController {
   @ApiOperation({ summary: 'Add-form help for a pin: its barangay, nearby incident counts, a suggested name and level' })
   async suggest(@Query() query: AreaSuggestionQuery) {
     return this.riskIntelligenceService.suggest(query);
+  }
+
+  /**
+   * Pin form "Find a place". Runs on Enter or a click only, never while typing (Nominatim
+   * policy: no autocomplete). The throttler tracks the client IP, as for the hospital
+   * "Find location", so 10/min is per IP.
+   */
+  @Get('places')
+  @Roles(UserRole.SUPERVISOR)
+  @Throttle({ sustained: { ttl: 60_000, limit: 10 } })
+  @ApiOperation({ summary: 'Find a named place inside Bocaue for the risk-area pin (map search)' })
+  async searchPlaces(@Query() query: PlaceSearchQuery) {
+    return this.places.search(query.q);
   }
 
   @Post('areas')

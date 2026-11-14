@@ -24,9 +24,13 @@ export class MapLibreOsmTileProvider implements TileProvider {
     // The maplibre.org demo style has no building data; any custom MAP_STYLE_URL is assumed
     // to be an OpenMapTiles-compatible style (e.g. MapTiler Streets, self-hosted tileserver-gl).
     const isCustomStyle = !!this.config.get<string>('MAP_STYLE_URL');
+    // Satellite with labels (e.g. MapTiler "hybrid"), offered as a toggle on the web pin
+    // maps (MOD-51). Empty = streets only.
+    const satelliteStyleUrl = this.config.get<string>('MAP_SATELLITE_STYLE_URL')?.trim() || null;
     return {
       provider: MapProvider.MAPLIBRE,
       styleUrl,
+      satelliteStyleUrl,
       attribution: '© OpenStreetMap contributors',
       staticMapSupported: false,
       supports3dBuildings: isCustomStyle,

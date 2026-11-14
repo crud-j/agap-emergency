@@ -289,6 +289,11 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   MAP_STYLE_URL: string = '';
+
+  // Satellite (hybrid) style for the web pin maps' Streets / Satellite toggle (MOD-51).
+  @IsString()
+  @IsOptional()
+  MAP_SATELLITE_STYLE_URL: string = '';
 }
 
 export function validateConfig(config: Record<string, unknown>) {

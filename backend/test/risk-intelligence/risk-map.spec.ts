@@ -63,7 +63,7 @@ describe('RiskMapQuery', () => {
 describe('RiskIntelligenceController.map', () => {
   it('defaults to 90 days', async () => {
     const service = { getRiskMap: jest.fn().mockResolvedValue({}) };
-    const controller = new RiskIntelligenceController(service as any, {} as any);
+    const controller = new RiskIntelligenceController(service as any, {} as any, {} as any);
     await controller.map({});
     expect(service.getRiskMap).toHaveBeenCalledWith(90);
   });

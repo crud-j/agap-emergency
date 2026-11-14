@@ -103,6 +103,11 @@ export interface MapClientConfig {
   provider: MapProvider;
   /** Style / TileJSON URL for MapLibre or Mapbox GL; null if client supplies its own. */
   styleUrl: string | null;
+  /**
+   * Optional satellite (hybrid) style for the web console's pin maps (MOD-51), from
+   * MAP_SATELLITE_STYLE_URL. null = not configured; clients then offer streets only.
+   */
+  satelliteStyleUrl: string | null;
   attribution: string;
   /** Whether the backend can produce static map image URLs for this provider. */
   staticMapSupported: boolean;

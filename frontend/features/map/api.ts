@@ -57,6 +57,8 @@ export interface LatestUnitPosition {
 export interface MapConfig {
   provider: string;
   styleUrl: string;
+  /** Satellite (hybrid) style for the pin maps' toggle; null/absent = not configured. */
+  satelliteStyleUrl?: string | null;
   attribution: string;
   staticMapSupported: boolean;
   supports3dBuildings: boolean;

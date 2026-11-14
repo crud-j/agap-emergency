@@ -45,6 +45,7 @@ const TEAL = '#0D6053';
 const FALLBACK_MAP_CONFIG: MapClientConfig = {
   provider: MapProvider.MAPLIBRE,
   styleUrl: null,
+  satelliteStyleUrl: null,
   attribution: '© OpenStreetMap contributors',
   staticMapSupported: false,
   supports3dBuildings: false,

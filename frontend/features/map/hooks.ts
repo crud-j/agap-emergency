@@ -12,13 +12,21 @@ import {
   type LiveResponderPosition,
 } from './api';
 
-export function useMapStyle(): string {
-  const { data } = useQuery({
+function useMapConfig() {
+  return useQuery({
     queryKey: ['map-config'],
     queryFn: fetchMapConfig,
     staleTime: Infinity,
   });
-  return data?.styleUrl ?? 'https://demotiles.maplibre.org/style.json';
+}
+
+export function useMapStyle(): string {
+  return useMapConfig().data?.styleUrl ?? 'https://demotiles.maplibre.org/style.json';
+}
+
+/** The satellite style (MAP_SATELLITE_STYLE_URL), or null when not configured. Same query as useMapStyle. */
+export function useSatelliteStyle(): string | null {
+  return useMapConfig().data?.satelliteStyleUrl ?? null;
 }
 
 /** REST poll while the socket is down (plan §19); the socket patches the caches otherwise. */

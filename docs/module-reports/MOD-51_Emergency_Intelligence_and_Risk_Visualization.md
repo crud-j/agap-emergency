@@ -116,6 +116,14 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
 4. Confirm a Dispatcher sees the Risk Map without the Risk areas tab, and a System Administrator sees Administration → Risk Areas read-only (cards and map, no buttons, no proposals) but not the Risk Map.
 5. **Check now.** Press it and confirm "Last checked" updates and the result line appears ("Nothing new found" or "N proposals to review"). With 3 or more flood reports in one barangay in 90 days, a "Whole barangay" flood proposal appears. Approve it and confirm the area and an audit row.
 6. **Hints.** With more incidents of an area's type inside it than its level suggests (3 → Moderate, 6 → High, 10 → Critical), the card offers **Raise to …**; applying it shows in the Audit log.
+7. **Finding the place (2026-11-15).** In **Add risk area**:
+   - type "public market" and press Enter: the Bocaue Public Market is listed; click it and the pin lands there and the map zooms in;
+   - paste `14.7963, 120.9272` (or a Google Maps link) and press Enter: the pin is placed with no search; a point outside Bocaue is refused;
+   - **Go to barangay** → Lolomboy: the map zooms to it and outlines it, with no pin dropped;
+   - choose type Fire: fire reports from the last 90 days show as dots; clicking a dot snaps the pin to it, and the "Most fire reports" chips pin their spot. With type Flood, barangays with flood reports are shaded and the chips zoom to them;
+   - barangay names show on the map; the zoom buttons and the **Expand** button work;
+   - with `MAP_SATELLITE_STYLE_URL` set (restart the backend), the **Streets / Satellite** toggle keeps the dots, lines and pin;
+   - pan to the northern tip of Bocaue (the blue outline's top edge): it can now be shown and pinned.
 
 **Risk areas (2026-11-15):**
 - A new area is a **pin with a radius** (50 m – 2 km). The barangay comes from the pin.
@@ -129,10 +137,16 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
   - runs nightly at **02:30 Manila time** (before, the time zone was the server's);
   - floods are proposed **per barangay** (3 or more reports in 90 days) instead of as point clusters;
   - **Check now** runs it on demand, and the last run is shown.
+- **Finding the place** (pin form):
+  - **Find a place:** `GET /risk-intelligence/places`, Supervisor only, 10/min. It uses the shared map search (Nominatim, cached 24 h) limited to Bocaue, and runs on Enter only (no autocomplete, per Nominatim policy). Coordinates and map links are read in the browser.
+  - **On the map:** **Go to barangay**, quick picks and incident dots, all from the Risk Map data (counts only, no incident ids).
+  - **Satellite:** optional, through `MAP_SATELLITE_STYLE_URL`.
+  - **Viewport:** the web maps' north edge is now 14.85, so the whole municipality is reachable.
 - **Code:**
   - `backend/src/risk-intelligence/` (`risk-area-rules.ts` for the numbers);
   - migration `20261115120000_risk_area_pin`;
-  - `frontend/components/admin/RiskAreasTab.tsx`, `components/risk/RiskAreasMap.tsx`, `RiskAreaPinMap.tsx`.
+  - `frontend/components/admin/RiskAreasTab.tsx`, `components/risk/RiskAreasMap.tsx`, `RiskAreaPinMap.tsx`;
+  - place finding: `backend/src/risk-intelligence/place-search.ts` and `place-search.service.ts`, `frontend/components/risk/PinPlaceFinder.tsx`, `frontend/features/risk/place-input.ts`.
 
 **Do not claim:**
 - A density model or heatmap — the map shows counts per spot (~11 m) and per barangay, nothing smoothed or predicted. Only the nightly hotspot proposals use PostGIS clustering.

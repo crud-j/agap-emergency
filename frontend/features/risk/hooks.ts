@@ -5,7 +5,7 @@ import {
   fetchRiskMap, fetchRiskAreas,
   createRiskArea, updateRiskArea, deleteRiskArea,
   fetchRiskAreaProposals, approveRiskAreaProposal, dismissRiskAreaProposal,
-  fetchAreaSuggestion, fetchHotspotStatus, runHotspotCheck,
+  fetchAreaSuggestion, fetchHotspotStatus, runHotspotCheck, searchPlaces,
   type RiskAreaChanges, type RiskAreaInput, type ApproveProposalInput, type RiskMapPeriod,
 } from './api';
 
@@ -74,6 +74,15 @@ export function useAreaSuggestion(q: { lat: number; lng: number; radius: number;
     staleTime: 60_000,
     retry: false,
   });
+}
+
+/**
+ * Pin form "Find a place" (Supervisor only). A mutation, so it runs only on Enter or a
+ * click, never while typing: the public map search forbids autocomplete. The server
+ * caches results for 24 h.
+ */
+export function usePlaceSearch() {
+  return useMutation({ mutationFn: (q: string) => searchPlaces(q) });
 }
 
 /** When the hotspot check last ran and when it runs next (Supervisor only). */

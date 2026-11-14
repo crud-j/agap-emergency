@@ -1,7 +1,9 @@
 // Tight municipal scope for Bocaue, Bulacan. This is an operational viewport,
 // not an official cadastral boundary.
 // [west, south, east, north] — MapLibre / GeoJSON order.
-export const BOCAUE_BOUNDS: [number, number, number, number] = [120.89, 14.76, 120.97, 14.835];
+// North is 14.85 because the municipal boundary reaches 14.8445 (BOCAUE_BOUNDARY_BOUNDS in
+// @agap/shared); at 14.835 the northern tip could not be shown or pinned (2026-11-15).
+export const BOCAUE_BOUNDS: [number, number, number, number] = [120.89, 14.76, 120.97, 14.85];
 
 // [lng, lat] — MapLibre / GeoJSON order (NOT Leaflet's [lat, lng])
 export const BOCAUE_CENTER: [number, number] = [120.9272, 14.7963];

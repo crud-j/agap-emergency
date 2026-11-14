@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import dynamic from 'next/dynamic';
+import { isCoordinateInBocaue } from '@agap/shared';
 import {
   AlertTriangle, Check, Clock, Edit, Info, Locate, MapPin, MapPinned, Plus, Power, RefreshCw, Search,
   Sparkles, Trash2, TrendingDown, TrendingUp, X,
@@ -16,14 +17,17 @@ import { titleCase } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 import {
   useApproveRiskAreaProposal, useAreaSuggestion, useCreateRiskArea, useDeleteRiskArea, useDismissRiskAreaProposal,
-  useHotspotStatus, useRiskAreaProposals, useRiskAreas, useRunHotspotCheck, useUpdateRiskArea,
+  useHotspotStatus, useRiskAreaProposals, useRiskAreas, useRiskMap, useRunHotspotCheck, useUpdateRiskArea,
 } from '@/features/risk/hooks';
 import {
-  RISK_LEVELS, type RiskArea, type RiskAreaInput, type RiskAreaProposal, type RiskLevel,
+  DEFAULT_RISK_MAP_PERIOD, RISK_LEVELS, type RiskArea, type RiskAreaInput, type RiskAreaProposal, type RiskLevel,
 } from '@/features/risk/api';
 import {
-  DEFAULT_RADIUS_M, MAX_RADIUS_M, MIN_RADIUS_M, formatRadius, hintText, levelWord, placeLine, relativeDays,
+  DEFAULT_RADIUS_M, MAX_RADIUS_M, MIN_RADIUS_M, boundaryBounds, formatRadius, hintText, levelWord, placeLine, relativeDays,
 } from '@/features/risk/area-geo';
+import { quickPicks } from '@/features/risk/place-input';
+import { PinPlaceFinder } from '@/components/risk/PinPlaceFinder';
+import type { PinMapFocus } from '@/components/risk/RiskAreaPinMap';
 
 /**
  * MOD-51 risk areas (redesigned 2026-11-15). The Supervisor manages them from the Risk
@@ -113,6 +117,13 @@ function AreaDialog({ area, onClose }: {
   const [levelTouched, setLevelTouched] = useState(!!area);
   const [error, setError] = useState<string | null>(null);
   const [outside, setOutside] = useState(false);
+  // Finding the place (2026-11-15): incidents and barangay lines on the map, search, barangay, quick picks.
+  // 90 days, the Risk Map's default: the same cached data when the Map tab was opened first.
+  const riskMap = useRiskMap(DEFAULT_RISK_MAP_PERIOD);
+  const [focus, setFocus] = useState<PinMapFocus | null>(null);
+  const focusSeq = useRef(0);
+  const [barangay, setBarangay] = useState('');
+  const [expanded, setExpanded] = useState(false);
   const create = useCreateRiskArea();
   const update = useUpdateRiskArea();
   const busy = create.isPending || update.isPending;
@@ -138,12 +149,37 @@ function AreaDialog({ area, onClose }: {
     }));
   }, [s, nameTouched, levelTouched]);
 
+  const barangays = riskMap.data?.barangays ?? [];
+  const points = riskMap.data?.points ?? [];
+  const picks = useMemo(() => quickPicks(riskMap.data, form.riskType), [riskMap.data, form.riskType]);
+  const barangayNames = useMemo(() => barangays.map((b) => b.name), [barangays]);
+
+  /** A click, dot or drag on the map (already checked to be inside Bocaue). */
+  function placePin(lat: number, lng: number) {
+    setOutside(false);
+    set('pin', { lat, lng });
+  }
+
+  /** A search result, pasted point or quick pick: pin it and zoom in to street level. */
+  function pinAndShow(lat: number, lng: number) {
+    if (!isCoordinateInBocaue(lat, lng)) { setOutside(true); return; }
+    placePin(lat, lng);
+    setFocus({ seq: ++focusSeq.current, kind: 'point', lat, lng });
+  }
+
+  function goToBarangay(name: string) {
+    const b = barangays.find((x) => x.name === name);
+    if (!b) return;
+    setBarangay(name);
+    setFocus({ seq: ++focusSeq.current, kind: 'bounds', bounds: boundaryBounds(b.boundary) });
+  }
+
   const pinMoved =
     !!form.pin &&
     (!area?.pin || area.pin.lat !== form.pin.lat || area.pin.lng !== form.pin.lng || area.pin.radius_m !== form.radius);
 
   async function save() {
-    if (!form.pin && !area) { setError('Click the map to place the pin.'); return; }
+    if (!form.pin && !area) { setError('Place the pin: find a place, pick a spot or click the map.'); return; }
     if (form.name.trim().length < 2) { setError('Give the area a name.'); return; }
     let meters: number | null = null;
     if (isFlood && form.threshold.trim()) {
@@ -182,23 +218,44 @@ function AreaDialog({ area, onClose }: {
         <DialogHeader>
           <DialogTitle>{area ? `Edit “${area.name}”` : 'Add risk area'}</DialogTitle>
           <DialogDescription>
-            Place a pin where the risk is and set how far it reaches. AGAP fills in the barangay, a name and a level
-            from the incidents nearby; change anything before saving.
+            Find the place, then put the pin where the risk is and set how far it reaches. AGAP fills in the barangay,
+            a name and a level from the incidents nearby; change anything before saving.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        <PinPlaceFinder
+          barangays={barangayNames}
+          picks={picks}
+          riskType={form.riskType}
+          onPin={pinAndShow}
+          onBarangay={goToBarangay}
+        />
+
+        <div className={cn('grid grid-cols-1 gap-4', !expanded && 'md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]')}>
           {/* Map + what AGAP found */}
           <div className="space-y-2">
-            <div className="h-[280px] md:h-[360px]">
+            <div className={expanded ? 'h-[60vh]' : 'h-[280px] md:h-[360px]'}>
               <RiskAreaPinMap
                 pin={form.pin}
                 radiusM={form.radius}
                 level={form.riskLevel}
-                onPick={(lat, lng) => { setOutside(false); set('pin', { lat, lng }); }}
+                riskType={form.riskType}
+                barangays={barangays}
+                points={points}
+                dataReady={riskMap.isSuccess}
+                focus={focus}
+                highlightBarangay={barangay}
+                expanded={expanded}
+                onToggleExpand={() => setExpanded((v) => !v)}
+                onPick={placePin}
                 onOutside={() => setOutside(true)}
               />
             </div>
+            {riskMap.isError && (
+              <p className="text-xs text-agap-textSub">
+                Couldn&apos;t load the incidents and barangay lines. You can still search or click the map.
+              </p>
+            )}
             {outside && <p role="alert" className="text-xs text-agap-danger">That spot is outside Bocaue. Pick a place inside the municipality.</p>}
             {area && !area.pin && !form.pin && (
               <p className="flex items-start gap-1.5 text-xs text-agap-textSub">

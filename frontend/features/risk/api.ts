@@ -142,6 +142,25 @@ export function fetchAreaSuggestion(q: { lat: number; lng: number; radius: numbe
   return api.get(`/risk-intelligence/areas/suggest?${qs.toString()}`, getToken());
 }
 
+/** GET /risk-intelligence/places: a named place inside Bocaue, from the map search. */
+export interface PlaceResult {
+  name: string;
+  /** Street and barangay, when the map knows them; '' otherwise. */
+  area: string;
+  lat: number;
+  lng: number;
+}
+
+export interface PlaceSearchResponse {
+  results: PlaceResult[];
+  /** true = the map search could not be reached. */
+  unavailable: boolean;
+}
+
+export function searchPlaces(q: string): Promise<PlaceSearchResponse> {
+  return api.get(`/risk-intelligence/places?${new URLSearchParams({ q }).toString()}`, getToken());
+}
+
 export function fetchHotspotStatus(): Promise<HotspotCheckStatus> {
   return api.get('/risk-intelligence/proposals/status', getToken());
 }

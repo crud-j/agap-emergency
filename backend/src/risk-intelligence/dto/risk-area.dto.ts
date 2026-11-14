@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { incident_category } from '@prisma/client';
 
@@ -105,4 +105,14 @@ export class AreaSuggestionQuery {
   @ApiProperty({ enum: incident_category })
   @IsEnum(incident_category)
   riskType!: incident_category;
+}
+
+/** GET /risk-intelligence/places: "Find a place" in Bocaue for the pin form. */
+export class PlaceSearchQuery {
+  @ApiProperty({ example: 'Bocaue public market' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value))
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  q!: string;
 }
