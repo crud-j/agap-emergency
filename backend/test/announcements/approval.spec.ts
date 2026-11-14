@@ -142,6 +142,45 @@ describe('approval flag off', () => {
     );
   });
 
+  it('texts a barangay-specific notice to its barangays and to subscribers with no known barangay', async () => {
+    const { service, prisma, smsQueue } = makeService({
+      flag: false,
+      rows: [draft({ scope: 'BARANGAY_SPECIFIC', target_barangays: ['Lolomboy', 'Tambobong'] })],
+    });
+    prisma.sms_subscribers.findMany.mockResolvedValue([
+      { id: 's-lolo', phone_number: '+639170000001', barangay_preference: 'Lolomboy' },
+      { id: 's-tamb', phone_number: '+639170000002', barangay_preference: 'Tambubong' },
+      { id: 's-wakas', phone_number: '+639170000003', barangay_preference: 'Wakas' },
+      { id: 's-none', phone_number: '+639170000004', barangay_preference: null },
+      { id: 's-old', phone_number: '+639170000005', barangay_preference: 'Saog' },
+    ]);
+    await service.publish('ann-1', OFFICER);
+
+    const sentTo = (smsQueue.add.mock.calls as any[]).filter(([name]) => name === 'announcement-sms').map(([, d]) => d.phone);
+    expect(sentTo.sort()).toEqual(['+639170000001', '+639170000002', '+639170000004', '+639170000005']);
+  });
+
+  it('ignores leftover target barangays on a municipality-wide notice (SMS and push)', async () => {
+    const { service, prisma, smsQueue } = makeService({
+      flag: false,
+      rows: [draft({ scope: 'MUNICIPALITY_WIDE', target_barangays: ['Lolomboy'] })],
+    });
+    prisma.sms_subscribers.findMany.mockResolvedValue([
+      { id: 's-wakas', phone_number: '+639170000003', barangay_preference: 'Wakas' },
+    ]);
+    await service.publish('ann-1', OFFICER);
+    expect(smsQueue.add).toHaveBeenCalledWith('announcement-sms', expect.objectContaining({ phone: '+639170000003' }));
+  });
+
+  it('stores a subscriber barangay in the official spelling, and an unknown one as no preference', async () => {
+    const { service, prisma } = makeService({ flag: false });
+    (prisma.sms_subscribers as any).upsert = jest.fn().mockResolvedValue({});
+    await service.subscribe({ phoneNumber: '+639170000001', barangayPreference: 'tambobong' });
+    await service.subscribe({ phoneNumber: '+639170000001', barangayPreference: 'Saog' });
+    const stored = (prisma.sms_subscribers as any).upsert.mock.calls.map((c: any) => c[0].create.barangay_preference);
+    expect(stored).toEqual(['Tambubong', null]);
+  });
+
   it('schedules a CRITICAL advisory directly', async () => {
     const { service, rows } = makeService({ flag: false });
     await service.schedule('ann-1', future(), OFFICER);

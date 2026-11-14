@@ -133,9 +133,11 @@ Get accurate, consistent official advisories to Bocaue residents quickly through
 7. Subscribe a number in the app. With Textbee loaded, publish a notice and confirm the SMS arrives and the drawer's **SMS** row turns to "1 delivered" within a few minutes. With the gateway SIM out of load, the row shows "failed" instead (added 2026-11-02).
 8. Tap Unsubscribe in the app; the next advisory must skip that number.
 9. With "Receive SMS" on in the Textbee app, reply STOP from a subscribed phone; confirm one confirmation SMS and that the subscription is inactive. (Not yet tried with a real phone.)
+10. **Barangay targeting (added 2026-11-14):** subscribe two numbers in the app, one with barangay Lolomboy and one with Wakas. Publish a notice for Lolomboy only: the Lolomboy number gets it and the Wakas number does not. A number subscribed with no barangay gets every notice.
+
+**Barangay targeting (2026-11-14):** a barangay-specific notice goes by SMS to subscribers in those barangays, and by push to citizens in them. Anyone whose barangay is unknown still gets it. Sign-up doesn't ask for a barangay, so for push that is most citizens today. The rule is `announcementReachesBarangay` in `shared/src/constants/barangays.ts`. The app and console pick from the database's list of 19 barangays (`BOCAUE_BARANGAY_NAMES`).
 
 **Do not claim:**
-- **SMS targeted by barangay.** Every active subscriber gets every SMS; the saved barangay preference isn't used yet.
 - **Superseding a notice** (replacing it with a newer one). The backend `POST /:id/supersede` exists, but the console doesn't offer it.
 
 **Optional, off by default:** with `ANNOUNCEMENT_APPROVAL_REQUIRED=true`, a CRITICAL advisory must be submitted to an MDRRMO Supervisor, who approves it or returns it with a reason on the Approvals page; the submitter can't approve their own. Add it to the TO-BE only if your group turns the flag on for the demo.

@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Job } from 'bullmq';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
-import { QUEUE_NAMES } from '@agap/shared';
+import { QUEUE_NAMES, announcementReachesBarangay } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { tokenFromConfig } from '../../notifications/push-token';
@@ -47,15 +47,16 @@ export class AnnouncementPushProcessor extends WorkerHost {
       // 1. Resolve active citizen recipients first. In-app notifications are
       // persisted for every citizen, while push is sent only where a device
       // token is registered.
+      // Same rule as the SMS fan-out: a citizen whose barangay is unknown (most accounts:
+      // sign-up does not ask for it) still gets a barangay-specific notice. Filtering by
+      // `barangay IN targets` in the database sent such a notice to almost nobody.
       const users = await this.prisma.user.findMany({
-        where: {
-          role: 'CITIZEN',
-          status: 'ACTIVE',
-          ...(targetBarangays.length > 0 ? { barangay: { in: targetBarangays } } : {}),
-        },
-        select: { id: true },
+        where: { role: 'CITIZEN', status: 'ACTIVE' },
+        select: { id: true, barangay: true },
       });
-      const recipientIds = users.map((user) => user.id);
+      const recipientIds = users
+        .filter((user) => announcementReachesBarangay(targetBarangays, user.barangay))
+        .map((user) => user.id);
 
       const existingNotifications = await this.prisma.notification.findMany({
         where: {

@@ -508,3 +508,27 @@ describe('IncidentsService resolution and Verified Reporter standing', () => {
     expect(prisma.incident.count).not.toHaveBeenCalled();
   });
 });
+
+describe('NotificationProcessor EMERGENCY_CONTACTS (responders on the way)', () => {
+  it('texts only contacts who kept alerts on, in priority order (same opt-in as MOD-16)', async () => {
+    const findMany = jest.fn().mockResolvedValue([{ phone_number: '+639171111111' }]);
+    const smsAdd = jest.fn();
+    const processor = new NotificationProcessor(
+      { get: jest.fn() } as any,
+      { emergencyContact: { findMany } } as any,
+      { add: smsAdd } as any,
+    );
+
+    await processor.process({
+      id: 'j2',
+      data: { userId: 'u1', channel: 'EMERGENCY_CONTACTS', body: 'AGAP: update' },
+    } as any);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { user_id: 'u1', is_active: true, notify_on_alert: true },
+      orderBy: { priority_order: 'asc' },
+    });
+    expect(smsAdd).toHaveBeenCalledTimes(1);
+    expect(smsAdd).toHaveBeenCalledWith('emergency-contact-sms', { phone: '+639171111111', message: 'AGAP: update' });
+  });
+});

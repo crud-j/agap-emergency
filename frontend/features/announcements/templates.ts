@@ -13,23 +13,22 @@
  *  - Output is always a DRAFT; a person approves it before release.
  */
 
+import { BOCAUE_BARANGAY_NAMES, FLOOD_PRONE_BARANGAY_NAMES } from '@agap/shared';
+
 export type Lang = 'FIL' | 'EN';
 export type LanguageMode = 'FIL' | 'EN' | 'FIL_EN';
 export type Severity = 'INFORMATIONAL' | 'ADVISORY' | 'WARNING' | 'CRITICAL';
 
 // ─── Bocaue reference data ──────────────────────────────────────────────────
 
-/** Official barangays of Bocaue (mirrors mobile/src/config/bocaue-geo.ts). */
-export const BOCAUE_BARANGAYS = [
-  'Antipona', 'Bagumbayan', 'Bambang', 'Batia',
-  'Biñang 1st', 'Biñang 2nd', 'Bolacan', 'Bundukan',
-  'Bunlo', 'Caingin', 'Duhat', 'Igulot',
-  'Lolomboy', 'Poblacion', 'Sulucan', 'Taal',
-  'Tambobong', 'Turo', 'Wakas',
-] as const;
+/**
+ * Official barangays of Bocaue, as the database spells them (one list in @agap/shared).
+ * SMS subscribers pick from the same list, so a barangay-specific notice reaches them.
+ */
+export const BOCAUE_BARANGAYS = BOCAUE_BARANGAY_NAMES;
 
 /** Flood-prone barangays with degraded connectivity during typhoons (CLAUDE.md). */
-export const FLOOD_PRONE_BARANGAYS = ['Lolomboy', 'Bunlo', 'Igulot', 'Bambang'] as const;
+export const FLOOD_PRONE_BARANGAYS = FLOOD_PRONE_BARANGAY_NAMES;
 
 /** Bocaue River critical level — mandatory-evacuation threshold (CLAUDE.md). */
 export const BOCAUE_RIVER_CRITICAL_M = 11.5;

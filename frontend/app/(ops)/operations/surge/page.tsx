@@ -28,14 +28,16 @@ import {
 import type { TriageTag, SurgeResource, SurgeRule, RiverLevel, BarangayRescueTotal } from '@/features/surge/api';
 import { useMarkRead } from '@/features/notifications/hooks';
 import { useBarangays } from '@/hooks/useBarangay';
+import { BOCAUE_BARANGAY_NAMES, FLOOD_PRONE_BARANGAY_NAMES, INDUSTRIAL_RISK_BARANGAY_NAMES } from '@agap/shared';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
+// The 19 Bocaue barangays as geo_regions spells them (incident tags use those names),
+// flood-prone and fireworks-industry barangays first.
+const PRIORITY_BARANGAYS: readonly string[] = [...FLOOD_PRONE_BARANGAY_NAMES, ...INDUSTRIAL_RISK_BARANGAY_NAMES];
 const BOCAUE_BARANGAYS = [
-  'Lolomboy', 'Bunlo', 'Igulot', 'Bambang', 'Bundukan', 'Biñang 1st',
-  'Biñang 2nd', 'Bocaue', 'Batia', 'Bolacan', 'Dulong Bayan 1st',
-  'Dulong Bayan 2nd', 'Malhacan', 'Meyto 1st', 'Meyto 2nd', 'Pugad',
-  'Santa Cruz', 'San Juan', 'Turo', 'Wakas', 'Poblacion',
+  ...PRIORITY_BARANGAYS,
+  ...BOCAUE_BARANGAY_NAMES.filter((b) => !PRIORITY_BARANGAYS.includes(b)),
 ];
 
 const SURGE_CATEGORIES = [

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, incident_priority, incident_status, resource_status } from '@prisma/client';
 import { ACTIVE_INCIDENT_STATUSES, DEPLOYED_RESOURCE_STATUSES, UNAVAILABLE_RESOURCE_STATUSES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -444,14 +444,27 @@ export class AnalyticsService {
     });
   }
 
-  async getDailySummary(date?: string) {
-    const day = date ? new Date(date) : new Date();
-    const start = new Date(day);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
+  /**
+   * One Asia/Manila calendar day (`YYYY-MM-DD`; default today), whatever the server's
+   * time zone. Like every other count here, DRAFT and DUPLICATE are not reported incidents.
+   */
+  async getDailySummary(date?: string, now: Date = new Date()) {
+    let start: Date;
+    if (date === undefined || date === '') {
+      start = manilaMidnight(now);
+    } else {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('date must be YYYY-MM-DD.');
+      start = new Date(`${date}T00:00:00+08:00`);
+      if (Number.isNaN(start.getTime()) || manilaDateKey(start) !== date) {
+        throw new BadRequestException('date must be a real calendar day (YYYY-MM-DD).');
+      }
+    }
+    const end = new Date(start.getTime() + DAY_MS);
 
-    const where = { submitted_at: { gte: start, lt: end } };
+    const where: Prisma.IncidentWhereInput = {
+      submitted_at: { gte: start, lt: end },
+      status: { notIn: NOT_REPORTED },
+    };
     const [total, byCategory, byStatus] = await this.prisma.$transaction([
       this.prisma.incident.count({ where }),
       this.prisma.incident.groupBy({
@@ -467,6 +480,6 @@ export class AnalyticsService {
         _count: { _all: true },
       }),
     ]);
-    return { date: start.toISOString().slice(0, 10), total, byCategory, byStatus };
+    return { date: manilaDateKey(start), total, byCategory, byStatus };
   }
 }

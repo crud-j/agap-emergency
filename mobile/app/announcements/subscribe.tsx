@@ -15,17 +15,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { goBack } from '@/src/lib/navigation';
 import { subscribeToSms, unsubscribeFromSms } from '@/src/services/api/announcements.api';
+import {
+  BOCAUE_BARANGAY_NAMES,
+  FLOOD_PRONE_BARANGAY_NAMES,
+  INDUSTRIAL_RISK_BARANGAY_NAMES,
+} from '@agap/shared';
 
 const TEAL = '#0D6053';
 
-// Key Bocaue barangays — flood-prone (Lolomboy, Bunlo, Igulot, Bambang) and
-// industrial-risk (Bundukan, Biñang 1st) listed first per operational priority.
+// All 19 Bocaue barangays in the database spelling, so MDRRMO's barangay-targeted texts
+// match. Flood-prone and fireworks-industry barangays first, then the rest A–Z.
+const PRIORITY_BARANGAYS: readonly string[] = [...FLOOD_PRONE_BARANGAY_NAMES, ...INDUSTRIAL_RISK_BARANGAY_NAMES];
 const BOCAUE_BARANGAYS = [
-  'Lolomboy', 'Bunlo', 'Igulot', 'Bambang',
-  'Bundukan', 'Biñang 1st',
-  'Batia', 'Bolacan', 'Duhat', 'Ganap', 'Masile',
-  'Panghulo', 'Pugad', 'Saog', 'Turo', 'Wakas',
-  'Poblacion',
+  ...PRIORITY_BARANGAYS,
+  ...BOCAUE_BARANGAY_NAMES.filter((b) => !PRIORITY_BARANGAYS.includes(b)),
 ];
 
 type Step = 'form' | 'success' | 'unsubscribed';

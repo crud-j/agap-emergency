@@ -8,6 +8,8 @@ import {
   MDRRMO_HOTLINE_DISPLAY,
   QUEUE_NAMES,
   SMS_SEGMENT_MAX,
+  announcementReachesBarangay,
+  canonicalBarangay,
   fitGsm7,
   gsm7Length,
   normalizePhPhone,
@@ -448,12 +450,16 @@ export class AnnouncementsService {
 
     // The summary is written for short channels; fall back to the body.
     const shortText = (published.summary ?? published.body ?? '').replace(/\s+/g, ' ').trim();
+    // Only a barangay-specific notice is targeted; SMS and push use the same rule.
+    const targetBarangays = published.scope === 'BARANGAY_SPECIFIC' ? (published.target_barangays ?? []) : [];
 
     try {
-      const subscribers = await this.prisma.sms_subscribers.findMany({
-        where: { is_active: true },
-        select: { id: true, phone_number: true },
-      });
+      const subscribers = (
+        await this.prisma.sms_subscribers.findMany({
+          where: { is_active: true },
+          select: { id: true, phone_number: true, barangay_preference: true },
+        })
+      ).filter((sub) => announcementReachesBarangay(targetBarangays, sub.barangay_preference));
 
       const smsText = buildAnnouncementSms(published.title, shortText);
 
@@ -496,7 +502,7 @@ export class AnnouncementsService {
         announcementId: published.id,
         title: published.title.slice(0, 100),
         body: shortText.slice(0, 200),
-        targetBarangays: published.target_barangays ?? [],
+        targetBarangays,
       });
     } catch (err) {
       this.logger.error(`Announcement push enqueue failed: ${String(err)}`);
@@ -808,15 +814,19 @@ export class AnnouncementsService {
   }
 
   async subscribe(dto: SmsSubscribeDto) {
+    // Stored in the official spelling, so targeting matches it. A name that is not a Bocaue
+    // barangay is stored as "no preference" (gets every notice), never refused: a typo must
+    // not stop someone getting MDRRMO texts.
+    const barangay = canonicalBarangay(dto.barangayPreference);
     return this.prisma.sms_subscribers.upsert({
       where: { phone_number: dto.phoneNumber },
       create: {
         phone_number: dto.phoneNumber,
-        barangay_preference: dto.barangayPreference ?? null,
+        barangay_preference: barangay,
         is_active: true,
       },
       update: {
-        barangay_preference: dto.barangayPreference ?? null,
+        barangay_preference: barangay,
         is_active: true,
         opted_out_at: null,
       },

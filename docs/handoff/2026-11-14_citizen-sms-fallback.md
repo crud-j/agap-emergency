@@ -75,7 +75,7 @@ EOF
 ## Decisions for the user
 
 1. **Barangay reply acknowledgements** now end in "Thank you." instead of "Salamat." (the user chose English). Change back if barangays should keep "Salamat".
-2. **"Responders on the way" texts to emergency contacts** (`backend/src/jobs/processors/notification.processor.ts`, `notifyEmergencyContacts`, fed by `dispatch.service.ts`) ignore the contact's `notify_on_alert` setting. The MOD-16 alert respects it. This was found but not fixed; ask whether to fix it.
+2. ~~"Responders on the way" texts ignore `notify_on_alert`~~: **fixed** in the fourth session (see "Fourth session").
 
 ---
 
@@ -181,10 +181,44 @@ EOF
 
 ## Known gaps left
 
-1. **Linking trusts possession of the event id.** The id is in the SMS text, so anyone who can read it could link it to their citizen account (only within 24 h, and only while unlinked). The id comes from `Math.random` (`mobile/src/lib/uuid.ts`).
+1. ~~Linking trusts possession of the event id~~: **fixed** in the fourth session. The account link now needs the verified account number to be the SMS sender. **Still open:** filling blanks (including the location) needs only the event id, for guests too, because a guest resend has no number to check.
 2. **Latency:** carrier delivery plus a poll every 15 s. Webhook mode (`BARANGAY_SMS_INBOUND_MODE=webhook`) is not built.
 3. **No console view of the inbound log:** `SOS_STALE`, `SOS_INVALID` and `SOS_LIMITED` texts are visible only in the database and logs.
 4. **Reply SMS limit:** the 1-per-minute limit is in memory (it resets on restart). Each reply uses SIM credit.
-5. `components/dispatch/IncidentDetailPanel.tsx` is **dead code** (nothing imports it).
+5. ~~`components/dispatch/IncidentDetailPanel.tsx` is dead code~~: **deleted** in the fourth session.
 6. **Shell-tool pitfall seen this session:** Python edits sent through Bash turned `\\n` into a real line break in TS strings twice. Use the Edit tool for any code containing backslashes.
-7. **Backlog** (2026-11-13): announcement SMS ignoring barangay, dead code to wire or delete, then lower-value items. AI summary on Analytics is still designed only.
+7. **Backlog** (2026-11-13): ~~announcement SMS ignoring barangay~~ (fixed in the fourth session), dead code to wire or delete, then lower-value items. AI summary on Analytics is still designed only.
+
+---
+
+## Fourth session (2026-11-14): fixes before the AI summary (uncommitted)
+
+The user asked to fix what was missing before starting the AI summary on Analytics. Everything is tested and typechecked; nothing has been run on a device or in a browser yet.
+
+1. **Contacts' "responders on the way" SMS** now respects `notify_on_alert` and `priority_order`, like MOD-16 (`notification.processor.ts`).
+2. **Announcement barangay targeting (MOD-53), SMS and push:**
+   - **Found:** SMS ignored `barangay_preference`. Push filtered on `users.barangay IN targets`, but sign-up never sets `users.barangay`, so a barangay-specific push reached almost nobody. Three different barangay lists were in use:
+     - the mobile subscribe screen listed five barangays that aren't in Bocaue and was missing seven real ones;
+     - the surge page listed neighbouring towns' barangays;
+     - the console and app spelled "Tambobong", while the database has "Tambubong".
+   - **Now:**
+     - one list, `BOCAUE_BARANGAY_NAMES`, in the database spelling, with `canonicalBarangay` (handles accents, case and old spellings) and `announcementReachesBarangay` ([`shared/src/constants/barangays.ts`](../../shared/src/constants/barangays.ts));
+     - a targeted notice goes to its barangays plus anyone whose barangay is unknown;
+     - a municipality-wide notice ignores any leftover targets;
+     - `subscribe` stores the official spelling, or null when the name isn't a Bocaue barangay (never refused);
+     - the mobile subscribe screen, the console compose page and the surge page use the shared list.
+   - The mobile map keeps its own GeoJSON list.
+3. **`/analytics/daily` and the nightly job** count the Asia/Manila day (it used the server's local midnight) and skip DRAFT/DUPLICATE. A bad `date` returns 400.
+4. **SMS report account link (MOD-19):** described in Known gap 1. A refused link is audited (`accountLinkRefused: SENDER_NUMBER_MISMATCH`) and logged; blanks are still filled.
+5. Deleted `frontend/components/dispatch/IncidentDetailPanel.tsx`.
+
+**Tests:**
+- new `test/analytics/daily-summary.spec.ts` and `test/announcements/barangay-targeting.spec.ts`;
+- additions to `approval.spec.ts`, `sms-report-channel.spec.ts` and `reporter-status-push.spec.ts`.
+
+**Verification:**
+- `tsc --noEmit` is clean on all four packages.
+- Backend full run: **131/131 suites, 2293 tests**.
+- Frontend: 22 suites, 216 tests. Mobile: 21 suites, 266 tests.
+
+**Device check:** see step 10 in the [MOD-53 report](../module-reports/MOD-53_Municipal_Announcements_and_Public_Broadcast.md) "Test before signing".

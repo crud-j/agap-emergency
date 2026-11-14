@@ -28,6 +28,7 @@ import {
   UserRole,
   TERMINAL_INCIDENT_STATUSES,
   isCoordinateInBocaue,
+  normalizePhPhone,
   sanitizeIntakeAnswers,
   intakeReportLines,
   resolveIntakeCategory,
@@ -55,6 +56,12 @@ const REFERENCE_RETRIES = 10;
  * long after the SMS created it. Later, the dispatcher has the case in hand.
  */
 export const SMS_REPORT_COMPLETION_WINDOW_MS = 24 * 60 * 60_000;
+
+/** Same PH mobile number however it was written (+63 9…, 09…). False when either is missing or invalid. */
+function samePhone(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = normalizePhPhone(a).e164;
+  return x !== null && x === normalizePhPhone(b).e164;
+}
 
 /**
  * The description an SMS report gets when its GPS was outside Bocaue. A description that
@@ -390,7 +397,7 @@ export class IncidentsService {
           select: {
             description: true,
             hazard_flags: true,
-            incident_reporters: { select: { id: true, user_id: true, reporter_status: true } },
+            incident_reporters: { select: { id: true, user_id: true, reporter_status: true, reporter_phone: true } },
             incident_patients: { select: { id: true }, take: 1 },
             incident_details: { select: { id: true, caller_answers: true } },
             incident_locations: { select: { id: true } },
@@ -399,10 +406,21 @@ export class IncidentsService {
         if (!current) return null;
         const filled: string[] = [];
 
-        // Only a citizen's own account, and only while nobody is linked yet.
+        // Only a citizen's own account, only while nobody is linked yet, and only when the
+        // account's verified number is the one that sent the SMS. The event id is printed in
+        // the text, so holding it proves nothing; a stranger who read it must not be able to
+        // follow someone else's emergency from their account.
         const reporter = current.incident_reporters;
         let linked = false;
+        let linkRefused = false;
         if (reporter && actorId && actorRole === UserRole.CITIZEN && !reporter.user_id) {
+          const account = await tx.user.findUnique({
+            where: { id: actorId },
+            select: { phone_number: true, is_phone_verified: true },
+          });
+          linkRefused = !account?.is_phone_verified || !samePhone(account.phone_number, reporter.reporter_phone);
+        }
+        if (reporter && actorId && actorRole === UserRole.CITIZEN && !reporter.user_id && !linkRefused) {
           const r = await tx.incidentReporter.updateMany({
             where: { id: reporter.id, user_id: null },
             data: { user_id: actorId, is_guest: false },
@@ -488,8 +506,9 @@ export class IncidentsService {
           filled.push('location');
         }
 
-        if (filled.length > 0) {
-          // Field names only: the values are personal or medical.
+        if (filled.length > 0 || linkRefused) {
+          // Field names only: the values are personal or medical. A refused link is
+          // recorded too, so an attempt on someone else's report can be traced.
           await this.audit.logInTransaction(tx, {
             action: AuditAction.UPDATE,
             ...(actorId ? { actorId } : {}),
@@ -498,8 +517,17 @@ export class IncidentsService {
             entityType: 'Incident',
             moduleId: 'MOD-19',
             incidentId: existing.id,
-            newValues: { completedFromApp: filled, channel: 'SMS' },
+            newValues: {
+              completedFromApp: filled,
+              channel: 'SMS',
+              ...(linkRefused && { accountLinkRefused: 'SENDER_NUMBER_MISMATCH' }),
+            },
           });
+        }
+        if (linkRefused) {
+          this.logger.warn(
+            `SMS report ${existing.public_reference}: account not linked (the account's verified number did not send the SMS)`,
+          );
         }
         return { filled, linked, locationAdded };
       });

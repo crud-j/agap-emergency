@@ -40,13 +40,21 @@ function build() {
   const current = {
     description: null as string | null,
     hazard_flags: [] as string[],
-    incident_reporters: { id: 'rep-1', user_id: null as string | null, reporter_status: null as string | null },
+    incident_reporters: {
+      id: 'rep-1',
+      user_id: null as string | null,
+      reporter_status: null as string | null,
+      reporter_phone: PHONE as string | null,
+    },
     incident_patients: [] as { id: string }[],
     incident_details: null as { id: string; caller_answers: unknown } | null,
     incident_locations: null as { id: string } | null,
   };
+  // The signed-in citizen: by default the verified owner of the number that sent the SMS.
+  const account = { phone_number: '09171234567' as string | null, is_phone_verified: true };
   const completeTx = {
     incident: { findUnique: jest.fn(async () => current), update: jest.fn() },
+    user: { findUnique: jest.fn(async () => account) },
     incidentReporter: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), update: jest.fn() },
     incident_patients: { create: jest.fn() },
     incident_details: { create: jest.fn(), update: jest.fn() },
@@ -87,7 +95,7 @@ function build() {
     prisma.incident.findFirst.mockResolvedValue(smsIncident(overrides));
     prisma.$transaction.mockImplementation(async (fn: (tx: any) => unknown) => fn(completeTx));
   };
-  return { service, prisma, created, current, completeTx, audit, realtime, contacts, barangayNotify, opsAlert, existingSms };
+  return { service, prisma, created, current, account, completeTx, audit, realtime, contacts, barangayNotify, opsAlert, existingSms };
 }
 
 describe('IncidentsService — SMS channel (MOD-17/19)', () => {
@@ -208,6 +216,44 @@ describe('IncidentsService — SMS channel (MOD-17/19)', () => {
         where: { id: 'inc-1' },
         data: { description: 'Smoke from the second floor\n\nReported GPS outside Bocaue: 14.59950,120.98420' },
       });
+    });
+
+    it.each([
+      ['a different number', { phone_number: '09189999999', is_phone_verified: true }],
+      ['the same number, not verified', { phone_number: '09171234567', is_phone_verified: false }],
+      ['no number on the account', { phone_number: null, is_phone_verified: true }],
+    ])('does not link an account with %s, but still fills blanks and audits the refusal', async (_label, acct) => {
+      const t = build();
+      t.existingSms();
+      Object.assign(t.account, acct);
+      await t.service.create(appDto() as any, 'user-2', UserRole.CITIZEN);
+
+      expect(t.completeTx.incidentReporter.updateMany).not.toHaveBeenCalled();
+      expect(t.contacts.notifyContactsOfIncident).not.toHaveBeenCalled();
+      expect(t.completeTx.incident.update).toHaveBeenCalled();
+      const entry = t.audit.logInTransaction.mock.calls[0][1];
+      expect(entry.newValues.accountLinkRefused).toBe('SENDER_NUMBER_MISMATCH');
+      expect(entry.newValues.completedFromApp).not.toContain('reporter_account');
+    });
+
+    it('audits a refused link even when there is nothing left to fill', async () => {
+      const t = build();
+      t.existingSms();
+      t.account.phone_number = '09189999999';
+      t.current.description = 'Dispatcher note';
+      t.current.incident_reporters.reporter_status = 'NEEDS_HELP';
+      t.current.incident_patients = [{ id: 'p-1' }];
+      t.current.incident_locations = { id: 'loc-1' };
+      t.current.hazard_flags = ['FIRE:SPREADING'];
+      await t.service.create(appDto() as any, 'user-2', UserRole.CITIZEN);
+
+      expect(t.audit.logInTransaction).toHaveBeenCalledTimes(1);
+      expect(t.audit.logInTransaction.mock.calls[0][1].newValues).toEqual({
+        completedFromApp: [],
+        channel: 'SMS',
+        accountLinkRefused: 'SENDER_NUMBER_MISMATCH',
+      });
+      expect(t.realtime.incidentUpdated).not.toHaveBeenCalled();
     });
 
     it('does not link a non-citizen account', async () => {

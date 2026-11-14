@@ -10,3 +10,4 @@ export * from './fire.constants';
 export * from './rescue.constants';
 export * from './identity-verification';
 export * from './hotlines';
+export * from './barangays';

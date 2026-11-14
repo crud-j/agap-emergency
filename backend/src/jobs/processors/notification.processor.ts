@@ -111,8 +111,11 @@ export class NotificationProcessor extends WorkerHost {
   private async notifyEmergencyContacts(data: NotificationJobData): Promise<void> {
     if (!data.userId) return;
     try {
+      // Same opt-in as the first alert (MOD-16): a contact who switched off alerts
+      // must not get the "responders on the way" follow-up either.
       const contacts = await this.prisma.emergencyContact.findMany({
-        where: { user_id: data.userId, is_active: true },
+        where: { user_id: data.userId, is_active: true, notify_on_alert: true },
+        orderBy: { priority_order: 'asc' },
       });
 
       for (const contact of contacts) {
