@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
-import { QUEUE_NAMES, normalizePhPhone } from '@agap/shared';
+import { QUEUE_NAMES, normalizePhPhone, parseCitizenSosSms } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import type { SmsJobData } from '../jobs/processors/sms.processor';
 import { AnnouncementsService } from '../announcements/announcements.service';
@@ -15,6 +15,7 @@ import { parseBarangayReply, type ParsedBarangayReply } from './barangay-reply.p
 import type { BarangayLinkStatus } from './dto/barangay-callback.dto';
 import { aiAssistEnabled } from '../ai-assist/ai-assist.flags';
 import { BARANGAY_REPLY_JOB, barangayReplyJobId, type AiAssistJobData } from '../ai-assist/ai-assist.jobs';
+import { CitizenSmsSosService, type CitizenSosOutcome } from '../emergency-alerts/sms-sos/citizen-sms-sos.service';
 
 /** One SMS received on the Textbee phone, from the poller or (later) the webhook. */
 export interface InboundSms {
@@ -34,7 +35,8 @@ export type InboundOutcome =
   | 'NOT_NOTIFIED'
   | 'UNPARSED'
   | 'DISABLED'
-  | 'OPT_OUT';
+  | 'OPT_OUT'
+  | CitizenSosOutcome;
 
 const NOTICE_INCLUDE = { barangay: { select: { id: true, name: true } } } as const;
 
@@ -77,6 +79,7 @@ export class BarangayReplyService {
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
     private readonly announcements: AnnouncementsService,
     @InjectQueue(QUEUE_NAMES.AI_ASSIST) private readonly aiQueue: Queue,
+    private readonly citizenSos: CitizenSmsSosService,
   ) {}
 
   repliesEnabled(): boolean {
@@ -101,6 +104,18 @@ export class BarangayReplyService {
 
     const phone = normalizePhPhone(msg.from);
     const fromE164 = phone.kind === 'MOBILE' ? phone.e164 : null;
+
+    // MOD-17/19: a citizen's SOS sent by SMS (no mobile data). First, before STOP and the
+    // barangay logic: an emergency text from anyone, a barangay hotline included, is a report.
+    const sos = this.citizenSos.enabled() ? parseCitizenSosSms(msg.body) : null;
+    if (sos) {
+      // A database failure throws before the row is stored: the next poll retries it, and
+      // the event id keeps a retry from making a second incident.
+      const result = await this.citizenSos.handle(sos, fromE164);
+      if (!(await this.store(msg, fromE164, null, result.outcome, null, result.incidentId))) return 'DUPLICATE';
+      this.logger.log(`SMS ${msg.providerMessageId}: ${result.outcome}`);
+      return result.outcome;
+    }
 
     // MOD-53: an announcement subscriber's STOP, checked before any barangay logic. A
     // barangay hotline's (or the override phone's) STOP is a barangay reply: today's path.
@@ -157,6 +172,7 @@ export class BarangayReplyService {
     parsed: ParsedBarangayReply | null,
     outcome: Exclude<InboundOutcome, 'DUPLICATE'>,
     noticeId: string | null,
+    incidentId: string | null = null,
   ): Promise<{ id: string } | null> {
     try {
       return await this.prisma.barangay_sms_inbound.create({
@@ -169,6 +185,7 @@ export class BarangayReplyService {
           parsed_command: parsed?.status ?? null,
           parsed_code: parsed?.code ?? null,
           notice_id: noticeId,
+          incident_id: incidentId,
           outcome,
         },
         select: { id: true },

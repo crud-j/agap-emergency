@@ -13,6 +13,9 @@ import {
 } from '@/src/services/api/incidents.api';
 import { ApiError } from '@/src/services/api/http';
 import { MDRRMO_HOTLINE, MDRRMO_HOTLINE_DISPLAY } from '@/src/config/hotlines';
+import { AGAP_SMS_NUMBER } from '@/src/config/sms-gateway';
+import { buildSosSmsBody, openSosSms, smsCanHelp } from '@/src/services/sms/sos-sms';
+import { useNetworkStatus } from '@/src/hooks/useNetworkStatus';
 import type { CreateIncidentInput } from '@agap/shared';
 import { DUPLICATE_DETECTION_RADIUS_METERS, isCoordinateInBocaue, ReporterType } from '@agap/shared';
 import { colors, cardShadow, radius } from '@/src/theme/tokens';
@@ -32,7 +35,49 @@ const LiveTrackingMap = React.lazy(() => Promise.resolve({
   default: require('../../src/components/tracking/live-tracking-map').default as typeof import('../../src/components/tracking/live-tracking-map').default,
 }));
 
-type TransmissionState = 'submitting' | 'success' | 'failed';
+/** smsOpened: the messages app was opened with the report; the citizen presses Send there. */
+type TransmissionState = 'submitting' | 'success' | 'failed' | 'smsOpened';
+
+/** How long the spinner runs before "Send by SMS" appears beside it (the data attempt keeps going). */
+const SMS_HINT_AFTER_MS = 8000;
+
+function callNumber(number: string) {
+  void Linking.openURL(`tel:${number}`).catch(() => undefined);
+}
+
+/** 911 and MDRRMO, shown wherever a report may not have arrived. AGAP never replaces them. */
+function HotlineButtons() {
+  return (
+    <>
+      <TouchableOpacity style={[styles.primaryBtn, styles.callBtn]} onPress={() => callNumber('911')} accessibilityRole="button">
+        <Ionicons name="call" size={18} color={colors.white} style={{ marginRight: 8 }} />
+        <Text style={styles.primaryBtnText}>Call 911</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.ghostBtn}
+        onPress={() => callNumber(MDRRMO_HOTLINE)}
+        accessibilityRole="button"
+        accessibilityLabel={`Call MDRRMO hotline ${MDRRMO_HOTLINE_DISPLAY}`}
+      >
+        <Text style={styles.ghostBtnText}>Call MDRRMO · {MDRRMO_HOTLINE_DISPLAY}</Text>
+      </TouchableOpacity>
+    </>
+  );
+}
+
+function SmsButton({ onPress, label }: { onPress: () => void; label: string }) {
+  return (
+    <TouchableOpacity
+      style={[styles.primaryBtn, styles.smsBtn]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityHint="Opens your messages app with the report filled in. Works without mobile data."
+    >
+      <Ionicons name="chatbox-ellipses" size={18} color={colors.white} style={{ marginRight: 8 }} />
+      <Text style={styles.primaryBtnText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 /** Photo/video delivery is separate from the report itself and never blocks it. */
 type MediaState = 'none' | 'uploading' | 'sent' | 'failed' | 'guest';
 
@@ -106,8 +151,14 @@ function MapPreview({
 
 // ─── Submitting ────────────────────────────────────────────────────────────────
 
-function SubmittingView() {
+function SubmittingView({ onSendSms }: { onSendSms?: (() => void) | undefined }) {
   const spin = useRef(new Animated.Value(0)).current;
+  const [slow, setSlow] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), SMS_HINT_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     Animated.loop(
@@ -131,6 +182,12 @@ function SubmittingView() {
       </View>
       <Text style={styles.heading}>Sending Emergency Report</Text>
       <Text style={styles.sub}>Connecting to MDRRMO Operations Center…</Text>
+      {slow && onSendSms && (
+        <>
+          <Text style={styles.sub}>Slow connection? Send the report as a text message instead. It needs no mobile data.</Text>
+          <SmsButton onPress={onSendSms} label="Send by SMS" />
+        </>
+      )}
     </View>
   );
 }
@@ -276,7 +333,7 @@ function SuccessView({
 // ─── Failed ───────────────────────────────────────────────────────────────────
 
 function FailedView({
-  error, limited, onRetry, onHome, onSignIn,
+  error, limited, onRetry, onHome, onSignIn, onSendSms,
 }: {
   error: string | null;
   /** The backend refused a guest report because this phone/network sent too many. */
@@ -284,6 +341,8 @@ function FailedView({
   onRetry: () => void;
   onHome: () => void;
   onSignIn: () => void;
+  /** Set when the failure was the connection and an AGAP SMS number is configured. */
+  onSendSms?: (() => void) | undefined;
 }) {
   if (limited) {
     return (
@@ -296,22 +355,7 @@ function FailedView({
           {error ?? 'Too many reports were sent from this phone without an account.'}
         </Text>
 
-        <TouchableOpacity
-          style={[styles.primaryBtn, styles.callBtn]}
-          onPress={() => void Linking.openURL('tel:911').catch(() => undefined)}
-          accessibilityRole="button"
-        >
-          <Ionicons name="call" size={18} color={colors.white} style={{ marginRight: 8 }} />
-          <Text style={styles.primaryBtnText}>Call 911</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.ghostBtn}
-          onPress={() => void Linking.openURL(`tel:${MDRRMO_HOTLINE}`).catch(() => undefined)}
-          accessibilityRole="button"
-          accessibilityLabel={`Call MDRRMO hotline ${MDRRMO_HOTLINE_DISPLAY}`}
-        >
-          <Text style={styles.ghostBtnText}>Call MDRRMO · {MDRRMO_HOTLINE_DISPLAY}</Text>
-        </TouchableOpacity>
+        <HotlineButtons />
         <TouchableOpacity style={styles.ghostBtn} onPress={onSignIn} accessibilityRole="button">
           <Text style={styles.ghostBtnText}>Sign in to report</Text>
         </TouchableOpacity>
@@ -333,13 +377,80 @@ function FailedView({
         <View style={styles.hotlineHeader}>
           <Ionicons name="alert-circle" size={16} color={colors.danger} />
           <Text style={[styles.hotlineBold, { color: colors.danger }]}>
-            Call 911 or the MDRRMO Hotline immediately.
+            {onSendSms
+              ? 'No connection? Send the report by SMS. It needs no mobile data. Or call 911 or the MDRRMO Hotline.'
+              : 'Call 911 or the MDRRMO Hotline immediately.'}
           </Text>
         </View>
       </View>
 
-      <TouchableOpacity style={styles.primaryBtn} onPress={onRetry} accessibilityRole="button">
-        <Text style={styles.primaryBtnText}>Try Again</Text>
+      {onSendSms && <SmsButton onPress={onSendSms} label="Send by SMS (no data needed)" />}
+      <TouchableOpacity style={onSendSms ? styles.ghostBtn : styles.primaryBtn} onPress={onRetry} accessibilityRole="button">
+        <Text style={onSendSms ? styles.ghostBtnText : styles.primaryBtnText}>Try Again</Text>
+      </TouchableOpacity>
+      {onSendSms && <HotlineButtons />}
+      <TouchableOpacity style={styles.ghostBtn} onPress={onHome} accessibilityRole="button">
+        <Text style={styles.ghostBtnText}>Go to Home</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── Sent by SMS ──────────────────────────────────────────────────────────────
+
+/**
+ * After the messages app was opened. The app cannot see whether the citizen pressed Send,
+ * so it says what to expect (a reply with the reference) and when to call instead. It keeps
+ * trying over data in the background: when data returns the same report goes through and
+ * this screen moves on by itself.
+ */
+function SmsOpenedView({
+  openFailed, onReopen, onRetry, onHome,
+}: {
+  /** No messages app took the link. */
+  openFailed: boolean;
+  onReopen: () => void;
+  onRetry: () => void;
+  onHome: () => void;
+}) {
+  if (openFailed) {
+    return (
+      <View style={styles.center}>
+        <View style={[styles.iconWrap, styles.iconWrapDanger]}>
+          <Ionicons name="chatbox-ellipses" size={44} color={colors.danger} />
+        </View>
+        <Text style={styles.heading}>Could Not Open Messages</Text>
+        <Text style={styles.sub}>Your report was not sent. Call 911 or the MDRRMO hotline now.</Text>
+        <HotlineButtons />
+        <TouchableOpacity style={styles.ghostBtn} onPress={onRetry} accessibilityRole="button">
+          <Text style={styles.ghostBtnText}>Try again over data</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.center}>
+      <View style={[styles.iconWrap, styles.iconWrapWarn]}>
+        <Ionicons name="chatbox-ellipses" size={44} color={colors.amber} />
+      </View>
+      <Text style={styles.heading}>Press Send in Messages</Text>
+      <Text style={styles.sub}>
+        Your messages app opened with your report filled in. Press <Text style={styles.bold}>Send</Text>.
+      </Text>
+      <View style={[styles.infoCard, styles.warnCard, { marginTop: 0, marginBottom: 8 }]}>
+        <Ionicons name="time-outline" size={18} color={colors.amber} />
+        <Text style={styles.infoCardText}>
+          MDRRMO will text back a reference number. No reply within 2 minutes? Call 911 or MDRRMO.
+          Normal SMS charges may apply.
+        </Text>
+      </View>
+      <HotlineButtons />
+      <TouchableOpacity style={styles.ghostBtn} onPress={onReopen} accessibilityRole="button">
+        <Text style={styles.ghostBtnText}>Open messages again</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.ghostBtn} onPress={onRetry} accessibilityRole="button">
+        <Text style={styles.ghostBtnText}>Try again over data</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.ghostBtn} onPress={onHome} accessibilityRole="button">
         <Text style={styles.ghostBtnText}>Go to Home</Text>
@@ -363,6 +474,13 @@ export default function TransmissionScreen() {
   const [incidentPriority, setIncidentPriority] = useState<string | null>(null);
   const [mediaState, setMediaState] = useState<MediaState>('none');
   const [similarReport, setSimilarReport] = useState<SimilarReportHint | null>(null);
+  /** The last failure was the connection, so SMS can get the report through. */
+  const [smsAllowed, setSmsAllowed] = useState(false);
+  const [smsOpenFailed, setSmsOpenFailed] = useState(false);
+  /** One attempt at a time: a reconnect retry must not race a tap on Try Again. */
+  const inFlight = useRef(false);
+  const { isOnline } = useNetworkStatus();
+  const wasOnline = useRef(isOnline);
 
   // Live responder position over the incident room (no-op for guests: no token).
   const live = useIncidentTracking(incidentId ?? undefined);
@@ -401,9 +519,44 @@ export default function TransmissionScreen() {
     transmit();
   }, []);
 
+  // Data came back after a failure or an SMS: resend the same report (same idempotency
+  // key). The server returns the incident the SMS made and completes it with the app's
+  // details, so this is never a second incident.
+  useEffect(() => {
+    const cameOnline = isOnline && !wasOnline.current;
+    wasOnline.current = isOnline;
+    if (!cameOnline || limited || inFlight.current) return;
+    if (txState === 'failed' && smsAllowed) {
+      setTxState('submitting');
+      void transmit();
+    } else if (txState === 'smsOpened') {
+      void transmit();
+    }
+  }, [isOnline]);
+
+  /** Opens the messages app with the report. The data attempt, if any, keeps running. */
+  async function sendBySms() {
+    const body = buildSosSmsBody(draft);
+    if (!body || !AGAP_SMS_NUMBER) return;
+    const opened = await openSosSms(AGAP_SMS_NUMBER, body);
+    setSmsOpenFailed(!opened);
+    setTxState('smsOpened');
+  }
+
   async function transmit() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await transmitOnce();
+    } finally {
+      inFlight.current = false;
+    }
+  }
+
+  async function transmitOnce() {
     if (!draft.idempotencyKey || !draft.type) {
       setError('Incomplete emergency report. Please try again.');
+      setSmsAllowed(false);
       setTxState('failed');
       return;
     }
@@ -412,6 +565,7 @@ export default function TransmissionScreen() {
       (!draft.location || !isCoordinateInBocaue(draft.location.lat, draft.location.lng))
     ) {
       setError('A report without an account can only be sent with a GPS location inside Bocaue Municipality.');
+      setSmsAllowed(false);
       setTxState('failed');
       return;
     }
@@ -503,22 +657,28 @@ export default function TransmissionScreen() {
       // 429 on a guest report: the per-phone / per-network cap was reached. Retrying
       // would hit it again, so the screen offers the hotlines and sign-in instead.
       setLimited(err instanceof ApiError && err.status === 429);
+      // A connection failure can go by SMS instead; a refusal would be refused there too.
+      setSmsAllowed(smsCanHelp(err));
       // Never hold an emergency for later delivery — tell the reporter now so
-      // they can retry or call a hotline instead of waiting on a reconnect.
+      // they can retry, text or call a hotline instead of waiting on a reconnect.
       setError(
         err instanceof Error
           ? err.message
           : 'Could not reach the MDRRMO Operations Center. Check your connection and try again.',
       );
-      setTxState('failed');
+      // After an SMS, a failed background retry changes nothing on screen.
+      setTxState((s) => (s === 'smsOpened' ? s : 'failed'));
     }
   }
+
+  const canSms = !!AGAP_SMS_NUMBER && !!draft.idempotencyKey && !!draft.type;
+  const retry = () => { setTxState('submitting'); void transmit(); };
 
   return (
     <View style={styles.root}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        {txState === 'submitting' && <SubmittingView />}
+        {txState === 'submitting' && <SubmittingView onSendSms={canSms ? sendBySms : undefined} />}
         {txState === 'success'    && (
           <SuccessView
             location={incidentLocation}
@@ -540,9 +700,18 @@ export default function TransmissionScreen() {
           <FailedView
             error={error}
             limited={limited}
-            onRetry={() => { setTxState('submitting'); transmit(); }}
+            onRetry={retry}
             onHome={() => router.replace('/home' as any)}
             onSignIn={() => router.replace('/auth/login')}
+            onSendSms={canSms && smsAllowed && !limited ? sendBySms : undefined}
+          />
+        )}
+        {txState === 'smsOpened' && (
+          <SmsOpenedView
+            openFailed={smsOpenFailed}
+            onReopen={sendBySms}
+            onRetry={retry}
+            onHome={() => router.replace('/home' as any)}
           />
         )}
       </SafeAreaView>
@@ -570,6 +739,7 @@ const styles = StyleSheet.create({
   },
   iconWrapSuccess: { backgroundColor: colors.primarySoft },
   iconWrapDanger:  { backgroundColor: colors.dangerSoft },
+  iconWrapWarn:    { backgroundColor: colors.amberSoft },
 
   // ─── Typography ────────────────────────────────────────────────────────────
   heading: {
@@ -650,4 +820,6 @@ const styles = StyleSheet.create({
   },
   ghostBtnText: { fontSize: 15, fontWeight: '600', color: colors.textMid },
   callBtn: { flexDirection: 'row', backgroundColor: colors.danger },
+  smsBtn: { flexDirection: 'row' },
+  bold: { fontWeight: '800', color: colors.text },
 });

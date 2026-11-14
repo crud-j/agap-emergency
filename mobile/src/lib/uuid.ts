@@ -1,7 +1,9 @@
 /**
  * Random v4 UUID for client-generated ids: the SOS idempotency key and the transport
  * outbox's clientRequestId. Math.random is enough here: the id only has to be unique,
- * not secret (the server still checks who sends it).
+ * not secret (the server still checks who sends it). One exception: an SOS sent by SMS
+ * carries its key in the text, and the first citizen app resend with that key within 24 h
+ * is linked to the SMS report (MOD-19). Anyone who can read the text could do that.
  */
 export function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {

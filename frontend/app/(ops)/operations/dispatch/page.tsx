@@ -41,6 +41,7 @@ import { initialPanelTab, showsNewIncidentAlerts, type PanelTab } from '@/featur
 import { alertMessage, confirmAction, escapeHtml, notify } from '@/components/ui/alerts';
 import { categoryIcon, formatAffectedCount, titleCase, priorityLabel, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
+import { SMS_CHANNEL_HINT, SmsChannelBadge } from '@/components/incidents/SmsChannelBadge';
 import { INCIDENT_DISPATCH_CHANGED, type ResourceRecommendation } from '@/features/dispatch/api';
 import { ApiError } from '@/lib/api';
 import type { MapFacility, MapIncident, MapRoute } from '@/components/incidents/IncidentMapView';
@@ -743,7 +744,10 @@ function QueueRow({ incident, selected, onSelect }: { incident: IncidentListItem
           </span>
         </div>
         <div className="mt-1.5 flex items-center justify-between gap-2">
-          <StatusChip status={incident.status} />
+          <span className="flex shrink-0 items-center gap-1.5">
+            <StatusChip status={incident.status} />
+            {incident.report_channel === 'SMS' && <SmsChannelBadge />}
+          </span>
           <span className="truncate text-[12px] text-slate-500">
             <span className="font-mono">{incident.public_reference}</span> · {timeAgo(incident.submitted_at)}
           </span>
@@ -881,12 +885,22 @@ function DispatchDetail({
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <PriorityBadge priority={incident.priority} />
             <StatusChip status={incident.status} />
+            {incident.report_channel === 'SMS' && <SmsChannelBadge />}
             {activeUnits > 0 && (
               <Badge variant="blue">
                 <Truck size={11} aria-hidden="true" /> {activeUnits} unit{activeUnits === 1 ? '' : 's'}
               </Badge>
             )}
           </div>
+          {incident.report_channel === 'SMS' && (
+            <p className="mt-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-900">
+              {SMS_CHANNEL_HINT}
+              {!loc && ' No location came through: ask where they are.'}
+              {incident.incident_reporters?.reporter_phone && (
+                <> Call back: <span className="font-mono font-semibold">{incident.incident_reporters.reporter_phone}</span></>
+              )}
+            </p>
+          )}
         </div>
         {/* Closing is the "Dispatch queue" back button above; this opens the full page. */}
         <Link

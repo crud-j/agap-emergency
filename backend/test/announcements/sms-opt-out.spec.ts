@@ -152,7 +152,7 @@ describe('BarangayReplyService: STOP before barangay handling', () => {
     const notify: any = { emitUpdated: jest.fn().mockResolvedValue(undefined) };
     const smsQueue: any = { add: jest.fn().mockResolvedValue({}) };
     const ann: any = { optOutBySms: jest.fn().mockResolvedValue(opts.optedOut ?? true) };
-    const service = new BarangayReplyService(prisma, config, links, callbacks, notify, smsQueue, ann);
+    const service = new BarangayReplyService(prisma, config, links, callbacks, notify, smsQueue, ann, undefined as any, { enabled: () => false, handle: jest.fn() } as any);
     return { service, prisma, callbacks, notify, smsQueue, ann };
   }
 
@@ -254,7 +254,7 @@ describe('BarangaySmsPoller: polls for STOP even with barangay replies off', () 
       repliesEnabled: jest.fn(() => all['BARANGAY_SMS_REPLIES_ENABLED'] === 'true'),
       optOutEnabled: jest.fn(() => (all['SMS_OPT_OUT_ENABLED'] ?? 'true') === 'true'),
     };
-    return new BarangaySmsPoller(config, {} as any, replies, {} as any);
+    return new BarangaySmsPoller(config, {} as any, replies, { enabled: () => false, handle: jest.fn() } as any, {} as any);
   }
 
   it('is on when only opt-out processing is on', () => {

@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import axios from 'axios';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { BarangayReplyService, type InboundSms } from './barangay-reply.service';
+import { CitizenSmsSosService } from '../emergency-alerts/sms-sos/citizen-sms-sos.service';
 
 /**
  * Its own queue, not the SMS queue: a slow Textbee read must never hold up an alert send
@@ -35,7 +36,8 @@ interface TextbeeReceived {
  * Phase 5 receiver, polling mode (`BARANGAY_SMS_INBOUND_MODE=poll`, the default): reads the
  * Textbee phone's received SMS every 15 s. Needs no public URL, so it works from a laptop.
  * Where it left off comes from the database, so a restart neither loses nor repeats a reply.
- * Runs when barangay replies or announcement STOP processing (MOD-53) is on.
+ * Runs when barangay replies, announcement STOP processing (MOD-53) or citizen SOS by SMS
+ * (MOD-17/19, `CITIZEN_SMS_SOS_ENABLED`) is on.
  */
 @Injectable()
 export class BarangaySmsPoller implements OnApplicationBootstrap {
@@ -45,6 +47,7 @@ export class BarangaySmsPoller implements OnApplicationBootstrap {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly replies: BarangayReplyService,
+    private readonly citizenSos: CitizenSmsSosService,
     @InjectQueue(BARANGAY_INBOUND_QUEUE) private readonly queue: Queue,
   ) {}
 
@@ -66,7 +69,7 @@ export class BarangaySmsPoller implements OnApplicationBootstrap {
   pollingOn(): boolean {
     const mode = this.config.get<string>('BARANGAY_SMS_INBOUND_MODE')?.trim() || 'poll';
     return (
-      (this.replies.repliesEnabled() || this.replies.optOutEnabled()) &&
+      (this.replies.repliesEnabled() || this.replies.optOutEnabled() || this.citizenSos.enabled()) &&
       mode === 'poll' &&
       !!this.config.get<string>('TEXTBEE_API_KEY')
     );

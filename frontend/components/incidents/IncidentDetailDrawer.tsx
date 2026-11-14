@@ -8,6 +8,7 @@ import {
   Shield, ShieldCheck, ShieldAlert, Video, Play, Landmark, Ban, Flame, LifeBuoy,
 } from 'lucide-react';
 import { IncidentChatPanel } from './IncidentChatPanel';
+import { SMS_CHANNEL_HINT } from './SmsChannelBadge';
 import { BarangayPanel, BARANGAY_REPORT, barangayHasNotReported } from './BarangayPanel';
 import {
   Drawer, DrawerContent, DrawerHeader, DrawerBody, DrawerFooter, DrawerTitle,
@@ -318,7 +319,9 @@ function Overview({ incident, onOpenBarangay }: { incident: IncidentDetail; onOp
       )}
 
       <Section icon={MapPin} title="Location">
-        <p className="text-sm font-semibold text-agap-textMain">{address ?? 'Address not available'}</p>
+        <p className="text-sm font-semibold text-agap-textMain">
+          {address ?? (incident.report_channel === 'SMS' && !loc ? 'Location unknown: call the reporter back' : 'Address not available')}
+        </p>
         {loc?.landmark && <p className="mt-0.5 text-sm text-agap-textMid">Near {loc.landmark}</p>}
         {coords && <CopyCoordinates coords={coords} />}
       </Section>
@@ -330,7 +333,9 @@ function Overview({ incident, onOpenBarangay }: { incident: IncidentDetail; onOp
             : incident.trigger_method === 'SOS_BUTTON'
               ? 'SOS button'
               : 'Manual'}
+          {incident.report_channel === 'SMS' && ' · sent by SMS (no mobile data)'}
         </p>
+        {incident.report_channel === 'SMS' && <p className="mt-0.5 text-xs text-agap-textSub">{SMS_CHANNEL_HINT}</p>}
       </Section>
 
       <BarangaySummary incidentId={incident.id} onOpen={onOpenBarangay} />

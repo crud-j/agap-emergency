@@ -55,7 +55,7 @@ function build(opts: { env?: Record<string, string>; open?: any[]; subscriber?: 
   const smsQueue: any = { add: jest.fn().mockResolvedValue({}) };
   const announcements: any = { optOutBySms: jest.fn().mockResolvedValue(!!opts.subscriber) };
   const aiQueue: any = { add: jest.fn().mockResolvedValue({}) };
-  const service = new BarangayReplyService(prisma, config, links, callbacks, notify, smsQueue, announcements, aiQueue);
+  const service = new BarangayReplyService(prisma, config, links, callbacks, notify, smsQueue, announcements, aiQueue, { enabled: () => false, handle: jest.fn() } as any);
   return { service, prisma, notify, aiQueue, callbacks };
 }
 

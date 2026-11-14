@@ -301,6 +301,8 @@ All four Bocaue operational categories are in scope: Medical & Trauma, Flood Ope
 /api/v1/audit
 /api/v1/organizations
 /api/v1/admin
+/api/v1/sla-policies
+/api/v1/analytics/export
 ```
 
 ---
@@ -375,21 +377,27 @@ Medical profile requires a separate ConsentRecord before any access. Audit logs 
 
 ## Dual-Path Alert Delivery
 
-Data path (HTTPS) + SMS path (Textbee) fire **simultaneously** at trigger. SMS payload < 160 chars:
-```
-AGAP|INC-2026-001234|14.5995,120.9842|1754179200|FIRE|C:Y
-```
-Both fire immediately because connectivity in Bocaue flood zones is degraded during typhoon events.
+Connectivity in Bocaue flood zones is degraded during typhoons, so a report has two paths. SMS payloads are always < 160 chars (one segment).
+
+- **Server ops SMS (MOD-17):** once the incident is saved, the server texts MDRRMO_OPS_PHONE through Textbee (`OpsAlertService`):
+  ```
+  AGAP|INC-2026-001234|14.5995,120.9842|1754179200|FIRE|C:Y
+  ```
+- **Citizen SMS fallback (MOD-17/19):** when the app cannot reach the server (no network, 20 s timeout, 5xx), it offers **Send by SMS**: it opens the messages app with one text to `EXPO_PUBLIC_AGAP_SMS_NUMBER` (the Textbee SIM), and the citizen presses Send. iOS cannot send SMS silently, and Android SEND_SMS is Play-restricted, so this step is user-confirmed. Field 2 is the report's client event id, not a reference:
+  ```
+  AGAP|3f2b8c1e-9a4d-4e7f-8b2a-1c5d6e7f8a9b|14.79630,120.92720|1754179200|FIRE|C:Y|T:S
+  ```
+  The inbound poller (every 15 s, `CITIZEN_SMS_SOS_ENABLED=true`) creates the incident (`report_channel = SMS`, guest, sender = callback number, GPS optional) and texts the reference back. Format: `shared/src/utils/citizen-sos-sms.ts`; handler: `backend/src/emergency-alerts/sms-sos/`.
 
 ---
 
 ## Offline Queue
 
 1. Assign a unique client event ID (idempotency key) at trigger time
-2. Try data + SMS in parallel
-3. If both fail → save to secure local queue
-4. On reconnect → flush queue with original event IDs
-5. Backend deduplicates by event ID — same ID → same incident, never a duplicate
+2. Send over data; on a connection failure offer Send by SMS (same event ID) and the hotlines. An SOS is never held in a local queue for later delivery.
+3. When data returns, the app resends with the same event ID. If the SMS already created the incident, the server returns it, links the signed-in citizen and fills only empty fields (MOD-19, within 24 h, audited)
+4. Backend deduplicates by event ID — same ID → same incident, never a duplicate (SMS, SMS resend or app)
+5. Responder crew actions offline use the transport outbox (`mobile/src/services/offline/transport-outbox.ts`), also keyed by client request IDs
 
 ---
 

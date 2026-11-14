@@ -202,7 +202,7 @@ describe('BarangayReplyService.handleInbound', () => {
     const callbacks: any = { reportBySms: jest.fn().mockResolvedValue(undefined) };
     const notify: any = { emitUpdated: jest.fn().mockResolvedValue(undefined) };
     const smsQueue: any = { add: jest.fn().mockResolvedValue({}) };
-    const service = new BarangayReplyService(prisma, config, links, callbacks, notify, smsQueue);
+    const service = new BarangayReplyService(prisma, config, links, callbacks, notify, smsQueue, undefined as any, undefined as any, { enabled: () => false, handle: jest.fn() } as any);
     return { service, prisma, callbacks, notify, smsQueue };
   }
 
@@ -385,7 +385,8 @@ describe('BarangaySmsPoller.poll', () => {
       handleInbound: jest.fn().mockResolvedValue('APPLIED'),
     };
     const queue: any = { upsertJobScheduler: jest.fn().mockResolvedValue({}), removeJobScheduler: jest.fn().mockResolvedValue(true) };
-    return { poller: new BarangaySmsPoller(config, prisma, replies, queue), replies, queue };
+    const citizenSos: any = { enabled: jest.fn(() => all['CITIZEN_SMS_SOS_ENABLED'] === 'true') };
+    return { poller: new BarangaySmsPoller(config, prisma, replies, citizenSos, queue), replies, queue };
   }
   const msg = (id: string, device = 'dev-1') => ({
     _id: id,
@@ -424,6 +425,12 @@ describe('BarangaySmsPoller.poll', () => {
     await expect(build({ TEXTBEE_API_KEY: '' }).poller.poll()).resolves.toBe(0);
     await expect(build({ BARANGAY_SMS_INBOUND_MODE: 'webhook' }).poller.poll()).resolves.toBe(0);
     expect(axiosGet).not.toHaveBeenCalled();
+  });
+
+  it('polls for citizen SOS texts alone (MOD-17/19), with barangay replies and STOP off', async () => {
+    axiosGet.mockResolvedValueOnce({ data: { data: [msg('a')], meta: {} } });
+    const sosOnly = build({ BARANGAY_SMS_REPLIES_ENABLED: 'false', SMS_OPT_OUT_ENABLED: 'false', CITIZEN_SMS_SOS_ENABLED: 'true' });
+    await expect(sosOnly.poller.poll()).resolves.toBe(1);
   });
 
   it('survives a Textbee error; the next poll starts from the same place', async () => {

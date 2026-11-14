@@ -50,6 +50,46 @@ export interface ReporterStanding {
 /** Attempts at a fresh public reference when simultaneous reports collide. */
 const REFERENCE_RETRIES = 10;
 
+/**
+ * An app resend may complete an SMS report (link the account, fill blanks) only this
+ * long after the SMS created it. Later, the dispatcher has the case in hand.
+ */
+export const SMS_REPORT_COMPLETION_WINDOW_MS = 24 * 60 * 60_000;
+
+/**
+ * The description an SMS report gets when its GPS was outside Bocaue. A description that
+ * is only this note still counts as empty when the app completes the report.
+ */
+export const SMS_OUTSIDE_BOCAUE_NOTE = 'Reported GPS outside Bocaue:';
+
+/** How a report reached `create`. Only CitizenSmsSosService passes `channel: 'SMS'`. */
+export interface CreateIncidentOptions {
+  /** 'SMS': the citizen SMS fallback (MOD-17/19). GPS is optional: the sender's number is the callback. */
+  channel?: 'APP' | 'SMS';
+  /** SMS: the sender's E.164 number, kept as the reporter's callback number. */
+  senderPhone?: string;
+  /** SMS: when the phone built the message. Recorded on the first event; SLA timing starts at receipt. */
+  sentAt?: Date;
+}
+
+/**
+ * hazard_flags as one list (queue, SMS summaries and exports read it): intake answers,
+ * hazards, response needs and the caller's people estimate.
+ */
+function buildHazardFlags(category: string, intakeAnswers: IntakeAnswers, dto: CreateIncidentDto): string[] {
+  return [
+    ...intakeReportLines(category, intakeAnswers),
+    ...(dto.hazards ?? []),
+    ...(dto.responseNeeds ?? []).map((n) => `DISPATCH:${n}`),
+    ...(dto.affectedCount ? [`AFFECTED_COUNT:${dto.affectedCount}`] : []),
+  ];
+}
+
+/** Manila wall-clock time for an event note, e.g. `2026-11-14 16:05`. */
+function manilaTime(d: Date): string {
+  return new Date(d.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 16).replace('T', ' ');
+}
+
 /** The column(s) behind a unique-constraint error (Prisma P2002), if that's what `err` is. */
 function uniqueViolationTarget(err: unknown): string | null {
   if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return null;
@@ -97,11 +137,15 @@ export class IncidentsService {
     dto: CreateIncidentDto,
     actorId?: string,
     actorRole?: UserRole,
+    opts: CreateIncidentOptions = {},
   ): Promise<Incident & { similar_report?: SimilarReportHint }> {
+    const viaSms = opts.channel === 'SMS';
     if ((dto.lat === undefined) !== (dto.lng === undefined)) {
       throw new BadRequestException('Latitude and longitude must be provided together.');
     }
-    if (!actorId && (dto.lat === undefined || dto.lng === undefined)) {
+    // An app guest must send GPS (anti-abuse). An SMS report may not have a fix: the
+    // sender's real number is the accountability, and GPS must never block a report.
+    if (!actorId && !viaSms && (dto.lat === undefined || dto.lng === undefined)) {
       throw new BadRequestException(
         'Guest emergency reports require GPS coordinates within Bocaue Municipality, Bulacan.',
       );
@@ -115,7 +159,7 @@ export class IncidentsService {
     });
     if (existing) {
       this.logger.log(`Idempotent incident for key ${dto.idempotencyKey}: ${existing.id}`);
-      return existing;
+      return viaSms ? existing : this.completeSmsReport(existing, dto, actorId, actorRole);
     }
 
     // MOD-09: keep only answers the shared intake catalog defines, then file the
@@ -150,12 +194,7 @@ export class IncidentsService {
     // Keep caller estimates as ranges; never turn a range into a fabricated count.
     // Intake answers are also flattened into hazard_flags so older consumers
     // (queue, SMS summaries, exports) keep reading one list.
-    const hazardFlags: string[] = [
-      ...intakeReportLines(category, intakeAnswers),
-      ...(dto.hazards ?? []),
-      ...(dto.responseNeeds ?? []).map((n) => `DISPATCH:${n}`),
-      ...(dto.affectedCount ? [`AFFECTED_COUNT:${dto.affectedCount}`] : []),
-    ];
+    const hazardFlags = buildHazardFlags(category, intakeAnswers, dto);
 
     const numberOfPatients = dto.affectedCount === '1' ? 1 : null;
 
@@ -170,6 +209,7 @@ export class IncidentsService {
           number_of_patients: numberOfPatients,
           client_event_id: dto.idempotencyKey,
           trigger_method: dto.triggerMethod ?? 'MANUAL_REPORT',
+          report_channel: viaSms ? 'SMS' : 'APP',
           hazard_flags: hazardFlags,
         },
       });
@@ -180,7 +220,8 @@ export class IncidentsService {
           user_id: actorId ?? null,
           is_guest: !actorId,
           reporter_name: dto.reporter?.name ?? null,
-          reporter_phone: dto.reporter?.phone ?? null,
+          reporter_phone: (viaSms ? opts.senderPhone : dto.reporter?.phone) ?? null,
+          contact_callback: viaSms ? opts.senderPhone ?? null : null,
           reporter_status: dto.intake?.reporterStatus ?? null,
         },
       });
@@ -250,6 +291,11 @@ export class IncidentsService {
           incident_id: inc.id,
           to_status: IncidentStatus.SUBMITTED as any,
           triggered_by_id: actorId ?? null,
+          // The phone's send time is history, not the SLA start: a late SMS must not
+          // arrive already in breach.
+          notes: viaSms
+            ? `Received by SMS (no mobile data)${opts.sentAt ? `; sent from the phone at ${manilaTime(opts.sentAt)}` : ''}`
+            : null,
         },
       });
 
@@ -267,7 +313,7 @@ export class IncidentsService {
         const target = uniqueViolationTarget(err);
         if (target?.includes('client_event_id')) {
           const existing = await this.prisma.incident.findFirst({ where: { client_event_id: dto.idempotencyKey } });
-          if (existing) return existing;
+          if (existing) return viaSms ? existing : this.completeSmsReport(existing, dto, actorId, actorRole);
         }
         if (target?.includes('public_reference') && attempt < REFERENCE_RETRIES) continue;
         throw err;
@@ -316,6 +362,167 @@ export class IncidentsService {
     // Tell the reporter a similar report is already being handled, so a bystander
     // knows MDRRMO is on it. Stage and age only — nothing about the other reporter.
     return similarReport ? { ...incident, similar_report: similarReport } : incident;
+  }
+
+  /**
+   * MOD-19: the app got through after the citizen already sent the report by SMS (same
+   * event id). The SMS carried only type, GPS and time, so the app's copy completes it:
+   * the signed-in citizen's account is linked (so they can track it) and fields the SMS
+   * could not carry are filled **only where still empty**. Category, priority, status and
+   * anything a dispatcher set are never touched. Audited.
+   *
+   * Never throws: the report already exists, so the app always gets it back.
+   */
+  private async completeSmsReport(
+    existing: Incident,
+    dto: CreateIncidentDto,
+    actorId?: string,
+    actorRole?: UserRole,
+  ): Promise<Incident> {
+    if (existing.report_channel !== 'SMS') return existing;
+    if (Date.now() - existing.created_at.getTime() > SMS_REPORT_COMPLETION_WINDOW_MS) return existing;
+
+    let outcome: { filled: string[]; linked: boolean; locationAdded: boolean } | null = null;
+    try {
+      outcome = await this.prisma.$transaction(async (tx) => {
+        const current = await tx.incident.findUnique({
+          where: { id: existing.id },
+          select: {
+            description: true,
+            hazard_flags: true,
+            incident_reporters: { select: { id: true, user_id: true, reporter_status: true } },
+            incident_patients: { select: { id: true }, take: 1 },
+            incident_details: { select: { id: true, caller_answers: true } },
+            incident_locations: { select: { id: true } },
+          },
+        });
+        if (!current) return null;
+        const filled: string[] = [];
+
+        // Only a citizen's own account, and only while nobody is linked yet.
+        const reporter = current.incident_reporters;
+        let linked = false;
+        if (reporter && actorId && actorRole === UserRole.CITIZEN && !reporter.user_id) {
+          const r = await tx.incidentReporter.updateMany({
+            where: { id: reporter.id, user_id: null },
+            data: { user_id: actorId, is_guest: false },
+          });
+          if (r.count === 1) {
+            linked = true;
+            filled.push('reporter_account');
+          }
+        }
+        if (reporter && !reporter.reporter_status && dto.intake?.reporterStatus) {
+          await tx.incidentReporter.update({
+            where: { id: reporter.id },
+            data: { reporter_status: dto.intake.reporterStatus },
+          });
+          filled.push('reporter_status');
+        }
+
+        const description = dto.description?.trim();
+        const onlySmsNote = !!current.description?.startsWith(SMS_OUTSIDE_BOCAUE_NOTE) && !current.description.includes('\n');
+        if ((!current.description || onlySmsNote) && description) {
+          await tx.incident.update({
+            where: { id: existing.id },
+            data: { description: onlySmsNote ? `${description}\n\n${current.description}` : description },
+          });
+          filled.push('description');
+        }
+
+        // The category stays the one the SMS set; answers are filtered by it.
+        const intakeAnswers = sanitizeIntakeAnswers(existing.category as unknown as IncidentType, dto.intake?.answers);
+        const hasAnswers = Object.keys(intakeAnswers).length > 0;
+        const storedAnswers = current.incident_details?.caller_answers;
+        const answersEmpty = !storedAnswers || (typeof storedAnswers === 'object' && Object.keys(storedAnswers).length === 0);
+        if (hasAnswers && answersEmpty) {
+          if (current.incident_details) {
+            await tx.incident_details.update({
+              where: { id: current.incident_details.id },
+              data: { caller_answers: intakeAnswers as Prisma.InputJsonValue },
+            });
+          } else {
+            await tx.incident_details.create({
+              data: { incident_id: existing.id, caller_answers: intakeAnswers as Prisma.InputJsonValue },
+            });
+          }
+          filled.push('intake_answers');
+        }
+
+        if (current.hazard_flags.length === 0) {
+          const flags = buildHazardFlags(String(existing.category), intakeAnswers, dto);
+          if (flags.length) {
+            await tx.incident.update({ where: { id: existing.id }, data: { hazard_flags: flags } });
+            filled.push('hazard_flags');
+          }
+        }
+
+        if (current.incident_patients.length === 0 && dto.patient) {
+          await tx.incident_patients.create({
+            data: {
+              incident_id: existing.id,
+              is_reporter: dto.patient.isReporter,
+              is_unknown: dto.patient.isUnknown,
+              patient_name: dto.patient.name ?? null,
+              approximate_age: dto.patient.age ?? null,
+              sex: dto.patient.sex ?? null,
+            },
+          });
+          filled.push('patient');
+        }
+
+        // create() already rejected coordinates outside Bocaue.
+        let locationAdded = false;
+        if (!current.incident_locations && dto.lat !== undefined && dto.lng !== undefined) {
+          await tx.incident_locations.create({
+            data: {
+              incident_id: existing.id,
+              latitude: dto.lat,
+              longitude: dto.lng,
+              formatted_address: dto.address ?? null,
+              landmark: dto.intake?.landmark?.trim() || null,
+              source: dto.address ? 'GPS_WITH_ADDRESS' : 'GPS',
+            },
+          });
+          locationAdded = true;
+          filled.push('location');
+        }
+
+        if (filled.length > 0) {
+          // Field names only: the values are personal or medical.
+          await this.audit.logInTransaction(tx, {
+            action: AuditAction.UPDATE,
+            ...(actorId ? { actorId } : {}),
+            ...(actorRole ? { actorRole } : {}),
+            entityId: existing.id,
+            entityType: 'Incident',
+            moduleId: 'MOD-19',
+            incidentId: existing.id,
+            newValues: { completedFromApp: filled, channel: 'SMS' },
+          });
+        }
+        return { filled, linked, locationAdded };
+      });
+    } catch (err) {
+      this.logger.warn(`Completing SMS report ${existing.public_reference} from the app failed: ${String(err)}`);
+      return existing;
+    }
+    if (!outcome || outcome.filled.length === 0) return existing;
+
+    this.logger.log(`SMS report ${existing.public_reference} completed from the app: ${outcome.filled.join(', ')}`);
+    this.realtime.incidentUpdated(existing.id, { change: 'sms_report_completed', fields: outcome.filled });
+    if (outcome.linked && actorId) {
+      void this.contactNotification.notifyContactsOfIncident(
+        actorId,
+        existing.id,
+        existing.public_reference,
+        String(existing.category),
+      );
+    }
+    // The SMS had no usable location, so the barangay was never tagged or alerted.
+    if (outcome.locationAdded) void this.barangayNotify?.notifyForIncident(existing.id);
+
+    return (await this.prisma.incident.findUnique({ where: { id: existing.id } }).catch(() => null)) ?? existing;
   }
 
   /**

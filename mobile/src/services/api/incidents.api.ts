@@ -36,12 +36,25 @@ export async function submitIncident(
   const headers: Record<string, string> = token
     ? { Authorization: `Bearer ${token}` }
     : { 'X-Device-Id': await getDeviceId() };
-  return apiFetch<SubmittedIncident>(`${API_BASE}/v1/incidents`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
+  // On a weak flood-zone signal fetch can hang with no limit. Give up after this, so the
+  // screen offers "Send by SMS" and the hotlines. A late success on the server is
+  // harmless: the same idempotency key on any resend or SMS returns that incident.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SUBMIT_TIMEOUT_MS);
+  try {
+    return await apiFetch<SubmittedIncident>(`${API_BASE}/v1/incidents`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
+
+/** How long an emergency report may wait for the server before the screen offers SMS. */
+export const SUBMIT_TIMEOUT_MS = 20_000;
 
 /**
  * Upload a captured photo as an incident attachment (MOD-10).

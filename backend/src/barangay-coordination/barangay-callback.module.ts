@@ -4,6 +4,7 @@ import { QUEUE_NAMES } from '@agap/shared';
 import { AuditModule } from '../audit/audit.module';
 import { AnnouncementsModule } from '../announcements/announcements.module';
 import { IncidentsModule } from '../incidents/incidents.module';
+import { CitizenSmsSosModule } from '../emergency-alerts/sms-sos/citizen-sms-sos.module';
 import { BarangayCoordinationModule } from './barangay-coordination.module';
 import { BarangayCallbackController } from './barangay-callback.controller';
 import { BarangayLinkController } from './barangay-link.controller';
@@ -22,6 +23,8 @@ import { BARANGAY_INBOUND_QUEUE, BarangaySmsPollProcessor, BarangaySmsPoller } f
     AnnouncementsModule,
     IncidentsModule,
     BarangayCoordinationModule,
+    // MOD-17/19: the same inbound poller turns citizen SOS texts into incidents.
+    CitizenSmsSosModule,
     // AI_ASSIST: an unparsed reply linked to one open case is queued for AI Assist. This
     // module never imports AiAssistModule (that one imports this one: K10).
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }, { name: BARANGAY_INBOUND_QUEUE }, { name: QUEUE_NAMES.AI_ASSIST }),

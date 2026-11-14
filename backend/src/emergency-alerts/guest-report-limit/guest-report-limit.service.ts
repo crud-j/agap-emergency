@@ -9,10 +9,12 @@ export interface GuestSource {
   ip?: string | undefined;
   /** Random per-install id the mobile app sends in X-Device-Id. Not hardware-derived. */
   deviceId?: string | undefined;
+  /** E.164 sender of a citizen SOS by SMS (MOD-17/19). A real SIM, so the limits are per number. */
+  phone?: string | undefined;
 }
 
 interface LimitRule {
-  scope: 'device' | 'ip';
+  scope: 'device' | 'ip' | 'phone';
   windowSeconds: number;
   max: number;
 }
@@ -30,6 +32,10 @@ export const GUEST_REPORT_RULES: readonly LimitRule[] = [
   { scope: 'device', windowSeconds: 24 * 60 * 60, max: 6 },
   { scope: 'ip', windowSeconds: 10 * 60, max: 20 },
   { scope: 'ip', windowSeconds: 24 * 60 * 60, max: 100 },
+  // SMS reports: only an SOS text carries a phone. A SIM is harder to replace than an
+  // install id, but a neighbour may text for several households in a flood.
+  { scope: 'phone', windowSeconds: 10 * 60, max: 3 },
+  { scope: 'phone', windowSeconds: 24 * 60 * 60, max: 10 },
 ];
 
 /** A retry of an already-admitted report (same idempotency key) is free for this long. */
@@ -174,7 +180,7 @@ export class GuestReportLimitService implements OnModuleDestroy {
     let hitRule: LimitRule | null = null;
 
     for (const rule of GUEST_REPORT_RULES) {
-      const value = rule.scope === 'device' ? source.deviceId : source.ip;
+      const value = source[rule.scope === 'device' ? 'deviceId' : rule.scope];
       if (!value) continue;
       const bucket = Math.floor(now / rule.windowSeconds);
       const key = `${KEY_PREFIX}${rule.scope}:${hash(`${rule.scope}:${value}`)}:${rule.windowSeconds}:${bucket}`;

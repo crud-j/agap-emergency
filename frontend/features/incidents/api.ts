@@ -22,6 +22,8 @@ export interface IncidentListItem {
   priority: string;
   status: string;
   trigger_method?: 'SOS_BUTTON' | 'SHAKE_GESTURE' | 'MANUAL_REPORT' | 'DISPATCHER_CREATED' | 'SYSTEM_GENERATED' | null;
+  /** How the report reached AGAP: the app, or the citizen SMS fallback (no mobile data). */
+  report_channel?: 'APP' | 'SMS';
   description: string | null;
   number_of_patients: number | null;
   submitted_at: string;

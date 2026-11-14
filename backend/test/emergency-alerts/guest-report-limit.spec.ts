@@ -45,6 +45,15 @@ describe('GuestReportLimitService', () => {
     expect(JSON.stringify(err.getResponse())).toContain('911');
   });
 
+  it('limits citizen SOS texts per sender number (MOD-17/19), separately from app reports', async () => {
+    const phoneMax = GUEST_REPORT_RULES.find((r) => r.scope === 'phone')!.max;
+    for (let i = 0; i < phoneMax; i++) await service.reserve({ phone: '+639171234567' }, `sms-${i}`);
+    await expect(service.reserve({ phone: '+639171234567' }, 'sms-next')).rejects.toBeInstanceOf(GuestReportLimitExceeded);
+    // Another number, and an app report from any device, are unaffected.
+    await expect(service.reserve({ phone: '+639181234567' }, 'sms-other')).resolves.toBeDefined();
+    await expect(service.reserve({ ip: '203.0.113.9', deviceId: 'device-zzzzzzzz' }, 'app-1')).resolves.toBeDefined();
+  });
+
   it('does not count a retry of the same report (offline queue / Try Again)', async () => {
     const source = { ip: '203.0.113.6', deviceId: 'device-bbbbbbbb' };
     for (let i = 0; i < DEVICE_MAX + 3; i++) await service.reserve(source, 'same-key');

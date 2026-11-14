@@ -206,6 +206,8 @@ model Incident {
   id                           String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   public_reference             String                         @unique @db.VarChar(30)
   trigger_method               trigger_method                 @default(SOS_BUTTON)
+  /// How the report reached AGAP: the app (HTTPS) or the citizen SMS fallback.
+  report_channel               report_channel                 @default(APP)
   client_event_id              String?                        @unique @db.VarChar(100)
   category                     incident_category
   priority                     incident_priority              @default(MEDIUM)
@@ -247,6 +249,7 @@ model Incident {
   incident_handovers           incident_handovers[]
   incident_locations           incident_locations?
   barangay_notices             incident_barangay_notices[]
+  inbound_sms                  barangay_sms_inbound[]
   incident_messages            incident_messages[]
   incident_metrics             incident_metrics?
   incident_patients            incident_patients[]
@@ -1816,11 +1819,15 @@ model barangay_sms_inbound {
   parsed_command      String?                    @db.VarChar(12)
   parsed_code         String?                    @db.VarChar(4)
   notice_id           String?                    @db.Uuid
+  /// Citizen SOS by SMS: the incident this message created or matched.
+  incident_id         String?                    @db.Uuid
   outcome             barangay_inbound_outcome
   created_at          DateTime                   @default(now()) @db.Timestamptz(6)
   notice              incident_barangay_notices? @relation(fields: [notice_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  incident            Incident?                  @relation(fields: [incident_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([notice_id], map: "idx_barangay_sms_inbound_notice")
+  @@index([incident_id], map: "idx_barangay_sms_inbound_incident")
   @@index([received_at(sort: Desc)], map: "idx_barangay_sms_inbound_received")
 }
 
@@ -1874,6 +1881,22 @@ enum barangay_inbound_outcome {
   UNPARSED
   DISABLED
   OPT_OUT
+  /// Citizen SOS by SMS: a new incident was created.
+  SOS_CREATED
+  /// Citizen SOS by SMS: the event id already had an incident (resend, or the app got through).
+  SOS_EXISTING
+  /// Citizen SOS by SMS: sent more than 6 h before it arrived; logged, no incident.
+  SOS_STALE
+  /// Citizen SOS by SMS: started like one but could not be read.
+  SOS_INVALID
+  /// Citizen SOS by SMS: the sender's number reached its report limit.
+  SOS_LIMITED
+}
+
+/// How a report reached AGAP.
+enum report_channel {
+  APP
+  SMS
 }
 
 enum announcement_category {

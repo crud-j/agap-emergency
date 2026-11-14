@@ -167,6 +167,13 @@ class EnvironmentVariables {
   @IsOptional()
   SMS_OPT_OUT_ENABLED?: string;
 
+  // MOD-17/19: citizen SOS by SMS. 'true' = an `AGAP|<eventId>|…` text sent to the Textbee
+  // phone by the app's "Send by SMS" fallback (no mobile data) becomes an incident, and
+  // the sender gets the reference back. The inbound poll runs for it. Default off.
+  @IsString()
+  @IsOptional()
+  CITIZEN_SMS_SOS_ENABLED?: string;
+
   // MOD-53 (ROLE_DASHBOARDS_PLAN.md Phase 7). 'true' = a CRITICAL advisory needs an
   // MDRRMO Supervisor's approval before release. Default off: publishing as before.
   @IsString()
