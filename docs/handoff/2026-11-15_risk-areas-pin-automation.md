@@ -1,7 +1,7 @@
 # Handoff: Risk areas: pinpoint, automation, redesign (MOD-51)
 
 **Date:** 2026-11-15
-**For:** the next agent, starting cold. This is the current handoff; read it first.
+**For:** the next agent. **Start with [`2026-11-15_session-handoff.md`](./2026-11-15_session-handoff.md)** (the whole session); this file has the Risk areas details.
 **First task:** ask the user how the **browser check** went (section "Waiting on the user"). Don't start new work on your own.
 **Earlier handoffs:**
 - [`2026-11-14_analytics-ai-summary.md`](./2026-11-14_analytics-ai-summary.md): AI summary and the AI provider setting; committed.
