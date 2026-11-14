@@ -76,6 +76,21 @@ export interface DispatchSummary {
   units: UnitCounts;
 }
 
+/** One response step for a range: average seconds and how many incidents it averages. */
+export interface IntervalStat {
+  avgSec: number | null;
+  n: number;
+}
+
+export interface ResponseIntervals {
+  /** Report → acknowledged. */
+  acknowledge: IntervalStat;
+  /** Report → first dispatch. */
+  dispatch: IntervalStat;
+  /** Dispatch → first unit on scene (travel). */
+  arrival: IntervalStat;
+}
+
 export interface IncidentPerformance {
   acknowledgeSec: number | null;
   dispatchSec: number | null;
@@ -409,6 +424,72 @@ export class AnalyticsService {
       acknowledgeCompliancePct: a.pct,
       dispatchCompliancePct: d.pct,
       onSceneCompliancePct: o.pct,
+    };
+  }
+
+  /**
+   * Incidents reported in the range per tagged barangay, most first. Incidents with no
+   * location or no barangay are one "Unassigned" row. Counts only.
+   */
+  async getBarangayCounts(range: AnalyticsDateRange): Promise<{ barangay: string; count: number }[]> {
+    const where: Prisma.IncidentWhereInput = {
+      submitted_at: { gte: range.from, lt: range.to },
+      status: { notIn: NOT_REPORTED },
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.incident_locations.groupBy({
+        by: ['barangay'],
+        where: { incidents: where, barangay: { not: null } },
+        orderBy: { barangay: 'asc' },
+        _count: { _all: true },
+      }),
+      this.prisma.incident.count({ where }),
+    ]);
+    const counts = rows
+      .map((row) => ({ barangay: row.barangay as string, count: row._count._all }))
+      .sort((a, b) => b.count - a.count || a.barangay.localeCompare(b.barangay));
+    const unassigned = total - counts.reduce((sum, row) => sum + row.count, 0);
+    if (unassigned > 0) counts.push({ barangay: 'Unassigned', count: unassigned });
+    return counts;
+  }
+
+  /** Incidents reported in the range per priority (all four, zero included). */
+  async getPriorityCounts(range: AnalyticsDateRange): Promise<{ priority: incident_priority; count: number }[]> {
+    const rows = await this.prisma.incident.groupBy({
+      by: ['priority'],
+      where: { submitted_at: { gte: range.from, lt: range.to }, status: { notIn: NOT_REPORTED } },
+      orderBy: { priority: 'asc' },
+      _count: { _all: true },
+    });
+    return PRIORITIES.map((priority) => ({
+      priority,
+      count: rows.find((row) => row.priority === priority)?._count._all ?? 0,
+    }));
+  }
+
+  /**
+   * Average seconds from the report to acknowledge and to dispatch, and from dispatch to
+   * the first unit on scene, for incidents reported in the range, each with how many
+   * incidents it averages. null when none reached the step, never 0.
+   */
+  async getResponseIntervals(range: AnalyticsDateRange): Promise<ResponseIntervals> {
+    const [row] = await this.prisma.$queryRaw<
+      { ack: unknown; ack_n: number; dispatch: unknown; dispatch_n: number; arrival: unknown; arrival_n: number }[]
+    >`
+      SELECT AVG(EXTRACT(EPOCH FROM (acknowledged_at - submitted_at))) AS ack,
+             COUNT(acknowledged_at)::int AS ack_n,
+             AVG(EXTRACT(EPOCH FROM (dispatched_at - submitted_at))) AS dispatch,
+             COUNT(dispatched_at)::int AS dispatch_n,
+             AVG(EXTRACT(EPOCH FROM (on_scene_at - dispatched_at))) AS arrival,
+             (COUNT(*) FILTER (WHERE on_scene_at IS NOT NULL AND dispatched_at IS NOT NULL))::int AS arrival_n
+        FROM incidents
+       WHERE submitted_at >= ${range.from}
+         AND submitted_at < ${range.to}
+         AND status::text NOT IN ('DRAFT', 'DUPLICATE')`;
+    return {
+      acknowledge: { avgSec: nullableNumber(row?.ack), n: Number(row?.ack_n ?? 0) },
+      dispatch: { avgSec: nullableNumber(row?.dispatch), n: Number(row?.dispatch_n ?? 0) },
+      arrival: { avgSec: nullableNumber(row?.arrival), n: Number(row?.arrival_n ?? 0) },
     };
   }
 

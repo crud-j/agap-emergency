@@ -92,6 +92,38 @@ describe('AiClientService: a call', () => {
     expect(mockConstructed).toHaveLength(1);
   });
 
+  it('keeps 512 output tokens by default and takes a per-call limit', async () => {
+    mockGenerateContent.mockResolvedValue(answer({ status: 'ON_SCENE', confidence: 0.93, english: 'We are here' }));
+    const b = build();
+    await call(b.service);
+    await b.service.structured('BARANGAY_REPLY', BARANGAY_REPLY_INSTRUCTIONS, 'x', BARANGAY_REPLY_JSON_SCHEMA, BarangayReplySchema, {
+      maxOutputTokens: 1024,
+      timeoutMs: 20_000,
+    });
+    expect(mockGenerateContent.mock.calls[0][0].config.maxOutputTokens).toBe(512);
+    expect(mockGenerateContent.mock.calls[1][0].config.maxOutputTokens).toBe(1024);
+  });
+
+  it('times out at the per-call limit when one is given', async () => {
+    jest.useFakeTimers();
+    try {
+      mockGenerateContent.mockImplementation(
+        ({ config }: any) =>
+          new Promise((_resolve, reject) => config.abortSignal.addEventListener('abort', () => reject(new Error('aborted')))),
+      );
+      const b = build({ ...ON, AI_ASSIST_TIMEOUT_MS: '8000' });
+      const pending = b.service.structured('BARANGAY_REPLY', BARANGAY_REPLY_INSTRUCTIONS, 'x', BARANGAY_REPLY_JSON_SCHEMA, BarangayReplySchema, {
+        timeoutMs: 20_000,
+      });
+      await jest.advanceTimersByTimeAsync(8_001);
+      expect(mockGenerateContent.mock.calls[0][0].config.abortSignal.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(12_000);
+      await expect(pending).resolves.toMatchObject({ ok: false, error: 'TIMEOUT' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('cuts an over-long English reading instead of failing the call', async () => {
     mockGenerateContent.mockResolvedValue(answer({ status: 'NEEDS_BACKUP', confidence: 0.9, english: 'x'.repeat(150) }));
     const res = await call(build().service);

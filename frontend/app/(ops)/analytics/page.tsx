@@ -11,6 +11,7 @@ import { Button, Card, CardHeader, CardTitle, StatCard, Skeleton, EmptyState } f
 import { useVolume, useSlaCompliance, useFalseAlertRate, useResponseTimes } from '@/features/analytics/hooks';
 import type { AnalyticsExportDataset, AnalyticsRange } from '@/features/analytics/api';
 import { downloadAnalyticsCsv } from '@/features/analytics/export';
+import { AiSummaryCard } from '@/components/analytics/AiSummaryCard';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 
@@ -261,6 +262,9 @@ export default function AnalyticsPage(): JSX.Element {
           loading={slaQ.isLoading}
         />
       </div>
+
+      {/* MOD-50 AI summary of the same range (Supervisor; hidden when AI is off) */}
+      <AiSummaryCard range={range} days={days} />
 
       {/* Row: Volume by Category + SLA Compliance detail */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

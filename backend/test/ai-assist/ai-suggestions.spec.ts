@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { UserRole } from '@agap/shared';
 import { AiSuggestionsService } from '../../src/ai-assist/ai-suggestions.service';
 import { AiSuggestionsController } from '../../src/ai-assist/ai-suggestions.controller';
@@ -141,6 +141,13 @@ describe('AiSuggestionsService.dismiss', () => {
   it('is refused once reviewed', async () => {
     const b = build({ row: { ...ROW, status: 'ACCEPTED' }, claim: 0 });
     await expect(b.service.dismiss('sug-1', DISPATCHER)).rejects.toThrow(ConflictException);
+    expect(b.audit.log).not.toHaveBeenCalled();
+  });
+
+  it('refuses an analytics summary (Supervisor only, on the Analytics page)', async () => {
+    const b = build({ row: { ...ROW, kind: 'ANALYTICS_NARRATIVE', incident_id: null } });
+    await expect(b.service.dismiss('sug-1', DISPATCHER)).rejects.toThrow(BadRequestException);
+    expect(b.prisma.ai_suggestions.updateMany).not.toHaveBeenCalled();
     expect(b.audit.log).not.toHaveBeenCalled();
   });
 });

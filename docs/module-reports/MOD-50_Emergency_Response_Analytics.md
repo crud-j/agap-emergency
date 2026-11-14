@@ -98,7 +98,33 @@ Accountability and continuous improvement — showing, with numbers, whether the
 **Test before signing:**
 1. On the Analytics page, switch the range between 7/30/90 days and confirm the charts update.
 2. Run a test incident through the full demo flow and confirm it's reflected in the volume count if recent enough; pick an empty range and confirm it shows "No data" rather than 0%.
+3. **AI summary (added 2026-11-14):**
+   1. With `AI_ASSIST_ENABLED=false`, the page looks exactly as before (no AI card).
+   2. With AI on, using demo data only while the Gemini key is free tier, click **Generate AI summary** for 30 days. Check every number in it against the tiles and charts.
+   3. Click **Regenerate** at once: the same summary comes back without a new AI call.
+   4. Click **Accept**: "Reviewed" appears, and the Activity Log shows a CREATE and an UPDATE on `ai_suggestion`.
+   5. Choose a range with fewer than 5 incidents: the card says it is too few.
+   6. As a Dispatcher, `GET /api/v1/analytics/ai-summary` returns 403.
+
+**AI summary (2026-11-14), Supervisor only:**
+- A **Generate AI summary** button writes a short summary of the selected period: a headline, 2 to 6 points and up to 3 "worth a look" items.
+- **AGAP's code computes every figure and every change** against the previous period of the same length:
+  - category and barangay jumps;
+  - response targets below 90% or 10 points down;
+  - incidents still waiting past a target;
+  - average times 20% slower or faster;
+  - false-alert rate.
+- Gemini only words them.
+- **Only totals are sent:** counts by category, priority and barangay, target results, average minutes and false alerts. No incident rows, names, phone numbers, coordinates, descriptions or medical data.
+- **Every number** in the AI text must appear in what was sent. Otherwise the summary is discarded (`UNVERIFIED_NUMBER`).
+- **No summary below 5 incidents.**
+- **Review:** the Supervisor accepts ("reviewed, fit for reports") or dismisses it. Both are audited, and it changes nothing else.
+- **Code:**
+  - `backend/src/analytics/narrative/` (facts);
+  - `backend/src/ai-assist/analytics-narrative/` (AI, routes `/api/v1/analytics/ai-summary`);
+  - `frontend/components/analytics/AiSummaryCard.tsx`.
 
 **Do not claim:**
+- That the AI summary explains causes or recommends actions. It only words the figures AGAP computed, and a person reviews it.
 - Predictive or causal analytics — this module reports what happened, it does not forecast or diagnose why.
 - A false-alert rate counted per distinct incident — it counts false-alert records.

@@ -139,3 +139,45 @@ export interface DispatchSummary {
 export function fetchDispatchSummary(): Promise<DispatchSummary> {
   return api.get('/analytics/dispatch-summary', getToken());
 }
+
+// ─── AI summary (MOD-50, Supervisor only) ────────────────────────────────────
+
+/** An AI summary the Supervisor can read. Never a failed or dismissed one. */
+export interface AiSummary {
+  id: string;
+  status: 'PENDING_REVIEW' | 'ACCEPTED';
+  createdAt: string;
+  /** The period the summary covers (it can differ from the page's by minutes). */
+  period: { from: string; to: string; days: number; label: string };
+  incidents: number;
+  headline: string;
+  points: string[];
+  watchItems: string[];
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+}
+
+/** GET /analytics/ai-summary: `enabled: false` when AI Assist is off (the card is hidden). */
+export interface AiSummaryState {
+  enabled: boolean;
+  summary: AiSummary | null;
+}
+
+/** POST /analytics/ai-summary. FAILED carries a short code, never the provider's text. */
+export type GenerateAiSummaryResult =
+  | { outcome: 'CREATED' | 'REUSED'; summary: AiSummary }
+  | { outcome: 'TOO_FEW'; incidents: number; minimum: number }
+  | { outcome: 'FAILED'; error: string }
+  | { outcome: 'DISABLED' };
+
+export function fetchAiSummary(range: AnalyticsRange): Promise<AiSummaryState> {
+  return api.get(`/analytics/ai-summary${rangeQuery(range)}`, getToken());
+}
+
+export function generateAiSummary(range: AnalyticsRange): Promise<GenerateAiSummaryResult> {
+  return api.post(`/analytics/ai-summary${rangeQuery(range)}`, {}, getToken());
+}
+
+export function reviewAiSummary(id: string, action: 'accept' | 'dismiss'): Promise<unknown> {
+  return api.post(`/analytics/ai-summary/${encodeURIComponent(id)}/${action}`, {}, getToken());
+}

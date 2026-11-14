@@ -141,9 +141,14 @@ export class AiSuggestionsService {
   async dismiss(id: string, actor: SuggestionActor) {
     const row = await this.prisma.ai_suggestions.findUnique({
       where: { id },
-      select: { status: true, incident_id: true },
+      select: { status: true, incident_id: true, kind: true },
     });
     if (!row) throw new NotFoundException('Suggestion not found');
+    // An analytics summary is the Supervisor's to review on the Analytics page; this
+    // route is also open to Dispatchers.
+    if (row.kind === 'ANALYTICS_NARRATIVE') {
+      throw new BadRequestException('Review this summary on the Analytics page.');
+    }
     const res = await this.prisma.ai_suggestions.updateMany({
       where: { id, status: { in: ['PENDING_REVIEW', 'INFO'] } },
       data: { status: 'DISMISSED', reviewed_by_id: actor.id, reviewed_at: new Date() },

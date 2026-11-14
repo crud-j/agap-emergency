@@ -28,7 +28,15 @@ export type AiErrorCode =
   | 'BLOCKED'
   | 'INVALID_OUTPUT'
   | 'DAILY_LIMIT'
-  | 'PROVIDER_ERROR';
+  | 'PROVIDER_ERROR'
+  /** The text used a number that is not in the input (checked after Zod, by the caller). */
+  | 'UNVERIFIED_NUMBER';
+
+/** Per-call limits. Defaults: 512 output tokens, AI_ASSIST_TIMEOUT_MS. */
+export interface AiCallOptions {
+  maxOutputTokens?: number;
+  timeoutMs?: number;
+}
 
 export type AiResult<T> =
   | { ok: true; value: T; model: string; latencyMs: number }
@@ -119,6 +127,7 @@ export class AiClientService {
     input: string,
     jsonSchema: unknown,
     schema: S,
+    opts: AiCallOptions = {},
   ): Promise<AiResult<z.infer<S>>> {
     const model = this.model;
     if (!this.enabled) return { ok: false, error: 'DISABLED', model, latencyMs: null };
@@ -136,7 +145,7 @@ export class AiClientService {
     const timer = setTimeout(() => {
       timedOut = true;
       abort.abort();
-    }, this.timeoutMs);
+    }, opts.timeoutMs ?? this.timeoutMs);
 
     try {
       const thinkingConfig = thinkingConfigFor(model);
@@ -148,7 +157,7 @@ export class AiClientService {
           responseMimeType: 'application/json',
           responseJsonSchema: jsonSchema,
           temperature: 0,
-          maxOutputTokens: 512,
+          maxOutputTokens: opts.maxOutputTokens ?? 512,
           ...(thinkingConfig && { thinkingConfig }),
           abortSignal: abort.signal,
         },

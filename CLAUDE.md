@@ -303,6 +303,7 @@ All four Bocaue operational categories are in scope: Medical & Trauma, Flood Ope
 /api/v1/admin
 /api/v1/sla-policies
 /api/v1/analytics/export
+/api/v1/analytics/ai-summary            ← MOD-50 AI summary (Supervisor only)
 ```
 
 ---

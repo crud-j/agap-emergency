@@ -12,7 +12,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiProduces } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { AnalyticsService, defaultAnalyticsDateRange, type AnalyticsDateRange } from './analytics.service';
+import { AnalyticsService, type AnalyticsDateRange } from './analytics.service';
+import { parseAnalyticsRange } from './analytics-range';
 import {
   ANALYTICS_EXPORT_DATASETS,
   AnalyticsExportService,
@@ -140,14 +141,5 @@ function isExportDataset(value: string | undefined): value is AnalyticsExportDat
 }
 
 function parseRange(from?: string, to?: string): AnalyticsDateRange {
-  const defaults = defaultAnalyticsDateRange();
-  const parsedFrom = from ? new Date(from) : defaults.from;
-  const parsedTo = to ? new Date(to) : defaults.to;
-  if (Number.isNaN(parsedFrom.getTime()) || Number.isNaN(parsedTo.getTime())) {
-    throw new BadRequestException('from and to must be valid ISO dates.');
-  }
-  if (parsedFrom >= parsedTo) {
-    throw new BadRequestException('from must be earlier than to.');
-  }
-  return { from: parsedFrom, to: parsedTo };
+  return parseAnalyticsRange(from, to);
 }

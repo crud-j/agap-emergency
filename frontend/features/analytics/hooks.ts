@@ -1,7 +1,12 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  fetchAiSummary,
+  generateAiSummary,
+  reviewAiSummary,
+  type AiSummaryState,
+  type GenerateAiSummaryResult,
   fetchResponseTimes,
   fetchVolume,
   fetchSlaCompliance,
@@ -77,5 +82,40 @@ export function useDispatchSummary(opts?: { refetchInterval?: number }) {
     queryFn: fetchDispatchSummary,
     staleTime: 15_000,
     refetchInterval: opts?.refetchInterval ?? 60_000,
+  });
+}
+
+const aiSummaryKey = (range: AnalyticsRange) => ['analytics-ai-summary', range] as const;
+
+/** The latest AI summary for a period of this length, and whether AI is on (MOD-50). */
+export function useAiSummary(range: AnalyticsRange) {
+  return useQuery({
+    queryKey: aiSummaryKey(range),
+    queryFn: () => fetchAiSummary(range),
+    staleTime: 60_000,
+    // The card is optional: a failure here just hides it.
+    retry: false,
+  });
+}
+
+/** Writes a summary of the range. TOO_FEW and FAILED come back as results, not errors. */
+export function useGenerateAiSummary(range: AnalyticsRange) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => generateAiSummary(range),
+    onSuccess: (result: GenerateAiSummaryResult) => {
+      if (result.outcome === 'CREATED' || result.outcome === 'REUSED') {
+        qc.setQueryData<AiSummaryState>(aiSummaryKey(range), { enabled: true, summary: result.summary });
+      }
+    },
+  });
+}
+
+/** Accept (reviewed, fit for reports) or dismiss. Both are audited on the server. */
+export function useReviewAiSummary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'accept' | 'dismiss' }) => reviewAiSummary(id, action),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['analytics-ai-summary'] }),
   });
 }

@@ -78,6 +78,13 @@ These come from the CLAUDE.md architectural rules:
 | Timeline notes (redacted, last 10) | Photos, media, chat messages |
 | Barangay SMS reply body (redacted) | The sender's phone number |
 
+**Analytics summary (MOD-50, added 2026-11-14):** sends **totals only**:
+- counts by category, priority and barangay for the period and the previous one;
+- response-target results, average minutes and false-alert counts;
+- the changes AGAP's code found.
+
+No incident row and no field from the "Never sent" column is sent. Supervisors only, on a button; the code is in `backend/src/ai-assist/analytics-narrative/`.
+
 **Redaction** (`redactForAi`, Phase 1) replaces PH phone numbers, emails, and anything that looks like an ID number with `[removed]`. Free-text descriptions can still contain a name (e.g. "si Juan ay nahulog"). Phase 0 has to accept that risk, or Phase 3 sends only category and intake answers.
 
 ---
