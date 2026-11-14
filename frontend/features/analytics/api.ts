@@ -67,6 +67,14 @@ export function fetchFalseAlertRate(range: AnalyticsRange): Promise<FalseAlertRa
   return api.get(`/analytics/false-alert-rate${rangeQuery(range)}`, getToken());
 }
 
+/** Which CSV GET /analytics/export returns: page aggregates, or one row per incident. */
+export type AnalyticsExportDataset = 'summary' | 'incidents';
+
+/** GET /analytics/export (Supervisor, System Administrator). Audited server-side as DATA_EXPORT. */
+export function fetchAnalyticsExport(dataset: AnalyticsExportDataset, range: AnalyticsRange): Promise<Blob> {
+  return api.blob(`/analytics/export${rangeQuery(range)}&dataset=${dataset}`, getToken());
+}
+
 export function fetchDailySummary(date?: string): Promise<DailySummaryData> {
   const qs = date ? `?date=${encodeURIComponent(date)}` : '';
   return api.get(`/analytics/daily${qs}`, getToken());

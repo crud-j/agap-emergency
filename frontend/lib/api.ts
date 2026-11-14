@@ -76,7 +76,12 @@ export const api = {
   /** Binary download (e.g. incident media) — authenticated, returns a Blob. */
   blob: async (path: string, token?: string): Promise<Blob> => {
     const res = await authedFetch(`${API_BASE}/v1${path}`, { headers: authHeaders(token) });
-    if (!res.ok) throw new ApiError(res.statusText || 'Download failed', res.status);
+    if (!res.ok) {
+      // Keep the server's reason (e.g. "Export a shorter range") when the error body is JSON.
+      const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
+      const message = typeof body?.message === 'string' ? body.message : res.statusText || 'Download failed';
+      throw new ApiError(message, res.status, body ?? undefined);
+    }
     return res.blob();
   },
 

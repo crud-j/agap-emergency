@@ -5,10 +5,11 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, PieChart, Pie, Legend,
 } from 'recharts';
-import { Activity, AlertTriangle, CheckCircle2, Clock, TrendingUp, XCircle } from 'lucide-react';
-import { Card, CardHeader, CardTitle, StatCard, Skeleton, EmptyState } from '@/components/ui';
+import { Activity, AlertTriangle, CheckCircle2, Clock, Download, TrendingUp, XCircle } from 'lucide-react';
+import { Button, Card, CardHeader, CardTitle, StatCard, Skeleton, EmptyState } from '@/components/ui';
 import { useVolume, useSlaCompliance, useFalseAlertRate, useResponseTimes } from '@/features/analytics/hooks';
-import type { AnalyticsRange } from '@/features/analytics/api';
+import type { AnalyticsExportDataset, AnalyticsRange } from '@/features/analytics/api';
+import { downloadAnalyticsCsv } from '@/features/analytics/export';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 
@@ -130,6 +131,21 @@ export default function AnalyticsPage(): JSX.Element {
   const falseQ = useFalseAlertRate(range);
   const rtQ = useResponseTimes(range);
 
+  // CSV backup of the same range the charts show (audited server-side as DATA_EXPORT).
+  const [exporting, setExporting] = useState<AnalyticsExportDataset | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  async function exportCsv(dataset: AnalyticsExportDataset): Promise<void> {
+    setExporting(dataset);
+    setExportError(null);
+    try {
+      await downloadAnalyticsCsv(dataset, range);
+    } catch (err) {
+      setExportError(err instanceof Error && err.message ? err.message : 'Export failed. Check your connection and retry.');
+    } finally {
+      setExporting(null);
+    }
+  }
+
   const volume = volumeQ.data;
   const sla = slaQ.data;
   const falseRate = falseQ.data;
@@ -172,8 +188,36 @@ export default function AnalyticsPage(): JSX.Element {
       </div>
 
       {/* Range selector + KPI tiles */}
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={exporting === 'summary'}
+            disabled={exporting !== null}
+            onClick={() => void exportCsv('summary')}
+            title={`Totals, SLA, volume and response times for the last ${days} days`}
+          >
+            {exporting !== 'summary' && <Download size={14} />}
+            Export summary CSV
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={exporting === 'incidents'}
+            disabled={exporting !== null}
+            onClick={() => void exportCsv('incidents')}
+            title={`One row per incident for the last ${days} days (no names, contacts, locations or medical data)`}
+          >
+            {exporting !== 'incidents' && <Download size={14} />}
+            Export incidents CSV
+          </Button>
+          {exportError && (
+            <span role="alert" className="text-xs font-semibold text-agap-danger">
+              {exportError}
+            </span>
+          )}
+        </div>
         <div className="flex rounded-lg border border-slate-200 bg-white p-1">
           {[7, 30, 90].map((option) => (
             <button key={option} type="button" onClick={() => setDays(option)} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${days === option ? 'bg-agap-green text-white' : 'text-agap-textSub'}`}>
