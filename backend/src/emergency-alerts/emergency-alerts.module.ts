@@ -7,15 +7,16 @@ import { RealtimeModule } from '../realtime/realtime.module';
 import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
 import { GuestReportLimitModule } from './guest-report-limit/guest-report-limit.module';
 import { QUEUE_NAMES } from '@agap/shared';
+import { SlaPoliciesModule } from '../sla-policies/sla-policies.module';
 
 @Module({
   imports: [
     RealtimeModule,
     BarangayCoordinationModule,
     GuestReportLimitModule,
+    SlaPoliciesModule,
     BullModule.registerQueue({ name: QUEUE_NAMES.SMS }),
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
-    BullModule.registerQueue({ name: QUEUE_NAMES.SLA_MONITOR }),
   ],
   controllers: [EmergencyAlertsController],
   providers: [EmergencyAlertsService, OpsAlertService],

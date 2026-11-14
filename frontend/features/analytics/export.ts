@@ -7,9 +7,14 @@ export function manilaDateKey(iso: string): string {
   return new Date(new Date(iso).getTime() + MANILA_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-/** e.g. agap-analytics-incidents_2026-10-15_to_2026-11-14.csv */
+const FILE_PREFIX: Record<AnalyticsExportDataset, string> = {
+  summary: 'AGAP-Analytics-Summary',
+  incidents: 'AGAP-Incident-List',
+};
+
+/** e.g. AGAP-Incident-List_2026-10-15_to_2026-11-14.csv (same name the server sends). */
 export function analyticsExportFilename(dataset: AnalyticsExportDataset, range: AnalyticsRange): string {
-  return `agap-analytics-${dataset}_${manilaDateKey(range.from)}_to_${manilaDateKey(range.to)}.csv`;
+  return `${FILE_PREFIX[dataset]}_${manilaDateKey(range.from)}_to_${manilaDateKey(range.to)}.csv`;
 }
 
 /** Fetch the CSV for the page's current range and save it in the browser. */

@@ -9,7 +9,7 @@ describe('analytics CSV export (MOD-50)', () => {
 
   it('names the file by dataset and range', () => {
     const range = { from: '2026-10-15T04:00:00.000Z', to: '2026-11-14T04:00:00.000Z' };
-    expect(analyticsExportFilename('summary', range)).toBe('agap-analytics-summary_2026-10-15_to_2026-11-14.csv');
-    expect(analyticsExportFilename('incidents', range)).toBe('agap-analytics-incidents_2026-10-15_to_2026-11-14.csv');
+    expect(analyticsExportFilename('summary', range)).toBe('AGAP-Analytics-Summary_2026-10-15_to_2026-11-14.csv');
+    expect(analyticsExportFilename('incidents', range)).toBe('AGAP-Incident-List_2026-10-15_to_2026-11-14.csv');
   });
 });

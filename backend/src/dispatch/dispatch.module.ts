@@ -6,6 +6,7 @@ import { ResourceMatchingService } from './resource-matching/resource-matching.s
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SlaPoliciesModule } from '../sla-policies/sla-policies.module';
 import { QUEUE_NAMES } from '@agap/shared';
 
 @Module({
@@ -13,6 +14,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     RealtimeModule,
     AuditModule,
     NotificationsModule,
+    SlaPoliciesModule,
     BullModule.registerQueue({ name: QUEUE_NAMES.NOTIFICATIONS }),
   ],
   controllers: [DispatchController],

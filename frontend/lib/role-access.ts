@@ -36,6 +36,8 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/operations/multi-agency', roles: OPS },
   { prefix: '/operations/history', roles: OPS },
   { prefix: '/operations/escalations', roles: [SUPERVISOR] },
+  // MOD-41 response targets: the escalation alarm and Analytics read them (API-enforced).
+  { prefix: '/operations/sla-targets', roles: [SUPERVISOR, SYS_ADMIN] },
   { prefix: '/operations/command', roles: [SUPERVISOR] },
   { prefix: '/operations/surge', roles: [SUPERVISOR] },
   // Dispatchers view it; risk-area management on it is the Supervisor's (API-enforced).
@@ -182,6 +184,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/administration/security', label: 'Security Events', roles: [SYS_ADMIN] },
       { href: '/administration/integrations', label: 'Integrations', roles: [SYS_ADMIN] },
       { href: '/administration/config', label: 'Configuration', roles: [SYS_ADMIN] },
+      { href: '/operations/sla-targets', label: 'Response Targets', roles: [SYS_ADMIN] },
     ],
   },
   {
@@ -208,6 +211,8 @@ export const SUPERVISOR_NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/dashboard', label: 'Dashboard', roles: S, exact: true },
       { href: '/operations/escalations', label: 'Escalations', roles: S, badge: 'openEscalations' },
+      // The targets that raise those escalations (MOD-41).
+      { href: '/operations/sla-targets', label: 'Response Targets', roles: S },
       // CRITICAL advisories awaiting MDRRMO approval (Phase 7).
       { href: '/operations/approvals', label: 'Approvals', roles: S, badge: 'pendingApprovals' },
       // Opens on its Responding list without new-incident alerts (oversight first); the

@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, PieChart, Pie, Legend,
 } from 'recharts';
+import Link from 'next/link';
 import { Activity, AlertTriangle, CheckCircle2, Clock, Download, TrendingUp, XCircle } from 'lucide-react';
 import { Button, Card, CardHeader, CardTitle, StatCard, Skeleton, EmptyState } from '@/components/ui';
 import { useVolume, useSlaCompliance, useFalseAlertRate, useResponseTimes } from '@/features/analytics/hooks';
@@ -76,7 +77,7 @@ function ChartTooltip({ active, payload, label }: {
 
 function SlaGauge({ pct, label }: { pct: number | null; label: string }): JSX.Element {
   if (pct == null) {
-    return <div className="flex h-[148px] flex-col items-center justify-center gap-1 text-center text-xs text-agap-textSub">No data<span>{label}</span></div>;
+    return <div className="flex h-[128px] flex-col items-center justify-center gap-1 text-center text-xs text-agap-textSub">No data<span>{label}</span></div>;
   }
   const color = pct >= 90 ? '#0D6053' : pct >= 70 ? '#D97706' : '#D44858';
   const gaugeData = [
@@ -85,15 +86,15 @@ function SlaGauge({ pct, label }: { pct: number | null; label: string }): JSX.El
   ];
   return (
     <div className="flex flex-col items-center gap-1">
-      <PieChart width={100} height={100}>
+      <PieChart width={84} height={84}>
         <Pie
           data={gaugeData}
-          cx={50}
-          cy={50}
+          cx={42}
+          cy={42}
           startAngle={90}
           endAngle={-270}
-          innerRadius={32}
-          outerRadius={46}
+          innerRadius={27}
+          outerRadius={39}
           dataKey="value"
           strokeWidth={0}
         >
@@ -102,7 +103,7 @@ function SlaGauge({ pct, label }: { pct: number | null; label: string }): JSX.El
           ))}
         </Pie>
       </PieChart>
-      <span className="text-lg font-extrabold tabular-nums" style={{ color }}>{pct}%</span>
+      <span className="text-base font-extrabold tabular-nums" style={{ color }}>{pct}%</span>
       <span className="text-xs text-agap-textSub text-center leading-tight">{label}</span>
     </div>
   );
@@ -196,10 +197,10 @@ export default function AnalyticsPage(): JSX.Element {
             loading={exporting === 'summary'}
             disabled={exporting !== null}
             onClick={() => void exportCsv('summary')}
-            title={`Totals, SLA, volume and response times for the last ${days} days`}
+            title={`A readable report of the last ${days} days: totals, response targets, incidents by category and status, average response times and unit deployments.`}
           >
             {exporting !== 'summary' && <Download size={14} />}
-            Export summary CSV
+            {exporting === 'summary' ? 'Preparing report…' : 'Download summary report (CSV)'}
           </Button>
           <Button
             variant="secondary"
@@ -207,14 +208,17 @@ export default function AnalyticsPage(): JSX.Element {
             loading={exporting === 'incidents'}
             disabled={exporting !== null}
             onClick={() => void exportCsv('incidents')}
-            title={`One row per incident for the last ${days} days (no names, contacts, locations or medical data)`}
+            title={`Every incident reported in the last ${days} days, one per row, with response times and target results. No names, contact details, exact locations or medical data.`}
           >
             {exporting !== 'incidents' && <Download size={14} />}
-            Export incidents CSV
+            {exporting === 'incidents' ? 'Preparing list…' : 'Download incident list (CSV)'}
           </Button>
+          <span className="text-xs text-agap-textSub">
+            Covers the last {days} days shown below · opens in Excel or Google Sheets
+          </span>
           {exportError && (
-            <span role="alert" className="text-xs font-semibold text-agap-danger">
-              {exportError}
+            <span role="alert" className="w-full text-xs font-semibold text-agap-danger">
+              Download failed: {exportError}
             </span>
           )}
         </div>
@@ -295,30 +299,40 @@ export default function AnalyticsPage(): JSX.Element {
           </CardHeader>
           {slaQ.isLoading ? (
             <div className="flex justify-around py-6">
-              <Skeleton className="h-24 w-24 rounded-full" />
-              <Skeleton className="h-24 w-24 rounded-full" />
+              <Skeleton className="h-20 w-20 rounded-full" />
+              <Skeleton className="h-20 w-20 rounded-full" />
+              <Skeleton className="h-20 w-20 rounded-full" />
             </div>
           ) : slaQ.isError ? (
             <EmptyState icon={XCircle} title="Could not load SLA data" />
           ) : (
             <>
               <div className="flex justify-around py-2">
-                <SlaGauge pct={sla?.acknowledgeCompliancePct ?? 0} label="Acknowledge SLA" />
-                <SlaGauge pct={sla?.dispatchCompliancePct ?? 0} label="Dispatch SLA" />
+                <SlaGauge pct={sla?.acknowledgeCompliancePct ?? null} label="Acknowledge" />
+                <SlaGauge pct={sla?.dispatchCompliancePct ?? null} label="Dispatch" />
+                <SlaGauge pct={sla?.onSceneCompliancePct ?? null} label="On scene" />
               </div>
               <div className="mt-3 space-y-1.5 border-t border-[rgba(168,181,193,0.20)] pt-3">
-                <div className="flex justify-between text-xs text-agap-textMid">
-                  <span>Total measured</span>
-                  <span className="font-semibold tabular-nums">{sla?.total ?? 0}</span>
-                </div>
-                <div className="flex justify-between text-xs text-agap-textMid">
-                  <span>Ack SLA met</span>
-                  <span className="font-semibold tabular-nums">{sla?.acknowledgeSlaMet ?? 0}</span>
-                </div>
-                <div className="flex justify-between text-xs text-agap-textMid">
-                  <span>Dispatch SLA met</span>
-                  <span className="font-semibold tabular-nums">{sla?.dispatchSlaMet ?? 0}</span>
-                </div>
+                {([
+                  ['Acknowledged in time', sla?.acknowledgeSlaMet, sla?.acknowledgeMeasured, sla?.acknowledgeOverdue],
+                  ['Dispatched in time', sla?.dispatchSlaMet, sla?.dispatchMeasured, sla?.dispatchOverdue],
+                  ['On scene in time', sla?.onSceneSlaMet, sla?.onSceneMeasured, sla?.onSceneOverdue],
+                ] as const).map(([label, met, measured, overdue]) => (
+                  <div key={label} className="flex justify-between gap-2 text-xs text-agap-textMid">
+                    <span>{label}</span>
+                    <span className="text-right font-semibold tabular-nums">
+                      {met ?? 0} of {measured ?? 0}
+                      {overdue ? <span className="ml-1 font-normal text-agap-danger">({overdue} still waiting)</span> : null}
+                    </span>
+                  </div>
+                ))}
+                <p className="pt-1 text-[11px] leading-snug text-agap-textSub">
+                  Measured from the report against each incident&apos;s{' '}
+                  <Link href="/operations/sla-targets" className="font-semibold text-agap-green hover:underline">
+                    response target
+                  </Link>
+                  . Incidents still waiting past a target count as missed.
+                </p>
               </div>
             </>
           )}

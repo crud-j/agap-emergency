@@ -34,6 +34,7 @@ const PATH_LABELS: Record<string, string> = {
   triage:          'Triage',
   fleet:           'Fleet',
   escalations:     'Escalations',
+  'sla-targets':   'Response Targets',
   command:         'Command',
   'multi-agency':  'Multi-Agency',
   surge:           'Surge',

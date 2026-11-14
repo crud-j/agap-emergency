@@ -20,6 +20,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { AuditModule } from './audit/audit.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { SlaPoliciesModule } from './sla-policies/sla-policies.module';
 import { OversightModule } from './oversight/oversight.module';
 import { RiskIntelligenceModule } from './risk-intelligence/risk-intelligence.module';
 import { DisasterModeModule } from './disaster-mode/disaster-mode.module';
@@ -94,6 +95,7 @@ import { validateConfig } from './config/config.validation';
     AnnouncementsModule,
     AuditModule,
     AnalyticsModule,
+    SlaPoliciesModule,
     OversightModule,
     RiskIntelligenceModule,
     DisasterModeModule,

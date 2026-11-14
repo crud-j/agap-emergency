@@ -21,7 +21,7 @@ import {
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
   Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug, Inbox, ShieldCheck, MapPinned, LogOut,
-  Fingerprint, IdCard, ChevronRight,
+  Fingerprint, IdCard, ChevronRight, Timer,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -35,6 +35,7 @@ const ICONS: Record<string, LucideIcon> = {
   '/operations/triage': Filter,
   '/operations/dispatch': Radio,
   '/operations/escalations': AlarmClock,
+  '/operations/sla-targets': Timer,
   '/operations/command': Shield,
   '/operations/multi-agency': Network,
   '/operations/surge': Zap,

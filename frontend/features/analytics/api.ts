@@ -19,12 +19,26 @@ export interface VolumeData {
   byStatus: Array<{ status: string; _count: { _all: number } }>;
 }
 
+/**
+ * MOD-41 compliance per step, against each incident's own response target. An incident
+ * counts toward a step once it reached it, or once it is still waiting past the target
+ * (counted as missed). Percentages are null when nothing counts.
+ */
 export interface SlaComplianceData {
   total: number;
   acknowledgeSlaMet: number;
   dispatchSlaMet: number;
+  onSceneSlaMet: number;
+  acknowledgeMeasured: number;
+  dispatchMeasured: number;
+  onSceneMeasured: number;
+  /** Still waiting for the step past its target. */
+  acknowledgeOverdue: number;
+  dispatchOverdue: number;
+  onSceneOverdue: number;
   acknowledgeCompliancePct: number | null;
   dispatchCompliancePct: number | null;
+  onSceneCompliancePct: number | null;
 }
 
 export interface FalseAlertRateData {

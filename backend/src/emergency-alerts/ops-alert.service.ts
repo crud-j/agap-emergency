@@ -4,6 +4,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { QUEUE_NAMES } from '@agap/shared';
 import { configuredOpsPhone } from '../barangay-coordination/barangay-notify.service';
+import { SlaScheduleService } from '../sla-policies/sla-schedule.service';
 
 const SMS_MAX = 160;
 
@@ -12,6 +13,8 @@ export interface OpsAlertIncident {
   id: string;
   public_reference: string;
   category: string;
+  /** Picks the SLA policy, so the checks run at this incident's own targets. */
+  priority: string;
   submitted_at: Date;
 }
 
@@ -20,7 +23,7 @@ export interface OpsAlertIncident {
  * 0,0) means the report has no GPS position. Always one SMS segment.
  */
 export function buildOpsSmsPayload(
-  incident: OpsAlertIncident,
+  incident: Pick<OpsAlertIncident, 'public_reference' | 'category' | 'submitted_at'>,
   coords: { lat: number; lng: number } | null,
 ): string {
   const lat = coords ? coords.lat.toFixed(4) : '0';
@@ -33,7 +36,8 @@ export function buildOpsSmsPayload(
 /**
  * Work that starts once a new report is saved (CLAUDE.md "Dual-Path Alert Delivery"):
  * - MOD-17: the SMS path to MDRRMO operations (Textbee), beside the HTTPS data path;
- * - MOD-41: the first SLA check (acknowledge), which raises an escalation if missed.
+ * - MOD-41: the SLA checks (acknowledge, dispatch, on scene) at the incident's own
+ *   targets, each raising an escalation if missed.
  *
  * Called only after the incident is in PostgreSQL. Never throws: a queue or SMS
  * failure must never affect the incident.
@@ -45,7 +49,7 @@ export class OpsAlertService {
   constructor(
     private readonly config: ConfigService,
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
-    @InjectQueue(QUEUE_NAMES.SLA_MONITOR) private readonly slaQueue: Queue,
+    private readonly slaSchedule: SlaScheduleService,
   ) {}
 
   async onIncidentSaved(incident: OpsAlertIncident, coords: { lat: number; lng: number } | null): Promise<void> {
@@ -64,15 +68,7 @@ export class OpsAlertService {
       this.logger.warn(`Ops SMS skipped for ${incident.public_reference}: MDRRMO_OPS_PHONE unset or placeholder`);
     }
 
-    try {
-      const ackSeconds = Number(this.config.get<string>('DEFAULT_SLA_ACKNOWLEDGE_SECONDS') ?? 120);
-      await this.slaQueue.add(
-        'sla-monitor',
-        { incidentId: incident.id, escalationType: 'ACKNOWLEDGEMENT' },
-        { delay: ackSeconds * 1000 },
-      );
-    } catch (err) {
-      this.logger.error(`SLA check not queued for ${incident.public_reference}: ${String(err)}. Incident unaffected.`);
-    }
+    // Never throws (SlaScheduleService logs its own failures).
+    await this.slaSchedule.scheduleForIncident(incident);
   }
 }

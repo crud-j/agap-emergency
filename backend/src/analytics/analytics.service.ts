@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, incident_priority, incident_status, resource_status } from '@prisma/client';
 import { ACTIVE_INCIDENT_STATUSES, DEPLOYED_RESOURCE_STATUSES, UNAVAILABLE_RESOURCE_STATUSES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { FALLBACK_SLA_SECONDS, SLA_STEPS } from '../sla-policies/sla-rules';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Bocaue is UTC+8 all year (no daylight saving), so a fixed offset is exact. */
@@ -324,58 +325,90 @@ export class AnalyticsService {
     return { byCategory, byStatus };
   }
 
-  async getSlaCompliance(range: AnalyticsDateRange = defaultAnalyticsDateRange()) {
+  /**
+   * MOD-41 compliance per step (acknowledge, dispatch, on scene) for incidents submitted
+   * in the range, against each incident's own SLA policy (same pick as sla-rules.ts).
+   *
+   * An incident counts toward a step once it reached the step (met or missed by its
+   * timestamp) or once it is still waiting for the step past its deadline (missed,
+   * "overdue"). An incident that ended before needing the step (cancelled, false alert)
+   * is not counted. Percentages are null when nothing counts, never 0.
+   */
+  async getSlaCompliance(range: AnalyticsDateRange = defaultAnalyticsDateRange(), now: Date = new Date()) {
+    const [ack, dispatch, onScene] = SLA_STEPS;
     const [row] = await this.prisma.$queryRaw<
-      Array<{
-        total: number;
-        acknowledge_measured: number;
-        acknowledge_met: number;
-        dispatch_measured: number;
-        dispatch_met: number;
-      }>
+      Array<Record<`${'acknowledge' | 'dispatch' | 'on_scene'}_${'reached' | 'met' | 'overdue'}` | 'total', number>>
     >`
+      WITH scoped AS (
+        SELECT i.status::text AS status, i.submitted_at, i.acknowledged_at, i.dispatched_at, i.on_scene_at,
+               COALESCE(p.acknowledge_threshold_secs, ${FALLBACK_SLA_SECONDS.acknowledge}) AS ack_t,
+               COALESCE(p.dispatch_threshold_secs, ${FALLBACK_SLA_SECONDS.dispatch}) AS dispatch_t,
+               COALESCE(p.on_scene_threshold_secs, ${FALLBACK_SLA_SECONDS.onScene}) AS on_scene_t
+          FROM incidents i
+          LEFT JOIN LATERAL (
+            SELECT p.acknowledge_threshold_secs, p.dispatch_threshold_secs, p.on_scene_threshold_secs
+              FROM sla_policies p
+             WHERE p.is_active = true
+               AND (p.incident_category IS NULL OR p.incident_category = i.category)
+               AND (p.priority IS NULL OR p.priority = i.priority)
+             ORDER BY
+               CASE WHEN p.incident_category IS NOT NULL AND p.priority IS NOT NULL THEN 2
+                    WHEN p.incident_category IS NOT NULL OR p.priority IS NOT NULL THEN 1
+                    ELSE 0 END DESC,
+               p.created_at DESC
+             LIMIT 1
+          ) p ON true
+         WHERE i.submitted_at >= ${range.from}
+           AND i.submitted_at < ${range.to}
+           AND i.status::text NOT IN ('DRAFT', 'DUPLICATE')
+      )
       SELECT COUNT(*)::int AS total,
-             COUNT(*) FILTER (WHERE i.acknowledged_at IS NOT NULL)::int AS acknowledge_measured,
-             COUNT(*) FILTER (
-               WHERE i.acknowledged_at IS NOT NULL
-                 AND EXTRACT(EPOCH FROM (i.acknowledged_at - i.submitted_at))
-                   <= COALESCE(ack_policy.acknowledge_threshold_secs, 120)
-             )::int AS acknowledge_met,
-             COUNT(*) FILTER (WHERE i.dispatched_at IS NOT NULL)::int AS dispatch_measured,
-             COUNT(*) FILTER (
-               WHERE i.dispatched_at IS NOT NULL
-                 AND EXTRACT(EPOCH FROM (i.dispatched_at - i.submitted_at))
-                   <= COALESCE(ack_policy.dispatch_threshold_secs, 300)
-             )::int AS dispatch_met
-        FROM incidents i
-        LEFT JOIN LATERAL (
-          SELECT p.acknowledge_threshold_secs, p.dispatch_threshold_secs
-            FROM sla_policies p
-           WHERE p.is_active = true
-             AND (p.incident_category IS NULL OR p.incident_category = i.category)
-             AND (p.priority IS NULL OR p.priority = i.priority)
-           ORDER BY
-             CASE WHEN p.incident_category IS NOT NULL AND p.priority IS NOT NULL THEN 2
-                  WHEN p.incident_category IS NOT NULL OR p.priority IS NOT NULL THEN 1
-                  ELSE 0 END DESC,
-             p.created_at DESC
-           LIMIT 1
-        ) ack_policy ON true
-       WHERE i.submitted_at >= ${range.from}
-         AND i.submitted_at < ${range.to}
-         AND i.status::text NOT IN ('DRAFT', 'DUPLICATE')`;
+             COUNT(*) FILTER (WHERE acknowledged_at IS NOT NULL)::int AS acknowledge_reached,
+             COUNT(*) FILTER (WHERE acknowledged_at IS NOT NULL
+                                AND EXTRACT(EPOCH FROM (acknowledged_at - submitted_at)) <= ack_t)::int AS acknowledge_met,
+             COUNT(*) FILTER (WHERE acknowledged_at IS NULL
+                                AND status = ANY(${[...ack!.waitingStatuses]}::text[])
+                                AND ${now} > submitted_at + ack_t * interval '1 second')::int AS acknowledge_overdue,
+             COUNT(*) FILTER (WHERE dispatched_at IS NOT NULL)::int AS dispatch_reached,
+             COUNT(*) FILTER (WHERE dispatched_at IS NOT NULL
+                                AND EXTRACT(EPOCH FROM (dispatched_at - submitted_at)) <= dispatch_t)::int AS dispatch_met,
+             COUNT(*) FILTER (WHERE dispatched_at IS NULL
+                                AND status = ANY(${[...dispatch!.waitingStatuses]}::text[])
+                                AND ${now} > submitted_at + dispatch_t * interval '1 second')::int AS dispatch_overdue,
+             COUNT(*) FILTER (WHERE on_scene_at IS NOT NULL)::int AS on_scene_reached,
+             COUNT(*) FILTER (WHERE on_scene_at IS NOT NULL
+                                AND EXTRACT(EPOCH FROM (on_scene_at - submitted_at)) <= on_scene_t)::int AS on_scene_met,
+             COUNT(*) FILTER (WHERE on_scene_at IS NULL
+                                AND status = ANY(${[...onScene!.waitingStatuses]}::text[])
+                                AND ${now} > submitted_at + on_scene_t * interval '1 second')::int AS on_scene_overdue
+        FROM scoped`;
 
-    const total = Number(row?.total ?? 0);
-    const ackMet = Number(row?.acknowledge_met ?? 0);
-    const dispatchMet = Number(row?.dispatch_met ?? 0);
-    const ackMeasured = Number(row?.acknowledge_measured ?? 0);
-    const dispatchMeasured = Number(row?.dispatch_measured ?? 0);
+    const n = (key: keyof NonNullable<typeof row>) => Number(row?.[key] ?? 0);
+    const stepStats = (prefix: 'acknowledge' | 'dispatch' | 'on_scene') => {
+      const met = n(`${prefix}_met`);
+      const overdue = n(`${prefix}_overdue`);
+      const measured = n(`${prefix}_reached`) + overdue;
+      return { met, overdue, measured, pct: measured ? Math.round((met / measured) * 100) : null };
+    };
+    const a = stepStats('acknowledge');
+    const d = stepStats('dispatch');
+    const o = stepStats('on_scene');
     return {
-      total,
-      acknowledgeSlaMet: ackMet,
-      dispatchSlaMet: dispatchMet,
-      acknowledgeCompliancePct: ackMeasured ? Math.round((ackMet / ackMeasured) * 100) : null,
-      dispatchCompliancePct: dispatchMeasured ? Math.round((dispatchMet / dispatchMeasured) * 100) : null,
+      total: n('total'),
+      acknowledgeSlaMet: a.met,
+      dispatchSlaMet: d.met,
+      onSceneSlaMet: o.met,
+      /** Base of each percentage: incidents that reached the step, plus those overdue for it. */
+      acknowledgeMeasured: a.measured,
+      dispatchMeasured: d.measured,
+      onSceneMeasured: o.measured,
+      /** Still waiting for the step past its target (counted as missed). */
+      acknowledgeOverdue: a.overdue,
+      dispatchOverdue: d.overdue,
+      onSceneOverdue: o.overdue,
+      acknowledgeCompliancePct: a.pct,
+      dispatchCompliancePct: d.pct,
+      onSceneCompliancePct: o.pct,
     };
   }
 

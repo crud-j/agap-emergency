@@ -9,6 +9,7 @@ import { LocationsModule } from '../locations/locations.module';
 import { IncidentsModule } from '../incidents/incidents.module';
 import { MapsModule } from '../locations/maps/maps.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { SlaPoliciesModule } from '../sla-policies/sla-policies.module';
 import { BarangayCoordinationModule } from '../barangay-coordination/barangay-coordination.module';
 import { QUEUE_NAMES } from '@agap/shared';
 import { NotificationProcessor } from './processors/notification.processor';
@@ -34,6 +35,7 @@ import { IdentityVerificationCleanupProcessor } from './processors/identity-veri
     IncidentsModule,
     MapsModule,
     AnalyticsModule,
+    SlaPoliciesModule,
     BarangayCoordinationModule,
     AiAssistModule,
     IdentityVerificationModule,

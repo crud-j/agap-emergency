@@ -112,6 +112,14 @@ describe('role-access', () => {
     expect(canOpen(ROLE.SUPERVISOR, '/administration/risk-areas')).toBe(false);
   });
 
+  it('Response Targets (MOD-41): Supervisor and System Administrator only', () => {
+    expect(canOpen(ROLE.SUPERVISOR, '/operations/sla-targets')).toBe(true);
+    expect(canOpen(ROLE.SYS_ADMIN, '/operations/sla-targets')).toBe(true);
+    for (const role of [ROLE.DISPATCHER, ROLE.ORG_ADMIN, ROLE.PUBLISHER, ROLE.HOSPITAL_USER]) {
+      expect(canOpen(role, '/operations/sla-targets')).toBe(false);
+    }
+  });
+
   it('only the Supervisor opens CRITICAL advisory approvals (Phase 7)', () => {
     expect(canOpen(ROLE.SUPERVISOR, '/operations/approvals')).toBe(true);
     for (const role of [ROLE.PUBLISHER, ROLE.SYS_ADMIN, ROLE.DISPATCHER, ROLE.ORG_ADMIN]) {
@@ -134,7 +142,7 @@ describe('role-access', () => {
     expect(showsSidebar(ROLE.HOSPITAL_USER)).toBe(false);
     expect(showsSidebar(ROLE.DISPATCHER)).toBe(true);
     expect(labels(ROLE.SUPERVISOR)).toEqual([
-      'Dashboard', 'Escalations', 'Approvals', 'Live Dispatch',
+      'Dashboard', 'Escalations', 'Response Targets', 'Approvals', 'Live Dispatch',
       'Incident Queue', 'Triage',
       'Command / ICS', 'Multi-Agency', 'Surge Mode',
       'Analytics', 'Risk Map', 'Activity Log', 'Incident History',
@@ -144,7 +152,7 @@ describe('role-access', () => {
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
       'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Hospitals & Facilities',
       'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'ID Reviews', 'Risk Areas', 'Audit Log',
-      'Security Events', 'Integrations', 'Configuration',
+      'Security Events', 'Integrations', 'Configuration', 'Response Targets',
       'Account Security',
     ]);
   });
@@ -152,7 +160,7 @@ describe('role-access', () => {
   it("the Supervisor's sidebar shows oversight up front and folds the rest", () => {
     const groups = navForRole(ROLE.SUPERVISOR);
     const visible = groups.filter((g) => !g.collapsible).flatMap((g) => g.items.map((i) => i.label));
-    expect(visible).toEqual(['Dashboard', 'Escalations', 'Approvals', 'Live Dispatch', 'Account Security']);
+    expect(visible).toEqual(['Dashboard', 'Escalations', 'Response Targets', 'Approvals', 'Live Dispatch', 'Account Security']);
     expect(groups.filter((g) => g.collapsible).map((g) => g.label)).toEqual([
       'Take Over Dispatch', 'Major Incident', 'Reports', 'Resources',
     ]);

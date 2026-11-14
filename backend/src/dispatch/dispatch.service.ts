@@ -13,6 +13,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { IncidentStatusNotifier } from '../notifications/incident-status-notifier';
+import { SlaScheduleService } from '../sla-policies/sla-schedule.service';
 import { addAgencyParticipant } from '../incidents/agency-participants';
 import { ACTIVE_DISPATCH_STATUSES } from '../incidents/field-report-access';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
@@ -114,6 +115,7 @@ export class DispatchService {
     private readonly realtime: RealtimeService,
     @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue: Queue,
     @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
+    @Optional() private readonly slaSchedule?: SlaScheduleService,
   ) {}
 
   async findAll(filters: { incidentId?: string; status?: string }) {
@@ -769,6 +771,18 @@ export class DispatchService {
       oldValues: { priority: incident.priority },
       newValues: { priority: dto.priorityAssessment, ...(dto.notes ? { notes: dto.notes } : {}) },
     });
+
+    // MOD-41: the targets follow the priority. Queue checks at the new deadlines; a check
+    // queued for the old ones re-reads the policy when it runs. Never throws.
+    if (updated.priority !== incident.priority) {
+      void this.slaSchedule?.scheduleForIncident({
+        id: updated.id,
+        public_reference: incident.public_reference,
+        category: String(incident.category),
+        priority: String(updated.priority),
+        submitted_at: incident.submitted_at,
+      });
+    }
 
     // Priority is an incident-record change (not a lifecycle status change), so
     // broadcast incident.updated to refresh the ops queue chip live. Best-effort.
