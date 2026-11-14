@@ -39,9 +39,7 @@ import { REPORTER_PHOTO_INCLUDE, reporterPhotoAvailable } from '../common/utils/
 import { OpsAlertService } from '../emergency-alerts/ops-alert.service';
 import { addAgencyParticipant } from './agency-participants';
 import { FIRE_REPORT_INCLUDE } from './fire-report/fire-report.service';
-
-/** ICS situation report (incident_command_structures.situation_notes, MOD-36). */
-const ICS_SITUATION_NOTES_MAX = 4000;
+import { IncidentCommandService } from './incident-command/incident-command.service';
 
 export interface ReporterStanding {
   verifiedReports: number;
@@ -92,6 +90,7 @@ export class IncidentsService {
     @Optional() private readonly barangayNotify?: BarangayNotifyService,
     @Optional() private readonly statusNotifier?: IncidentStatusNotifier,
     @Optional() private readonly opsAlert?: OpsAlertService,
+    @Optional() private readonly command?: IncidentCommandService,
   ) {}
 
   async create(
@@ -678,6 +677,8 @@ export class IncidentsService {
     if (newStatus === IncidentStatus.RESOLVED || TERMINAL_INCIDENT_STATUSES.has(newStatus)) {
       // Frees the barangay short code for reuse.
       void this.barangayNotify?.closeNoticesForIncident(id);
+      // Incident Command ends with the incident; its history is kept (MOD-36).
+      void this.command?.endIfRunning(id, actorId, `Incident ${newStatus.toLowerCase()}`);
     }
 
     this.notifyReporterOfStatus(id, newStatus);
@@ -929,6 +930,7 @@ export class IncidentsService {
     });
 
     void this.barangayNotify?.closeNoticesForIncident(id);
+    void this.command?.endIfRunning(id, actorId, 'Incident marked false alert');
     this.notifyReporterOfStatus(id, IncidentStatus.FALSE_ALERT);
 
     return updated;
@@ -1025,6 +1027,7 @@ export class IncidentsService {
     }
 
     void this.barangayNotify?.closeNoticesForIncident(id);
+    void this.command?.endIfRunning(id, actorId, 'Incident marked duplicate');
     this.notifyReporterOfStatus(id, IncidentStatus.DUPLICATE);
 
     return updated;
@@ -1154,71 +1157,6 @@ export class IncidentsService {
     });
   }
 
-  // ---- ICS support (MOD-36) ----
-
-  async activateIcs(id: string, objectives: string[], userId: string) {
-    await this.findById(id);
-    const ics = await this.prisma.incident_command_structures.upsert({
-      where: { incident_id: id },
-      create: { incident_id: id, objectives: objectives ?? [] },
-      update: { objectives: objectives ?? [] },
-    });
-    void this.audit.log({
-      action: 'CREATE',
-      actorId: userId,
-      entityType: 'incident_command_structure',
-      entityId: ics.id,
-      moduleId: 'MOD-36',
-      incidentId: id,
-      newValues: { objectives },
-    });
-    this.realtime.incidentUpdated(id, { icsActivated: true, objectives });
-    return ics;
-  }
-
-  async getIcs(id: string) {
-    const ics = await this.prisma.incident_command_structures.findUnique({
-      where: { incident_id: id },
-      include: {
-        ics_assignments: {
-          include: { users: { select: { id: true, full_name: true, role: true } } },
-        },
-      },
-    });
-    if (!ics) throw new NotFoundException('No ICS activated for incident');
-    return ics;
-  }
-
-  async addIcsPosition(
-    id: string,
-    dto: { userId: string; position: string; organizationId?: string },
-    actorId?: string,
-  ) {
-    const ics = await this.prisma.incident_command_structures.findUnique({
-      where: { incident_id: id },
-    });
-    if (!ics) throw new NotFoundException('No ICS activated for incident');
-    const assignment = await this.prisma.ics_assignments.create({
-      data: {
-        ics_id: ics.id,
-        user_id: dto.userId,
-        position: dto.position as any,
-        organization_id: dto.organizationId ?? null,
-      },
-    });
-    void this.audit.log({
-      action: 'CREATE',
-      actorId: actorId ?? dto.userId,
-      entityType: 'ics_assignment',
-      entityId: assignment.id,
-      moduleId: 'MOD-36',
-      incidentId: id,
-      newValues: { position: dto.position, assigned_user: dto.userId },
-    });
-    this.realtime.incidentUpdated(id, { icsPositionAdded: dto.position, userId: dto.userId });
-    return assignment;
-  }
-
   // ---- Handover (MOD-44) ----
 
   async createHandover(
@@ -1255,87 +1193,6 @@ export class IncidentsService {
       where: { id: handover.id },
       data: { acknowledged_at: new Date() },
     });
-  }
-
-  // ---- ICS extended (MOD-36) ----
-
-  async updateIcs(
-    incidentId: string,
-    dto: { objectives?: string[]; situationNotes?: string | null },
-    userId: string,
-  ) {
-    const ics = await this.prisma.incident_command_structures.findUnique({
-      where: { incident_id: incidentId },
-    });
-    if (!ics) throw new NotFoundException('No ICS activated for incident');
-    if (dto.objectives !== undefined && !(Array.isArray(dto.objectives) && dto.objectives.every((o) => typeof o === 'string'))) {
-      throw new BadRequestException('objectives must be a list of strings');
-    }
-    if (dto.situationNotes !== undefined && dto.situationNotes !== null) {
-      if (typeof dto.situationNotes !== 'string') throw new BadRequestException('situationNotes must be text');
-      if (dto.situationNotes.length > ICS_SITUATION_NOTES_MAX) {
-        throw new BadRequestException(`situationNotes is limited to ${ICS_SITUATION_NOTES_MAX} characters`);
-      }
-    }
-    const notes = dto.situationNotes === undefined ? undefined : dto.situationNotes?.trim() || null;
-    const updated = await this.prisma.incident_command_structures.update({
-      where: { incident_id: incidentId },
-      data: {
-        ...(dto.objectives !== undefined && { objectives: dto.objectives }),
-        ...(notes !== undefined && { situation_notes: notes }),
-        updated_at: new Date(),
-      },
-    });
-    void this.audit.log({
-      action: 'UPDATE',
-      actorId: userId,
-      entityType: 'incident_command_structure',
-      entityId: ics.id,
-      moduleId: 'MOD-36',
-      incidentId,
-      newValues: dto as Record<string, unknown>,
-    });
-    this.realtime.incidentUpdated(incidentId, { icsUpdated: true });
-    return updated;
-  }
-
-  async deactivateIcs(incidentId: string, userId: string) {
-    const ics = await this.prisma.incident_command_structures.findUnique({
-      where: { incident_id: incidentId },
-    });
-    if (!ics) throw new NotFoundException('No ICS activated for incident');
-    await this.prisma.ics_assignments.deleteMany({ where: { ics_id: ics.id } });
-    await this.prisma.incident_command_structures.delete({ where: { incident_id: incidentId } });
-    void this.audit.log({
-      action: 'DELETE',
-      actorId: userId,
-      entityType: 'incident_command_structure',
-      entityId: ics.id,
-      moduleId: 'MOD-36',
-      incidentId,
-    });
-    this.realtime.incidentUpdated(incidentId, { icsDeactivated: true });
-    return { message: 'ICS deactivated' };
-  }
-
-  async removeIcsPosition(positionId: string, userId: string) {
-    const assignment = await this.prisma.ics_assignments.findUnique({
-      where: { id: positionId },
-      include: { incident_command_structures: { select: { incident_id: true } } },
-    });
-    if (!assignment) throw new NotFoundException('ICS position not found');
-    await this.prisma.ics_assignments.delete({ where: { id: positionId } });
-    const incidentId = assignment.incident_command_structures?.incident_id;
-    void this.audit.log({
-      action: 'DELETE',
-      actorId: userId,
-      entityType: 'ics_assignment',
-      entityId: positionId,
-      moduleId: 'MOD-36',
-      incidentId,
-      oldValues: { position: assignment.position },
-    });
-    return { message: 'ICS position removed' };
   }
 
   // ---- Assessment single read (MOD-37) ----

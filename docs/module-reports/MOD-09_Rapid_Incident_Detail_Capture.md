@@ -25,7 +25,7 @@ The "Tell responders what you see" screen of the emergency report. It asks a few
 Give dispatchers the details that change what they send (people trapped, fuel leaking, water rising) in seconds, without a long phone interview and without ever delaying the report.
 
 **Tasks Performed**
-1. Shows type-specific questions from one shared question list (road incident, fire, natural disaster).
+1. Shows type-specific questions from one shared question list (medical, road incident, fire, natural disaster).
 2. Shows follow-up questions only when they apply (water depth and trend only when flooding is ticked).
 3. Records a nearest landmark, the number of people hurt or in danger, and the reporter's own situation.
 4. Accepts up to 1,000 characters of notes.
@@ -83,7 +83,7 @@ Give dispatchers the details that change what they send (people trapped, fuel le
 | Step | Process Description | Step Type |
 |---|---|---|
 | 1 | After choosing the incident type, the reporter sees the Details screen with the note "Every question is optional. If it's urgent, send now." | User Action |
-| 2 | The app shows the questions for the type: vehicles involved, injuries, someone pinned, fuel or fire, which road and traffic (road incident); what is burning, people trapped, spreading, explosions, LPG or chemicals (fire); what is happening, people stranded, people needing extra help (natural disaster). | Processing |
+| 2 | The app shows the questions for the type: awake and responding, breathing normally, what the caller sees (chest pain, stroke signs, heavy bleeding, seizure, fall, labor, poisoning) and age group (medical); vehicles involved, injuries, someone pinned, fuel or fire, which road and traffic (road incident); what is burning, people trapped, spreading, explosions, LPG or chemicals (fire); what is happening, people stranded, people needing extra help (natural disaster). | Processing |
 | 3 | When the reporter ticks flooding, the app adds water depth and whether the water is still rising. | Processing |
 | 4 | The reporter optionally adds a landmark, the number of people hurt, "I'm safe" or "I need help too", and notes, then sends. | User Action |
 | 5 | The backend keeps only answers the shared list defines and drops anything else. | Validation |
@@ -109,5 +109,4 @@ Give dispatchers the details that change what they send (people trapped, fuel le
 3. Send a report with no answers at all; it is accepted.
 
 **Do not claim:**
-- Questions for a Medical incident type. The app offers only Road incident, Fire and Natural disaster.
 - Answers being required. None are.

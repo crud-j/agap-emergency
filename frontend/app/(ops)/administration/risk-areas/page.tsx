@@ -4,8 +4,11 @@ import { RiskAreasTab } from '@/components/admin/RiskAreasTab';
 
 export default function AdminRiskAreasPage(): JSX.Element {
   return (
-    <AdminPage title="Risk Areas" description="Flood, fire and other hazard areas shown on the Risk page (MOD-51)">
-      <RiskAreasTab />
+    <AdminPage
+      title="Risk Areas"
+      description="Read-only. Supervisors add, change and approve risk areas from the Risk Map (MOD-51)"
+    >
+      <RiskAreasTab canManage={false} />
     </AdminPage>
   );
 }

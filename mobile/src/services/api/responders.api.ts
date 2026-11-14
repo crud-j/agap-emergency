@@ -27,6 +27,11 @@ export interface AssignmentIncident {
   priority: string;
   /** The reporter agreed to show their profile photo and the incident is active. Never the patient. */
   reporter_has_photo: boolean;
+  /**
+   * Single assignment only, after accepting: the reporter said they themselves need help
+   * and shared their medical profile. Open it with getPatientMedicalProfile (each read is logged).
+   */
+  patient_medical_shared?: boolean;
   description: string | null;
   number_of_patients: number | null;
   incident_locations: AssignmentIncidentLocation | null;
@@ -62,6 +67,24 @@ export function getMyAssignments(token: string): Promise<Assignment[]> {
 
 export function getAssignment(id: string, token: string): Promise<Assignment> {
   return authFetch<Assignment>(`/v1/responders/assignments/${id}`, token);
+}
+
+/** The patient's self-reported medical profile, as the crew sees it (MOD-03 / MOD-32). */
+export interface PatientMedicalProfile {
+  source: 'REPORTER_SELF_REPORTED';
+  blood_type: string | null;
+  allergies: string[];
+  current_medications: string[];
+  medical_conditions: string[];
+  disabilities: string[];
+  responder_notes: string | null;
+  last_reviewed_at: string | null;
+  updated_at: string;
+}
+
+/** Each call is written to the patient's access log; call it only when the crew taps to view. */
+export function getPatientMedicalProfile(dispatchId: string, token: string): Promise<PatientMedicalProfile> {
+  return authFetch<PatientMedicalProfile>(`/v1/medical-profiles/assignments/${encodeURIComponent(dispatchId)}`, token);
 }
 
 export function acceptAssignment(id: string, token: string): Promise<void> {
@@ -126,6 +149,8 @@ export interface IcsStructureView {
   deactivated_at: string | null;
   objectives: string[];
   situation_notes: string | null;
+  /** Last change to the plan (goals or situation update). */
+  updated_at?: string;
   ics_assignments: IcsAssignmentView[];
 }
 

@@ -29,6 +29,7 @@ import { useTransportRoute } from '@/src/hooks/useTransportRoute';
 import { useTranslations } from '@/src/hooks/useAccessibility';
 import { useReporterPhotoUri } from '@/src/hooks/useReporterPhoto';
 import { ReporterPhotoCard } from '@/src/components/responder/reporter-photo-card';
+import { PatientMedicalCard } from '@/src/components/responder/patient-medical-card';
 import { NavigateButton } from '@/src/components/responder/navigate-button';
 import { OutboxBanner, TransportBanners } from '@/src/components/responder/transport-banners';
 import { useTransportOutbox } from '@/src/hooks/useTransportOutbox';
@@ -551,6 +552,11 @@ export default function AssignmentDetailScreen() {
             {/* The reporter's face, so the crew can find them on arrival (never labelled the patient). */}
             {reporterPhotoUri && <ReporterPhotoCard uri={reporterPhotoUri} />}
 
+            {/* The patient's own medical profile: accepted crew only, and only when the reporter said they need help. */}
+            {accepted && incident?.patient_medical_shared && dispatchId && token && (
+              <PatientMedicalCard dispatchId={dispatchId as string} token={token} />
+            )}
+
             {/* Sharing status */}
             <View style={styles.shareStrip}>
               <View
@@ -876,15 +882,16 @@ function positionLabel(pos: string): string {
     case 'LOGISTICS_SECTION_CHIEF':    return 'Logistics Chief';
     case 'PLANNING_SECTION_CHIEF':     return 'Planning Chief';
     case 'SAFETY_OFFICER':             return 'Safety Officer';
-    case 'PUBLIC_INFORMATION_OFFICER': return 'PIO';
+    case 'PUBLIC_INFORMATION_OFFICER': return 'Public Information Officer';
     case 'LIAISON_OFFICER':            return 'Liaison Officer';
     default:                           return titleCase(pos);
   }
 }
 
-/** MOD-36 — read-only ICS structure for the responding crew. Renders nothing
- *  until ICS is activated (the backend 404s, surfaced here as isError). */
+/** MOD-36 — the Incident Command plan, read-only, for the crew and anyone holding a
+ *  command job. Renders nothing when the incident was never under command (404). */
 function IcsViewerSection({ incidentId, token }: { incidentId: string; token: string }) {
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const { data: ics, isError } = useQuery({
     queryKey: ['incident-ics', incidentId],
     queryFn: () => getIncidentIcs(incidentId, token),
@@ -894,54 +901,89 @@ function IcsViewerSection({ incidentId, token }: { incidentId: string; token: st
   });
 
   if (isError || !ics) return null;
+  const ended = !!ics.deactivated_at;
   const active = ics.ics_assignments.filter((a) => !a.relieved_at);
+  const mine = active.filter((a) => a.users?.id === currentUserId);
+  const commander = active.find((a) => a.position === 'INCIDENT_COMMANDER');
 
   return (
     <View style={[styles.card, cmdStyles.section]}>
       <View style={cmdStyles.sectionHead}>
         <Ionicons name="git-network" size={16} color={colors.primary} style={{ marginRight: 8 }} />
         <Text style={cmdStyles.sectionTitle}>Incident Command</Text>
-        <View style={[cmdStyles.pill, { backgroundColor: ics.deactivated_at ? colors.surface : colors.primarySoft }]}>
-          <Text style={[cmdStyles.pillText, ics.deactivated_at && { color: colors.textSub }]}>
-            {ics.deactivated_at ? 'Deactivated' : 'Active'}
+        <View style={[cmdStyles.pill, { backgroundColor: ended ? colors.surface : colors.primarySoft }]}>
+          <Text style={[cmdStyles.pillText, ended && { color: colors.textSub }]}>
+            {ended ? 'Ended' : 'Running'}
           </Text>
         </View>
       </View>
 
-      {ics.objectives.length > 0 && (
-        <View style={{ marginTop: 8 }}>
-          <Text style={cmdStyles.subLabel}>Objectives</Text>
-          {ics.objectives.map((obj, i) => (
-            <View key={i} style={cmdStyles.bulletRow}>
-              <View style={cmdStyles.bullet} />
-              <Text style={cmdStyles.bodyText}>{obj}</Text>
+      {ended ? (
+        <Text style={[cmdStyles.mutedText, { marginTop: 8 }]}>
+          Command for this incident has ended. Follow normal dispatch instructions.
+        </Text>
+      ) : (
+        <>
+          {mine.length > 0 && (
+            <View style={cmdStyles.myJob} accessibilityRole="summary">
+              <Text style={cmdStyles.myJobLabel}>Your job</Text>
+              <Text style={cmdStyles.myJobName}>{mine.map((a) => positionLabel(a.position)).join(', ')}</Text>
             </View>
-          ))}
-        </View>
-      )}
+          )}
 
-      <View style={{ marginTop: 10 }}>
-        <Text style={cmdStyles.subLabel}>Command positions</Text>
-        {active.length === 0 ? (
-          <Text style={cmdStyles.mutedText}>No positions assigned.</Text>
-        ) : (
-          active.map((a) => (
-            <View key={a.id} style={cmdStyles.posRow}>
-              <Text style={[
-                cmdStyles.posName,
-                a.position === 'INCIDENT_COMMANDER' && { color: colors.danger },
-              ]}>
-                {positionLabel(a.position)}
-              </Text>
-              <Text style={cmdStyles.posUser}>
-                {a.users?.full_name ?? a.users?.id?.slice(0, 8) ?? '—'}
-              </Text>
+          <View style={{ marginTop: 10 }}>
+            <Text style={cmdStyles.subLabel}>In charge</Text>
+            <Text style={[cmdStyles.posName, !commander && { color: colors.danger }]}>
+              {commander ? (commander.users?.full_name ?? 'Incident Commander') : 'No commander named yet'}
+            </Text>
+          </View>
+
+          {ics.objectives.length > 0 && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={cmdStyles.subLabel}>Goals</Text>
+              {ics.objectives.map((obj, i) => (
+                <View key={i} style={cmdStyles.bulletRow}>
+                  <View style={cmdStyles.bullet} />
+                  <Text style={cmdStyles.bodyText}>{obj}</Text>
+                </View>
+              ))}
             </View>
-          ))
-        )}
-      </View>
+          )}
+
+          {!!ics.situation_notes && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={cmdStyles.subLabel}>
+                Latest update{ics.updated_at ? ` · ${formatClock(ics.updated_at)}` : ''}
+              </Text>
+              <Text style={cmdStyles.bodyText}>{ics.situation_notes}</Text>
+            </View>
+          )}
+
+          <View style={{ marginTop: 10 }}>
+            <Text style={cmdStyles.subLabel}>Who does what</Text>
+            {active.length === 0 ? (
+              <Text style={cmdStyles.mutedText}>No jobs given out yet.</Text>
+            ) : (
+              active.map((a) => (
+                <View key={a.id} style={cmdStyles.posRow}>
+                  <Text style={[cmdStyles.posName, a.position === 'INCIDENT_COMMANDER' && { color: colors.danger }]}>
+                    {positionLabel(a.position)}
+                  </Text>
+                  <Text style={cmdStyles.posUser}>
+                    {a.users?.id === currentUserId ? 'You' : (a.users?.full_name ?? '—')}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        </>
+      )}
     </View>
   );
+}
+
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
 }
 
 /** MOD-44 — handovers for this incident. The responder can acknowledge a
@@ -1065,6 +1107,12 @@ const cmdStyles = StyleSheet.create({
   posUser: { fontSize: 13, color: colors.textMid },
   pill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999, marginLeft: 8 },
   pillText: { fontSize: 11, fontWeight: '700', color: colors.primary },
+  myJob: {
+    marginTop: 10, padding: 12, borderRadius: radius.md,
+    backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: colors.primary,
+  },
+  myJobLabel: { fontSize: 11, fontWeight: '700', color: colors.primary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  myJobName: { marginTop: 2, fontSize: 16, fontWeight: '800', color: colors.text },
   handoverCard: {
     marginTop: 10, padding: 12, borderRadius: radius.md,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,

@@ -4,21 +4,6 @@ import type { RouteSnapshot, TransportDestinationView, TransportLeg } from '@aga
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface RiskDataPoint {
-  lat: number;
-  lng: number;
-  intensity: number;
-  category: string | null;
-  barangay: string | null;
-  incident_count: number;
-}
-
-export interface RiskIntelligenceResponse {
-  points: RiskDataPoint[];
-  generated_at: string;
-  period_days: number;
-}
-
 /**
  * One unit on an active mission (GET /locations/responders). The backend only
  * returns ACCEPTED dispatches whose incident is still active, one row per
@@ -81,12 +66,6 @@ export interface MapConfig {
 
 export function fetchMapConfig(): Promise<MapConfig> {
   return api.get('/locations/map-config', getToken());
-}
-
-export function fetchRiskData(periodDays = 30): Promise<RiskIntelligenceResponse> {
-  // Geo risk points for the map overlay (MOD-51). Lives under risk-intelligence —
-  // the former /analytics/risk path never existed on the backend (404).
-  return api.get(`/risk-intelligence/map-points?periodDays=${periodDays}`, getToken());
 }
 
 export function fetchLiveResponderPositions(): Promise<LiveResponderPosition[]> {

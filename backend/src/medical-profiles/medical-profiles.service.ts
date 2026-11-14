@@ -9,9 +9,10 @@ import { CreateMedicalProfileDto } from './dto/create-medical-profile.dto';
 import { UpdateMedicalProfileDto } from './dto/update-medical-profile.dto';
 import { MedicalCryptoService } from './medical-crypto.service';
 import { AuditService } from '../audit/audit.service';
-import { AuditAction, UserRole } from '@agap/shared';
+import { AuditAction } from '@agap/shared';
+import { MEDICAL_CONSENT_TYPE as CONSENT_TYPE, findSharedReporterProfile } from './patient-medical-access';
 
-const CONSENT_TYPE = 'MEDICAL_PROFILE';
+const NO_SHARED_PROFILE = 'No medical information has been shared for this patient.';
 
 @Injectable()
 export class MedicalProfilesService {
@@ -99,59 +100,69 @@ export class MedicalProfilesService {
     ]);
   }
 
-  async findForResponder(targetUserId: string, accessorId: string, accessorRole: string = UserRole.RESPONDER) {
-    let incidentReference: string | null = null;
-    if (accessorRole === UserRole.RESPONDER) {
-      const crewed = await this.prisma.dispatches.findFirst({
-        where: {
-          status: { in: ['PENDING', 'SENT', 'ACCEPTED'] },
-          dispatch_crew: { some: { user_id: accessorId } },
-          incidents: {
-            OR: [
-              { incident_reporters: { user_id: targetUserId } },
-              { incident_patients: { some: { user_id: targetUserId } } },
-            ],
-          },
-        },
-        select: { incidents: { select: { id: true, public_reference: true } } },
+  /**
+   * The patient's medical profile for the crew of one assignment (MOD-32 / MOD-48).
+   * Only a crew member on that dispatch, after accepting it, and only when the
+   * reporter said they themselves need help (see findSharedReporterProfile). Every
+   * read is written to the citizen's access log (with the incident) and the audit trail.
+   */
+  async findForAssignment(dispatchId: string, actor: { id: string; role: string }) {
+    const dispatch = await this.prisma.dispatches.findFirst({
+      where: { id: dispatchId, status: 'ACCEPTED', dispatch_crew: { some: { user_id: actor.id } } },
+      select: { incident_id: true, incidents: { select: { public_reference: true } } },
+    });
+    if (!dispatch) {
+      void this.audit?.log({
+        action: AuditAction.PERMISSION_DENIED,
+        actorId: actor.id,
+        actorRole: actor.role,
+        entityType: 'medical_profile',
+        entityId: dispatchId,
+        moduleId: 'MOD-48',
+        newValues: { reason: 'NOT_ACCEPTED_CREW_ON_DISPATCH', dispatchId },
       });
-      if (!crewed) {
-        void this.audit?.log({
-          action: AuditAction.PERMISSION_DENIED,
-          actorId: accessorId,
-          actorRole: accessorRole,
-          entityType: 'medical_profile',
-          entityId: targetUserId,
-          moduleId: 'MOD-48',
-          newValues: { reason: 'RESPONDER_NOT_CREWED_ON_PATIENT_INCIDENT', targetUserId },
-        });
-        throw new ForbiddenException('You are not crewed on an incident involving this patient');
-      }
-      incidentReference = crewed.incidents.public_reference;
-    }
-    const consent = await this.prisma.consent_records.findFirst({
-      where: { user_id: targetUserId, consent_type: CONSENT_TYPE, status: 'GRANTED' },
-      orderBy: { granted_at: 'desc' },
-    });
-    if (!consent) {
-      throw new ForbiddenException('Patient has not consented to medical data sharing');
+      throw new ForbiddenException("Only the crew of an accepted assignment can see the patient's medical information.");
     }
 
-    const profile = await this.prisma.medicalProfile.findUnique({
-      where: { user_id: targetUserId },
-    });
-    if (!profile) throw new NotFoundException('No medical profile found');
+    const shared = await findSharedReporterProfile(this.prisma, dispatch.incident_id);
+    if (!shared) throw new NotFoundException(NO_SHARED_PROFILE);
+    const profile = await this.prisma.medicalProfile.findUnique({ where: { id: shared.profileId } });
+    if (!profile) throw new NotFoundException(NO_SHARED_PROFILE);
 
-    // Least-privilege: log every sensitive-data access.
+    const reference = dispatch.incidents.public_reference;
+    // Least-privilege: every sensitive read is logged before the data leaves.
     await this.prisma.sensitive_data_access_log.create({
       data: {
-        accessor_id: accessorId,
+        accessor_id: actor.id,
         data_type: 'MEDICAL_PROFILE',
         entity_id: profile.id,
-        purpose: incidentReference ? `Responder incident access ${incidentReference}` : 'Responder incident access',
+        incident_id: dispatch.incident_id,
+        purpose: `Patient care by the assigned crew, ${reference}`,
       },
     });
+    void this.audit?.log({
+      action: AuditAction.READ,
+      actorId: actor.id,
+      actorRole: actor.role,
+      entityType: 'medical_profile',
+      entityId: profile.id,
+      moduleId: 'MOD-48',
+      incidentId: dispatch.incident_id,
+      newValues: { dispatchId },
+    });
 
-    return this.crypto.openProfile(profile);
+    const open = this.crypto.openProfile(profile);
+    // Medical fields only: no internal ids, no consent record.
+    return {
+      source: 'REPORTER_SELF_REPORTED' as const,
+      blood_type: open.blood_type,
+      allergies: open.allergies,
+      current_medications: open.current_medications,
+      medical_conditions: open.medical_conditions,
+      disabilities: open.disabilities,
+      responder_notes: open.responder_notes,
+      last_reviewed_at: open.last_reviewed_at,
+      updated_at: open.updated_at,
+    };
   }
 }

@@ -28,6 +28,7 @@ import { RescueTripService } from './rescue-trip/rescue-trip.service';
 import { IncidentHandoverService } from './incident-handover/incident-handover.service';
 import { TransportService } from './transport/transport.service';
 import { ReporterPhotoService } from './reporter-photo/reporter-photo.service';
+import { IncidentCommandService } from './incident-command/incident-command.service';
 import { StartTransportDto } from './transport/dto/start-transport.dto';
 import { RecordArrivalDto } from './transport/dto/record-arrival.dto';
 import { UpdateTransportDto } from './transport/dto/update-transport.dto';
@@ -46,8 +47,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole, IncidentStatus } from '@agap/shared';
 import { IncidentParticipantService, type IncidentParticipation } from '../realtime/incident-participant.service';
 import {
-  ActivateIcsDto, AddAgencyDto, AssignIcsPositionDto, AssignIncidentCommanderDto, FalseAlertDto,
-  IncidentFeedbackDto, MarkDuplicateDto, MergeIncidentDto, UpdateIcsDto,
+  AddAgencyDto, AssignIcsPositionDto, AssignIncidentCommanderDto, FalseAlertDto,
+  IncidentFeedbackDto, MarkDuplicateDto, MergeIncidentDto, StartIcsDto, UpdateIcsDto,
 } from './dto/incident-actions.dto';
 import { CreateHandoverDto } from './incident-handover/dto/create-handover.dto';
 import { CreateResolutionDto } from './dto/create-resolution.dto';
@@ -69,6 +70,7 @@ export class IncidentsController {
     private readonly fireReportService: FireReportService,
     private readonly rescueTripService: RescueTripService,
     private readonly reporterPhoto: ReporterPhotoService,
+    private readonly command: IncidentCommandService,
   ) {}
 
   /**
@@ -576,58 +578,61 @@ export class IncidentsController {
     return this.rescueTripService.submit(id, dto, { id: req.user.id, role: req.user.role });
   }
 
-  // ---- ICS ----
+  // ---- Incident Command (MOD-36) ----
 
   @Post(':id/ics/activate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Activate ICS for an incident' })
+  @ApiOperation({ summary: 'Start Incident Command, optionally naming the Incident Commander in the same step (MOD-36)' })
   async activateIcs(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: ActivateIcsDto,
-    @Request() req: any,
+    @Body() body: StartIcsDto,
+    @Request() req: AuthedRequest,
   ) {
-    return this.incidentsService.activateIcs(id, body?.objectives ?? [], req.user.id);
+    return this.command.start(
+      id,
+      { objectives: body?.objectives ?? [], ...(body?.commanderUserId && { commanderUserId: body.commanderUserId }) },
+      req.user.id,
+    );
   }
 
   @Get(':id/ics')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
+  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.RESPONDER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get ICS structure' })
-  async getIcs(@Param('id', ParseUUIDPipe) id: string) {
-    return this.incidentsService.getIcs(id);
+  @ApiOperation({ summary: 'Incident Command for an incident, running or ended, with the job history (MOD-36). Responders: crew on this incident or holders of a command job.' })
+  async getIcs(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    if (req.user.role === UserRole.RESPONDER && !(await this.command.holdsCurrentJob(req.user.id, id))) {
+      await this.requireParticipation(req, id, ['staff', 'crew']);
+    }
+    return this.command.get(id);
   }
 
   @Post(':id/ics/positions')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Assign an ICS position (MOD-36)' })
+  @ApiOperation({ summary: 'Give someone a command job. Incident Commander: use assign-ic (MOD-36)' })
   async addIcsPosition(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: AssignIcsPositionDto,
-    @Request() req: any,
+    @Request() req: AuthedRequest,
   ) {
-    return this.incidentsService.addIcsPosition(id, body, req.user.id);
+    return this.command.assign(id, body, req.user.id);
   }
 
   @Post(':id/ics/assign-ic')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Assign the Incident Commander (shortcut for INCIDENT_COMMANDER position) (MOD-36)' })
+  @ApiOperation({ summary: 'Name the Incident Commander, or hand command to someone else; the current one is relieved in the same step (MOD-36)' })
   async assignIncidentCommander(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: AssignIncidentCommanderDto,
-    @Request() req: any,
+    @Request() req: AuthedRequest,
   ) {
-    return this.incidentsService.addIcsPosition(
-      id,
-      { ...body, position: 'INCIDENT_COMMANDER' },
-      req.user.id,
-    );
+    return this.command.setCommander(id, body, req.user.id);
   }
 
   // ---- Handover (MOD-44) ----
@@ -745,40 +750,41 @@ export class IncidentsController {
     );
   }
 
-  // ---- ICS extended ----
+  // ---- Incident Command, continued (MOD-36) ----
 
   @Patch(':id/ics')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update ICS objectives and situation notes (MOD-36)' })
+  @ApiOperation({ summary: 'Update the command plan: goals and the latest situation update (MOD-36)' })
   async updateIcs(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateIcsDto,
-    @Request() req: any,
+    @Request() req: AuthedRequest,
   ) {
-    return this.incidentsService.updateIcs(id, body, req.user.id);
+    return this.command.updatePlan(id, body, req.user.id);
   }
 
   @Post(':id/ics/deactivate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Deactivate ICS for incident (MOD-36)' })
-  async deactivateIcs(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
-    return this.incidentsService.deactivateIcs(id, req.user.id);
+  @ApiOperation({ summary: 'End Incident Command. The plan and job history are kept (MOD-36)' })
+  async deactivateIcs(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthedRequest) {
+    return this.command.end(id, req.user.id);
   }
 
   @Delete(':id/ics/positions/:posId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPERVISOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Remove an ICS position assignment (MOD-36)' })
+  @ApiOperation({ summary: 'Relieve someone of a command job. The record is kept (MOD-36)' })
   async removeIcsPosition(
+    @Param('id', ParseUUIDPipe) id: string,
     @Param('posId', ParseUUIDPipe) posId: string,
-    @Request() req: any,
+    @Request() req: AuthedRequest,
   ) {
-    return this.incidentsService.removeIcsPosition(posId, req.user.id);
+    return this.command.relieve(id, posId, req.user.id);
   }
 
   // ---- Assessment single read ----

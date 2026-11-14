@@ -119,6 +119,5 @@ Keep the incident's status trustworthy for every other module (dispatch, trackin
 5. As a responder on a transport, try Mark Resolved before Arrived at hospital; it must be refused. Steps 7–8 come from the uncommitted Unit Field Flow work (Phase 1): commit it before printing.
 
 **Do not claim:**
-- Several units finishing one incident separately. The backend supports it (only the last active unit resolves the incident), but a second dispatch is refused once the incident is Dispatched (finding P3-F1), so no screen can reach it yet.
 - Automatic/timed lifecycle progression. Every transition is actor-triggered; nothing advances a status on its own.
 - Reopening a terminal incident. CLOSED, CANCELLED, FALSE_ALERT and DUPLICATE have no outgoing transitions.

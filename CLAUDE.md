@@ -239,7 +239,7 @@ All four Bocaue operational categories are in scope: Medical & Trauma, Flood Ope
 | MOD-19 | `mobile/src/services/offline` + `backend/src/offline-sync` |
 | MOD-20 | `backend/src/realtime/websocket.gateway.ts` |
 | MOD-21 | `frontend/app/operations/page.tsx` |
-| MOD-22 | `frontend/app/operations/map` |
+| MOD-22 | `frontend/app/(ops)/operations/dispatch` (Live Dispatch; `/operations/map` redirects there) |
 | MOD-23 | `frontend/app/operations/incidents` |
 | MOD-24 | `backend/src/dispatch/priority` |
 | MOD-25 | `backend/src/incidents/triage` + `incident-validation` |

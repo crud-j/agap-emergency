@@ -13,6 +13,8 @@ function build(opts: {
   resourceStatus?: string;
   crew?: string[];
   crewAlreadyOnIncident?: boolean;
+  /** Active dispatches already on the incident when the lock is taken (newest first). */
+  activeDispatches?: Array<{ dispatcher_id: string; call_sign: string; full_name: string }>;
 }) {
   const crew = opts.crew ?? ['resp-fire'];
   const dispatchRow = {
@@ -24,7 +26,15 @@ function build(opts: {
       (Array.isArray(sql) ? sql.join('') : String((sql as { sql?: string }).sql ?? '')).includes('FROM incidents')
         ? [{ status: opts.lockedStatus ?? opts.status }]
         : crew.map((user_id) => ({ user_id, status: 'AVAILABLE' }))),
-    dispatches: { create: jest.fn().mockResolvedValue(dispatchRow) },
+    dispatches: {
+      create: jest.fn().mockResolvedValue(dispatchRow),
+      findMany: jest.fn().mockResolvedValue((opts.activeDispatches ?? []).map((d) => ({
+        dispatcher_id: d.dispatcher_id,
+        created_at: new Date('2026-11-02T00:59:00Z'),
+        resources: { name: d.call_sign, call_sign: d.call_sign },
+        users: { full_name: d.full_name },
+      }))),
+    },
     dispatch_crew: {
       createMany: jest.fn().mockResolvedValue({ count: crew.length }),
       findFirst: jest.fn().mockResolvedValue(opts.crewAlreadyOnIncident ? { user_id: crew[0] } : null),
@@ -178,5 +188,70 @@ describe('DispatchService.create: first unit unchanged', () => {
     expect(b.notifier.notifyReporter).toHaveBeenCalledWith('inc-1', 'DISPATCHED');
     expect(b.queue.add).toHaveBeenCalledWith('dispatch-contact-notify', expect.anything());
     expect(b.audit.log.mock.calls[0][0].newValues).not.toHaveProperty('additionalUnit');
+  });
+});
+
+describe('DispatchService.create: someone else dispatched first (expectedActiveUnits)', () => {
+  const ANA = { dispatcher_id: 'dispatcher-ana', call_sign: 'RESCUE-1', full_name: 'Ana Cruz' };
+
+  it('refuses a first dispatch that lost the race instead of turning it into a silent second unit', async () => {
+    // Mark opened the form at ASSESSED (0 units); Ana's RESCUE-1 committed first.
+    const b = build({ status: 'ASSESSED', lockedStatus: 'DISPATCHED', activeDispatches: [ANA] });
+    const err = await b.service.create({ ...b.dto, expectedActiveUnits: 0 } as any, 'supervisor-mark').catch((e) => e);
+
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(err.getResponse()).toMatchObject({
+      code: 'INCIDENT_DISPATCH_CHANGED',
+      activeUnits: 1,
+      latestUnit: 'RESCUE-1',
+      latestDispatcher: 'Ana Cruz',
+      message: expect.stringContaining('Ana Cruz already dispatched RESCUE-1'),
+    });
+    expect(b.tx.dispatches.create).not.toHaveBeenCalled();
+    expect(b.tx.resources.update).not.toHaveBeenCalled();
+    expect(b.tx.incidentEvent.create).not.toHaveBeenCalled();
+    expect(b.realtime.incidentAssigned).not.toHaveBeenCalled();
+    expect(b.queue.add).not.toHaveBeenCalled();
+  });
+
+  it('counts only active units on this incident, after the lock', async () => {
+    const b = build({ status: 'ASSESSED', lockedStatus: 'DISPATCHED', activeDispatches: [ANA] });
+    await b.service.create({ ...b.dto, expectedActiveUnits: 0 } as any, 'supervisor-mark').catch(() => undefined);
+
+    expect(b.tx.dispatches.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { incident_id: 'inc-1', status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
+    }));
+    const lockOrder = b.tx.$queryRaw.mock.invocationCallOrder[0]!;
+    expect(b.tx.dispatches.findMany.mock.invocationCallOrder[0]!).toBeGreaterThan(lockOrder);
+  });
+
+  it('accepts a deliberate "Dispatch another unit" made with the unit already seen', async () => {
+    const b = build({ status: 'ON_SCENE', activeDispatches: [ANA] });
+    await expect(b.service.create({ ...b.dto, expectedActiveUnits: 1 } as any, 'dispatcher-ana')).resolves.toMatchObject({ id: 'disp-2' });
+    expect(b.tx.dispatches.create).toHaveBeenCalled();
+  });
+
+  it('accepts the next unit of the same multi-unit send (expected grows with each unit sent)', async () => {
+    const own = { dispatcher_id: 'dispatcher-ana', call_sign: 'AMB-1', full_name: 'Ana Cruz' };
+    const b = build({ status: 'DISPATCHED', activeDispatches: [own] });
+    await expect(b.service.create({ ...b.dto, expectedActiveUnits: 1 } as any, 'dispatcher-ana')).resolves.toBeDefined();
+  });
+
+  it('accepts when a unit was recalled meanwhile (fewer units than seen never doubles up)', async () => {
+    const b = build({ status: 'DISPATCH_PENDING', activeDispatches: [] });
+    await expect(b.service.create({ ...b.dto, expectedActiveUnits: 1 } as any, 'dispatcher-ana')).resolves.toBeDefined();
+  });
+
+  it('names "You" when the unseen unit came from the same account (two browser tabs)', async () => {
+    const b = build({ status: 'DISPATCHED', activeDispatches: [ANA] });
+    const err = await b.service.create({ ...b.dto, expectedActiveUnits: 0 } as any, 'dispatcher-ana').catch((e) => e);
+    expect(err.getResponse()).toMatchObject({ code: 'INCIDENT_DISPATCH_CHANGED', latestDispatcher: 'You' });
+    expect(err.getResponse().message).toMatch(/^You already dispatched RESCUE-1/);
+  });
+
+  it('skips the check when the client does not send expectedActiveUnits (older clients)', async () => {
+    const b = build({ status: 'ASSESSED', lockedStatus: 'DISPATCHED', activeDispatches: [ANA] });
+    await expect(b.service.create(b.dto as any, 'dispatcher-1')).resolves.toBeDefined();
+    expect(b.tx.dispatches.findMany).not.toHaveBeenCalled();
   });
 });

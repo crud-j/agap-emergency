@@ -11,7 +11,9 @@ import {
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { MedicalProfilesService } from './medical-profiles.service';
 import { CreateMedicalProfileDto } from './dto/create-medical-profile.dto';
@@ -57,14 +59,20 @@ export class MedicalProfilesController {
     await this.medicalProfilesService.deleteMine(req.user.id);
   }
 
-  @Get(':userId')
+  @Get('assignments/:dispatchId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.RESPONDER, UserRole.DISPATCHER, UserRole.SUPERVISOR)
-  @ApiOperation({ summary: 'Access a patient medical profile (audited)' })
-  async findForResponder(
-    @Param('userId', ParseUUIDPipe) userId: string,
+  @Roles(UserRole.RESPONDER)
+  @ApiOperation({
+    summary: "The patient's medical profile for this assignment's crew, after accepting it. "
+      + 'Only when the reporter said they themselves need help and consented; every read is logged (MOD-32/48)',
+  })
+  async findForAssignment(
+    @Param('dispatchId', ParseUUIDPipe) dispatchId: string,
     @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.medicalProfilesService.findForResponder(userId, req.user.id, req.user.role);
+    // Consent can be withdrawn at any time: never kept in a cache.
+    res.setHeader('Cache-Control', 'private, no-store');
+    return this.medicalProfilesService.findForAssignment(dispatchId, { id: req.user.id, role: req.user.role });
   }
 }

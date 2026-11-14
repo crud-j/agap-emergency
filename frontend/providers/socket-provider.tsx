@@ -184,11 +184,17 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
     );
 
     // ─── incident.updated ────────────────────────────────────────────────────
-    const offUpdated = onIncidentEvent<{ incidentId: string; priority?: string }>(
+    const offUpdated = onIncidentEvent<{ incidentId: string; priority?: string; ics?: boolean }>(
       'incident.updated',
-      ({ incidentId, priority }) => {
+      ({ incidentId, priority, ics }) => {
         startTransition(() => {
           qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+          // Incident Command changed (MOD-36): another Supervisor sees it at once.
+          if (ics) {
+            qc.invalidateQueries({ queryKey: ['incident-ics', incidentId] });
+            qc.invalidateQueries({ queryKey: ['oversight', 'major-incidents'] });
+            qc.invalidateQueries({ queryKey: ['audit-incident', incidentId] });
+          }
           qc.invalidateQueries({ queryKey: ['dispatch-incident', incidentId] });
           // A triage priority change: the queue and dashboard chips flip now, and the
           // Critical count is recounted by the server.

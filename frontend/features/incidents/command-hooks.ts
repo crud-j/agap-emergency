@@ -8,6 +8,7 @@ import {
   deactivateIcs,
   addIcsPosition,
   removeIcsPosition,
+  setIncidentCommander,
   fetchAgencies,
   fetchAvailableAgencies,
   addAgency,
@@ -20,84 +21,65 @@ import {
   approveMutualAid,
   denyMutualAid,
   type MutualAidListParams,
+  type IcsStructure,
 } from './command';
 
 // ─── ICS hooks (MOD-36) ───────────────────────────────────────────────────────
 
+/** 404 = this incident has never been under command; that is normal, so no retry. */
 export function useIncidentIcs(incidentId: string | null) {
   return useQuery({
     queryKey: ['incident-ics', incidentId],
     queryFn: () => fetchIcs(incidentId!),
     enabled: !!incidentId,
     staleTime: 30_000,
-    retry: false, // 404 when no ICS is normal — don't retry
+    retry: false,
+  });
+}
+
+/** Every ICS write returns the whole command: cache it and refresh the lists. */
+function useIcsMutation<V extends { incidentId: string }>(fn: (v: V) => Promise<IcsStructure>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (data, { incidentId }) => {
+      qc.setQueryData(['incident-ics', incidentId], data);
+      qc.invalidateQueries({ queryKey: ['oversight', 'major-incidents'] });
+      qc.invalidateQueries({ queryKey: ['audit-incident', incidentId] });
+    },
   });
 }
 
 export function useActivateIcs() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ incidentId, objectives }: { incidentId: string; objectives: string[] }) =>
-      activateIcs(incidentId, objectives),
-    onSuccess: (_data, { incidentId }) => {
-      qc.invalidateQueries({ queryKey: ['incident-ics', incidentId] });
-      qc.invalidateQueries({ queryKey: ['incident', incidentId] });
-    },
-  });
+  return useIcsMutation(({ incidentId, objectives, commanderUserId }: {
+    incidentId: string; objectives: string[]; commanderUserId?: string;
+  }) => activateIcs(incidentId, objectives, commanderUserId));
 }
 
 export function useUpdateIcs() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      incidentId,
-      data,
-    }: {
-      incidentId: string;
-      data: { objectives?: string[]; situationNotes?: string };
-    }) => updateIcs(incidentId, data),
-    onSuccess: (_data, { incidentId }) => {
-      qc.invalidateQueries({ queryKey: ['incident-ics', incidentId] });
-    },
-  });
+  return useIcsMutation(({ incidentId, data }: {
+    incidentId: string; data: { objectives?: string[]; situationNotes?: string | null };
+  }) => updateIcs(incidentId, data));
 }
 
 export function useDeactivateIcs() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (incidentId: string) => deactivateIcs(incidentId),
-    onSuccess: (_data, incidentId) => {
-      qc.invalidateQueries({ queryKey: ['incident-ics', incidentId] });
-      qc.invalidateQueries({ queryKey: ['incident', incidentId] });
-    },
-  });
+  return useIcsMutation(({ incidentId }: { incidentId: string }) => deactivateIcs(incidentId));
 }
 
 export function useAddIcsPosition() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      incidentId,
-      data,
-    }: {
-      incidentId: string;
-      data: { userId: string; position: string; organizationId?: string };
-    }) => addIcsPosition(incidentId, data),
-    onSuccess: (_data, { incidentId }) => {
-      qc.invalidateQueries({ queryKey: ['incident-ics', incidentId] });
-    },
-  });
+  return useIcsMutation(({ incidentId, data }: {
+    incidentId: string; data: { userId: string; position: string; organizationId?: string };
+  }) => addIcsPosition(incidentId, data));
+}
+
+export function useSetIncidentCommander() {
+  return useIcsMutation(({ incidentId, userId }: { incidentId: string; userId: string }) =>
+    setIncidentCommander(incidentId, userId));
 }
 
 export function useRemoveIcsPosition() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ incidentId, posId }: { incidentId: string; posId: string }) =>
-      removeIcsPosition(incidentId, posId),
-    onSuccess: (_data, { incidentId }) => {
-      qc.invalidateQueries({ queryKey: ['incident-ics', incidentId] });
-    },
-  });
+  return useIcsMutation(({ incidentId, posId }: { incidentId: string; posId: string }) =>
+    removeIcsPosition(incidentId, posId));
 }
 
 // ─── Agency hooks (MOD-34) ────────────────────────────────────────────────────

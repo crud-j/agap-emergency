@@ -147,10 +147,10 @@ export function OpsDashboard(): JSX.Element {
           />
         </KpiLink>
         <KpiLink
-          href="/operations/dispatch"
+          href="/operations/dispatch?tab=responding"
           label="Units in the field"
           value={summary ? summary.enRoute + summary.onScene : undefined}
-          destination="dispatch"
+          destination="Live Dispatch"
         >
           <StatCard
             label="In the field"
@@ -212,10 +212,10 @@ export function OpsDashboard(): JSX.Element {
               loading={loading}
             />
             <ActionRow
-              href="/operations/map"
+              href="/operations/dispatch?tab=responding"
               icon={<MapIcon size={16} aria-hidden="true" />}
-              title="Open live map"
-              detail="Incidents, units and routes"
+              title="Track units in the field"
+              detail="Units, routes and hospitals on the map"
             />
             <ActionRow
               href="/operations/incidents"

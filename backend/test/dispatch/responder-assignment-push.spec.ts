@@ -34,16 +34,19 @@ function build(opts: { crew?: string[]; queueFails?: boolean } = {}) {
   };
   const tx = {
     dispatches: { create: jest.fn().mockResolvedValue(dispatchRow), update: jest.fn().mockResolvedValue({ ...dispatchRow, status: 'CANCELLED' }) },
-    // The incident row lock taken by create() (Phase 5), then the crew availability rows.
-    $queryRaw: jest.fn(async (sql: TemplateStringsArray | { sql?: string }) =>
-      (Array.isArray(sql) ? sql.join('') : String((sql as { sql?: string }).sql ?? '')).includes('FROM incidents')
-        ? [{ status: INCIDENT.status }]
-        : crew.map((user_id) => ({ user_id, status: 'AVAILABLE' }))),
+    // The incident row lock taken by create() (Phase 5) and cancel(), cancel()'s
+    // dispatch row lock, then the crew availability rows.
+    $queryRaw: jest.fn(async (sql: TemplateStringsArray | { sql?: string }) => {
+      const text = Array.isArray(sql) ? sql.join('') : String((sql as { sql?: string }).sql ?? '');
+      if (text.includes('FROM incidents')) return [{ status: INCIDENT.status }];
+      if (text.includes('FROM dispatches')) return [{ status: 'PENDING', on_scene_at: null }];
+      return crew.map((user_id) => ({ user_id, status: 'AVAILABLE' }));
+    }),
     dispatch_crew: {
       createMany: jest.fn().mockResolvedValue({ count: crew.length }),
       create: jest.fn().mockResolvedValue({ dispatch_id: 'disp-1', user_id: 'resp-c' }),
     },
-    resources: { update: jest.fn() },
+    resources: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     incident: { update: jest.fn() },
     incidentEvent: { create: jest.fn() },
   };
@@ -166,7 +169,7 @@ describe('DispatchService responder pushes', () => {
 
   it('cancel: pushes "Assignment cancelled" to every crew member', async () => {
     const b = build();
-    await b.service.cancel('disp-1', 'dispatcher-1');
+    await b.service.cancel('disp-1', 'dispatcher-1', { reason: 'WRONG_UNIT' });
     const pushes = b.pushes();
     expect(pushes).toHaveLength(2);
     for (const [, data, opts] of pushes) {
@@ -178,6 +181,6 @@ describe('DispatchService responder pushes', () => {
 
   it('cancel: a queue failure still returns the cancelled dispatch', async () => {
     const b = build({ queueFails: true });
-    await expect(b.service.cancel('disp-1', 'dispatcher-1')).resolves.toMatchObject({ id: 'disp-1', status: 'CANCELLED' });
+    await expect(b.service.cancel('disp-1', 'dispatcher-1', { reason: 'WRONG_UNIT' })).resolves.toMatchObject({ id: 'disp-1', status: 'CANCELLED' });
   });
 });

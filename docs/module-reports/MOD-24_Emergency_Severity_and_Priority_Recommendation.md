@@ -19,7 +19,7 @@ Content for the [Individual Module Report template](../M_5.pdf). Each section be
 ## 2. Module Description
 
 **Description**
-Gives the dispatcher a starting-point priority for each incident — the intake category's default, raised to CRITICAL only when specific caller answers from MOD-09 intake (pinned in a vehicle, fuel leak/fire, people trapped, fireworks/explosions, fire spreading, stranded people in worsening flood conditions, live wires in flood water) warrant it. Shown alongside the dispatcher's own assessment at triage; it never substitutes for that decision.
+Gives the dispatcher a starting-point priority for each incident — the intake category's default, raised to CRITICAL only when specific caller answers from MOD-09 intake (patient not responding or not breathing normally, chest pain, stroke signs, heavy bleeding, pinned in a vehicle, fuel leak/fire, people trapped, fireworks/explosions, fire spreading, stranded people in worsening flood conditions, live wires in flood water) warrant it. Shown alongside the dispatcher's own assessment at triage; it never substitutes for that decision.
 
 **Purpose**
 Make sure a genuinely severe report isn't missed in a busy queue, and show the dispatcher why the system is suggesting a given priority, while leaving the final call entirely to the dispatcher. Priority sets the **order** of response, never **whether** an incident gets one: every incident, at every priority, appears in the live queue and is covered by the same MOD-41 SLA escalation timers. For this reason the screens show the levels as **Immediate / Urgent / Prompt / Standard** (stored as CRITICAL / HIGH / MEDIUM / LOW), so no label reads as "can be ignored".
@@ -38,7 +38,7 @@ Make sure a genuinely severe report isn't missed in a busy queue, and show the d
 | No. | AS-IS Input (Existing Process) | TO-BE Input (Proposed Automated Process) |
 |---|---|---|
 | 1 | Caller's verbally described situation, judged for urgency on the spot by the operator | The incident's category |
-| 2 | | The caller's MOD-09 intake answers (e.g. pinned, fuel/fire, trapped, burning target, explosions, spreading, stranded, water level/trend, vulnerable people, live wires) |
+| 2 | | The caller's MOD-09 intake answers (e.g. conscious, breathing, medical condition, pinned, fuel/fire, trapped, burning target, explosions, spreading, stranded, water level/trend, vulnerable people, live wires) |
 | 3 | | The incident's currently stored priority |
 | 4 | | The dispatcher's confirmed or overridden priority and optional note, set in the incident drawer |
 

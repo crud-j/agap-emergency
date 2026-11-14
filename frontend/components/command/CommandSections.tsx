@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import Link from 'next/link';
 import {
-  ArrowRight, BedDouble, Building2, FileText, HeartPulse, Network, PencilLine, ScrollText, Siren, Target, Tent, Zap,
+  AlertTriangle, ArrowRight, BedDouble, Building2, FileText, HeartPulse, Network, PencilLine, ScrollText, Siren, Target, Tent, Zap,
 } from 'lucide-react';
+import { useNow } from '@/lib/use-now';
 import { Badge, Button, PriorityBadge, Skeleton, StatusChip } from '@/components/ui';
+import { notify } from '@/components/ui/alerts';
 import { DashboardPanel } from '@/components/dashboard/DashboardPanel';
 import { useMajorIncidents } from '@/features/oversight/hooks';
 import { useIncidentAgencies, useUpdateIcs } from '@/features/incidents/command-hooks';
@@ -16,7 +18,7 @@ import { receivingStatusBadge } from '@/features/hospitals/location';
 import { timeAgo, titleCase } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 
-/** Mirrors ICS_SITUATION_NOTES_MAX in incidents.service.ts. */
+/** Mirrors ICS_SITUATION_NOTES_MAX in incident-command.service.ts. */
 const SITUATION_NOTES_MAX = 4000;
 const COMMAND_LOG_SHOWN = 25;
 
@@ -78,12 +80,22 @@ export function MajorIncidentsPanel({ selectedId, onSelect }: {
 // ─── Objectives and situation report ─────────────────────────────────────────
 
 /** Stored in incident_command_structures.objectives / situation_notes via PATCH /incidents/:id/ics. */
-export function CommandBriefPanel({ incidentId, ics, editable }: {
+/** A situation update older than this gets a "post a fresh one" nudge while command runs. */
+const STALE_UPDATE_MS = 30 * 60_000;
+
+export function CommandBriefPanel({ incidentId, ics, editable, editRequest = 0, id }: {
   incidentId: string;
   ics: IcsStructure;
+  /** The signed-in Supervisor may change the plan, and command is running. */
   editable: boolean;
+  /** Bump to open the editor from outside (the setup checklist). */
+  editRequest?: number;
+  id?: string;
 }): JSX.Element {
   const update = useUpdateIcs();
+  const now = useNow(60_000);
+  const running = !ics.deactivated_at;
+  const stale = now - new Date(ics.updated_at).getTime() > STALE_UPDATE_MS;
   const [editing, setEditing] = useState(false);
   const [objectivesText, setObjectivesText] = useState('');
   const [notes, setNotes] = useState('');
@@ -96,6 +108,11 @@ export function CommandBriefPanel({ incidentId, ics, editable }: {
     setEditing(true);
   }
 
+  useEffect(() => {
+    if (editRequest > 0 && editable) startEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest]);
+
   async function save() {
     try {
       setError(null);
@@ -107,6 +124,7 @@ export function CommandBriefPanel({ incidentId, ics, editable }: {
         },
       });
       setEditing(false);
+      void notify('success', { title: 'Plan saved', text: 'Crews on this incident see it in the AGAP app.' });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Saving failed.');
     }
@@ -116,25 +134,37 @@ export function CommandBriefPanel({ incidentId, ics, editable }: {
 
   return (
     <DashboardPanel
-      title={<><Target size={14} className="text-agap-textSub" /> Objectives and situation report</>}
+      className="scroll-mt-4"
+      title={<span id={id} className="flex items-center gap-1.5"><Target size={14} className="text-agap-textSub" /> The plan</span>}
       action={editable && !editing ? (
         <Button variant="secondary" size="sm" onClick={startEdit}><PencilLine size={13} /> Edit</Button>
       ) : undefined}
     >
+      <p className="-mt-1 mb-3 text-[12px] text-agap-textSub">
+        {running
+          ? 'Everyone works from this. Ambulance crews and job holders see it in the AGAP responder app.'
+          : 'The plan as it stood when command ended.'}
+      </p>
       {editing ? (
         <div className="space-y-3">
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-agap-textSub">Objectives (one per line)</span>
-            <textarea rows={4} value={objectivesText} onChange={(e) => setObjectivesText(e.target.value)} className={cn(fieldClass, 'resize-y')} />
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-agap-textSub">Goals (one per line)</span>
+            <textarea
+              rows={4}
+              value={objectivesText}
+              onChange={(e) => setObjectivesText(e.target.value)}
+              placeholder={'Get everyone out of the building.\nKeep the fire from spreading to houses.\nSend the injured to hospitals with free beds.'}
+              className={cn(fieldClass, 'resize-y')}
+            />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-agap-textSub">Situation report</span>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-agap-textSub">Latest situation update</span>
             <textarea
               rows={5}
               maxLength={SITUATION_NOTES_MAX}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Current conditions, hazards, resources on scene, next update time."
+              placeholder="What is happening now? Dangers, who is on scene, what is still needed, when the next update is."
               className={cn(fieldClass, 'resize-y')}
             />
             <span className="mt-1 block text-right text-[11px] text-agap-textSub">{notes.length} / {SITUATION_NOTES_MAX}</span>
@@ -148,9 +178,9 @@ export function CommandBriefPanel({ incidentId, ics, editable }: {
       ) : (
         <div className="space-y-4">
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-agap-textSub">Objectives</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-agap-textSub">Goals</p>
             {ics.objectives.length === 0 ? (
-              <p className="text-sm text-agap-textSub">No objectives recorded.</p>
+              <p className="text-sm text-agap-textSub">No goals written yet.</p>
             ) : (
               <ul className="space-y-1">
                 {ics.objectives.map((obj, i) => (
@@ -163,13 +193,22 @@ export function CommandBriefPanel({ incidentId, ics, editable }: {
             )}
           </div>
           <div>
-            <p className="mb-1.5 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-agap-textSub">
-              <FileText size={12} /> Situation report
+            <p className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs font-semibold uppercase tracking-wide text-agap-textSub">
+              <FileText size={12} /> Latest situation update
+              {ics.situation_notes && (
+                <span className="font-normal normal-case tracking-normal">· plan updated {fmtTs(ics.updated_at)}</span>
+              )}
             </p>
             {ics.situation_notes ? (
               <p className="whitespace-pre-wrap text-sm text-agap-textMain">{ics.situation_notes}</p>
             ) : (
-              <p className="text-sm text-agap-textSub">No situation report yet.</p>
+              <p className="text-sm text-agap-textSub">No update written yet.</p>
+            )}
+            {running && ics.situation_notes && stale && (
+              <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-agap-amberSoft px-3 py-2 text-[12px] text-agap-textMid">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-agap-amber" />
+                This update is {timeAgo(ics.updated_at).replace(' ago', '')} old. Teams may be working from old information. Post a fresh one.
+              </p>
             )}
           </div>
         </div>
@@ -186,10 +225,10 @@ export function AgencyCoordinationPanel({ incidentId }: { incidentId: string }):
   const current = (data ?? []).filter((a) => !a.left_at);
   return (
     <DashboardPanel
-      title={<><Network size={14} className="text-agap-textSub" /> Agency coordination</>}
+      title={<><Network size={14} className="text-agap-textSub" /> Other agencies helping</>}
       action={(
         <Link href="/operations/multi-agency" className="flex items-center gap-1 text-[12px] font-semibold text-agap-green hover:text-agap-green/80">
-          Multi-Agency <ArrowRight size={13} />
+          Add an agency <ArrowRight size={13} />
         </Link>
       )}
     >
@@ -198,7 +237,7 @@ export function AgencyCoordinationPanel({ incidentId }: { incidentId: string }):
       ) : isLoading ? (
         <Skeleton className="h-16 w-full" />
       ) : current.length === 0 ? (
-        <p className="text-sm text-agap-textSub">No other agency has joined this incident.</p>
+        <p className="text-sm text-agap-textSub">Only MDRRMO so far. Add BFP, PNP or others on the Multi-Agency page when they join.</p>
       ) : (
         <ul className="divide-y divide-agap-track/15">
           {current.map((a) => (
@@ -251,7 +290,7 @@ export function HospitalEvacuationPanel(): JSX.Element {
 
   return (
     <DashboardPanel
-      title={<><HeartPulse size={14} className="text-agap-textSub" /> Hospitals and evacuation centers</>}
+      title={<><HeartPulse size={14} className="text-agap-textSub" /> Where to send people: hospitals and evacuation centers</>}
       bodyClassName="space-y-4"
     >
       {isError ? (
@@ -284,7 +323,7 @@ export function HospitalEvacuationPanel(): JSX.Element {
 export function CommandLogPanel({ incidentId }: { incidentId: string }): JSX.Element {
   const { data, isLoading, isError } = useIncidentAudit(incidentId);
   return (
-    <DashboardPanel title={<><ScrollText size={14} className="text-agap-textSub" /> Command log</>}>
+    <DashboardPanel title={<><ScrollText size={14} className="text-agap-textSub" /> What has happened (recorded automatically)</>}>
       {isError ? (
         <p className="text-sm text-agap-danger">Couldn&apos;t load the command log.</p>
       ) : isLoading || !data ? (

@@ -1,8 +1,6 @@
-import { BadRequestException } from '@nestjs/common';
 import { UserRole } from '@agap/shared';
 import { OversightController } from '../../src/oversight/oversight.controller';
 import { OVERSIGHT_CONFIG, OversightService, minutesFrom } from '../../src/oversight/oversight.service';
-import { IncidentsService } from '../../src/incidents/incidents.service';
 import { ROLES_KEY } from '../../src/common/decorators/roles.decorator';
 
 // ─── Minimal mocks ────────────────────────────────────────────────────────────
@@ -251,51 +249,5 @@ describe('OversightService.getActivity()', () => {
       fromStatus: 'ACKNOWLEDGED', toStatus: 'DISPATCHED',
       actor: { id: 'u-2', name: 'Ben', role: 'DISPATCHER' }, occurredAt: minutesAgo(2).toISOString(),
     }]);
-  });
-});
-
-// ─── ICS situation notes are stored ───────────────────────────────────────────
-
-describe('IncidentsService.updateIcs() situation notes', () => {
-  function makeIncidents() {
-    const prisma = {
-      incident_command_structures: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'ics-1', incident_id: 'inc-1' }),
-        update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'ics-1', ...data })),
-      },
-    };
-    const audit = { log: jest.fn().mockResolvedValue(undefined) };
-    const realtime = { incidentUpdated: jest.fn() };
-    const service = new IncidentsService(
-      prisma as any, {} as any, {} as any, {} as any, realtime as any, audit as any, {} as any,
-    );
-    return { service, prisma, audit };
-  }
-
-  it('writes situation_notes (trimmed) and audits the change', async () => {
-    const { service, prisma, audit } = makeIncidents();
-    await service.updateIcs('inc-1', { situationNotes: '  Fire contained at Bundukan warehouse.  ' }, 'sup-1');
-
-    const data = prisma.incident_command_structures.update.mock.calls[0][0].data;
-    expect(data.situation_notes).toBe('Fire contained at Bundukan warehouse.');
-    expect(data).not.toHaveProperty('objectives');
-    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'sup-1', moduleId: 'MOD-36' }));
-  });
-
-  it('clears notes with an empty string and leaves them alone when omitted', async () => {
-    const { service, prisma } = makeIncidents();
-    await service.updateIcs('inc-1', { situationNotes: '   ' }, 'sup-1');
-    await service.updateIcs('inc-1', { objectives: ['Contain fire'] }, 'sup-1');
-
-    expect(prisma.incident_command_structures.update.mock.calls[0][0].data.situation_notes).toBeNull();
-    expect(prisma.incident_command_structures.update.mock.calls[1][0].data).not.toHaveProperty('situation_notes');
-  });
-
-  it('rejects oversized notes and non-text objectives', async () => {
-    const { service } = makeIncidents();
-    await expect(service.updateIcs('inc-1', { situationNotes: 'x'.repeat(4001) }, 'sup-1'))
-      .rejects.toBeInstanceOf(BadRequestException);
-    await expect(service.updateIcs('inc-1', { objectives: [42 as unknown as string] }, 'sup-1'))
-      .rejects.toBeInstanceOf(BadRequestException);
   });
 });

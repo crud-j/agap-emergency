@@ -47,7 +47,7 @@ Let a dispatcher or supervisor see the whole municipal picture at a glance inste
 
 | No. | AS-IS Technologies / Resources | TO-BE Technologies, Tools, and Components |
 |---|---|---|
-| 1 | Printed municipal maps and staff familiarity with the area | Operations Center Map screen, `frontend/app/(ops)/operations/map` |
+| 1 | Printed municipal maps and staff familiarity with the area | Operations Center Live Dispatch screen (map and dispatch on one screen), `frontend/app/(ops)/operations/dispatch` |
 | 2 | Memory of where units typically are | MapLibre rendering incident markers (colored by priority) and live responder markers |
 | 3 | No live position tracking of units | Flood-prone-barangay advisory circles (Lolomboy, Bunlo, Igulot, Bambang) drawn over the base map |
 | 4 | — | Socket.io subscription to the same real-time event engine as MOD-20, so new incidents/positions appear without a page refresh |
@@ -75,13 +75,13 @@ Let a dispatcher or supervisor see the whole municipal picture at a glance inste
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | A dispatcher or supervisor opens Operations → Map. | User Action |
+| 1 | A dispatcher or supervisor opens Live Dispatch. The map fills the screen, beside a panel listing incidents Waiting for a unit and those Responding. | User Action |
 | 2 | MapLibre renders every active incident as a marker colored by priority, and every responding unit's current position. | Processing |
 | 3 | Flood-prone barangays (Lolomboy, Bunlo, Igulot, Bambang) are drawn as advisory circles on the same base map. | Processing |
-| 4 | Each tracked unit's route is drawn by leg — solid to the scene, dashed to the destination hospital — with a "to scene" or "to hospital" label on the unit. "Show hospitals" adds every hospital with a verified location. | Processing |
+| 4 | Each tracked unit's route is drawn by leg — solid to the scene, dashed to the destination hospital — with a "to scene" or "to hospital" label on the unit. Layers → "All verified hospitals" adds every hospital with a verified location; the legend sits in the same menu. | Processing |
 | 5 | A new incident submitted from the phone is pushed through the same real-time event engine used across operations and appears on the map with no refresh. | Notification |
 | 6 | A responder's marker moves as their phone reports a new position. | Notification |
-| 7 | Clicking any marker opens that incident's drawer directly. | User Action |
+| 7 | Clicking any marker opens that incident in the panel (dispatch form, or unit tracking once a unit is out); other incidents' routes fade while it is open. | User Action |
 
 **TO-BE Outputs**
 
@@ -89,15 +89,18 @@ Let a dispatcher or supervisor see the whole municipal picture at a glance inste
 |---|---|
 | 1 | A live map showing every active incident (by priority color) and every responding unit's current position |
 | 2 | A flood-prone-barangay overlay, unit routes by leg, and an optional hospital layer over the base map |
-| 3 | An incident drawer opened directly from a clicked marker |
+| 3 | The incident opened in the dispatch panel directly from a clicked marker |
 
 ---
 
 ## Owner notes (not part of the report)
 
 **Test before signing:**
-1. Open Operations → Map and point out the color-coded incident markers and the flood-prone-barangay overlay.
-2. Submit a new SOS from the phone and confirm the marker appears on the map live, with no refresh, then click it to open the incident drawer directly from the map.
+1. Open Live Dispatch and point out the color-coded incident markers and the flood-prone-barangay overlay (Layers shows the legend).
+2. Submit a new SOS from the phone and confirm the marker appears on the map live, with no refresh, then click it to open the incident in the panel directly from the map.
+3. Open the old URL `/operations/map` and confirm it lands on Live Dispatch, Responding list.
+
+**Merged with Dispatch (2026-11-14):** the separate Live Map page is gone. Its unit routes, destination hospitals, hospital layer, legend and "outside Bocaue" notice are on Live Dispatch; its "Units on mission" list is the Responding list, grouped by incident.
 
 **Do not claim:**
 - Authoritative GIS accuracy, 3D mapping, or guaranteed instant tile loading.

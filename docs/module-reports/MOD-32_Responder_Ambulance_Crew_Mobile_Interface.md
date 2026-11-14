@@ -126,8 +126,9 @@ Give each crew what it needs in the field without a separate radio call for each
 5. Tap Request help → Ambulance and confirm the dispatcher's bell shows "Crew help requested".
 6. Toggle availability and confirm the web Fleet board updates without a refresh.
 
+**Crew access (2026-11-13):** the crew of an *accepted* assignment sees a **Patient medical info** card on the responder app, only when the reporter marked "Also needs help" on their own report (reporter ≠ patient: a bystander's profile is never shown for the person they reported), has consented, and the incident is still active. The card stays closed until the crew taps **Show**; each read is written to the citizen's access log with the incident, and to the audit trail (`GET /v1/medical-profiles/assignments/:dispatchId`). Dispatchers and supervisors no longer read profiles; the old `GET /medical-profiles/:userId` route is removed. Test: as a citizen with a medical profile, report with "Also needs help"; dispatch and accept on the responder phone; tap Show; then check the citizen's Privacy → access log names the incident. Report again as "Safe, reporting for others" and check the card does not appear.
+
 **Do not claim:**
-- Two units on the same incident (for example a fire truck and an ambulance), or the "Finish (your unit)" button. The backend and app support it, but a second dispatch is refused once the incident is Dispatched (finding P3-F1), so no screen can reach it yet. A fire-truck notice "casualties, no ambulance" therefore always applies.
-- A responder screen showing the patient's medical profile. The backend route now allows only the crew on that patient's incident, but no screen calls it.
+- Medical information for a patient other than the reporter, or before the crew accepts. The Patient medical info card appears only after accepting, when the reporter said they need help.
 - A complete electronic patient-care record system, or integration with vehicle telemetry or clinical devices.
 - BFP's own alarm terms as final: the fire report's alarm levels are provisional until BFP Bocaue confirms them (decision D1).

@@ -78,6 +78,8 @@ export interface MapRoute {
   leg: TransportLeg;
   /** Stale or older than 120 s: drawn faded. */
   lastKnown?: boolean;
+  /** Belongs to another incident while one is selected: drawn faint, for context only. */
+  dimmed?: boolean;
 }
 
 /** Camera tracking of the selected incident's accepted unit (dispatch dashboard). */
@@ -254,7 +256,7 @@ export function IncidentMapView({
             type: 'FeatureCollection' as const,
             features: allRoutes.map((r) => ({
               type: 'Feature' as const,
-              properties: { id: r.id, leg: r.leg, lastKnown: !!r.lastKnown },
+              properties: { id: r.id, leg: r.leg, lastKnown: !!r.lastKnown, dimmed: !!r.dimmed },
               geometry: { type: 'LineString' as const, coordinates: r.geometry },
             })),
           }
@@ -425,7 +427,7 @@ export function IncidentMapView({
               paint={{
                 'line-color': LEG_COLORS.TO_SCENE,
                 'line-width': 5,
-                'line-opacity': ['case', ['get', 'lastKnown'], 0.4, 0.85],
+                'line-opacity': ['case', ['get', 'dimmed'], 0.2, ['get', 'lastKnown'], 0.4, 0.85],
               }}
             />
             <Layer
@@ -437,7 +439,7 @@ export function IncidentMapView({
                 'line-color': LEG_COLORS.TO_FACILITY,
                 'line-width': 5,
                 'line-dasharray': [2, 1.5],
-                'line-opacity': ['case', ['get', 'lastKnown'], 0.4, 0.9],
+                'line-opacity': ['case', ['get', 'dimmed'], 0.2, ['get', 'lastKnown'], 0.4, 0.9],
               }}
             />
           </Source>

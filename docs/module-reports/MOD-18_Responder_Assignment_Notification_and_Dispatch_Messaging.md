@@ -115,6 +115,5 @@ Give the dispatcher and the reporter a record-backed assignment message instead 
 
 **Do not claim:**
 - A live Socket.io update on the Missions screen. The phone learns of an assignment from the push or the 15-second poll, not from a socket event.
-- Dispatching a second unit to an incident that is already Dispatched. The backend accepts a dispatch only while the incident is Acknowledged, Assessed or Dispatch Pending (finding P3-F1 in the unit field-flow plan). Add crew to the existing dispatch instead.
-- Cancelling, reassigning or changing the crew of a dispatch, or the "Assignment cancelled" push. The backend supports them, but no screen offers them (see MOD-31's implementation gap).
+- Changing the crew of a dispatch after it is sent. The backend supports it, but no screen offers it. (Recalling or replacing a unit, with the "Assignment cancelled" push to its crew, is on the Dispatch screen.)
 - Messaging to a unit or crew outside AGAP (no external-agency radio/CAD bridge) — assignment always targets an AGAP-registered resource and user.

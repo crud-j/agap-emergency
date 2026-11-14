@@ -20,6 +20,8 @@ import { openTransportWhere } from '../incidents/transport/open-transport';
 import { TransportAudienceService } from '../incidents/transport/transport-audience.service';
 import { notifyRescueStillWaiting } from '../incidents/rescue-trip/rescue-trip.service';
 import { assertResponderFixInArea } from '../locations/responder-fix-area';
+import { lockIncidentAndDispatch, releaseDispatchedUnit } from '../dispatch/dispatch-release';
+import { findSharedReporterProfile } from '../medical-profiles/patient-medical-access';
 import { UpdateAssignmentStatusDto } from './dto/update-assignment-status.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { TrackLocationDto } from '../locations/dto/track-location.dto';
@@ -41,6 +43,18 @@ import { REPORTER_PHOTO_INCLUDE, reporterPhotoAvailable, type ReporterPhotoSourc
  * to show their photo and the incident is active) and strips the account fields it was
  * derived from. The image itself comes from GET /incidents/:id/reporter-photo.
  */
+/** Accept and decline answer an assignment that is still waiting for the crew. */
+function assertAssignmentOpen(status: string): void {
+  if (status === 'PENDING' || status === 'SENT') return;
+  throw new ConflictException({
+    code: 'ASSIGNMENT_CLOSED',
+    message:
+      status === 'CANCELLED'
+        ? 'This assignment was cancelled by the Operations Center.'
+        : 'This assignment was already answered.',
+  });
+}
+
 function withReporterPhoto<
   T extends {
     incidents: { status: string; incident_reporters: (ReporterPhotoSource & { is_guest: boolean }) | null };
@@ -297,14 +311,23 @@ export class RespondersService {
     if (!dispatch) throw new NotFoundException('Assignment not found');
     const isCrew = dispatch.dispatch_crew.some((c) => c.user_id === userId);
     if (!isCrew) throw new ForbiddenException('You are not assigned to this dispatch');
-    const activeDispatchCount = await this.prisma.dispatches.count({
-      where: { incident_id: dispatch.incident_id, status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
-    });
-    return { ...withReporterPhoto(dispatch), active_dispatch_count: activeDispatchCount };
+    const [activeDispatchCount, sharedProfile] = await Promise.all([
+      this.prisma.dispatches.count({
+        where: { incident_id: dispatch.incident_id, status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
+      }),
+      // Existence only (no medical field is read): the crew taps to open it, and that read is logged.
+      dispatch.status === 'ACCEPTED' ? findSharedReporterProfile(this.prisma, dispatch.incident_id) : null,
+    ]);
+    const view = withReporterPhoto(dispatch);
+    return {
+      ...view,
+      incidents: { ...view.incidents, patient_medical_shared: !!sharedProfile },
+      active_dispatch_count: activeDispatchCount,
+    };
   }
 
   async acceptAssignment(dispatchId: string, userId: string) {
-    const accepted = await this.prisma.$transaction(async (tx) => {
+    const { row: accepted, changed } = await this.prisma.$transaction(async (tx) => {
       // Lock availability row first, then dispatch row — consistent order to avoid deadlocks.
       const locked = await tx.$queryRaw<AvailabilityRow[]>`
         SELECT user_id, status::text AS status
@@ -338,12 +361,17 @@ export class RespondersService {
       if (!dispatch) throw new NotFoundException('Assignment not found');
       const isCrew = dispatch.dispatch_crew.some((c) => c.user_id === userId);
       if (!isCrew) throw new ForbiddenException('You are not assigned to this dispatch');
+      // A second tap (or a retry) on an accepted assignment is a no-op.
+      if (dispatch.status === 'ACCEPTED') return { row: dispatch, changed: false };
+      assertAssignmentOpen(dispatch.status);
 
-      return tx.dispatches.update({
+      const row = await tx.dispatches.update({
         where: { id: dispatchId },
         data: { status: 'ACCEPTED', accepted_at: new Date() },
       });
+      return { row, changed: true };
     });
+    if (!changed) return accepted;
     void this.audit.log({
       action: AuditAction.STATUS_CHANGE,
       actorId: userId,
@@ -359,12 +387,53 @@ export class RespondersService {
     return accepted;
   }
 
+  /**
+   * The crew turns the assignment down. Their unit is freed, and an incident left
+   * with no unit (none on scene yet) goes back to DISPATCH_PENDING so it returns
+   * to the dispatch queue instead of waiting on a unit that isn't coming.
+   */
   async declineAssignment(dispatchId: string, userId: string, reason: string) {
-    await this.assertCrewMember(dispatchId, userId);
-    const declined = await this.prisma.dispatches.update({
-      where: { id: dispatchId },
-      data: { status: 'REJECTED', rejected_at: new Date(), rejected_reason: reason },
+    const dispatch = await this.assertCrewMember(dispatchId, userId);
+    const { declined, release, incidentStatus } = await this.prisma.$transaction(async (tx) => {
+      const locked = await lockIncidentAndDispatch(tx, dispatch.incident_id, dispatchId);
+      assertAssignmentOpen(locked.dispatchStatus);
+      const declined = await tx.dispatches.update({
+        where: { id: dispatchId },
+        data: { status: 'REJECTED', rejected_at: new Date(), rejected_reason: reason },
+      });
+      const release = await releaseDispatchedUnit(tx, dispatch, locked.incidentStatus);
+      await tx.incidentEvent.create({
+        data: {
+          incident_id: dispatch.incident_id,
+          from_status: locked.incidentStatus as any,
+          to_status: (release.revertedTo ?? locked.incidentStatus) as any,
+          triggered_by_id: userId,
+          triggered_by_role: 'RESPONDER',
+          notes: `Unit ${dispatch.resources?.call_sign ?? dispatch.resources?.name ?? 'unknown'} declined the assignment`,
+        },
+      });
+      return { declined, release, incidentStatus: locked.incidentStatus };
     });
+    try {
+      if (release.revertedTo) {
+        this.realtime.notifyIncidentStatusChanged({
+          incidentId: dispatch.incident_id,
+          previousStatus: incidentStatus as unknown as IncidentStatus,
+          newStatus: release.revertedTo,
+          changedAt: new Date().toISOString(),
+          changedBy: userId,
+        });
+      }
+      if (release.released) {
+        this.realtime.resourceStatusChanged({
+          resourceId: dispatch.resource_id,
+          newStatus: 'AVAILABLE',
+          changedAt: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`Realtime emit failed for declined dispatch ${dispatchId}: ${String(err)}`);
+    }
     void this.audit.log({
       action: AuditAction.STATUS_CHANGE,
       actorId: userId,
@@ -506,6 +575,14 @@ export class RespondersService {
         },
         select: { id: true, resource_id: true, status: true },
       });
+      // Re-checked under the incident lock: the Operations Center may have recalled
+      // or replaced this unit after the ACCEPTED check above (DispatchService.cancel).
+      if (!active.some((d) => d.id === dispatchId)) {
+        throw new ConflictException({
+          code: 'ASSIGNMENT_CLOSED',
+          message: 'This assignment was cancelled by the Operations Center.',
+        });
+      }
       const callerIsLastActive = active.length === 1 && active[0]!.id === dispatchId;
 
       if (resolving && callerIsLastActive) {

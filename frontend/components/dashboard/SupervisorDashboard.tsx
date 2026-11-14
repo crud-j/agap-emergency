@@ -409,8 +409,8 @@ export function SupervisorDashboard(): JSX.Element {
           title="Live map"
           bodyClassName="p-0"
           action={(
-            <Link href="/operations/map" className="flex items-center gap-1 text-[12px] font-semibold text-agap-green hover:text-agap-green/80">
-              Full map <ArrowRight size={13} />
+            <Link href="/operations/dispatch?tab=responding" className="flex items-center gap-1 text-[12px] font-semibold text-agap-green hover:text-agap-green/80">
+              Open Live Dispatch <ArrowRight size={13} />
             </Link>
           )}
         >

@@ -7,11 +7,17 @@ export interface IcsAssignment {
   id: string;
   position: string;
   assigned_at: string;
+  /** Set when the person was relieved or command ended. Rows are never deleted. */
   relieved_at: string | null;
   users: { id: string; full_name: string | null; role: string } | null;
   organization_id: string | null;
+  organizations?: { id: string; name: string; short_name: string | null } | null;
 }
 
+/**
+ * One Incident Command per incident. deactivated_at set = command has ended; the
+ * plan and every job ever held stay readable. Starting again clears deactivated_at.
+ */
 export interface IcsStructure {
   id: string;
   incident_id: string;
@@ -19,6 +25,8 @@ export interface IcsStructure {
   deactivated_at: string | null;
   objectives: string[];
   situation_notes: string | null;
+  /** Last change to the plan (goals or situation update). */
+  updated_at: string;
   ics_assignments: IcsAssignment[];
 }
 
@@ -116,13 +124,23 @@ export function fetchIcs(incidentId: string): Promise<IcsStructure> {
 export function activateIcs(
   incidentId: string,
   objectives: string[],
+  commanderUserId?: string,
 ): Promise<IcsStructure> {
-  return api.post(`/incidents/${incidentId}/ics/activate`, { objectives }, getToken());
+  return api.post(
+    `/incidents/${incidentId}/ics/activate`,
+    { objectives, ...(commanderUserId ? { commanderUserId } : {}) },
+    getToken(),
+  );
+}
+
+/** Name the Incident Commander, or hand command over (the current one is relieved). */
+export function setIncidentCommander(incidentId: string, userId: string): Promise<IcsStructure> {
+  return api.post(`/incidents/${incidentId}/ics/assign-ic`, { userId }, getToken());
 }
 
 export function updateIcs(
   incidentId: string,
-  data: { objectives?: string[]; situationNotes?: string },
+  data: { objectives?: string[]; situationNotes?: string | null },
 ): Promise<IcsStructure> {
   return api.patch(`/incidents/${incidentId}/ics`, data, getToken());
 }
@@ -134,14 +152,14 @@ export function deactivateIcs(incidentId: string): Promise<IcsStructure> {
 export function addIcsPosition(
   incidentId: string,
   data: { userId: string; position: string; organizationId?: string },
-): Promise<IcsAssignment> {
+): Promise<IcsStructure> {
   return api.post(`/incidents/${incidentId}/ics/positions`, data, getToken());
 }
 
 export function removeIcsPosition(
   incidentId: string,
   posId: string,
-): Promise<void> {
+): Promise<IcsStructure> {
   return api.delete(`/incidents/${incidentId}/ics/positions/${posId}`, getToken());
 }
 

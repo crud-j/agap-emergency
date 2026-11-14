@@ -129,7 +129,7 @@ Each sidebar page, its address, and who sees it. A role that doesn't see a page 
 | Requests | `/resources/requests` | Org Administrator, System Administrator (view only) |
 | Hospitals & Facilities | `/hospitals` | Hospital User (as the Hospital Portal), Dispatcher, Supervisor, Org Administrator, System Administrator |
 | Analytics | `/analytics` | Supervisor |
-| Risk Map | `/operations/risk` | Supervisor |
+| Risk Map (tabs: Map · Risk areas) | `/operations/risk` | Dispatcher (Map only), Supervisor (Map and Risk areas) |
 | Announcements | `/announcements` (compose: `/announcements/compose`) | Announcements Publisher |
 | Publication History | `/announcements/history` | Announcements Publisher |
 | Approvals | `/operations/approvals` | Supervisor |
@@ -138,7 +138,7 @@ Each sidebar page, its address, and who sees it. A role that doesn't see a page 
 | Roles & Permissions | `/administration/permissions` | System Administrator |
 | Barangay Directory | `/administration/barangays` | Org Administrator, System Administrator |
 | ID Reviews | `/administration/id-reviews` | MDRRMO Org Administrator, System Administrator |
-| Risk Areas | `/administration/risk-areas` | System Administrator |
+| Risk Areas | `/administration/risk-areas` | System Administrator (view only) |
 | Security Events | `/administration/security` | System Administrator |
 | Integrations | `/administration/integrations` | System Administrator |
 | Configuration | `/administration/config` | System Administrator |
@@ -750,13 +750,14 @@ How it works: 30 s after an incident is sent, the system checks whether it moved
 
 #### MOD-50 Emergency Intelligence and Risk Visualization · 🖥️
 **Purpose:** Shows where incidents cluster and which areas are high-risk, so the LGU can prepare. A nightly job proposes new hotspots for approval.
-**Sign in as:** supervisor (Risk Map) · admin (Risk Areas)
-**Go to:** 🖥️ **Risk Map** (`/operations/risk`, supervisor) · **Risk Areas** (`/administration/risk-areas`, admin)
+**Sign in as:** supervisor · dispatcher1 · admin
+**Go to:** 🖥️ **Risk Map** (`/operations/risk`) · **Risk Areas** (`/administration/risk-areas`, admin)
 
-1. 🖥️ (supervisor) **Risk Map**: clustered points over recent incidents.
-2. 🖥️ (admin) **Risk Areas**: create one with an invalid barangay name. It is refused. Create, update and delete a valid one. Each appears in **Audit Log** with before and after values.
-3. 🖥️ The admin can open Risk Areas but **not** the Risk Map (Supervisor only).
-4. *(Optional)* After the 2:30 AM nightly job, approve a hotspot proposal. A risk area and an audit row appear.
+1. 🖥️ (supervisor) **Risk Map → Map**: a fire or road accident is a dot at its street, not the barangay centre; tap it for type, count, barangay and date. A flood report shades its barangay blue with the count. Switch 30 days / 90 days / 12 months and hide a type from the legend.
+2. 🖥️ (supervisor) **Risk Map → Risk areas**: create one with an invalid barangay name. It is refused. Create, update and delete a valid one. Each appears in **Activity Log** with before and after values, and the area shows on the Map tab.
+3. 🖥️ (dispatcher1) **Risk Map** opens with the map only: no Risk areas tab.
+4. 🖥️ (admin) **Risk Areas** lists the areas with no Add, Edit or Remove buttons and no proposals. The admin **cannot** open the Risk Map.
+5. *(Optional)* After the 2:30 AM nightly job, the supervisor's Risk areas tab shows a count; approve a proposal. A risk area with its outline and an audit row appear.
 
 #### MOD-51 Disaster Surge and Mass-Casualty Mode · 🖥️ + 📱
 **Purpose:** Switches operations into disaster mode during typhoons or explosions: recommends activation from river levels, runs a triage board, and broadcasts to crews.
@@ -843,7 +844,7 @@ Tick each one as it passes. ✅ pass · ⚠️ partial · ❌ fail.
 | 47 | Privacy & Consent | 📱 🗄️ | citizen | Profile → Privacy & Data | Arjar Mauricio | |
 | 48 | System Administration | 🖥️ 🔌 | admin | Users & Accounts | Aldrin Dela Cruz | |
 | 49 | Analytics | 🖥️ | supervisor | Analytics | Arjar Mauricio | |
-| 50 | Risk Visualization | 🖥️ | supervisor, admin | Risk Map · Risk Areas | Jhobert S. Dionisio | |
+| 50 | Risk Visualization | 🖥️ | supervisor, dispatcher1, admin | Risk Map · Risk Areas | Jhobert S. Dionisio | |
 | 51 | Surge / Mass-Casualty | 🖥️ 📱 | supervisor, responder1 | Surge Mode | Christian Joaquin | |
 | 52 | Announcements | 🖥️ 📱 | publisher, citizen | Announcements | Vanessa Danielle T. Jose | |
 

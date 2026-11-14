@@ -20,7 +20,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@agap/shared';
-import { AddCrewDto, ReassignDispatchDto } from './dto/dispatch-actions.dto';
+import { AddCrewDto, CancelDispatchDto, ReassignDispatchDto } from './dto/dispatch-actions.dto';
 
 @ApiTags('dispatch')
 @ApiBearerAuth()
@@ -106,21 +106,25 @@ export class DispatchController {
   @Patch(':id/cancel')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
-  @ApiOperation({ summary: 'Cancel a dispatch' })
-  async cancel(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
-    return this.dispatchService.cancel(id, req.user.id);
+  @ApiOperation({ summary: 'Recall a unit that has not reached the scene (reason required)' })
+  async cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: CancelDispatchDto,
+    @Request() req: any,
+  ) {
+    return this.dispatchService.cancel(id, req.user.id, body);
   }
 
   @Patch(':id/reassign')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
-  @ApiOperation({ summary: 'Reassign a dispatch to another resource' })
+  @ApiOperation({ summary: 'Replace a unit that has not reached the scene with another unit (reason required)' })
   async reassign(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: ReassignDispatchDto,
     @Request() req: any,
   ) {
-    return this.dispatchService.reassign(id, body.resourceId, req.user.id);
+    return this.dispatchService.reassign(id, body, req.user.id);
   }
 
   @Post(':id/crew')

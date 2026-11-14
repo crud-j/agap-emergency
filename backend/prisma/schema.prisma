@@ -848,6 +848,9 @@ model first_aid_guides {
   incident_details incident_details[]
 }
 
+/// MOD-36: who holds which Incident Command job. Relieving someone stamps relieved_at; rows are never deleted.
+/// Current holders only (migration SQL): uq_ics_assignments_current_holder (ics_id, position, user_id) and
+/// uq_ics_assignments_one_commander (one INCIDENT_COMMANDER per command).
 model ics_assignments {
   id                          String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   ics_id                      String                      @db.Uuid
@@ -860,7 +863,7 @@ model ics_assignments {
   organizations               Organization?               @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users                       User                        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@unique([ics_id, position, user_id])
+  @@index([ics_id])
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -880,6 +883,8 @@ model incident_agency_participants {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// MOD-36: Incident Command for one incident. Ending command stamps deactivated_at (the row and its
+/// assignments are kept as history); starting it again clears deactivated_at.
 model incident_command_structures {
   id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   incident_id     String            @unique @db.Uuid
@@ -1372,7 +1377,7 @@ model risk_areas {
 }
 
 /// MOD-51 (AUTOMATION_NEEDS_PLAN Phase 2, C7): a recurring incident cluster proposed as a
-/// risk area. Only a System Administrator's approval creates the risk area. The partial
+/// risk area. Only a Supervisor's approval creates the risk area. The partial
 /// unique index (one PENDING per type and barangay) lives in the SQL migration.
 model risk_area_proposals {
   id             String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid

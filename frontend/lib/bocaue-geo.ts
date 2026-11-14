@@ -14,6 +14,11 @@ export const BOCAUE_MAX_ZOOM = 18;
 // Administrative boundary GeoJSON served from frontend/public/assets/geojson.
 export const BOCAUE_BOUNDARY_SOURCE = '/assets/geojson/bocaue.geojson';
 
+// Advisory overlays on the Risk Map, drawn with each barangay's real boundary.
+// Names are spelled as in geo_regions (the OSM barangay boundaries).
+export const FLOOD_PRONE_BARANGAYS: readonly string[] = ['Lolomboy', 'Bunlo', 'Igulot', 'Bambang'];
+export const FIREWORKS_BARANGAYS: readonly string[] = ['Bundukan', 'Biñang 1st'];
+
 // Four rectangles dim the map outside the locked Bocaue viewport while leaving
 // the operational area clear. The viewport itself remains constrained by
 // BOCAUE_BOUNDS.

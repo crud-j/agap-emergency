@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize, IsArray, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateIf,
-} from 'class-validator';
+} from 'class-validator';
 import { IsRecordId } from '../../common/decorators/is-record-id.decorator';
 
 const NOTE_MAX = 500;
@@ -77,6 +77,14 @@ export class ActivateIcsDto {
   @IsString({ each: true })
   @MaxLength(300, { each: true })
   objectives?: string[];
+}
+
+/** MOD-36 — start command: goals, and the person in charge (recommended, so command never starts leaderless). */
+export class StartIcsDto extends ActivateIcsDto {
+  @ApiPropertyOptional({ description: 'User to name as Incident Commander in the same step' })
+  @IsOptional()
+  @IsRecordId()
+  commanderUserId?: string;
 }
 
 export class UpdateIcsDto extends ActivateIcsDto {

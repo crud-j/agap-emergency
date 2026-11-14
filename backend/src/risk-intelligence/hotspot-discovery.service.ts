@@ -17,7 +17,7 @@ export const HOTSPOT_BUFFER_M = 30;
 
 /**
  * MOD-51 (AUTOMATION_NEEDS_PLAN Phase 2, C7): each night, proposes recurring incident
- * clusters as risk areas. Only a System Administrator's approval creates the risk area
+ * clusters as risk areas. Only a Supervisor's approval creates the risk area
  * (through RiskIntelligenceService.createArea, so its barangay check and audit apply).
  */
 @Injectable()
@@ -33,7 +33,7 @@ export class HotspotDiscoveryService {
   /**
    * One run: cluster the last 90 days per category, drop clusters an active risk area of
    * the same type already covers (by boundary, or by barangay for areas without one) or
-   * that an administrator dismissed in that window, and upsert one PENDING proposal per
+   * that a Supervisor dismissed in that window, and upsert one PENDING proposal per
    * type and barangay. Returns how many proposals were written; a failure logs and returns 0.
    */
   @Cron('30 2 * * *')
@@ -115,7 +115,7 @@ export class HotspotDiscoveryService {
 
   /**
    * Creates the risk area from a PENDING proposal, with its boundary. The proposal is
-   * claimed first, so two administrators can't approve it twice; if the area can't be
+   * claimed first, so two Supervisors can't approve it twice; if the area can't be
    * created the claim is released.
    */
   async approve(id: string, dto: ApproveRiskAreaProposalDto, actorId: string) {

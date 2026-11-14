@@ -1,6 +1,6 @@
 import { api } from '@/lib/api';
 import { getToken } from '@/lib/auth';
-import type { PaginatedResult } from '@agap/shared';
+import type { DispatchChangeReason, PaginatedResult } from '@agap/shared';
 import type { IncidentListItem } from '../incidents/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -61,7 +61,16 @@ export interface CreateDispatchBody {
   resourceId: string;
   initialCrewIds?: string[];
   dispatchNotes?: string;
+  /**
+   * Active units the sender saw on the incident when choosing this one. If someone
+   * else dispatched meanwhile, the server answers 409 INCIDENT_DISPATCH_CHANGED
+   * instead of silently adding a second unit.
+   */
+  expectedActiveUnits?: number;
 }
+
+/** 409 code: another unit reached the incident after the sender's form was planned. */
+export const INCIDENT_DISPATCH_CHANGED = 'INCIDENT_DISPATCH_CHANGED';
 
 /**
  * A dispatch as returned by the staff-only GET /dispatch?incidentId= (array,
@@ -73,6 +82,8 @@ export interface IncidentDispatch {
   resource_id: string;
   status: string;
   accepted_at: string | null;
+  /** Set when the unit reaches the scene; it can't be recalled or replaced after that. */
+  on_scene_at: string | null;
   created_at: string;
   resources: { id: string; name: string; call_sign: string | null; resource_type: string } | null;
   dispatch_crew: Array<{ user_id: string; users: { id: string; full_name: string } | null }>;
@@ -95,6 +106,27 @@ export function fetchDispatch(id: string): Promise<DispatchItem> {
 
 export function createDispatch(body: CreateDispatchBody): Promise<DispatchItem> {
   return api.post('/dispatch', body, getToken());
+}
+
+/** Why a unit is recalled or replaced (MOD-31). "OTHER" needs notes. */
+export interface DispatchChangeBody {
+  reason: DispatchChangeReason;
+  notes?: string;
+}
+
+export interface ReassignDispatchBody extends DispatchChangeBody {
+  resourceId: string;
+  crewIds?: string[];
+}
+
+/** Recall a unit that hasn't reached the scene. */
+export function cancelDispatch(dispatchId: string, body: DispatchChangeBody): Promise<DispatchItem & { incidentStatus: string }> {
+  return api.patch(`/dispatch/${encodeURIComponent(dispatchId)}/cancel`, body, getToken());
+}
+
+/** Replace a unit that hasn't reached the scene; returns the new dispatch. */
+export function reassignDispatch(dispatchId: string, body: ReassignDispatchBody): Promise<DispatchItem> {
+  return api.patch(`/dispatch/${encodeURIComponent(dispatchId)}/reassign`, body, getToken());
 }
 
 export function fetchDispatchRecommendations(incidentId: string): Promise<ResourceRecommendation[]> {

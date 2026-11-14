@@ -75,10 +75,10 @@ Enforce one of AGAP's core rules directly in the workflow: dispatch recommendati
 
 | Step | Process Description | Step Type |
 |---|---|---|
-| 1 | From a validated incident (Acknowledged, Assessed or Dispatch Pending), the dispatcher opens the Dispatch screen, which already shows the ranked unit recommendation from MOD-30. | User Action |
+| 1 | From a validated incident (Acknowledged, Assessed or Dispatch Pending), the dispatcher opens it on the Live Dispatch screen, which already shows the ranked unit recommendation from MOD-30. | User Action |
 | 2 | The dispatcher selects a unit, picks its crew members from the responder list, and may add dispatch notes. | User Action |
 | 3 | The dispatcher clicks Authorize Dispatch and confirms the summary dialog (units, crew, notes) — this explicit confirmation is the authorization; nothing is sent automatically before it. A notification then confirms which units were sent, or a message explains which unit failed. | User Action |
-| 4 | The backend validates the request, authenticates the dispatcher, and persists the assignment with an identifier and timestamp. | Database |
+| 4 | The backend validates the request, authenticates the dispatcher, and persists the assignment with an identifier and timestamp. If another dispatcher or supervisor sent a unit to the same incident after this form was opened, it refuses the dispatch and names that unit and its sender, so one call never gets two units by accident. | Database |
 | 5 | A dispatch-created event is broadcast live to the operations screens, and each crew member gets a "New assignment" push on their phone (MOD-18). | Notification |
 
 **TO-BE Outputs**
@@ -97,7 +97,20 @@ Enforce one of AGAP's core rules directly in the workflow: dispatch recommendati
 1. Open an Assessed incident → Dispatch, pick the recommended unit, add a crew member, and click Authorize Dispatch — confirm the audit entry records the explicit click.
 2. Confirm the crew member's phone gets the "New assignment" push and the unit shows as Dispatched on the Fleet board.
 
-**Implementation gap (decide before signing):** there is no screen to reassign a unit, cancel a dispatch, or add/remove crew after dispatching, and the responder app has no Decline button. The backend routes (`PATCH /v1/dispatch/:id/reassign`, `/cancel`, `POST`/`DELETE /v1/dispatch/:id/crew`, `POST /v1/responders/assignments/:id/decline`) exist and are tested, but nothing calls them. Ask for these controls if your module must cover changing a dispatch.
+**Recall and replace (2026-11-13):** on the Dispatch screen each unit that hasn't reached the scene has **Replace** and **Recall**. The dispatcher picks a reason ("Other" needs a note); it goes to the incident timeline and the audit trail, and the crew gets an "Assignment cancelled" push. Replace swaps the unit in one transaction (`PATCH /v1/dispatch/:id/reassign`), so if the new unit was just taken the original stays assigned. Recalling the only unit sends the incident back to Dispatch Pending and the dispatch form reappears (`PATCH /v1/dispatch/:id/cancel`). Once a unit is on scene, only its crew ends its part (Finish), so a patient on board is never cancelled from the console. A cancelled crew can no longer accept or post status updates.
+
+**Test before signing (recall / replace):**
+3. Dispatch one unit, click **Recall**, choose "Wrong unit sent" — the incident returns to Dispatch Pending, the unit is Available on the Fleet board, the crew phone gets "Assignment cancelled", and the Audit log shows the reason.
+4. Dispatch a unit, click **Replace**, pick another unit — exactly one active unit remains, the new crew gets "New assignment", the old crew "Assignment cancelled".
+5. Mark a unit On scene from the phone — Replace and Recall disappear for it.
+
+**Two people on one incident (2026-11-14):** each dispatch carries how many units its sender saw on the incident (`expectedActiveUnits`). Under the incident lock the backend counts active units; if there are more, it refuses with 409 `INCIDENT_DISPATCH_CHANGED` ("Ana Cruz already dispatched RESCUE-1 … Your unit was not sent"). Before this, the late dispatch was silently accepted as an additional unit. "Dispatch another unit" and multi-unit sends still work, since they count what they saw. Clients that omit the field are not checked.
+
+**Test before signing (two people):**
+6. Sign in as a Dispatcher and, in another browser, as a Supervisor. Open the same Assessed incident in both. Dispatch from the Dispatcher; the Supervisor's form is replaced by the tracking card with "Someone else dispatched a unit…".
+7. The race itself (the live update hasn't reached the second screen yet) is too quick to click by hand, so call the API: on an incident that already has one active unit, `POST /v1/dispatch` (Swagger) with another available unit and `"expectedActiveUnits": 0`. Expect 409 `INCIDENT_DISPATCH_CHANGED` naming the first unit and its sender. The incident still has exactly one unit, and the second unit is still Available. The same call with `"expectedActiveUnits": 1` dispatches it as an additional unit.
+
+**Implementation gap:** there is no screen to add or remove crew after dispatching, and the responder app has no Decline button (`POST`/`DELETE /v1/dispatch/:id/crew` and `POST /v1/responders/assignments/:id/decline` exist and are tested; a decline now frees the unit and returns a unit-less incident to Dispatch Pending).
 
 **Do not claim:**
 - Integration with any external CAD/radio dispatch system.

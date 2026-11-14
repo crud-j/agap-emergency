@@ -9,15 +9,19 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import { cn } from '@/lib/utils';
 import { useAuthUser } from '@/lib/use-auth';
 import { logout } from '@/lib/session';
-import { navForRole, showsSidebar, type NavLink } from '@/lib/role-access';
+import { ROLE, navForRole, showsSidebar, type NavBadge, type NavLink } from '@/lib/role-access';
+import { useEscalations } from '@/features/escalations/hooks';
+import { usePendingApprovals } from '@/features/announcements/hooks';
+import { useMajorIncidents } from '@/features/oversight/hooks';
+import { useSurgeState } from '@/features/surge/hooks';
 import styles from './Sidebar.module.css';
 import {
-  LayoutDashboard, List, Map as MapIcon, Filter, Radio,
+  LayoutDashboard, List, Filter, Radio,
   Truck, Building2, HeartPulse, AlarmClock,
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
   Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug, Inbox, ShieldCheck, MapPinned, LogOut,
-  Fingerprint, IdCard,
+  Fingerprint, IdCard, ChevronRight,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -28,7 +32,6 @@ import type { LucideIcon } from 'lucide-react';
 const ICONS: Record<string, LucideIcon> = {
   '/dashboard': LayoutDashboard,
   '/operations/incidents': List,
-  '/operations/map': MapIcon,
   '/operations/triage': Filter,
   '/operations/dispatch': Radio,
   '/operations/escalations': AlarmClock,
@@ -58,6 +61,61 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 type NavItem = NavLink & { icon: LucideIcon };
+
+// ─── Live signals (Supervisor) ──────────────────────────────────────────────────
+//
+// Counts beside Escalations and Approvals, and whether a major incident is running
+// (an incident under ICS command, or surge mode on). Same queries as the Supervisor
+// dashboard, so they share its cache and the socket keeps them fresh.
+
+interface NavSignals {
+  badges: Record<NavBadge, number>;
+  majorIncident: boolean;
+}
+
+function useNavSignals(enabled: boolean): NavSignals {
+  const escalations = useEscalations(undefined, { enabled });
+  const approvals = usePendingApprovals(enabled);
+  const majors = useMajorIncidents({ enabled });
+  const surge = useSurgeState({ enabled });
+  const openEscalations = (escalations.data ?? []).filter(
+    (e) => e.status === 'ACTIVE' || e.status === 'ACKNOWLEDGED',
+  ).length;
+  return {
+    badges: { openEscalations, pendingApprovals: approvals.data?.length ?? 0 },
+    majorIncident: enabled && (!!surge.data?.is_active || (majors.data?.length ?? 0) > 0),
+  };
+}
+
+function badgeText(count: number): string {
+  return count > 99 ? '99+' : String(count);
+}
+
+// ─── Folded groups ──────────────────────────────────────────────────────────────
+//
+// The person's own open/closed choices, kept per browser. A group with no saved
+// choice is closed unless it holds the current page or is a major-incident group
+// during a major incident.
+
+const GROUPS_STORAGE_KEY = 'agap.ops.nav.groups';
+
+function readGroupChoices(): Record<string, boolean> {
+  try {
+    const raw = window.localStorage.getItem(GROUPS_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeGroupChoices(choices: Record<string, boolean>) {
+  try {
+    window.localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(choices));
+  } catch {
+    /* storage unavailable — choices just won't persist */
+  }
+}
 
 // ─── Motion ─────────────────────────────────────────────────────────────────────
 //
@@ -184,9 +242,12 @@ function SidebarNav(): JSX.Element {
   const [activePosition, setActivePosition] = useState<{ top: number; height: number } | null>(null);
 
   const groups = navForRole(user?.role, user?.orgType).map((g) => ({
-    label: g.label,
+    ...g,
     items: g.items.map((item): NavItem => ({ ...item, icon: ICONS[item.href] ?? Circle })),
   }));
+
+  const signals = useNavSignals(user?.role === ROLE.SUPERVISOR);
+  const [groupChoices, setGroupChoices] = useState<Record<string, boolean>>({});
 
   function matchesPath(item: NavLink) {
     return item.exact
@@ -202,6 +263,50 @@ function SidebarNav(): JSX.Element {
       g.items.some((other) => other.href.length > item.href.length && matchesPath(other)),
     );
   }
+
+  function isGroupOpen(group: (typeof groups)[number]): boolean {
+    if (!group.collapsible) return true;
+    const choice = groupChoices[group.label];
+    if (choice !== undefined) return choice;
+    return (
+      group.items.some(isActive) ||
+      (!!group.opensDuringMajorIncident && signals.majorIncident)
+    );
+  }
+
+  const setGroupOpen = useCallback((label: string, open: boolean) => {
+    setGroupChoices((prev) => {
+      const next = { ...prev, [label]: open };
+      writeGroupChoices(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    setGroupChoices((prev) => ({ ...readGroupChoices(), ...prev }));
+  }, []);
+
+  // Never hide the page you're on: arriving at a link inside a folded group opens it.
+  const activeGroupLabel = groups.find((g) => g.collapsible && g.items.some(isActive))?.label;
+  useEffect(() => {
+    if (activeGroupLabel && groupChoices[activeGroupLabel] === false) setGroupOpen(activeGroupLabel, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroupLabel]);
+
+  // A new major incident reopens the Major Incident group even if it was closed before.
+  const majorIncident = signals.majorIncident;
+  useEffect(() => {
+    if (!majorIncident) return;
+    setGroupChoices((prev) => {
+      const closed = groups.filter((g) => g.opensDuringMajorIncident && prev[g.label] === false);
+      if (closed.length === 0) return prev;
+      const next = { ...prev };
+      for (const g of closed) delete next[g.label];
+      writeGroupChoices(next);
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [majorIncident]);
 
   const docked = mode === 'dock';
   const overlay = !isDesktop && !docked;
@@ -332,7 +437,7 @@ function SidebarNav(): JSX.Element {
   useLayoutEffect(() => {
     const activeLink = navContentRef.current?.querySelector<HTMLElement>('[aria-current="page"]');
     setActivePosition(activeLink ? { top: activeLink.offsetTop, height: activeLink.offsetHeight } : null);
-  }, [asideMounted, pathname, user?.role]);
+  }, [asideMounted, pathname, user?.role, groupChoices, majorIncident]);
 
   useEffect(() => {
     if (!docked) return;
@@ -440,21 +545,67 @@ function SidebarNav(): JSX.Element {
                     }}
                   />
                 )}
-                {groups.map((group, gi) => (
-                  <div key={group.label} role="group" aria-labelledby={`nav-group-${gi}`} className="mb-4">
-                    <p
-                      id={`nav-group-${gi}`}
-                      className={cn(
-                        'mx-2 mb-1.5 px-2.5 text-[10.5px] font-semibold uppercase tracking-widest select-none',
-                        styles.groupLabel,
-                        styles.fadeText,
-                      )}
-                    >
-                      {group.label}
-                    </p>
+                {groups.map((group, gi) => {
+                  const open = isGroupOpen(group);
+                  const alert = !!group.opensDuringMajorIncident && signals.majorIncident;
+                  // A folded group still shows how many inbox items wait inside it.
+                  const hiddenCount = open
+                    ? 0
+                    : group.items.reduce((n, item) => n + (item.badge ? signals.badges[item.badge] : 0), 0);
+                  return (
+                  <div
+                    key={group.label}
+                    role="group"
+                    aria-labelledby={`nav-group-${gi}`}
+                    className={group.collapsible && !open ? 'mb-1' : 'mb-4'}
+                  >
+                    {group.collapsible ? (
+                      <button
+                        type="button"
+                        onClick={() => setGroupOpen(group.label, !open)}
+                        aria-expanded={open}
+                        aria-controls={open ? `nav-group-items-${gi}` : undefined}
+                        className={cn(
+                          'mx-2 mb-1.5 flex w-[calc(100%-1rem)] items-center gap-1.5 rounded-md px-2.5 py-1 text-left text-[10.5px] font-semibold uppercase tracking-widest select-none',
+                          styles.groupLabel,
+                          styles.groupToggle,
+                        )}
+                      >
+                        <ChevronRight
+                          size={12}
+                          aria-hidden="true"
+                          className={cn('shrink-0 transition-transform duration-200', open && 'rotate-90')}
+                        />
+                        <span id={`nav-group-${gi}`} className={cn('truncate', styles.fadeText)}>{group.label}</span>
+                        {alert && (
+                          <span className={cn(styles.groupAlert, styles.fadeText)}>
+                            <span className="sr-only">(major incident active)</span>
+                          </span>
+                        )}
+                        {hiddenCount > 0 && (
+                          <span className={cn('ml-auto', styles.navBadge, styles.fadeText)}>
+                            {badgeText(hiddenCount)}
+                          </span>
+                        )}
+                      </button>
+                    ) : (
+                      <p
+                        id={`nav-group-${gi}`}
+                        className={cn(
+                          'mx-2 mb-1.5 px-2.5 text-[10.5px] font-semibold uppercase tracking-widest select-none',
+                          styles.groupLabel,
+                          styles.fadeText,
+                        )}
+                      >
+                        {group.label}
+                      </p>
+                    )}
+                    {open && (
+                    <div id={`nav-group-items-${gi}`}>
                     {group.items.map((item) => {
                       const active = isActive(item);
                       const Icon = item.icon;
+                      const count = item.badge ? signals.badges[item.badge] : 0;
                       return (
                         <Link
                           key={item.href}
@@ -473,11 +624,20 @@ function SidebarNav(): JSX.Element {
                             />
                           </span>
                           <span className={cn('truncate', styles.fadeText)}>{item.label}</span>
+                          {count > 0 && (
+                            <span className={cn('ml-auto', styles.navBadge, styles.fadeText)}>
+                              {badgeText(count)}
+                              <span className="sr-only"> waiting</span>
+                            </span>
+                          )}
                         </Link>
                       );
                     })}
+                    </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </nav>
 
@@ -553,21 +713,24 @@ function SidebarNav(): JSX.Element {
                 {group.items.map((item) => {
                   const active = isActive(item);
                   const Icon = item.icon;
+                  const count = item.badge ? signals.badges[item.badge] : 0;
+                  const label = count > 0 ? `${item.label} (${count} waiting)` : item.label;
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      aria-label={item.label}
+                      aria-label={label}
                       aria-current={active ? 'page' : undefined}
                       className={cn(styles.dockItem, active && styles.dockItemActive)}
-                      onMouseEnter={showTip(item.label)}
+                      onMouseEnter={showTip(label)}
                       onMouseLeave={hideTip}
-                      onFocus={showTip(item.label)}
+                      onFocus={showTip(label)}
                       onBlur={hideTip}
                     >
                       <span data-flip={item.href} className={styles.flipIcon}>
                         <Icon size={18} />
                       </span>
+                      {count > 0 && <span aria-hidden="true" className={styles.dockBadge}>{badgeText(count)}</span>}
                     </Link>
                   );
                 })}

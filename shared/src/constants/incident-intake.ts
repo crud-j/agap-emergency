@@ -3,8 +3,8 @@ import { IncidentPriority, PRIORITY_WEIGHTS } from '../enums/incident-priority.e
 import { ResourceType } from '../enums/resource-type.enum';
 
 /**
- * MOD-09 — Caller intake catalog for the three citizen-facing Bocaue categories
- * (road incident, fire, natural disaster).
+ * MOD-09 — Caller intake catalog for the four citizen-facing Bocaue categories
+ * (medical, road incident, fire, natural disaster).
  *
  * This is the single source of truth for what a citizen can answer. The mobile
  * app renders it, the backend validates against it (unknown keys and values are
@@ -54,6 +54,57 @@ const YNU: IntakeOption[] = [
   { value: 'yes', label: 'Yes' },
   { value: 'no', label: 'No' },
   { value: 'unknown', label: 'Not sure', report: 'Unknown' },
+];
+
+/**
+ * Medical: the two vital-sign questions first (they decide how urgent the
+ * ambulance is), then what the caller sees, then the age group so the crew
+ * brings the right equipment. The number of patients is asked on the same
+ * screen ("How many people are affected?"), so it is not repeated here.
+ */
+const MEDICAL_QUESTIONS: IntakeQuestion[] = [
+  {
+    key: 'conscious',
+    question: 'Is the person awake and responding?',
+    report: 'Conscious / responding',
+    options: YNU,
+  },
+  {
+    key: 'breathing',
+    question: 'Is the person breathing normally?',
+    report: 'Breathing normally',
+    hint: 'If they are not breathing, start CPR if you know how.',
+    options: YNU,
+  },
+  {
+    key: 'condition',
+    question: 'What do you see?',
+    report: 'Condition',
+    multi: true,
+    options: [
+      { value: 'chest_pain', label: 'Chest pain' },
+      { value: 'breathing_difficulty', label: 'Hard to breathe', report: 'Difficulty breathing' },
+      { value: 'stroke', label: 'Face drooping, weak arm, or slurred speech', report: 'Stroke signs' },
+      { value: 'bleeding', label: 'Heavy bleeding' },
+      { value: 'seizure', label: 'Seizure / convulsions' },
+      { value: 'fall', label: 'Bad fall or injury', report: 'Fall / injury' },
+      { value: 'labor', label: 'Pregnancy / giving birth', report: 'Pregnancy / labor' },
+      { value: 'poisoning', label: 'Poisoning / overdose' },
+      { value: 'other', label: 'Other illness' },
+    ],
+  },
+  {
+    key: 'age',
+    question: 'How old is the person?',
+    report: 'Patient age group',
+    options: [
+      { value: 'infant', label: 'Baby (under 1)', report: 'Infant' },
+      { value: 'child', label: 'Child' },
+      { value: 'adult', label: 'Adult' },
+      { value: 'senior', label: 'Senior (60+)', report: 'Senior' },
+      { value: 'unknown', label: 'Not sure', report: 'Unknown' },
+    ],
+  },
 ];
 
 const ROAD_QUESTIONS: IntakeQuestion[] = [
@@ -193,12 +244,13 @@ const NATURAL_DISASTER_QUESTIONS: IntakeQuestion[] = [
   },
 ];
 
-/** Fallback for categories outside the three citizen-facing ones. */
+/** Fallback for categories outside the four citizen-facing ones. */
 export const GENERIC_INTAKE_QUESTIONS: IntakeQuestion[] = [
   { key: 'injured', question: 'Is anyone injured?', report: 'Injured people', options: YNU },
 ];
 
 const INTAKE_QUESTIONS: Partial<Record<IncidentType, IntakeQuestion[]>> = {
+  [IncidentType.MEDICAL]: MEDICAL_QUESTIONS,
   [IncidentType.ROAD_ACCIDENT]: ROAD_QUESTIONS,
   [IncidentType.FIRE]: FIRE_QUESTIONS,
   [IncidentType.NATURAL_DISASTER]: NATURAL_DISASTER_QUESTIONS,
@@ -305,6 +357,12 @@ export function recommendIntakePriority(
   const base = CATEGORY_DEFAULT_PRIORITY[type as IncidentType] ?? IncidentPriority.MEDIUM;
   const has = (key: string, value: string) => (answers[key] ?? []).includes(value);
   const reasons: string[] = [];
+
+  if (has('conscious', 'no')) reasons.push('Patient not responding');
+  if (has('breathing', 'no')) reasons.push('Patient not breathing normally');
+  if (has('condition', 'chest_pain')) reasons.push('Chest pain');
+  if (has('condition', 'stroke')) reasons.push('Stroke signs');
+  if (has('condition', 'bleeding')) reasons.push('Heavy bleeding');
 
   if (has('pinned', 'yes')) reasons.push('Person pinned in a vehicle');
   if (has('fuel', 'yes')) reasons.push('Fuel leak or fire at the crash');

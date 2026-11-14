@@ -40,7 +40,7 @@ Give residents one fast, hard-to-trigger-by-accident way to report an emergency 
 |---|---|---|
 | 1 | Phone call to the MDRRMO hotline or 911 | Three-second hold on the SOS button |
 | 2 | Caller's verbal description of the location | GPS position (optional when signed in; required inside Bocaue for a report without an account) |
-| 3 | Caller's verbal description of the emergency | Incident type: Road incident, Fire or Natural disaster |
+| 3 | Caller's verbal description of the emergency | Incident type: Medical, Road incident, Fire or Natural disaster |
 | 4 | Caller's name and number | Optional details, photo or video (MOD-09, MOD-10) |
 | 5 | | Unique report key created by the app |
 
@@ -88,7 +88,7 @@ Give residents one fast, hard-to-trigger-by-accident way to report an emergency 
 | 1 | On the home screen, the citizen presses and holds SOS. A ring fills over three seconds while the phone vibrates and plays an alert sound; letting go early cancels. | User Action |
 | 2 | When the hold completes, the app starts a new report with a unique report key and the trigger "SOS button". | Processing |
 | 3 | Confirm Location captures the GPS position and address (MOD-11, MOD-12). A signed-in citizen may continue without a precise location. | Integration |
-| 4 | The citizen picks Road incident, Fire or Natural disaster; Continue stays disabled until one is chosen. | Validation |
+| 4 | The citizen picks Medical, Road incident, Fire or Natural disaster; Continue stays disabled until one is chosen. | Validation |
 | 5 | On the Details screen every question is optional; the citizen taps send. | User Action |
 | 6 | The backend checks the report: latitude and longitude together, inside Bocaue, and GPS present for a report without an account. | Validation |
 | 7 | The backend checks the report key. A key it has seen before returns the existing incident instead of creating a second one. | Validation |
@@ -118,6 +118,5 @@ Give residents one fast, hard-to-trigger-by-accident way to report an emergency 
 4. From the sign-up screen, report without an account while outside Bocaue (or with GPS off); it is refused.
 
 **Do not claim:**
-- A Medical incident type in the app. Only Road incident, Fire and Natural disaster are offered (flooding is filed as Flood).
 - Saving a report on the phone to send later (MOD-19 was eliminated).
 - `POST /v1/emergency-alerts/sos`. It exists but no screen uses it; the app sends through `POST /v1/incidents`.

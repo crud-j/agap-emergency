@@ -28,7 +28,7 @@ const ROLE_LABELS: Record<string, string> = {
 const PATH_LABELS: Record<string, string> = {
   dashboard:       'Dashboard',
   operations:      'Operations',
-  dispatch:        'Dispatch',
+  dispatch:        'Live Dispatch',
   incidents:       'Incidents',
   map:             'Map',
   triage:          'Triage',

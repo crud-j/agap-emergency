@@ -59,11 +59,12 @@ export function useActivity() {
   });
 }
 
-export function useMajorIncidents() {
+export function useMajorIncidents(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['oversight', 'major-incidents'],
     queryFn: fetchMajorIncidents,
     staleTime: 15_000,
     refetchInterval: 60_000,
+    enabled: opts?.enabled ?? true,
   });
 }

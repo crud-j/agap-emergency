@@ -20,6 +20,15 @@ const CATEGORIES: {
   cardBg: string;
 }[] = [
   {
+    type: IncidentType.MEDICAL,
+    label: 'Medical',
+    description: 'Sudden illness, collapse,\nor someone hurt',
+    icon: 'medkit',
+    iconColor: '#DC2626',
+    iconBg: '#FEE2E2',
+    cardBg: '#FEF2F2',
+  },
+  {
     type: IncidentType.ROAD_ACCIDENT,
     label: 'Road incident',
     description: 'Car, motorcycle, or\nother vehicle accident',

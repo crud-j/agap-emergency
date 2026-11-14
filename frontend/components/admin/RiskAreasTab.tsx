@@ -20,10 +20,10 @@ import {
 } from '@/features/risk/api';
 
 /**
- * MOD-51 risk areas, managed by the System Administrator (MODULE_GAPS_COMPLETION_PLAN.md
- * Phase 5). Lives under Administration because the Risk page and its heatmap stay
- * Supervisor/Dispatcher only (role dashboards Phase 5b). The boundary polygon is not
- * drawn here: a new area is listed and tied to a barangay.
+ * MOD-51 risk areas. The Supervisor manages them and the nightly hotspot proposals from
+ * the Risk Map's "Risk areas" tab; the System Administrator sees the same list read-only
+ * under Administration (the API refuses their writes). No outline is drawn here: a new
+ * area covers its barangay, and an approved hotspot keeps the cluster's outline.
  */
 
 const RISK_TYPES = ['FLOOD', 'FIRE', 'INDUSTRIAL', 'ROAD_ACCIDENT', 'RESCUE', 'MEDICAL', 'NATURAL_DISASTER', 'DEBRIS', 'OTHER'] as const;
@@ -114,7 +114,7 @@ function AreaDialog({ open, area, onClose }: {
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{area ? 'Edit risk area' : 'Add risk area'}</DialogTitle>
-          <DialogDescription>Shown on the Risk page for Supervisors and Dispatchers.</DialogDescription>
+          <DialogDescription>Shown on the Risk Map for Supervisors and Dispatchers.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -193,7 +193,7 @@ function AreaDialog({ open, area, onClose }: {
             <label className="flex items-center justify-between gap-3 rounded-xl border border-[rgba(168,181,193,0.20)] px-3 py-2">
               <span className="text-sm text-agap-textMain">
                 Active
-                <span className="block text-xs text-agap-textSub">Inactive areas stay listed but are left out of flood zones.</span>
+                <span className="block text-xs text-agap-textSub">Inactive areas stay listed here but are hidden from the Risk Map.</span>
               </span>
               <button
                 type="button"
@@ -390,7 +390,8 @@ function ProposedAreas(): JSX.Element | null {
 
 // ─── Tab ──────────────────────────────────────────────────────────────────────
 
-export function RiskAreasTab(): JSX.Element {
+/** canManage: the Supervisor's tab on the Risk Map. false: the System Administrator's read-only list. */
+export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element {
   const areas = useRiskAreas();
   const [editing, setEditing] = useState<{ area: RiskArea | null } | null>(null);
   const [removing, setRemoving] = useState<RiskArea | null>(null);
@@ -427,6 +428,8 @@ export function RiskAreasTab(): JSX.Element {
       header: 'Status',
       accessor: (a) => <Badge variant={a.is_active ? 'green' : 'muted'}>{a.is_active ? 'Active' : 'Inactive'}</Badge>,
     },
+  ];
+  if (canManage) columns.push(
     {
       key: 'actions',
       header: '',
@@ -441,21 +444,25 @@ export function RiskAreasTab(): JSX.Element {
         </div>
       ),
     },
-  ];
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="flex max-w-2xl items-start gap-2 text-sm text-agap-textSub">
           <Info size={15} className="mt-0.5 shrink-0" aria-hidden />
-          Areas are listed on the Risk page and tied to a barangay. Map boundaries are not drawn here.
+          {canManage
+            ? 'A new area covers its whole barangay on the Risk Map. An approved proposal keeps the outline of the incidents that formed it.'
+            : 'Read-only. Risk areas are an MDRRMO operations decision: Supervisors add, change and approve them from the Risk Map.'}
         </p>
-        <Button variant="primary" onClick={() => setEditing({ area: null })}>
-          <Plus size={15} /> Add risk area
-        </Button>
+        {canManage && (
+          <Button variant="primary" onClick={() => setEditing({ area: null })}>
+            <Plus size={15} /> Add risk area
+          </Button>
+        )}
       </div>
 
-      <ProposedAreas />
+      {canManage && <ProposedAreas />}
 
       {areas.isError ? (
         <p className="rounded-xl border border-[rgba(212,72,88,0.2)] bg-agap-dangerSoft px-4 py-2.5 text-sm text-agap-danger">
@@ -467,7 +474,7 @@ export function RiskAreasTab(): JSX.Element {
         <EmptyState
           icon={MapPinned}
           title="No risk areas yet"
-          description="Add one, for example a flood area for Lolomboy at the 11.50 m river level."
+          description={canManage ? 'Add one, for example a flood area for Lolomboy at the 11.50 m river level.' : 'Supervisors have not added any yet.'}
         />
       ) : (
         <DataTable columns={columns} data={areas.data ?? []} getRowKey={(a) => a.id} />

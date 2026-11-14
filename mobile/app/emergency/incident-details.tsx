@@ -97,6 +97,12 @@ const AFFECTED_OPTIONS: { key: string; label: string; icon: IoniconName }[] = [
 ];
 
 const TYPE_META: Partial<Record<IncidentType, { label: string; icon: IoniconName; color: string; notes: string }>> = {
+  [IncidentType.MEDICAL]: {
+    label: 'Medical',
+    icon: 'medkit',
+    color: '#DC2626',
+    notes: 'e.g. Lolo collapsed in the kitchen, diabetic, takes maintenance for high blood',
+  },
   [IncidentType.ROAD_ACCIDENT]: {
     label: 'Road incident',
     icon: 'car',

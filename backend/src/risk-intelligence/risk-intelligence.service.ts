@@ -2,6 +2,40 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateRiskAreaDto, UpdateRiskAreaDto } from './dto/risk-area.dto';
+import type { RiskMapPeriod } from './dto/risk-map.dto';
+
+/** Enough for a year of Bocaue incidents; beyond it the page says the list was cut. */
+export const RISK_MAP_MAX_POINTS = 2000;
+
+/** A GeoJSON geometry as PostGIS ST_AsGeoJSON returns it. */
+export interface GeoJsonGeometry {
+  type: string;
+  coordinates: unknown;
+}
+
+export interface RiskMapBarangay {
+  name: string;
+  boundary: GeoJsonGeometry;
+  flood_incidents: number;
+}
+
+export interface RiskMapPoint {
+  category: string;
+  lat: number;
+  lng: number;
+  incident_count: number;
+  last_reported_at: Date;
+  /** null = outside every barangay boundary. */
+  barangay: string | null;
+}
+
+export interface RiskMap {
+  period_days: RiskMapPeriod;
+  generated_at: string;
+  barangays: RiskMapBarangay[];
+  points: RiskMapPoint[];
+  points_truncated: boolean;
+}
 
 @Injectable()
 export class RiskIntelligenceService {
@@ -10,81 +44,84 @@ export class RiskIntelligenceService {
     private readonly audit: AuditService,
   ) {}
 
-  async getHeatmap() {
-    // Placeholder — real PostGIS density is a later step.
-    const grouped = await this.prisma.incident_locations.groupBy({
-      by: ['barangay'],
-      orderBy: { barangay: 'asc' },
-      _count: { _all: true },
-    });
-    return grouped.map((g) => ({ barangay: g.barangay, count: g._count._all }));
-  }
-
   /**
-   * Geo risk points for the operations map overlay (MOD-51). Clusters recent
-   * incidents by a ~111 m coordinate grid and returns normalized intensity per
-   * cluster. Pure PostgreSQL read — no PostGIS required.
+   * The Risk Map (MOD-51). Floods are counted per barangay, because a flood covers an
+   * area; every other incident is shown where it happened. Incidents at the same spot
+   * (about 11 m) and of the same type become one point with a count. A flood report
+   * outside every barangay boundary is shown as a point, so it never disappears.
+   *
+   * Barangay = the polygon that covers the GPS point (geo_regions), not the reverse-geocoded
+   * text, which can be missing or spelled differently. Draft, false, duplicate and cancelled
+   * reports don't count (same filter as hotspot discovery). No reporter, patient or incident
+   * id is returned: only type, place, count and the latest report time.
    */
-  async getGeoHeatmap(periodDays = 30) {
-    const days = Number.isFinite(periodDays) && periodDays > 0 ? Math.min(periodDays, 365) : 30;
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  async getRiskMap(periodDays: RiskMapPeriod): Promise<RiskMap> {
+    const [barangays, spots] = await Promise.all([
+      this.prisma.$queryRaw<RiskMapBarangay[]>`
+        WITH floods AS (
+          SELECT ST_SetSRID(ST_MakePoint(il.longitude::float8, il.latitude::float8), 4326) AS g
+            FROM incidents i
+            JOIN incident_locations il ON il.incident_id = i.id
+           WHERE i.category = 'FLOOD'
+             AND i.created_at >= now() - make_interval(days => ${periodDays}::int)
+             AND i.status NOT IN ('DRAFT', 'FALSE_ALERT', 'DUPLICATE', 'CANCELLED')
+        )
+        SELECT r.name,
+               ST_AsGeoJSON(r.boundary, 6)::json AS boundary,
+               (SELECT count(*)::int FROM floods f WHERE ST_Covers(r.boundary, f.g)) AS flood_incidents
+          FROM geo_regions r
+         WHERE r.region_type = 'barangay'
+         ORDER BY r.name`,
+      this.prisma.$queryRaw<RiskMapPoint[]>`
+        WITH incs AS (
+          SELECT i.category::text AS category, i.created_at,
+                 il.latitude::float8 AS lat, il.longitude::float8 AS lng,
+                 ST_SetSRID(ST_MakePoint(il.longitude::float8, il.latitude::float8), 4326) AS g
+            FROM incidents i
+            JOIN incident_locations il ON il.incident_id = i.id
+           WHERE i.created_at >= now() - make_interval(days => ${periodDays}::int)
+             AND i.status NOT IN ('DRAFT', 'FALSE_ALERT', 'DUPLICATE', 'CANCELLED')
+        ),
+        spots AS (
+          SELECT category, avg(lat) AS lat, avg(lng) AS lng,
+                 count(*)::int AS incident_count, max(created_at) AS last_reported_at
+            FROM incs
+           WHERE category <> 'FLOOD'
+              OR NOT EXISTS (SELECT 1 FROM geo_regions r
+                              WHERE r.region_type = 'barangay' AND ST_Covers(r.boundary, incs.g))
+           GROUP BY category, round(lat::numeric, 4), round(lng::numeric, 4)
+        )
+        SELECT s.category, s.lat, s.lng, s.incident_count, s.last_reported_at,
+               (SELECT r.name FROM geo_regions r
+                 WHERE r.region_type = 'barangay'
+                   AND ST_Covers(r.boundary, ST_SetSRID(ST_MakePoint(s.lng, s.lat), 4326))
+                 LIMIT 1) AS barangay
+          FROM spots s
+         ORDER BY s.incident_count DESC, s.last_reported_at DESC
+         LIMIT ${RISK_MAP_MAX_POINTS + 1}::int`,
+    ]);
 
-    const rows = await this.prisma.incident.findMany({
-      where: { submitted_at: { gte: since } },
-      select: {
-        category: true,
-        incident_locations: { select: { latitude: true, longitude: true, barangay: true } },
-      },
-    });
-
-    const buckets = new Map<
-      string,
-      { lat: number; lng: number; count: number; barangay: string | null; categories: Record<string, number> }
-    >();
-
-    for (const row of rows) {
-      const loc = row.incident_locations;
-      if (!loc || loc.latitude == null || loc.longitude == null) continue;
-      const lat = Number(loc.latitude);
-      const lng = Number(loc.longitude);
-      // Round to 3 decimals (~111 m) so nearby incidents form one density point.
-      const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
-      let bucket = buckets.get(key);
-      if (!bucket) {
-        bucket = { lat, lng, count: 0, barangay: loc.barangay ?? null, categories: {} };
-        buckets.set(key, bucket);
-      }
-      bucket.count += 1;
-      if (row.category) bucket.categories[row.category] = (bucket.categories[row.category] ?? 0) + 1;
-    }
-
-    const clusters = [...buckets.values()];
-    const maxCount = Math.max(1, ...clusters.map((b) => b.count));
-
-    const points = clusters.map((b) => {
-      const topCategory =
-        Object.entries(b.categories).sort((a, c) => c[1] - a[1])[0]?.[0] ?? null;
-      return {
-        lat: b.lat,
-        lng: b.lng,
-        intensity: Math.round((b.count / maxCount) * 100) / 100, // 0..1
-        category: topCategory,
-        barangay: b.barangay,
-        incident_count: b.count,
-      };
-    });
-
-    return { points, generated_at: new Date().toISOString(), period_days: days };
+    return {
+      period_days: periodDays,
+      generated_at: new Date().toISOString(),
+      barangays,
+      points: spots.slice(0, RISK_MAP_MAX_POINTS),
+      // Said on the page, so a busy year never looks like a quiet one.
+      points_truncated: spots.length > RISK_MAP_MAX_POINTS,
+    };
   }
 
-  async getFloodZones() {
-    return this.prisma.risk_areas.findMany({
-      where: { risk_type: 'FLOOD', is_active: true },
-    });
-  }
-
+  /** Every risk area, with its outline as GeoJSON when it has one (approved hotspots). */
   async findAreas() {
-    return this.prisma.risk_areas.findMany({ orderBy: { name: 'asc' } });
+    const [areas, outlines] = await Promise.all([
+      this.prisma.risk_areas.findMany({ orderBy: { name: 'asc' } }),
+      this.prisma.$queryRaw<Array<{ id: string; boundary: GeoJsonGeometry }>>`
+        SELECT id::text AS id, ST_AsGeoJSON(area_boundary::geometry, 6)::json AS boundary
+          FROM risk_areas
+         WHERE area_boundary IS NOT NULL`,
+    ]);
+    const boundaryById = new Map(outlines.map((o) => [o.id, o.boundary]));
+    return areas.map((a) => ({ ...a, boundary: boundaryById.get(a.id) ?? null }));
   }
 
   async createArea(dto: CreateRiskAreaDto, actorId: string) {
@@ -184,14 +221,5 @@ export class RiskIntelligenceService {
       floodThresholdMeters: a.flood_threshold_meters === null ? null : Number(a.flood_threshold_meters),
       isActive: a.is_active,
     };
-  }
-
-  async getPatterns() {
-    const byCategory = await this.prisma.incident.groupBy({
-      by: ['category'],
-      orderBy: { category: 'asc' },
-      _count: { _all: true },
-    });
-    return { byCategory };
   }
 }

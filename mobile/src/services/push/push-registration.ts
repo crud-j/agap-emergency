@@ -47,12 +47,15 @@ export async function registerPushToken(
 }
 
 /** Dispatch a tapped assignment push points at (data.type 'ASSIGNMENT', data.dispatchId). */
+/** Incident Command job notices (MOD-36); they carry dispatchId only for crew on the incident. */
+const ICS_TYPES = new Set(['ICS_POSITION_ASSIGNED', 'ICS_POSITION_RELIEVED', 'ICS_COMMAND_ENDED']);
+
 export function assignmentIdFromNotification(
   response: Notifications.NotificationResponse | null | undefined,
 ): string | null {
   const data = response?.notification.request.content.data;
-  if (data?.type !== 'ASSIGNMENT') return null;
-  const id = data.dispatchId;
+  if (data?.type !== 'ASSIGNMENT' && !ICS_TYPES.has(String(data?.type))) return null;
+  const id = data?.dispatchId;
   return typeof id === 'string' && id ? id : null;
 }
 
@@ -60,6 +63,8 @@ export function assignmentIdFromNotification(
 export function incidentIdFromNotification(
   response: Notifications.NotificationResponse | null | undefined,
 ): string | null {
-  const id = response?.notification.request.content.data?.incidentId;
+  const data = response?.notification.request.content.data;
+  if (ICS_TYPES.has(String(data?.type))) return null;
+  const id = data?.incidentId;
   return typeof id === 'string' && id ? id : null;
 }

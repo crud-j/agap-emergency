@@ -1,4 +1,4 @@
-import { NAV_GROUPS, ROLE, canOpen, landingForRole, navForRole, showsSidebar } from '@/lib/role-access';
+import { ALL_NAV_GROUPS, ROLE, canOpen, landingForRole, navForRole, showsSidebar } from '@/lib/role-access';
 
 const CONSOLE_ROLES = Object.values(ROLE);
 
@@ -6,7 +6,7 @@ const labels = (role: string) => navForRole(role).flatMap((g) => g.items.map((i)
 
 describe('role-access', () => {
   it('every sidebar link opens for every role it is shown to', () => {
-    for (const group of NAV_GROUPS) {
+    for (const group of ALL_NAV_GROUPS) {
       for (const item of group.items) {
         for (const role of item.roles) {
           expect({ role, href: item.href, open: canOpen(role, item.href) }).toEqual({
@@ -101,6 +101,17 @@ describe('role-access', () => {
     expect(landingForRole(ROLE.DISPATCHER)).toBe('/operations/dispatch');
   });
 
+  it('Risk Map: Dispatcher and Supervisor; Risk Areas list: System Administrator only (read-only)', () => {
+    expect(canOpen(ROLE.DISPATCHER, '/operations/risk')).toBe(true);
+    expect(canOpen(ROLE.SUPERVISOR, '/operations/risk')).toBe(true);
+    for (const role of [ROLE.SYS_ADMIN, ROLE.ORG_ADMIN, ROLE.PUBLISHER, ROLE.HOSPITAL_USER]) {
+      expect(canOpen(role, '/operations/risk')).toBe(false);
+    }
+    expect(canOpen(ROLE.SYS_ADMIN, '/administration/risk-areas')).toBe(true);
+    // Supervisors manage risk areas from the Risk Map, not from Administration.
+    expect(canOpen(ROLE.SUPERVISOR, '/administration/risk-areas')).toBe(false);
+  });
+
   it('only the Supervisor opens CRITICAL advisory approvals (Phase 7)', () => {
     expect(canOpen(ROLE.SUPERVISOR, '/operations/approvals')).toBe(true);
     for (const role of [ROLE.PUBLISHER, ROLE.SYS_ADMIN, ROLE.DISPATCHER, ROLE.ORG_ADMIN]) {
@@ -110,7 +121,7 @@ describe('role-access', () => {
 
   it('sidebars match the agreed spec', () => {
     expect(labels(ROLE.DISPATCHER)).toEqual([
-      'Dashboard', 'Incident Queue', 'Live Map', 'Triage', 'Dispatch',
+      'Dashboard', 'Incident Queue', 'Triage', 'Live Dispatch', 'Risk Map',
       'Multi-Agency', 'Fleet & Units', 'Hospitals & Facilities', 'Incident History',
       'Account Security',
     ]);
@@ -123,13 +134,11 @@ describe('role-access', () => {
     expect(showsSidebar(ROLE.HOSPITAL_USER)).toBe(false);
     expect(showsSidebar(ROLE.DISPATCHER)).toBe(true);
     expect(labels(ROLE.SUPERVISOR)).toEqual([
-      'Dashboard', 'Incident Queue', 'Live Map', 'Triage', 'Dispatch',
-      'Escalations', 'Activity Log',
+      'Dashboard', 'Escalations', 'Approvals', 'Live Dispatch',
+      'Incident Queue', 'Triage',
       'Command / ICS', 'Multi-Agency', 'Surge Mode',
+      'Analytics', 'Risk Map', 'Activity Log', 'Incident History',
       'Fleet & Units', 'Hospitals & Facilities',
-      'Analytics', 'Risk Map',
-      'Approvals',
-      'Incident History',
       'Account Security',
     ]);
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
@@ -138,6 +147,35 @@ describe('role-access', () => {
       'Security Events', 'Integrations', 'Configuration',
       'Account Security',
     ]);
+  });
+
+  it("the Supervisor's sidebar shows oversight up front and folds the rest", () => {
+    const groups = navForRole(ROLE.SUPERVISOR);
+    const visible = groups.filter((g) => !g.collapsible).flatMap((g) => g.items.map((i) => i.label));
+    expect(visible).toEqual(['Dashboard', 'Escalations', 'Approvals', 'Live Dispatch', 'Account Security']);
+    expect(groups.filter((g) => g.collapsible).map((g) => g.label)).toEqual([
+      'Take Over Dispatch', 'Major Incident', 'Reports', 'Resources',
+    ]);
+    expect(groups.find((g) => g.label === 'Major Incident')?.opensDuringMajorIncident).toBe(true);
+    // Folding hides links, never permissions: every Dispatcher page still opens.
+    for (const path of ['/operations/incidents', '/operations/triage', '/operations/dispatch', '/operations/surge']) {
+      expect({ path, open: canOpen(ROLE.SUPERVISOR, path) }).toEqual({ path, open: true });
+    }
+  });
+
+  it('Live Dispatch replaces Live Map; the old map URL still opens for ops roles (it redirects)', () => {
+    for (const role of [ROLE.DISPATCHER, ROLE.SUPERVISOR]) {
+      const items = navForRole(role).flatMap((g) => g.items);
+      expect(items.map((i) => i.href)).not.toContain('/operations/map');
+      expect(items.filter((i) => i.href === '/operations/dispatch').map((i) => i.label)).toEqual(['Live Dispatch']);
+      expect(canOpen(role, '/operations/map')).toBe(true);
+    }
+  });
+
+  it('no other role gets folded groups', () => {
+    for (const role of CONSOLE_ROLES.filter((r) => r !== ROLE.SUPERVISOR)) {
+      expect({ role, folded: navForRole(role, 'MDRRMO').some((g) => g.collapsible) }).toEqual({ role, folded: false });
+    }
   });
 
   it('ID Reviews: shown to an MDRRMO Org Administrator only, among Org Administrators', () => {

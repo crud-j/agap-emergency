@@ -2,15 +2,26 @@ import { RespondersService } from '../../src/responders/responders.service';
 import { DispatchService } from '../../src/dispatch/dispatch.service';
 import { IncidentStatusService } from '../../src/incidents/incident-status/incident-status.service';
 
-const dispatchRow = { id: 'dispatch-1', incident_id: 'inc-1', resource_id: 'res-1' };
+const dispatchRow = { id: 'dispatch-1', incident_id: 'inc-1', resource_id: 'res-1', status: 'PENDING' };
 
 function respondersSetup() {
   const tx = {
-    $queryRaw: jest.fn().mockResolvedValueOnce([{ user_id: 'resp-1', status: 'AVAILABLE' }]).mockResolvedValue([]),
+    // Accept locks the crew's availability row, decline the incident; both lock the dispatch.
+    $queryRaw: jest.fn(async (sql: TemplateStringsArray) => {
+      const text = sql.join('');
+      if (text.includes('responder_availability')) return [{ user_id: 'resp-1', status: 'AVAILABLE' }];
+      if (text.includes('FROM incidents')) return [{ status: 'DISPATCHED' }];
+      if (text.includes('FROM dispatches')) return [{ status: 'PENDING', on_scene_at: null }];
+      return [];
+    }),
     dispatches: {
       findUnique: jest.fn().mockResolvedValue({ ...dispatchRow, dispatch_crew: [{ user_id: 'resp-1' }] }),
-      update: jest.fn().mockResolvedValue({ ...dispatchRow, status: 'ACCEPTED' }),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...dispatchRow, ...data })),
+      count: jest.fn().mockResolvedValue(0),
     },
+    resources: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    incident: { update: jest.fn() },
+    incidentEvent: { create: jest.fn() },
   };
   const prisma = {
     $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -21,7 +32,10 @@ function respondersSetup() {
     },
     location_history: { create: jest.fn().mockResolvedValue({ id: 'loc-1', recorded_at: new Date('2026-10-18T00:00:00Z') }) },
   };
-  const realtime = { dispatchUpdated: jest.fn(), notifyResponderLocationUpdated: jest.fn() };
+  const realtime = {
+    dispatchUpdated: jest.fn(), notifyResponderLocationUpdated: jest.fn(),
+    notifyIncidentStatusChanged: jest.fn(), resourceStatusChanged: jest.fn(),
+  };
   const audit = { log: jest.fn().mockResolvedValue(undefined) };
   const audience = { roomsForDispatch: jest.fn().mockResolvedValue({ incidentRoom: true, userIds: [] }) };
   const service = new RespondersService(

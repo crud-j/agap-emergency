@@ -186,6 +186,25 @@ handover/deactivate.
 7.  Automated recommendations remain advisory unless an adopting
     organization explicitly authorizes a specific automation policy.
 
+### As built (November 2026)
+
+Code: `backend/src/incidents/incident-command/incident-command.service.ts`,
+`backend/src/notifications/ics-notifier.ts`, `frontend/app/(ops)/operations/command/page.tsx`,
+crew view in `mobile/app/responder/assignment/[id].tsx`.
+
+| Rule | How it is enforced |
+|---|---|
+| Nothing is deleted | Ending command stamps `incident_command_structures.deactivated_at`; relieving someone stamps `ics_assignments.relieved_at`. The final plan and every job ever held stay readable (`GET /incidents/:id/ics` returns an ended command too). |
+| One Incident Commander at a time | Partial unique index `uq_ics_assignments_one_commander`. `POST /ics/positions` refuses a second commander (409); `POST /ics/assign-ic` hands command over, relieving the current commander in the same transaction. |
+| A person holds a job once at a time | Partial unique index `uq_ics_assignments_current_holder`; the same person may take the same job again after being relieved. |
+| Command never starts leaderless | `POST /ics/activate` takes `commanderUserId` and names the commander in the same transaction. The console always asks for one. |
+| Who may hold a job | Active Supervisors, Dispatchers and Responders. |
+| People are told | Assigned, relieved and command-ended notices go to the person's feed and phone push (`ICS_POSITION_ASSIGNED`, `ICS_POSITION_RELIEVED`, `ICS_COMMAND_ENDED`). Only the reference number and job name are sent. Nobody is notified of their own action. |
+| Command ends with the incident | Resolving, closing, false-alert or duplicate marking ends a running command automatically. After that the plan and jobs are frozen; only "end" is allowed. Command can be started again while the incident is active. |
+| Crews can read the plan | Responders crewing the incident, or holding a command job, may `GET /ics`. The responder app shows their own job, the commander, goals and the latest situation update. |
+| Audit | Start, plan changes (old and new values), assignments, hand-overs, reliefs and the end (with the plan and team as they stood) are written to the audit log. |
+| Live updates | Every change emits `incident.updated` with `ics: true`; open consoles refresh at once. |
+
 ## 10. User Interface (Screens)
 
   -----------------------------------------------------------------------

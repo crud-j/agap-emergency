@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { IncidentsController } from './incidents.controller';
 import { IncidentsService } from './incidents.service';
+import { IncidentCommandService } from './incident-command/incident-command.service';
 import { IncidentStatusService } from './incident-status/incident-status.service';
 import { DuplicateDetectionService } from './duplicate-detection/duplicate-detection.service';
 import { PriorityService } from './priority/priority.service';
@@ -43,6 +44,7 @@ import { QUEUE_NAMES } from '@agap/shared';
   controllers: [IncidentsController],
   providers: [
     IncidentsService,
+    IncidentCommandService,
     IncidentStatusService,
     DuplicateDetectionService,
     PriorityService,
@@ -55,6 +57,6 @@ import { QUEUE_NAMES } from '@agap/shared';
     TransportRequestCacheService,
     ReporterPhotoService,
   ],
-  exports: [IncidentsService, IncidentStatusService, TransportService, TransportLegModule],
+  exports: [IncidentsService, IncidentCommandService, IncidentStatusService, TransportService, TransportLegModule],
 })
 export class IncidentsModule {}

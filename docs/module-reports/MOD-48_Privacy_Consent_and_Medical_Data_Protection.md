@@ -100,7 +100,9 @@ Earn the trust that comes with holding medical information, without claiming to 
 2. Open Prisma Studio and show a row in `medical_profiles` where every value starts with `v1.` (ciphertext), next to the same profile shown in readable form on the app.
 3. Withdraw consent and confirm the Medical Profile screen (MOD-03) locks again immediately.
 
+**Crew access (2026-11-13):** the crew of an *accepted* assignment sees a **Patient medical info** card on the responder app, only when the reporter marked "Also needs help" on their own report (reporter ≠ patient: a bystander's profile is never shown for the person they reported), has consented, and the incident is still active. The card stays closed until the crew taps **Show**; each read is written to the citizen's access log with the incident, and to the audit trail (`GET /v1/medical-profiles/assignments/:dispatchId`). Dispatchers and supervisors no longer read profiles; the old `GET /medical-profiles/:userId` route is removed. Test: as a citizen with a medical profile, report with "Also needs help"; dispatch and accept on the responder phone; tap Show; then check the citizen's Privacy → access log names the incident. Report again as "Safe, reporting for others" and check the card does not appear.
+
 **Do not claim:**
-- A responder viewing a patient's medical profile. The backend now allows it only for a responder on an active crew for that patient's incident, records the purpose, and logs a refused attempt as Permission Denied, but no responder screen calls it yet (uncommitted Unit Field Flow work, Phase 2).
+- Clinical verification of the profile: it is self-reported by the citizen, and the card says so.
 - Legal compliance certification.
 - Guaranteed deletion across every backup copy, or automatic consent propagation to every system that might touch the data.

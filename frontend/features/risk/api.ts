@@ -1,9 +1,41 @@
 import { api } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 
-export interface HeatmapPoint {
+/** Barangay or hotspot outline, as PostGIS ST_AsGeoJSON returns it. */
+type Ring = [number, number][];
+export type AreaBoundary =
+  | { type: 'Polygon'; coordinates: Ring[] }
+  | { type: 'MultiPolygon'; coordinates: Ring[][] };
+
+/** The Risk Map's time windows (days); the backend accepts only these. */
+export const RISK_MAP_PERIODS = [30, 90, 365] as const;
+export type RiskMapPeriod = (typeof RISK_MAP_PERIODS)[number];
+export const DEFAULT_RISK_MAP_PERIOD: RiskMapPeriod = 90;
+
+export interface RiskMapBarangay {
+  name: string;
+  boundary: AreaBoundary;
+  flood_incidents: number;
+}
+
+/** Incidents of one type at one spot (~11 m). Floods appear here only when outside every barangay. */
+export interface RiskMapPoint {
+  category: string;
+  lat: number;
+  lng: number;
+  incident_count: number;
+  last_reported_at: string;
+  /** null = outside every barangay boundary. */
   barangay: string | null;
-  count: number;
+}
+
+export interface RiskMap {
+  period_days: RiskMapPeriod;
+  generated_at: string;
+  barangays: RiskMapBarangay[];
+  points: RiskMapPoint[];
+  /** true = only the busiest spots were sent. */
+  points_truncated: boolean;
 }
 
 export interface RiskArea {
@@ -16,6 +48,8 @@ export interface RiskArea {
   flood_threshold_meters: number | string | null;
   description: string | null;
   is_active: boolean;
+  /** Set for approved hotspots; null = the area is the whole barangay (or has no place). */
+  boundary?: AreaBoundary | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -36,27 +70,15 @@ export interface RiskAreaInput {
 
 export type RiskAreaChanges = Partial<RiskAreaInput> & { isActive?: boolean };
 
-export interface RiskPatterns {
-  byCategory: Array<{ category: string; _count: { _all: number } }>;
-}
-
-export function fetchRiskHeatmap(): Promise<HeatmapPoint[]> {
-  return api.get('/risk-intelligence/heatmap', getToken());
-}
-
-export function fetchFloodZones(): Promise<RiskArea[]> {
-  return api.get('/risk-intelligence/flood-zones', getToken());
+export function fetchRiskMap(periodDays: RiskMapPeriod): Promise<RiskMap> {
+  return api.get(`/risk-intelligence/map?periodDays=${periodDays}`, getToken());
 }
 
 export function fetchRiskAreas(): Promise<RiskArea[]> {
   return api.get('/risk-intelligence/areas', getToken());
 }
 
-export function fetchRiskPatterns(): Promise<RiskPatterns> {
-  return api.get('/risk-intelligence/patterns', getToken());
-}
-
-// ─── Management (System Administrator, MODULE_GAPS_COMPLETION_PLAN.md Phase 5) ──
+// ─── Management (Supervisor only; read by Dispatchers and, for support, the System Administrator) ──
 
 export function createRiskArea(body: RiskAreaInput): Promise<RiskArea> {
   return api.post('/risk-intelligence/areas', body, getToken());

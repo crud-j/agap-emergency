@@ -20,6 +20,7 @@ import { UserRole } from '@agap/shared';
 import { CreateRiskAreaDto, UpdateRiskAreaDto } from './dto/risk-area.dto';
 import { ApproveRiskAreaProposalDto, ListRiskAreaProposalsQuery } from './dto/risk-area-proposal.dto';
 import { HotspotDiscoveryService } from './hotspot-discovery.service';
+import { DEFAULT_RISK_MAP_PERIOD, RiskMapQuery } from './dto/risk-map.dto';
 
 @ApiTags('risk')
 @ApiBearerAuth()
@@ -31,29 +32,17 @@ export class RiskIntelligenceController {
     private readonly hotspots: HotspotDiscoveryService,
   ) {}
 
-  @Get('heatmap')
+  @Get('map')
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
-  @ApiOperation({ summary: 'Incident heatmap by barangay' })
-  async heatmap() {
-    return this.riskIntelligenceService.getHeatmap();
+  @ApiOperation({ summary: 'Risk Map: floods per barangay (with boundaries), other incidents at their spot' })
+  async map(@Query() query: RiskMapQuery) {
+    return this.riskIntelligenceService.getRiskMap(query.periodDays ?? DEFAULT_RISK_MAP_PERIOD);
   }
 
-  @Get('map-points')
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
-  @ApiOperation({ summary: 'Geo risk points for the operations map overlay (MOD-51)' })
-  async mapPoints(@Query('periodDays') periodDays?: string) {
-    return this.riskIntelligenceService.getGeoHeatmap(periodDays ? Number(periodDays) : 30);
-  }
-
-  @Get('flood-zones')
-  @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR)
-  @ApiOperation({ summary: 'List flood risk zones' })
-  async floodZones() {
-    return this.riskIntelligenceService.getFloodZones();
-  }
-
-  // The System Administrator manages risk areas (Administration → Risk Areas) but,
-  // since role dashboards Phase 5b, gets no heatmap or map points.
+  // Risk areas are an MDRRMO operations decision: the Supervisor manages them and the
+  // nightly hotspot proposals from the Risk Map. Dispatchers read them; the System
+  // Administrator keeps a read-only list for support (Administration → Risk Areas) and,
+  // since role dashboards Phase 5b, gets no Risk Map data.
   @Get('areas')
   @Roles(UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
   @ApiOperation({ summary: 'List risk areas' })
@@ -62,14 +51,14 @@ export class RiskIntelligenceController {
   }
 
   @Post('areas')
-  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Create a risk area' })
   async createArea(@Body() dto: CreateRiskAreaDto, @Request() req: any) {
     return this.riskIntelligenceService.createArea(dto, req.user.id);
   }
 
   @Patch('areas/:id')
-  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Update a risk area' })
   async updateArea(
     @Param('id', ParseUUIDPipe) id: string,
@@ -80,7 +69,7 @@ export class RiskIntelligenceController {
   }
 
   @Delete('areas/:id')
-  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Delete a risk area' })
   async deleteArea(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
     await this.riskIntelligenceService.deleteArea(id, req.user.id);
@@ -90,14 +79,14 @@ export class RiskIntelligenceController {
   // ── Proposed hotspots (AUTOMATION_NEEDS_PLAN Phase 2, C7) ──────────────────
 
   @Get('proposals')
-  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'List risk areas proposed from incident clusters' })
   async proposals(@Query() query: ListRiskAreaProposalsQuery) {
     return this.hotspots.listProposals(query.status ?? 'PENDING');
   }
 
   @Post('proposals/:id/approve')
-  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Approve a proposal: creates the risk area with its boundary (audited)' })
   async approveProposal(
     @Param('id', ParseUUIDPipe) id: string,
@@ -108,16 +97,9 @@ export class RiskIntelligenceController {
   }
 
   @Post('proposals/:id/dismiss')
-  @Roles(UserRole.SYSTEM_ADMINISTRATOR)
+  @Roles(UserRole.SUPERVISOR)
   @ApiOperation({ summary: 'Dismiss a proposal (audited)' })
   async dismissProposal(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
     return this.hotspots.dismiss(id, req.user.id);
-  }
-
-  @Get('patterns')
-  @Roles(UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR)
-  @ApiOperation({ summary: 'Incident patterns' })
-  async patterns() {
-    return this.riskIntelligenceService.getPatterns();
   }
 }

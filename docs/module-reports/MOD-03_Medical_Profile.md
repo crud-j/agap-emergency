@@ -118,7 +118,9 @@ Have important medical facts written down ahead of time, with the citizen's expl
 
 **Encryption (added 2026-10-23):** every medical value is AES-256-GCM encrypted with `MEDICAL_ENCRYPTION_KEY` before it is saved, and bound to its owner. A screenshot of the `medical_profiles` row (values start with `v1.`) next to the readable app screen shows it. The server needs the key set; without it a profile can't be saved (dispatch is never affected).
 
+**Crew access (2026-11-13):** the crew of an *accepted* assignment sees a **Patient medical info** card on the responder app, only when the reporter marked "Also needs help" on their own report (reporter ≠ patient: a bystander's profile is never shown for the person they reported), has consented, and the incident is still active. The card stays closed until the crew taps **Show**; each read is written to the citizen's access log with the incident, and to the audit trail (`GET /v1/medical-profiles/assignments/:dispatchId`). Dispatchers and supervisors no longer read profiles; the old `GET /medical-profiles/:userId` route is removed. Test: as a citizen with a medical profile, report with "Also needs help"; dispatch and accept on the responder phone; tap Show; then check the citizen's Privacy → access log names the incident. Report again as "Safe, reporting for others" and check the card does not appear.
+
 **Do not claim:**
-- **Responders viewing the profile in an app.** The backend `GET /medical-profiles/:userId` exists (it now allows only a responder on an active crew for that patient's incident, and logs every access), but no web or mobile screen calls it.
+- **A profile for a patient who isn't the reporter.** Only the reporter's own profile is shown, and only when they said they need help; AGAP never matches another user to a patient.
 - **Deleting the profile from the app.** The backend `DELETE /medical-profiles/me` exists, but no screen uses it.
 - **The access log and data export** on the Privacy screen. They belong to MOD-48, not this module.

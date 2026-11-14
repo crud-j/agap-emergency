@@ -181,9 +181,9 @@ describe('proposal routes and DTO', () => {
   const roles = (name: keyof RiskIntelligenceController) => Reflect.getMetadata(ROLES_KEY, RiskIntelligenceController.prototype[name]);
   const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
 
-  it('are System Administrator only', () => {
+  it('are Supervisor only', () => {
     for (const name of ['proposals', 'approveProposal', 'dismissProposal'] as const) {
-      expect(roles(name)).toEqual([UserRole.SYSTEM_ADMINISTRATOR]);
+      expect(roles(name)).toEqual([UserRole.SUPERVISOR]);
     }
   });
 

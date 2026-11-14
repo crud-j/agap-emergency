@@ -5,6 +5,8 @@ import {
   fetchDispatches,
   fetchDispatch,
   createDispatch,
+  cancelDispatch,
+  reassignDispatch,
   fetchDispatchRecommendations,
   fetchPriorityRecommendation,
   fetchAvailableUnits,
@@ -12,6 +14,8 @@ import {
   fetchIncidentDispatches,
   setIncidentPriority,
   type CreateDispatchBody,
+  type DispatchChangeBody,
+  type ReassignDispatchBody,
 } from './api';
 
 export function useDispatches(incidentId?: string) {
@@ -90,22 +94,44 @@ export function useDispatchQueue() {
   });
 }
 
+/** Everything a dispatch, recall or replacement changes for one incident. */
+function invalidateDispatchViews(qc: ReturnType<typeof useQueryClient>, incidentId: string) {
+  qc.invalidateQueries({ queryKey: ['dispatches'] });
+  qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
+  qc.invalidateQueries({ queryKey: ['available-units'] });
+  // A unit just sent is no longer AVAILABLE (a recalled one is again); "Dispatch another unit" follows.
+  qc.invalidateQueries({ queryKey: ['dispatch-recommendations', incidentId] });
+  // The units-needed pre-selection subtracts units already responding.
+  qc.invalidateQueries({ queryKey: ['incident-dispatches', incidentId] });
+  qc.invalidateQueries({ queryKey: ['responders'] });
+  qc.invalidateQueries({ queryKey: ['incidents'] });
+  qc.invalidateQueries({ queryKey: ['incident', incidentId] });
+  qc.invalidateQueries({ queryKey: ['dispatch-incident', incidentId] });
+}
+
 export function useCreateDispatch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateDispatchBody) => createDispatch(body),
-    onSuccess: (_data, body) => {
-      qc.invalidateQueries({ queryKey: ['dispatches'] });
-      qc.invalidateQueries({ queryKey: ['dispatch-incidents'] });
-      qc.invalidateQueries({ queryKey: ['available-units'] });
-      // The unit just sent is no longer AVAILABLE; "Dispatch another unit" must not offer it.
-      qc.invalidateQueries({ queryKey: ['dispatch-recommendations', body.incidentId] });
-      // The units-needed pre-selection subtracts units already responding.
-      qc.invalidateQueries({ queryKey: ['incident-dispatches', body.incidentId] });
-      qc.invalidateQueries({ queryKey: ['responders'] });
-      qc.invalidateQueries({ queryKey: ['incidents'] });
-      qc.invalidateQueries({ queryKey: ['incident', body.incidentId] });
-      qc.invalidateQueries({ queryKey: ['dispatch-incident', body.incidentId] });
-    },
+    // A refusal (e.g. someone else dispatched first) means this view was stale too.
+    onSettled: (_data, _err, body) => invalidateDispatchViews(qc, body.incidentId),
+  });
+}
+
+/** MOD-31 — recall a unit before it reaches the scene. */
+export function useCancelDispatch(incidentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ dispatchId, body }: { dispatchId: string; body: DispatchChangeBody }) => cancelDispatch(dispatchId, body),
+    onSettled: () => invalidateDispatchViews(qc, incidentId),
+  });
+}
+
+/** MOD-31 — replace a unit before it reaches the scene. */
+export function useReassignDispatch(incidentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ dispatchId, body }: { dispatchId: string; body: ReassignDispatchBody }) => reassignDispatch(dispatchId, body),
+    onSettled: () => invalidateDispatchViews(qc, incidentId),
   });
 }

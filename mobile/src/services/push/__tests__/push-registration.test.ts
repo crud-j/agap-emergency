@@ -28,3 +28,17 @@ describe('assignmentIdFromNotification (AUTOMATION_NEEDS_PLAN C1)', () => {
     expect(incidentIdFromNotification(tap({ incidentId: 'inc-1' }))).toBe('inc-1');
   });
 });
+
+describe('Incident Command job notices (MOD-36)', () => {
+  it('open the crew member’s assignment when they crew a unit on the incident', () => {
+    for (const type of ['ICS_POSITION_ASSIGNED', 'ICS_POSITION_RELIEVED', 'ICS_COMMAND_ENDED']) {
+      expect(assignmentIdFromNotification(tap({ type, incidentId: 'inc-1', dispatchId: 'disp-1' }))).toBe('disp-1');
+    }
+  });
+
+  it('never open the reporter’s incident screen, which would refuse a responder', () => {
+    const notice = tap({ type: 'ICS_POSITION_ASSIGNED', incidentId: 'inc-1' });
+    expect(assignmentIdFromNotification(notice)).toBeNull();
+    expect(incidentIdFromNotification(notice)).toBeNull();
+  });
+});

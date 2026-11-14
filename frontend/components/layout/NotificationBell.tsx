@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { Bell, Loader2, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck, Siren, Flame, LifeBuoy } from 'lucide-react';
+import { Bell, Loader2, AlertCircle, Megaphone, Info, CheckCheck, CheckCircle2, Truck, Siren, Flame, LifeBuoy, Crown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useAuthUser } from '@/lib/use-auth';
+import { canOpen } from '@/lib/role-access';
 import { useUnreadCount, useNotifications, useMarkRead, useMarkAllRead } from '@/features/notifications/hooks';
 import type { AppNotification } from '@/features/notifications/api';
 import { Toast } from '@/components/ui/toast';
@@ -26,7 +28,25 @@ const EVENT_META: Record<string, { icon: typeof AlertCircle; color: string; bg: 
   [NOTIFICATION_EVENT_TYPES.RESCUE_AMBULANCE_SUGGESTED]: { icon: LifeBuoy, color: '#D44858', bg: '#FDF2F3' },
   ANNOUNCEMENT:              { icon: Megaphone,    color: '#0D6053', bg: '#EEF7F4' },
   SURGE_:                    { icon: Siren,        color: '#D44858', bg: '#FDF2F3' },
+  ICS_POSITION_ASSIGNED:     { icon: Crown,        color: '#0D6053', bg: '#EEF7F4' },
+  ICS_POSITION_RELIEVED:     { icon: Crown,        color: '#8795A3', bg: '#F5F7FA' },
+  ICS_COMMAND_ENDED:         { icon: Crown,        color: '#8795A3', bg: '#F5F7FA' },
 };
+
+/** Incident Command job notices (MOD-36). */
+const ICS_EVENT_TYPES = new Set(['ICS_POSITION_ASSIGNED', 'ICS_POSITION_RELIEVED', 'ICS_COMMAND_ENDED']);
+const COMMAND_PAGE = '/operations/command';
+
+/**
+ * A command job notice opens that incident on the Command page, for people allowed
+ * to open it (Supervisors). Anyone else falls back to the incident itself.
+ */
+function incidentNoticeLink(type: string, incidentId: string, role: string | undefined, notificationId?: string): string {
+  if (ICS_EVENT_TYPES.has(type) && canOpen(role, COMMAND_PAGE)) {
+    return `${COMMAND_PAGE}?incident=${encodeURIComponent(incidentId)}`;
+  }
+  return incidentLink(incidentId, notificationId);
+}
 
 /** `n` makes each notification's link unique, so opening a second notice for an
  *  incident that is already open on the Incident Queue still reopens its drawer. */
@@ -38,9 +58,9 @@ function incidentLink(incidentId: string, notificationId?: string): string {
 }
 
 /** Where a notification row leads, or null when it has no page of its own. */
-function notificationHref(notif: AppNotification): string | null {
+function notificationHref(notif: AppNotification, role: string | undefined): string | null {
   // Incident notices (crew help, fire report and rescue notices included) open that incident.
-  if (notif.incident_id) return incidentLink(notif.incident_id, notif.id);
+  if (notif.incident_id) return incidentNoticeLink(notif.event_type, notif.incident_id, role, notif.id);
   if (notif.event_type === 'ANNOUNCEMENT' && typeof notif.data_payload?.announcementId === 'string') {
     return `/announcements/${encodeURIComponent(notif.data_payload.announcementId)}`;
   }
@@ -75,16 +95,18 @@ function timeAgo(iso: string): string {
 
 function NotifRow({
   notif,
+  role,
   onRead,
   onOpen,
 }: {
   notif: AppNotification;
+  role: string | undefined;
   onRead: (id: string) => void;
   onOpen: (href: string) => void;
 }) {
   const unread = notif.status === 'PENDING';
   const { icon: Icon, color, bg } = getEventMeta(notif.event_type);
-  const href = notificationHref(notif);
+  const href = notificationHref(notif, role);
 
   const crewNote = crewHelpNote(notif);
 
@@ -148,6 +170,7 @@ export function NotificationBell() {
   const unread = countData?.unread ?? 0;
   const notifications = listData?.data ?? [];
   const router = useRouter();
+  const role = useAuthUser()?.role;
   const { toasts, toast, dismiss } = useToast();
   const toastLinks = useRef(new Map<string, string>());
   // Navigation can take a moment (first visit to a page); the bell shows a spinner
@@ -179,11 +202,11 @@ export function NotificationBell() {
         variant: n.type === 'INCIDENT_AWAITING_CLOSURE' ? 'success' : 'default',
         duration: 8000,
       });
-      if (n.incidentId) toastLinks.current.set(id, incidentLink(n.incidentId));
+      if (n.incidentId) toastLinks.current.set(id, incidentNoticeLink(n.type, n.incidentId, role));
       else if (n.type === 'SURGE_RECOMMENDED') toastLinks.current.set(id, '/operations/surge');
       else if (n.type === 'HOSPITAL_STATUS_STALE' || n.type === 'REGISTRY_REVIEW_DUE') toastLinks.current.set(id, '/hospitals');
     });
-  }, [toast]);
+  }, [toast, role]);
 
   // Close on outside click
   useEffect(() => {
@@ -274,6 +297,7 @@ export function NotificationBell() {
                 <NotifRow
                   key={n.id}
                   notif={n}
+                  role={role}
                   onRead={(id) => { markRead(id); }}
                   onOpen={openLink}
                 />

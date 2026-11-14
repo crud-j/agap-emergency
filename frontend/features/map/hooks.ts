@@ -4,7 +4,6 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useWsState } from '@/lib/use-ws-state';
 import {
   fetchMapConfig,
-  fetchRiskData,
   fetchLiveResponderPositions,
   fetchIncidentLocations,
   fetchLatestUnitPositions,
@@ -20,14 +19,6 @@ export function useMapStyle(): string {
     staleTime: Infinity,
   });
   return data?.styleUrl ?? 'https://demotiles.maplibre.org/style.json';
-}
-
-export function useRiskData(periodDays = 30) {
-  return useQuery({
-    queryKey: ['risk-data', periodDays],
-    queryFn: () => fetchRiskData(periodDays),
-    staleTime: 5 * 60_000,
-  });
 }
 
 /** REST poll while the socket is down (plan §19); the socket patches the caches otherwise. */

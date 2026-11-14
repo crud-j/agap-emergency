@@ -25,9 +25,8 @@
 |---|---|---|
 | Dashboard | `/dashboard` | Content depends on role |
 | Incident Queue | `/operations/incidents` | |
-| Live Map | `/operations/map` | |
 | Triage | `/operations/triage` | |
-| Dispatch | `/operations/dispatch` | |
+| Live Dispatch | `/operations/dispatch` | The live map and dispatch on one screen (2026-11-14). The old Live Map URL `/operations/map` redirects here, to the Responding list |
 | Incident History | `/operations/history` | New (plan Phase 4) |
 | Escalations | `/operations/escalations` | |
 | Activity Log | `/audit` | Same page as Audit Log; label differs only by audience. Supervisor sees "Activity Log", System Administrator "Audit Log" |
@@ -37,11 +36,12 @@
 | Fleet & Units | `/operations/fleet` | Registry (`/resources`) becomes a tab of this page |
 | Hospitals & Facilities | `/hospitals` | |
 | Analytics | `/analytics` | |
-| Risk Map | `/operations/risk` | |
+| Risk Map | `/operations/risk` | Dispatcher: map only. Supervisor: map plus a **Risk areas** tab (manage areas, approve hotspot proposals) |
 | Announcements | `/announcements` | Filters: All · Advisories · Drafts · Pending approval |
 | Publication History | `/announcements/history` | New (plan Phase 2) |
 | Approvals | `/operations/approvals` | New (plan Phase 7) |
 | Users & Accounts, Roles & Permissions, Barangay Directory, Integrations, Security Events, Configuration | `/administration/<section>` | The administration tabs become routes, so the sidebar is the only navigation |
+| Risk Areas | `/administration/risk-areas` | System Administrator, read-only (support). Supervisors manage risk areas on the Risk Map |
 | Organizations | `/organizations` | |
 | Requests | `/resources/requests` | Org Administrator (plan Phase 6) |
 
@@ -136,7 +136,7 @@ Process incoming reports and coordinate the response. This is the primary real-t
 - Cannot change permissions, edit audit history or publish announcements.
 
 ### Sidebar
-Dashboard · Incident Queue · Live Map · Triage · Dispatch · Fleet & Units · Hospitals & Facilities · Multi-Agency · Incident History
+Dashboard · Incident Queue · Triage · Live Dispatch · Risk Map · Fleet & Units · Hospitals & Facilities · Multi-Agency · Incident History
 
 **Not in the sidebar:** a Reports link (`/analytics/*` does not allow Dispatchers; the per-incident report lives in the incident drawer). No Broadcast or Send SMS quick actions: Dispatchers do not publish announcements, and there is no free-form SMS endpoint.
 
@@ -183,21 +183,39 @@ The Incident Commander mockup is the content of this page, not a separate dashbo
 - Has every Dispatcher action, including dispatch.
 - Acknowledges and resolves escalations; activates ICS; assigns the Incident Commander; adds agencies; activates surge mode.
 - Approves or returns CRITICAL advisories from the LGU Information Officer.
+- Owns risk areas (MOD-51): adds, changes and removes them, and approves or dismisses the nightly hotspot proposals, from the Risk Map's Risk areas tab. Every change is audited. Road hazards (construction, closed or flooded roads) will be Supervisor-only too (planned).
 - Reassigns or hands over incidents only through audited actions.
 - Cannot silently change or erase a dispatcher's recorded decision.
 - Cannot manage accounts or system configuration.
 - Gets only the medical information needed for the decision at hand.
 
 ### Sidebar
-| Group | Links |
-|---|---|
-| Operations | Dashboard · Incident Queue · Live Map · Triage · Dispatch |
-| Oversight | Escalations · Activity Log |
-| Command | Command / ICS · Multi-Agency · Surge Mode |
-| Resources | Fleet & Units · Hospitals & Facilities |
-| Intelligence | Analytics · Risk Map |
-| Broadcast | Approvals |
-| Records | Incident History |
+The Supervisor keeps every Dispatcher page, but their daily work is oversight. Only that shows up front; the rest sits in folded groups, one click away. Folding hides links, never permissions (`ROUTE_ROLES` is unchanged).
+
+| Group | Links | Default |
+|---|---|---|
+| Oversight | Dashboard · Escalations · Approvals · Live Dispatch | Always visible. Escalations and Approvals show a count of open items |
+| Take Over Dispatch | Incident Queue · Triage | Folded |
+| Major Incident | Command / ICS · Multi-Agency · Surge Mode | Folded. Opens by itself, with a pulsing dot, while an incident is under ICS or surge mode is on |
+| Reports | Analytics · Risk Map · Activity Log · Incident History | Folded |
+| Resources | Fleet & Units · Hospitals & Facilities | Folded |
+
+- A group the Supervisor opens or closes stays that way (remembered per browser).
+- Opening a page inside a folded group (for example from a dashboard link) opens that group, so the current page is never hidden.
+- A folded group shows the total count of open items inside it.
+- The collapsed dock still shows every icon; counts appear as small badges there.
+
+### Live Dispatch: oversight by default, dispatch never locked
+Live Dispatch is one screen for watching and acting, so the defaults (not permissions) keep the Supervisor in oversight:
+
+| | Dispatcher | Supervisor |
+|---|---|---|
+| List shown on arrival | Waiting (incidents needing a unit) | Responding (units in the field) |
+| "New incident" pop-ups | On | Off. The Immediate and Waiting counts stay visible, and Escalations flags what needs them |
+| Dispatch form | Available | Available: one tab away, no take-over switch |
+
+- An explicit link (`?tab=waiting` / `?tab=responding`) overrides the starting list.
+- **Two people on one incident.** Each dispatch carries how many units its sender saw on the incident. If someone else's unit got there first, the backend refuses with 409 `INCIDENT_DISPATCH_CHANGED` and names the unit and who sent it, instead of silently adding a second unit. A deliberate "Dispatch another unit" still works. If the live update arrives while the form is open, the form is replaced by the tracking card with a notice saying someone else dispatched.
 
 The oversight items in the mockup ("Dispatch Oversight", "Resource Coverage", "Performance Reports") are **Dashboard panels**, not links. "Active Incidents" is the Incident Queue.
 
@@ -222,6 +240,7 @@ Keep AGAP healthy, secure and correctly configured. Supports operations but is *
 - **Roles and permissions.**
 - **Organizations, resource registry, hospitals and facilities.**
 - **Barangay directory.**
+- **Risk Areas:** read-only list for support. Risk areas are an MDRRMO operations decision, so Supervisors manage them.
 - **Security events:** failed logins, lockouts, password and MFA changes, revoked sessions, permission denials.
 - **Audit viewer:** search the audit log; never edit it.
 - **Configuration:** one page for all `system_configurations` keys (the mockup's "Incident Configuration" and "System Settings" are the same table).
@@ -288,6 +307,8 @@ Scoped to the Hospital Portal (`/hospitals`) and their own Account page. **No si
 | ICS, multi-agency, surge | No | Support | Yes | No | No |
 | Publish announcements | Yes | No | No | Yes (platform support) | No |
 | Approve CRITICAL advisories | No | No | Yes | No | No |
+| Risk Map | No | View | View | No | No |
+| Manage risk areas, approve hotspot proposals | No | No | Yes | Read-only list | No |
 | Medical details | No | Minimum necessary | Minimum necessary | No | No |
 | Manage accounts and roles | No | No | No | Yes | Own org members |
 | System configuration | No | No | No | Yes | No |

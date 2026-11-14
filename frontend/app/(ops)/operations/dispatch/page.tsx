@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Siren, Truck, MapPin, Users, CheckCircle2, ExternalLink,
   Search, X, Navigation, UserCheck, ChevronDown, ChevronUp,
@@ -23,18 +24,25 @@ import { useIncident, useUpdateIncidentStatus } from '@/features/incidents/hooks
 import {
   ACTIVE_RESPONSE_INCIDENT_STATUSES, isRouteLastKnown, recommendUnitsNeeded, sanitizeIntakeAnswers,
 } from '@agap/shared';
-import { useIncidentUnits, useLiveResponders, useRouteLine } from '@/features/map/hooks';
+import { useIncidentUnits, useIncidentsUnits, useLiveResponders, useRouteLine } from '@/features/map/hooks';
 import {
-  destinationFacilities, formatEta, legChip, trackingPhase, unitRoutePlan,
+  destinationFacilities, formatEta, isUnitOnMap, legChip, trackingPhase, unitRoutePlan,
 } from '@/features/map/live-tracking';
 import { LegChip } from '@/components/map/LegChip';
 import { useNow } from '@/lib/use-now';
 import { UnitTrackingCard } from '@/components/dispatch/UnitTrackingCard';
+import { RespondingList, type RespondingUnit } from '@/components/dispatch/RespondingList';
+import { MapLayersControl } from '@/components/dispatch/MapLayersControl';
+import { useHospitals } from '@/features/hospitals/hooks';
+import { isWithinBocaue } from '@/lib/bocaue-geo';
+import { useAuthUser } from '@/lib/use-auth';
+import { initialPanelTab, showsNewIncidentAlerts, type PanelTab } from '@/features/dispatch/live-dispatch';
 import { alertMessage, confirmAction, escapeHtml, notify } from '@/components/ui/alerts';
 import { categoryIcon, formatAffectedCount, titleCase, priorityLabel, timeAgo, ACTIVE_STATUSES } from '@/lib/incident-format';
 import type { IncidentListItem } from '@/features/incidents/api';
-import type { ResourceRecommendation } from '@/features/dispatch/api';
-import type { MapIncident } from '@/components/incidents/IncidentMapView';
+import { INCIDENT_DISPATCH_CHANGED, type ResourceRecommendation } from '@/features/dispatch/api';
+import { ApiError } from '@/lib/api';
+import type { MapFacility, MapIncident, MapRoute } from '@/components/incidents/IncidentMapView';
 import type { IncidentDetail } from '@/features/incidents/api';
 
 const PRIORITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
@@ -87,6 +95,26 @@ const PILL =
 
 const DESKTOP_QUERY = '(min-width: 1024px)';
 
+/** The optional hospital layer re-reads GET /hospitals at most every 5 minutes (plan §16.3). */
+const HOSPITAL_LAYER_STALE_MS = 5 * 60_000;
+
+const RESPONDING: readonly string[] = ACTIVE_RESPONSE_INCIDENT_STATUSES;
+
+function byPriorityThenAge(a: IncidentListItem, b: IncidentListItem): number {
+  const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
+  return pr !== 0 ? pr : +new Date(a.submitted_at) - +new Date(b.submitted_at);
+}
+
+function matchesSearch(i: IncidentListItem, search: string): boolean {
+  const q = search.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    i.public_reference.toLowerCase().includes(q) ||
+    (i.incident_locations?.barangay ?? '').toLowerCase().includes(q) ||
+    i.category.toLowerCase().includes(q)
+  );
+}
+
 function km(meters: number | null): string {
   if (meters == null) return 'n/a';
   return `${(meters / 1000).toFixed(2)} km`;
@@ -112,16 +140,43 @@ const IncidentMapView = dynamic(
   },
 );
 
-export default function DispatchPage(): JSX.Element {
+// useSearchParams needs a Suspense boundary in the app router.
+export default function LiveDispatchRoute(): JSX.Element {
+  return (
+    <Suspense>
+      <LiveDispatchPage />
+    </Suspense>
+  );
+}
+
+/**
+ * Live Dispatch — MOD-22 Real-Time Incident Map and MOD-31 Dispatch on one screen.
+ * Full-bleed map (every unit's route by leg, destination hospitals) under one panel
+ * with two lists: Waiting (needs a unit) and Responding (units out). Opening an
+ * incident focuses the map on it and shows dispatch or tracking in the panel.
+ *
+ * Role defaults (docs/AGAP_Role_Rules_and_Dashboard_Content.md): the Dispatcher
+ * starts on Waiting with new-incident alerts; the Supervisor starts on Responding
+ * without them (oversight first) but keeps full dispatch authority, one tab away.
+ */
+function LiveDispatchPage(): JSX.Element {
   const wsState = useWsState();
-  const { data: incidents = [], isLoading } = useDispatchQueue();
+  const { data: incidents = [], isLoading, isError: incidentsError } = useDispatchQueue();
   const { data: availableUnits = [] } = useAvailableUnits();
   const { data: responders } = useLiveResponders();
+  const role = useAuthUser()?.role ?? null;
+  const searchParams = useSearchParams();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [followUnit, setFollowUnit] = useState(false);
   const [fitRequest, setFitRequest] = useState(0);
+  const [showHospitals, setShowHospitals] = useState(false);
+  // Null until the user picks a tab: the default follows ?tab= and the role, which is
+  // only known after hydration (useAuthUser is null during SSR).
+  const [pickedTab, setPickedTab] = useState<PanelTab | null>(null);
+  const tabParam = searchParams.get('tab');
+  const tab: PanelTab = pickedTab ?? initialPanelTab(tabParam, role);
 
   useEffect(() => {
     setFollowUnit(false);
@@ -148,26 +203,25 @@ export default function DispatchPage(): JSX.Element {
     }
   }, [selectedId]);
 
-  const queue = useMemo(
-    () =>
-      incidents
-        .filter((i: IncidentListItem) => PRE_DISPATCH.includes(i.status))
-        .filter((i) => {
-          if (!search.trim()) return true;
-          const q = search.toLowerCase();
-          return (
-            i.public_reference.toLowerCase().includes(q) ||
-            (i.incident_locations?.barangay ?? '').toLowerCase().includes(q) ||
-            i.category.toLowerCase().includes(q)
-          );
-        })
-        .sort((a, b) => {
-          const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
-          if (pr !== 0) return pr;
-          return +new Date(a.submitted_at) - +new Date(b.submitted_at);
-        }),
-    [incidents, search],
+  const waitingAll = useMemo(
+    () => incidents.filter((i: IncidentListItem) => PRE_DISPATCH.includes(i.status)).sort(byPriorityThenAge),
+    [incidents],
   );
+  const respondingAll = useMemo(
+    () => incidents.filter((i: IncidentListItem) => RESPONDING.includes(i.status)).sort(byPriorityThenAge),
+    [incidents],
+  );
+  const queue = useMemo(() => waitingAll.filter((i) => matchesSearch(i, search)), [waitingAll, search]);
+  const responding = useMemo(() => respondingAll.filter((i) => matchesSearch(i, search)), [respondingAll, search]);
+  /** The list the panel shows, for prev/next and focus return. */
+  const visibleList = tab === 'waiting' ? queue : responding;
+
+  /** Map or alert pick: also switch to the list holding the incident, so "back" lands on it. */
+  function openIncident(id: string) {
+    setSelectedId(id);
+    if (waitingAll.some((i) => i.id === id)) setPickedTab('waiting');
+    else if (respondingAll.some((i) => i.id === id)) setPickedTab('responding');
+  }
 
   const mapIncidents = useMemo<MapIncident[]>(
     () =>
@@ -188,10 +242,11 @@ export default function DispatchPage(): JSX.Element {
   );
 
   // Toast when an incident joins the queue after the page has loaded. The first load
-  // only records what is already there. Skipped while a confirmation is open.
+  // only records what is already there. Skipped while a confirmation is open, and for
+  // the Supervisor (see showsNewIncidentAlerts).
   const seenIds = useRef<Set<string> | null>(null);
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || !showsNewIncidentAlerts(role)) return;
     const pending = incidents.filter((i) => PRE_DISPATCH.includes(i.status));
     if (!seenIds.current) {
       seenIds.current = new Set(pending.map((i) => i.id));
@@ -207,19 +262,21 @@ export default function DispatchPage(): JSX.Element {
       text: `${first.public_reference} · ${titleCase(first.category)}${place ? ` · ${place}` : ''}`,
       actionText: 'Open',
     }).then((open) => {
-      if (open) setSelectedId(first.id);
+      if (open) openIncident(first.id);
     });
-  }, [incidents, isLoading]);
+  }, [incidents, isLoading, role]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const criticalCount = useMemo(() => incidents.filter((i) => ACTIVE_STATUSES.includes(i.status) && i.priority === 'CRITICAL').length, [incidents]);
-  const awaitingCount = queue.length;
-  const activeCount = useMemo(() => incidents.filter((i) => ACTIVE_STATUSES.includes(i.status)).length, [incidents]);
+  // Counts ignore the search box. "Immediate" = Critical incidents still waiting for a
+  // unit: the ones someone must act on now (a Critical already responding is tracked).
+  const criticalCount = useMemo(() => waitingAll.filter((i) => i.priority === 'CRITICAL').length, [waitingAll]);
+  const awaitingCount = waitingAll.length;
+  const respondingCount = respondingAll.length;
   const availableCount = availableUnits.length;
 
-  // Previous / next within the queue while an incident is open (a map pick may be outside it).
-  const queueIndex = selectedId ? queue.findIndex((i) => i.id === selectedId) : -1;
-  const prevId = queueIndex > 0 ? queue[queueIndex - 1]?.id ?? null : null;
-  const nextId = queueIndex >= 0 ? queue[queueIndex + 1]?.id ?? null : null;
+  // Previous / next within the list on screen while an incident is open (a map pick may be outside it).
+  const queueIndex = selectedId ? visibleList.findIndex((i) => i.id === selectedId) : -1;
+  const prevId = queueIndex > 0 ? visibleList[queueIndex - 1]?.id ?? null : null;
+  const nextId = queueIndex >= 0 ? visibleList[queueIndex + 1]?.id ?? null : null;
 
   const { data: selectedIncident } = useIncident(selectedId);
   const phase = trackingPhase(selectedIncident?.dispatches);
@@ -239,8 +296,69 @@ export default function DispatchPage(): JSX.Element {
   const routeLastKnown = isRouteLastKnown(plan.server, now);
   const trackedEtaSeconds = trackedUnit?.eta.seconds ?? plan.server?.durationSeconds ?? route.data?.durationSeconds ?? null;
   const trackedChip = legChip(trackedUnit);
-  const unitLegs = useMemo(() => Object.fromEntries((units ?? []).map((u) => [u.dispatchId, legChip(u)])), [units]);
-  const facilities = useMemo(() => destinationFacilities(units), [units]);
+
+  // ── Overview layer (was the Live Map): every tracked unit's leg, route and hospital ──
+  const trackedIncidentIds = useMemo(
+    () => [...new Set((responders ?? []).map((r) => r.incident_id).filter((id): id is string => !!id))].sort(),
+    [responders],
+  );
+  const fieldUnits = useIncidentsUnits(trackedIncidentIds);
+  /** Every unit by dispatch, the selected incident's fresher cache last. Same query keys, so usually identical. */
+  const allUnits = useMemo(
+    () => [...new Map([...fieldUnits, ...(units ?? [])].map((u) => [u.dispatchId, u])).values()],
+    [fieldUnits, units],
+  );
+  const unitLegs = useMemo(() => Object.fromEntries(allUnits.map((u) => [u.dispatchId, legChip(u)])), [allUnits]);
+  const incidentOfDispatch = useMemo(
+    () => Object.fromEntries((responders ?? []).flatMap((r) => (r.dispatchId && r.incident_id ? [[r.dispatchId, r.incident_id]] : []))),
+    [responders],
+  );
+  const overviewRoutes = useMemo<MapRoute[]>(
+    () =>
+      allUnits.flatMap((u) =>
+        u.route && u.leg !== 'AT_FACILITY' && !(routeGeometry && u.dispatchId === tracked.dispatchId)
+          ? [{
+              id: u.dispatchId,
+              geometry: u.route.geometry,
+              leg: u.leg ?? 'TO_SCENE',
+              lastKnown: isRouteLastKnown(u.route, now),
+              // With an incident open, other incidents' routes stay as faint context.
+              dimmed: !!selectedId && incidentOfDispatch[u.dispatchId] !== selectedId,
+            }]
+          : [],
+      ),
+    [allUnits, routeGeometry, tracked.dispatchId, now, selectedId, incidentOfDispatch],
+  );
+  const { data: hospitals } = useHospitals({ enabled: showHospitals, staleTime: HOSPITAL_LAYER_STALE_MS });
+  const facilities = useMemo<MapFacility[]>(() => {
+    const verified = showHospitals
+      ? (hospitals ?? []).flatMap((h) =>
+          h.location_status === 'VERIFIED' && h.latitude != null && h.longitude != null
+            ? [{ id: h.id, name: h.name, latitude: h.latitude, longitude: h.longitude, verified: true }]
+            : [],
+        )
+      : [];
+    return [...verified, ...destinationFacilities(allUnits)];
+  }, [showHospitals, hospitals, allUnits]);
+
+  /** Responding list: units with a live position, under their incident. */
+  const unitsByIncident = useMemo(() => {
+    const out: Record<string, RespondingUnit[]> = {};
+    for (const r of responders ?? []) {
+      if (!r.incident_id) continue;
+      (out[r.incident_id] ??= []).push({
+        key: r.dispatchId ?? r.responderId,
+        label: r.call_sign ?? r.resource_name ?? 'Unit',
+        chip: (r.dispatchId && unitLegs[r.dispatchId]) || legChip(null),
+      });
+    }
+    return out;
+  }, [responders, unitLegs]);
+
+  // Positions outside Bocaue are not drawn; say so instead of letting them vanish.
+  const offMapCount =
+    mapIncidents.filter((i) => i.lat != null && i.lng != null && (i.lat !== 0 || i.lng !== 0) && !isWithinBocaue(i.lng, i.lat)).length +
+    (responders ?? []).filter((r) => !isUnitOnMap(r.lng, r.lat)).length;
 
   const recQuery = useDispatchRecommendations(phase === 'none' ? selectedId : null);
   const nearestMeters = useMemo(() => {
@@ -258,22 +376,36 @@ export default function DispatchPage(): JSX.Element {
             incidents={mapIncidents}
             responders={responders ?? []}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={openIncident}
             tracking={{ dispatchId: tracked.dispatchId, follow: followUnit, onFollowChange: setFollowUnit, fitRequest }}
             routeGeometry={routeGeometry}
             routeStyle={plan.leg === 'TO_FACILITY' ? 'TO_FACILITY' : 'TO_SCENE'}
             routeLastKnown={routeLastKnown}
-            facilities={phase === 'accepted' ? facilities : []}
+            routes={overviewRoutes}
+            facilities={facilities}
             unitLegs={unitLegs}
           />
         </div>
 
-        {/* ── Top-right: connection + live indicator ─────────────────────── */}
-        <div className="pointer-events-none absolute right-4 top-4 z-[1000]">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/60 bg-white/80 px-3.5 py-1.5 shadow-sm backdrop-blur-md transition-all">
-            <Wifi size={13} aria-hidden="true" className={wsState === 'connected' ? 'text-emerald-500' : 'text-slate-400'} />
-            <div className="scale-90"><ConnectionIndicator state={wsState} /></div>
+        {/* ── Top-right: connection, map layers, and notices ─────────────── */}
+        <div className="pointer-events-none absolute right-4 top-4 z-[1000] flex max-w-[calc(100%-2rem)] flex-col items-end gap-2 lg:max-w-[calc(100%-468px)]">
+          <div className="flex items-center gap-2">
+            <div className="pointer-events-auto flex h-[34px] items-center gap-2 rounded-full border border-white/60 bg-white/80 px-3.5 shadow-sm backdrop-blur-md transition-all">
+              <Wifi size={13} aria-hidden="true" className={wsState === 'connected' ? 'text-emerald-500' : 'text-slate-400'} />
+              <div className="scale-90"><ConnectionIndicator state={wsState} /></div>
+            </div>
+            <MapLayersControl showHospitals={showHospitals} onShowHospitalsChange={setShowHospitals} />
           </div>
+          {incidentsError && (
+            <p role="alert" className="pointer-events-auto rounded-xl bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 shadow-sm ring-1 ring-red-200">
+              Incidents failed to load. Unit positions may still update.
+            </p>
+          )}
+          {offMapCount > 0 && (
+            <p className="pointer-events-auto max-w-xs rounded-xl bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm ring-1 ring-amber-300">
+              {offMapCount} incident/unit location{offMapCount === 1 ? '' : 's'} outside Bocaue {offMapCount === 1 ? 'is' : 'are'} not drawn.
+            </p>
+          )}
         </div>
 
         {/* ── Bottom: ETA pill ────────────────────────────────────────────── */}
@@ -333,29 +465,25 @@ export default function DispatchPage(): JSX.Element {
         {/* Queue view — stays mounted while an incident is open, so the list keeps its scroll position. */}
         <div className={`min-h-0 flex-1 flex-col animate-in slide-in-from-left-4 fade-in duration-300 motion-reduce:animate-none ${selectedId ? 'hidden' : 'flex'}`}>
 
-          {/* Stats Grid */}
-          <dl className="grid shrink-0 grid-cols-2 gap-px bg-slate-200/50 p-[1px] sm:grid-cols-4">
-            <StatCard value={criticalCount} label="Immediate" tone="danger" pulse={criticalCount > 0} />
-            <StatCard value={awaitingCount} label="Waiting" tone="amber" />
-            <StatCard value={activeCount} label="Active" tone="info" />
-            <StatCard value={availableCount} label="Free units" tone="green" />
-          </dl>
+          {/* Counts; the first three open the list they count. */}
+          <div className="grid shrink-0 grid-cols-2 gap-px bg-slate-200/50 p-[1px] sm:grid-cols-4">
+            <StatCard value={criticalCount} label="Immediate" hint="Critical, waiting for a unit" tone="danger" pulse={criticalCount > 0} onClick={() => setPickedTab('waiting')} />
+            <StatCard value={awaitingCount} label="Waiting" hint="Waiting for a unit" tone="amber" onClick={() => setPickedTab('waiting')} />
+            <StatCard value={respondingCount} label="Responding" hint="Units out on these incidents" tone="info" onClick={() => setPickedTab('responding')} />
+            <StatCard value={availableCount} label="Free units" hint="Units available to dispatch" tone="green" />
+          </div>
 
-          {/* Header & Search */}
-          <div className="shrink-0 border-b border-slate-100 bg-white/50 px-5 py-4 backdrop-blur-md">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <h2 className="text-[15px] font-bold text-slate-900 tracking-tight">Dispatch Queue</h2>
-                <div className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 ring-1 ring-inset ring-emerald-500/20">
-                  <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-700">Live</span>
-                </div>
+          {/* Lists & Search */}
+          <div className="shrink-0 border-b border-slate-100 bg-white/50 px-5 pb-4 pt-3 backdrop-blur-md">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div role="tablist" aria-label="Incident lists" className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
+                <ListTab active={tab === 'waiting'} onClick={() => setPickedTab('waiting')} count={awaitingCount} tone="amber">Waiting</ListTab>
+                <ListTab active={tab === 'responding'} onClick={() => setPickedTab('responding')} count={respondingCount} tone="info">Responding</ListTab>
               </div>
-              {queue.length > 0 && (
-                <span className="flex h-6 items-center justify-center rounded-full bg-amber-100 px-2.5 text-[11px] font-bold text-amber-700 tabular-nums">
-                  {queue.length}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 ring-1 ring-inset ring-emerald-500/20">
+                <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-700">Live</span>
+              </div>
             </div>
 
             <div className="group relative flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white pl-3.5 pr-1.5 shadow-sm transition-all focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
@@ -381,14 +509,22 @@ export default function DispatchPage(): JSX.Element {
             </div>
           </div>
 
-          {/* Queue list */}
-          <div ref={queueListRef} className="min-h-0 max-h-[60vh] flex-1 overflow-y-auto bg-white/40 scrollbar-thin lg:max-h-none">
+          {/* The selected list */}
+          <div ref={queueListRef} role="tabpanel" aria-label={tab === 'waiting' ? 'Waiting for a unit' : 'Responding'} className="min-h-0 max-h-[60vh] flex-1 overflow-y-auto bg-white/40 scrollbar-thin lg:max-h-none">
             {isLoading ? (
               <div className="space-y-2 p-4">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <Skeleton key={i} className="h-16 w-full rounded-xl" />
                 ))}
               </div>
+            ) : tab === 'responding' ? (
+              <RespondingList
+                incidents={responding}
+                unitsByIncident={unitsByIncident}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                searching={!!search.trim()}
+              />
             ) : queue.length === 0 ? (
               <div className="flex flex-col items-center px-4 py-10 text-center animate-in fade-in duration-300">
                 <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-100">
@@ -434,23 +570,25 @@ export default function DispatchPage(): JSX.Element {
                 className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 ${FOCUS_RING}`}
               >
                 <ArrowLeft size={16} aria-hidden="true" />
-                Dispatch queue
-                {queue.length > 0 && (
-                  <span className="rounded-full bg-amber-100 px-1.5 text-[11px] font-bold leading-5 text-amber-700 tabular-nums">
-                    {queue.length}
+                {tab === 'waiting' ? 'Waiting' : 'Responding'}
+                {visibleList.length > 0 && (
+                  <span className={`rounded-full px-1.5 text-[11px] font-bold leading-5 tabular-nums ${
+                    tab === 'waiting' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    {visibleList.length}
                   </span>
                 )}
               </button>
-              {queueIndex >= 0 && queue.length > 1 && (
+              {queueIndex >= 0 && visibleList.length > 1 && (
                 <div className="flex items-center gap-1">
                   <span className="mr-1 text-xs font-medium text-slate-500 tabular-nums">
-                    {queueIndex + 1} of {queue.length}
+                    {queueIndex + 1} of {visibleList.length}
                   </span>
                   <button
                     type="button"
                     onClick={() => prevId && setSelectedId(prevId)}
                     disabled={!prevId}
-                    aria-label="Previous incident in queue"
+                    aria-label="Previous incident in list"
                     title="Previous incident"
                     className={`flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-35 ${FOCUS_RING}`}
                   >
@@ -460,7 +598,7 @@ export default function DispatchPage(): JSX.Element {
                     type="button"
                     onClick={() => nextId && setSelectedId(nextId)}
                     disabled={!nextId}
-                    aria-label="Next incident in queue"
+                    aria-label="Next incident in list"
                     title="Next incident"
                     className={`flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-35 ${FOCUS_RING}`}
                   >
@@ -510,20 +648,59 @@ function pickTrackedUnit(
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
 
-function StatCard({ value, label, tone, pulse }: { value: number; label: string; tone: 'danger' | 'amber' | 'info' | 'green'; pulse?: boolean; }): JSX.Element {
+/** A count tile. With `onClick` it opens the list it counts (a shortcut for the tabs below). */
+function StatCard({ value, label, hint, tone, pulse, onClick }: {
+  value: number; label: string; hint: string; tone: 'danger' | 'amber' | 'info' | 'green'; pulse?: boolean; onClick?: () => void;
+}): JSX.Element {
   const tones = {
-    danger: { num: 'text-red-600', label: 'text-red-700', dot: 'bg-red-500', bg: 'bg-white' },
-    amber:  { num: 'text-amber-600', label: 'text-amber-700', dot: 'bg-amber-500', bg: 'bg-white' },
-    info:   { num: 'text-blue-600', label: 'text-blue-700', dot: 'bg-blue-500', bg: 'bg-white' },
-    green:  { num: 'text-emerald-600', label: 'text-emerald-700', dot: 'bg-emerald-500', bg: 'bg-white' },
+    danger: { num: 'text-red-600', label: 'text-red-700', dot: 'bg-red-500' },
+    amber:  { num: 'text-amber-600', label: 'text-amber-700', dot: 'bg-amber-500' },
+    info:   { num: 'text-blue-600', label: 'text-blue-700', dot: 'bg-blue-500' },
+    green:  { num: 'text-emerald-600', label: 'text-emerald-700', dot: 'bg-emerald-500' },
   };
   const t = tones[tone] ?? tones['green']!;
-  return (
-    <div className={`flex flex-col items-center justify-center gap-1.5 p-3 sm:py-4 ${t.bg} transition-colors hover:bg-slate-50`}>
+  const body = (
+    <>
       <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${t.dot} ${pulse ? 'animate-pulse' : ''} shadow-sm`} />
-      <dd className={`font-mono text-xl font-bold leading-none tabular-nums tracking-tight sm:text-2xl ${t.num}`}>{value}</dd>
-      <dt className={`text-[12px] font-semibold ${t.label}`}>{label}</dt>
-    </div>
+      <span className={`font-mono text-xl font-bold leading-none tabular-nums tracking-tight sm:text-2xl ${t.num}`}>{value}</span>
+      <span className={`text-[12px] font-semibold ${t.label}`}>{label}</span>
+    </>
+  );
+  const base = 'flex flex-col items-center justify-center gap-1.5 bg-white p-3 sm:py-4';
+  if (!onClick) {
+    return <div className={base} title={hint} aria-label={`${value} ${label}: ${hint}`}>{body}</div>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={hint}
+      aria-label={`${value} ${label}: ${hint}. Show list`}
+      className={`${base} transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/50`}
+    >
+      {body}
+    </button>
+  );
+}
+
+/** Waiting / Responding switch at the top of the panel. */
+function ListTab({ active, onClick, count, tone, children }: {
+  active: boolean; onClick: () => void; count: number; tone: 'amber' | 'info'; children: ReactNode;
+}): JSX.Element {
+  const badge = tone === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700';
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-bold transition-all ${FOCUS_RING} ${
+        active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+      }`}
+    >
+      {children}
+      {count > 0 && <span className={`rounded-full px-1.5 text-[11px] leading-5 tabular-nums ${badge}`}>{count}</span>}
+    </button>
   );
 }
 
@@ -649,6 +826,20 @@ function DispatchDetail({
   const [sendingUnits, setSendingUnits] = useState(false);
   const [dispatchIssue, setDispatchIssue] = useState<string | null>(null);
 
+  // The first-dispatch form was on screen and the incident got a unit without this
+  // user sending one (their own send holds sendingUnits until it closes this view):
+  // someone else dispatched. Say so instead of letting the form silently vanish.
+  const activeNow = (incident?.dispatches ?? []).filter((d) => ACTIVE_DISPATCH.includes(d.status)).length;
+  const formOpen = !!incident && DISPATCHABLE.includes(incident.status) && activeNow === 0;
+  const formWasOpen = useRef(false);
+  useEffect(() => {
+    if (!incident) return;
+    if (formWasOpen.current && !formOpen && !sendingUnits && activeNow > 0) {
+      setDispatchIssue((issue) => issue ?? 'Someone else dispatched a unit to this incident while you had it open, so nothing was sent from here. Check the unit below; use “Dispatch another unit” only if the incident needs more help.');
+    }
+    formWasOpen.current = formOpen && !sendingUnits;
+  }, [incident, formOpen, sendingUnits, activeNow]);
+
   if (isLoading || !incident) {
     return (
       <div className="space-y-4 p-5">
@@ -667,6 +858,9 @@ function DispatchDetail({
   const canAddUnit = hasDispatch && ADDITIONAL_DISPATCH.includes(incident.status);
   const addingUnit = canAddUnit && addingUnitFor === incident.id;
   const activeUnits = (incident.dispatches ?? []).filter((d) => ACTIVE_DISPATCH.includes(d.status)).length;
+  // A recalled or declined only unit sends the incident back to DISPATCH_PENDING:
+  // show the dispatch form again, not a tracking card with nothing on it.
+  const showTracking = hasDispatch && !sendingUnits && !(dispatchable && activeUnits === 0);
   const unitLabel = phase === 'accepted' ? 'Unit accepted — tracking live' : phase === 'awaiting' ? 'Awaiting crew acceptance' : phase === 'closed' ? 'No active unit' : null;
 
   return (
@@ -733,7 +927,7 @@ function DispatchDetail({
               <MapPin size={16} className="mt-0.5 shrink-0 text-emerald-500" />
               <span className="text-[13px] font-medium text-slate-700 leading-relaxed">{address}</span>
             </div>
-            {hasDispatch && !sendingUnits ? (
+            {showTracking ? (
               <div className="space-y-4">
                 {dispatchIssue && (
                   <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-800">
@@ -744,7 +938,7 @@ function DispatchDetail({
                     </button>
                   </div>
                 )}
-                <UnitTrackingCard incidentId={incident.id} dispatches={incident.dispatches} trackedDispatchId={trackedDispatchId} follow={followUnit} onToggleFollow={onToggleFollow} onFit={onFit} />
+                <UnitTrackingCard incidentId={incident.id} reference={incident.public_reference} dispatches={incident.dispatches} trackedDispatchId={trackedDispatchId} follow={followUnit} onToggleFollow={onToggleFollow} onFit={onFit} />
                 {addingUnit ? (
                   <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
@@ -889,6 +1083,10 @@ function RecommendationPanel({
   const [showNotes, setShowNotes] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Units already on the incident when this plan was made, from fresh data. Sent with
+  // each dispatch so the server refuses one that would silently double up with a unit
+  // someone else sent meanwhile (INCIDENT_DISPATCH_CHANGED).
+  const [seenActiveUnits, setSeenActiveUnits] = useState<number | null>(null);
 
   const availableResponders = useMemo(() => responders.filter((r) => r.availability_status === 'AVAILABLE'), [responders]);
   const availableResponderIds = useMemo(() => new Set(availableResponders.map((r) => r.id)), [availableResponders]);
@@ -934,6 +1132,7 @@ function RecommendationPanel({
       busyResponderIds,
     });
     setPlan(next);
+    setSeenActiveUnits(activeDispatches.length);
     setUnitIds(next.unitIds);
     setCrewByUnit(next.crewByUnit);
   }, [ready, plan, needs, units, activeDispatches, availableResponderIds, busyResponderIds]);
@@ -1002,6 +1201,8 @@ function RecommendationPanel({
     onBusyChange?.(true);
     const sent: string[] = [];
     let failure: string | null = null;
+    let overtaken: string | null = null;
+    const seen = seenActiveUnits ?? activeDispatches.length;
     for (const id of unitIds) {
       const crew = crewByUnit[id] ?? [];
       try {
@@ -1010,9 +1211,12 @@ function RecommendationPanel({
           resourceId: id,
           ...(crew.length ? { initialCrewIds: crew } : {}),
           ...(notes.trim() ? { dispatchNotes: notes.trim() } : {}),
+          // Each unit of this send adds one to what the next may expect.
+          expectedActiveUnits: seen + sent.length,
         });
         sent.push(id);
       } catch (err) {
+        if (err instanceof ApiError && err.body?.code === INCIDENT_DISPATCH_CHANGED) overtaken = err.message;
         failure = `${unitLabel(id)}: ${(err as Error)?.message ?? 'Dispatch failed'}`;
         break;
       }
@@ -1020,6 +1224,19 @@ function RecommendationPanel({
     setSending(false);
     onBusyChange?.(false);
     const ref = incident?.public_reference ?? 'the incident';
+    if (overtaken) {
+      // Someone else sent a unit while this form was open. Nothing more goes out; the
+      // plan is redone from fresh data so the next choice counts their unit too.
+      const message = sent.length
+        ? `Dispatched ${sent.map(unitLabel).join(', ')}. Stopped there: ${overtaken}`
+        : overtaken;
+      setPlan(null);
+      setSeenActiveUnits(null);
+      setError(message);
+      onPartialDispatch?.(message);
+      void alertMessage({ icon: 'warning', title: 'Another unit was dispatched first', text: message });
+      return;
+    }
     if (!failure) {
       onDispatched();
       void notify('success', {

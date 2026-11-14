@@ -471,6 +471,48 @@ describe('IncidentsService', () => {
       ]);
     });
 
+    it('stores medical answers, flags them for the dispatcher and raises an unresponsive patient to CRITICAL', async () => {
+      const tx = captureTx();
+      await service.create({
+        ...base(),
+        type: IncidentType.MEDICAL,
+        intake: {
+          answers: {
+            conscious: ['no'],
+            breathing: ['unknown'],
+            condition: ['chest_pain', 'made-up'],
+            age: ['senior'],
+            injured: ['yes'], // generic question, not part of the medical catalog
+          },
+        },
+      });
+
+      const data = tx.incident.create.mock.calls[0][0].data;
+      const details = tx.incident_details.create.mock.calls[0][0].data;
+      expect(data.category).toBe(IncidentType.MEDICAL);
+      expect(details.caller_answers).toEqual({
+        conscious: ['no'],
+        breathing: ['unknown'],
+        condition: ['chest_pain'],
+        age: ['senior'],
+      });
+      expect(data.hazard_flags).toEqual(
+        expect.arrayContaining(['Conscious / responding: No', 'Condition: Chest pain', 'Patient age group: Senior']),
+      );
+      expect(data.priority).toBe(IncidentPriority.CRITICAL);
+      expect(details.priority_reasons).toEqual(['Patient not responding', 'Chest pain']);
+    });
+
+    it('keeps a medical report at the HIGH default when nothing signals a life threat', async () => {
+      const tx = captureTx();
+      await service.create({
+        ...base(),
+        type: IncidentType.MEDICAL,
+        intake: { answers: { conscious: ['yes'], breathing: ['yes'], condition: ['fall'] } },
+      });
+      expect(tx.incident.create.mock.calls[0][0].data.priority).toBe(IncidentPriority.HIGH);
+    });
+
     it('keeps the category default when answers carry no escalation signal', async () => {
       const tx = captureTx();
       await service.create({

@@ -7,7 +7,7 @@ import { ROLES_KEY } from '../../src/common/decorators/roles.decorator';
 
 // MOD-51 risk-area management (MODULE_GAPS_COMPLETION_PLAN.md Phase 5).
 
-const ADMIN_ID = 'user-admin';
+const SUPERVISOR_ID = 'user-supervisor';
 const AREA_ID = '6f1d1c1e-2b7a-4a43-9a3c-1d2a3b4c5d6e';
 
 // Same options as main.ts, so these are the rules a real request meets.
@@ -93,16 +93,18 @@ describe('RiskIntelligenceController access', () => {
   const roles = (name: keyof RiskIntelligenceController) =>
     Reflect.getMetadata(ROLES_KEY, RiskIntelligenceController.prototype[name]);
 
-  it('lets only the System Administrator create, update and delete (others get 403)', () => {
+  it('lets only the Supervisor create, update and delete (others get 403)', () => {
     for (const name of ['createArea', 'updateArea', 'deleteArea'] as const) {
-      expect(roles(name)).toEqual([UserRole.SYSTEM_ADMINISTRATOR]);
+      expect(roles(name)).toEqual([UserRole.SUPERVISOR]);
     }
   });
 
-  it('opens the area list to the System Administrator, but not the heatmap or map points (Phase 5b)', () => {
-    expect(roles('areas')).toContain(UserRole.SYSTEM_ADMINISTRATOR);
-    expect(roles('heatmap')).not.toContain(UserRole.SYSTEM_ADMINISTRATOR);
-    expect(roles('mapPoints')).not.toContain(UserRole.SYSTEM_ADMINISTRATOR);
+  it('lets Dispatchers, Supervisors and the System Administrator (support) read the area list', () => {
+    expect(roles('areas')).toEqual([UserRole.DISPATCHER, UserRole.SUPERVISOR, UserRole.SYSTEM_ADMINISTRATOR]);
+  });
+
+  it('opens the Risk Map data to Dispatchers and Supervisors, not the System Administrator (Phase 5b)', () => {
+    expect(roles('map')).toEqual([UserRole.DISPATCHER, UserRole.SUPERVISOR]);
   });
 });
 
@@ -111,26 +113,26 @@ describe('RiskIntelligenceController access', () => {
 describe('RiskIntelligenceService risk areas', () => {
   it('creates an area and writes a MOD-51 audit row', async () => {
     const { service, prisma, audit } = makeService();
-    await service.createArea(validArea as CreateRiskAreaDto, ADMIN_ID);
+    await service.createArea(validArea as CreateRiskAreaDto, SUPERVISOR_ID);
     expect(prisma.risk_areas.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ risk_type: 'FLOOD', risk_level: 'HIGH', barangay: 'Lolomboy', flood_threshold_meters: 11.5 }),
     });
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'CREATE', actorId: ADMIN_ID, entityType: 'risk_area', moduleId: 'MOD-51',
+      action: 'CREATE', actorId: SUPERVISOR_ID, entityType: 'risk_area', moduleId: 'MOD-51',
     }));
   });
 
   it('refuses a barangay outside Bocaue and stores the official spelling', async () => {
     const { service, prisma } = makeService();
-    await expect(service.createArea({ ...validArea, barangay: 'Malolos' } as CreateRiskAreaDto, ADMIN_ID))
+    await expect(service.createArea({ ...validArea, barangay: 'Malolos' } as CreateRiskAreaDto, SUPERVISOR_ID))
       .rejects.toThrow(/not a Bocaue barangay/);
-    await service.createArea({ ...validArea, barangay: 'tambubong' } as CreateRiskAreaDto, ADMIN_ID);
+    await service.createArea({ ...validArea, barangay: 'tambubong' } as CreateRiskAreaDto, SUPERVISOR_ID);
     expect(prisma.risk_areas.create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ barangay: 'Tambubong' }) });
   });
 
   it('updates the level, deactivates, stamps updated_at and audits old and new values', async () => {
     const { service, prisma, audit } = makeService();
-    await service.updateArea(AREA_ID, { riskLevel: 'CRITICAL', isActive: false }, ADMIN_ID);
+    await service.updateArea(AREA_ID, { riskLevel: 'CRITICAL', isActive: false }, SUPERVISOR_ID);
     expect(prisma.risk_areas.update).toHaveBeenCalledWith({
       where: { id: AREA_ID },
       data: expect.objectContaining({ risk_level: 'CRITICAL', is_active: false, updated_at: expect.any(Date) }),
@@ -144,7 +146,7 @@ describe('RiskIntelligenceService risk areas', () => {
 
   it('clears the barangay when sent empty', async () => {
     const { service, prisma } = makeService();
-    await service.updateArea(AREA_ID, { barangay: '' }, ADMIN_ID);
+    await service.updateArea(AREA_ID, { barangay: '' }, SUPERVISOR_ID);
     expect(prisma.risk_areas.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ barangay: null }),
     }));
@@ -152,7 +154,7 @@ describe('RiskIntelligenceService risk areas', () => {
 
   it('deletes an area and keeps what was deleted in the audit row', async () => {
     const { service, prisma, audit } = makeService();
-    await service.deleteArea(AREA_ID, ADMIN_ID);
+    await service.deleteArea(AREA_ID, SUPERVISOR_ID);
     expect(prisma.risk_areas.delete).toHaveBeenCalledWith({ where: { id: AREA_ID } });
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
       action: 'DELETE', entityId: AREA_ID, oldValues: expect.objectContaining({ name: 'Lolomboy riverside' }),
@@ -161,8 +163,8 @@ describe('RiskIntelligenceService risk areas', () => {
 
   it('404s on a missing area without writing anything', async () => {
     const { service, prisma, audit } = makeService({ area: null });
-    await expect(service.updateArea(AREA_ID, { riskLevel: 'LOW' }, ADMIN_ID)).rejects.toThrow(NotFoundException);
-    await expect(service.deleteArea(AREA_ID, ADMIN_ID)).rejects.toThrow(NotFoundException);
+    await expect(service.updateArea(AREA_ID, { riskLevel: 'LOW' }, SUPERVISOR_ID)).rejects.toThrow(NotFoundException);
+    await expect(service.deleteArea(AREA_ID, SUPERVISOR_ID)).rejects.toThrow(NotFoundException);
     expect(prisma.risk_areas.update).not.toHaveBeenCalled();
     expect(prisma.risk_areas.delete).not.toHaveBeenCalled();
     expect(audit.log).not.toHaveBeenCalled();
