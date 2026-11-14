@@ -1,10 +1,11 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { AuditAction } from '@agap/shared';
-import { risk_area_proposal_status } from '@prisma/client';
+import { Prisma, risk_area_proposal_status } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { RiskIntelligenceService } from './risk-intelligence.service';
+import { RiskIntelligenceService, type GeoJsonGeometry } from './risk-intelligence.service';
+import { nextNightlyRun } from './risk-area-rules';
 import { ApproveRiskAreaProposalDto } from './dto/risk-area-proposal.dto';
 
 /** Incidents older than this don't count toward a hotspot. */
@@ -14,10 +15,29 @@ export const HOTSPOT_EPS_M = 150;
 export const HOTSPOT_MIN_POINTS = 4;
 /** Hull padding, so a cluster of points on one line still has an area. */
 export const HOTSPOT_BUFFER_M = 30;
+/**
+ * Floods cover an area, so they are counted per barangay (like the Risk Map), not
+ * clustered as points: this many flood reports in one barangay in 90 days proposes a
+ * whole-barangay flood area.
+ */
+export const FLOOD_BARANGAY_MIN = 3;
+/** `system_configurations` key holding the last run: { at, trigger, written, failed, byUserId }. */
+export const LAST_RUN_KEY = 'risk.hotspot_check.last_run';
+
+export type HotspotTrigger = 'NIGHTLY' | 'MANUAL';
+
+export interface HotspotLastRun {
+  at: string;
+  trigger: HotspotTrigger;
+  /** Proposals written or refreshed by the run. */
+  written: number;
+  failed: boolean;
+}
 
 /**
- * MOD-51 (AUTOMATION_NEEDS_PLAN Phase 2, C7): each night, proposes recurring incident
- * clusters as risk areas. Only a Supervisor's approval creates the risk area
+ * MOD-51 (AUTOMATION_NEEDS_PLAN Phase 2, C7): each night at 02:30 Manila time, and when a
+ * Supervisor presses "Check now", proposes recurring incident clusters (and barangays with
+ * repeated floods) as risk areas. Only a Supervisor's approval creates the risk area
  * (through RiskIntelligenceService.createArea, so its barangay check and audit apply).
  */
 @Injectable()
@@ -30,21 +50,95 @@ export class HotspotDiscoveryService {
     private readonly risk: RiskIntelligenceService,
   ) {}
 
+  @Cron('30 2 * * *', { timeZone: 'Asia/Manila' })
+  async nightly(): Promise<void> {
+    await this.discover('NIGHTLY');
+  }
+
+  /** "Check now": the same run, on demand, recorded and audited under the Supervisor. */
+  async checkNow(actorId: string): Promise<{ written: number; lastRun: HotspotLastRun | null; nextRunAt: string }> {
+    const written = await this.discover('MANUAL', actorId);
+    await this.audit.log({
+      action: AuditAction.SYSTEM,
+      actorId,
+      entityType: 'hotspot_check',
+      moduleId: 'MOD-51',
+      newValues: { trigger: 'MANUAL', written },
+    });
+    return { written, ...(await this.status()) };
+  }
+
+  /** When the check last ran (null: never since this was added) and when it runs next. */
+  async status(now: Date = new Date()): Promise<{ lastRun: HotspotLastRun | null; nextRunAt: string }> {
+    const row = await this.prisma.system_configurations.findUnique({
+      where: { config_key: LAST_RUN_KEY },
+      select: { config_value: true },
+    });
+    const value = row?.config_value as Partial<HotspotLastRun> | null | undefined;
+    const lastRun =
+      value && typeof value.at === 'string'
+        ? {
+            at: value.at,
+            trigger: value.trigger === 'MANUAL' ? ('MANUAL' as const) : ('NIGHTLY' as const),
+            written: Number(value.written ?? 0),
+            failed: value.failed === true,
+          }
+        : null;
+    return { lastRun, nextRunAt: nextNightlyRun(now).toISOString() };
+  }
+
   /**
-   * One run: cluster the last 90 days per category, drop clusters an active risk area of
-   * the same type already covers (by boundary, or by barangay for areas without one) or
-   * that a Supervisor dismissed in that window, and upsert one PENDING proposal per
-   * type and barangay. Returns how many proposals were written; a failure logs and returns 0.
+   * One run over the last 90 days:
+   * - every type except floods: DBSCAN clusters of incidents (4 within 150 m);
+   * - floods: barangays with 3 or more flood reports, the barangay polygon as the area;
+   * then drop candidates an active risk area of the same type already covers (by
+   * boundary, or by barangay for areas without one) or that a Supervisor dismissed in
+   * that window, and upsert one PENDING proposal per type and barangay. Records the run;
+   * returns how many proposals were written. A failure logs, is recorded, and returns 0.
    */
-  @Cron('30 2 * * *')
-  async discover(): Promise<number> {
+  async discover(trigger: HotspotTrigger = 'NIGHTLY', actorId?: string): Promise<number> {
+    let written = 0;
+    let failed = false;
     try {
-      const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      written = await this.runDiscovery();
+      if (written) this.logger.log(`Hotspot discovery (${trigger}) wrote ${written} risk area proposal(s)`);
+    } catch (err) {
+      failed = true;
+      this.logger.error(`Hotspot discovery failed: ${String(err)}`);
+    }
+    await this.recordRun({ at: new Date().toISOString(), trigger, written, failed }, actorId);
+    return written;
+  }
+
+  private async recordRun(run: HotspotLastRun, actorId?: string): Promise<void> {
+    try {
+      await this.prisma.system_configurations.upsert({
+        where: { config_key: LAST_RUN_KEY },
+        create: {
+          config_key: LAST_RUN_KEY,
+          config_value: run as unknown as Prisma.InputJsonValue,
+          description: 'MOD-51: last risk area hotspot check',
+          ...(actorId && { updated_by_id: actorId }),
+        },
+        update: {
+          config_value: run as unknown as Prisma.InputJsonValue,
+          updated_by_id: actorId ?? null,
+          updated_at: new Date(),
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Could not record the hotspot check: ${String(err)}`);
+    }
+  }
+
+  private async runDiscovery(): Promise<number> {
+    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
         WITH pts AS (
           SELECT i.category, ST_Transform(il.point::geometry, 32651) AS g
             FROM incidents i
             JOIN incident_locations il ON il.incident_id = i.id
            WHERE il.point IS NOT NULL
+             AND i.category <> 'FLOOD'
              AND i.created_at >= now() - make_interval(days => ${HOTSPOT_WINDOW_DAYS}::int)
              AND i.status NOT IN ('DRAFT', 'FALSE_ALERT', 'DUPLICATE', 'CANCELLED')
         ),
@@ -69,8 +163,26 @@ export class HotspotDiscoveryService {
                    LIMIT 1) AS barangay
             FROM clusters c
         ),
+        flood_barangays AS (
+          SELECT 'FLOOD'::incident_category AS category, count(*)::int AS n,
+                 ST_Transform(r.boundary, 32651) AS hull, r.name AS barangay
+            FROM incidents i
+            JOIN incident_locations il ON il.incident_id = i.id
+            JOIN geo_regions r ON r.region_type = 'barangay' AND ST_Covers(r.boundary, il.point::geometry)
+           WHERE il.point IS NOT NULL
+             AND i.category = 'FLOOD'
+             AND i.created_at >= now() - make_interval(days => ${HOTSPOT_WINDOW_DAYS}::int)
+             AND i.status NOT IN ('DRAFT', 'FALSE_ALERT', 'DUPLICATE', 'CANCELLED')
+           GROUP BY r.id, r.name, r.boundary
+          HAVING count(*) >= ${FLOOD_BARANGAY_MIN}::int
+        ),
+        candidates AS (
+          SELECT category, n, hull, barangay FROM named
+          UNION ALL
+          SELECT category, n, hull, barangay FROM flood_barangays
+        ),
         uncovered AS (
-          SELECT nm.* FROM named nm
+          SELECT nm.* FROM candidates nm
            WHERE NOT EXISTS (
                    SELECT 1 FROM risk_areas a
                     WHERE a.is_active AND a.risk_type = nm.category
@@ -97,20 +209,24 @@ export class HotspotDiscoveryService {
                       window_days    = EXCLUDED.window_days,
                       updated_at     = now()
         RETURNING id`;
-      if (rows.length) this.logger.log(`Hotspot discovery wrote ${rows.length} risk area proposal(s)`);
-      return rows.length;
-    } catch (err) {
-      this.logger.error(`Hotspot discovery failed: ${String(err)}`);
-      return 0;
-    }
+    return rows.length;
   }
 
-  listProposals(status: risk_area_proposal_status = 'PENDING') {
-    return this.prisma.risk_area_proposals.findMany({
+  /** Proposals with their outline as GeoJSON, so the Risk areas map can show them. */
+  async listProposals(status: risk_area_proposal_status = 'PENDING') {
+    const proposals = await this.prisma.risk_area_proposals.findMany({
       where: { status },
       orderBy: [{ incident_count: 'desc' }, { updated_at: 'desc' }],
       take: 100,
     });
+    if (proposals.length === 0) return [];
+    const ids = proposals.map((p) => p.id);
+    const outlines = await this.prisma.$queryRaw<Array<{ id: string; boundary: GeoJsonGeometry }>>`
+      SELECT id::text AS id, ST_AsGeoJSON(area_boundary::geometry, 6)::json AS boundary
+        FROM risk_area_proposals
+       WHERE id = ANY(${ids}::uuid[]) AND area_boundary IS NOT NULL`;
+    const byId = new Map(outlines.map((o) => [o.id, o.boundary]));
+    return proposals.map((p) => ({ ...p, boundary: byId.get(p.id) ?? null }));
   }
 
   /**
@@ -139,6 +255,8 @@ export class HotspotDiscoveryService {
           ...(dto.description && { description: dto.description }),
         },
         actorId,
+        // The proposal brings its own boundary (cluster outline or barangay polygon).
+        { requirePin: false },
       );
     } catch (err) {
       await this.prisma.risk_area_proposals.updateMany({

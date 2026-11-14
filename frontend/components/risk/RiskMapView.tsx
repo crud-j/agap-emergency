@@ -12,15 +12,9 @@ import {
 import { MapErrorOverlay } from '@/components/map/MapErrorOverlay';
 import { resolveMissingStyleImages } from '@/components/map/missing-style-images';
 import { titleCase } from '@/lib/incident-format';
-import type { AreaBoundary, RiskArea, RiskMap } from '@/features/risk/api';
+import type { RiskArea, RiskMap } from '@/features/risk/api';
 import { FLOOD_SHADES, RISK_CATEGORY_COLORS } from '@/features/risk/categories';
-
-export const RISK_LEVEL_COLORS: Record<string, string> = {
-  LOW: '#16A34A',
-  MODERATE: '#D97706',
-  HIGH: '#DC2626',
-  CRITICAL: '#9B1C1C',
-};
+import { RISK_LEVEL_COLORS } from './risk-colors';
 
 const POINT_LAYER = 'risk-points';
 const AREA_LAYER = 'risk-area-fill';
@@ -66,22 +60,20 @@ export function RiskMapView({ map, areas, categories }: Props): JSX.Element {
     })),
   }), [map.barangays]);
 
-  // An approved hotspot has its own outline; any other area covers its whole barangay.
-  const areaGeoJSON = useMemo(() => {
-    const byName = new globalThis.Map(map.barangays.map((b) => [b.name, b.boundary]));
-    return {
-      type: 'FeatureCollection' as const,
-      features: areas.flatMap((a) => {
-        const geometry: AreaBoundary | undefined = a.boundary ?? (a.barangay ? byName.get(a.barangay) : undefined);
-        if (!geometry) return [];
-        return [{
-          type: 'Feature' as const,
-          properties: { name: a.name, riskType: a.risk_type, level: a.risk_level },
-          geometry,
-        }];
-      }),
-    };
-  }, [areas, map.barangays]);
+  // The server sends each area's drawn shape: a pin's circle, a hotspot outline, or the
+  // whole barangay. An area with no place has no boundary and is left off the map.
+  const areaGeoJSON = useMemo(() => ({
+    type: 'FeatureCollection' as const,
+    features: areas.flatMap((a) =>
+      a.boundary
+        ? [{
+            type: 'Feature' as const,
+            properties: { name: a.name, riskType: a.risk_type, level: a.risk_level },
+            geometry: a.boundary,
+          }]
+        : [],
+    ),
+  }), [areas]);
 
   const pointGeoJSON = useMemo(() => ({
     type: 'FeatureCollection' as const,

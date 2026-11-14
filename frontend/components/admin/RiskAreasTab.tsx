@@ -1,56 +1,88 @@
 'use client';
 
-import { useState, type JSX } from 'react';
-import { Check, Edit, Info, MapPinned, Plus, Power, Sparkles, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
+import dynamic from 'next/dynamic';
 import {
-  Button, Badge, DataTable, EmptyState, Skeleton,
+  AlertTriangle, Check, Clock, Edit, Info, Locate, MapPin, MapPinned, Plus, Power, RefreshCw, Search,
+  Sparkles, Trash2, TrendingDown, TrendingUp, X,
+} from 'lucide-react';
+import {
+  Button, Badge, EmptyState, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
-  type BadgeVariant, type Column,
+  type BadgeVariant,
 } from '@/components/ui';
 import { titleCase } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
-import { useBarangayDirectory } from '@/features/admin/barangay-contacts';
 import {
-  useApproveRiskAreaProposal, useCreateRiskArea, useDeleteRiskArea, useDismissRiskAreaProposal,
-  useRiskAreaProposals, useRiskAreas, useUpdateRiskArea,
+  useApproveRiskAreaProposal, useAreaSuggestion, useCreateRiskArea, useDeleteRiskArea, useDismissRiskAreaProposal,
+  useHotspotStatus, useRiskAreaProposals, useRiskAreas, useRunHotspotCheck, useUpdateRiskArea,
 } from '@/features/risk/hooks';
 import {
   RISK_LEVELS, type RiskArea, type RiskAreaInput, type RiskAreaProposal, type RiskLevel,
 } from '@/features/risk/api';
+import {
+  DEFAULT_RADIUS_M, MAX_RADIUS_M, MIN_RADIUS_M, formatRadius, hintText, levelWord, placeLine, relativeDays,
+} from '@/features/risk/area-geo';
 
 /**
- * MOD-51 risk areas. The Supervisor manages them and the nightly hotspot proposals from
- * the Risk Map's "Risk areas" tab; the System Administrator sees the same list read-only
- * under Administration (the API refuses their writes). No outline is drawn here: a new
- * area covers its barangay, and an approved hotspot keeps the cluster's outline.
+ * MOD-51 risk areas (redesigned 2026-11-15). The Supervisor manages them from the Risk
+ * Map's "Risk areas" tab: pins a place with a radius, reviews AGAP's proposals and hints,
+ * and runs the hotspot check. The System Administrator sees the same cards and map
+ * read-only under Administration (the API refuses their writes).
  */
 
+const MapLoading = () => (
+  <div className="flex h-full w-full items-center justify-center rounded-2xl bg-agap-surface text-sm text-agap-textSub">
+    Loading map…
+  </div>
+);
+const RiskAreasMap = dynamic(() => import('@/components/risk/RiskAreasMap'), { ssr: false, loading: MapLoading });
+const RiskAreaPinMap = dynamic(() => import('@/components/risk/RiskAreaPinMap'), { ssr: false, loading: MapLoading });
+
 const RISK_TYPES = ['FLOOD', 'FIRE', 'INDUSTRIAL', 'ROAD_ACCIDENT', 'RESCUE', 'MEDICAL', 'NATURAL_DISASTER', 'DEBRIS', 'OTHER'] as const;
-const NO_BARANGAY = '__none__';
+const ALL = '__all__';
 const BOCAUE_RIVER_CRITICAL_M = 11.5;
 
 const LEVEL_VARIANT: Record<RiskLevel, BadgeVariant> = {
-  LOW: 'green', MODERATE: 'blue', HIGH: 'amber', CRITICAL: 'red',
+  LOW: 'green', MODERATE: 'amber', HIGH: 'red', CRITICAL: 'red',
 };
+const levelRank = (level: string) => (RISK_LEVELS as readonly string[]).indexOf(level);
 
 const INPUT =
-  'h-9 w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 text-sm text-agap-textMain ' +
+  'h-9 w-full rounded-xl border border-[rgba(168,181,193,0.25)] bg-white px-3 text-sm text-agap-textMain ' +
   'placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green';
+const LABEL = 'mb-1 block text-xs font-semibold text-agap-textMid';
 
 const threshold = (a: RiskArea) => (a.flood_threshold_meters === null ? null : Number(a.flood_threshold_meters));
 
 function errMsg(e: unknown, fallback: string) {
-  return e instanceof Error ? e.message : fallback;
+  return e instanceof Error && e.message ? e.message : fallback;
 }
 
-// ─── Form dialog ──────────────────────────────────────────────────────────────
+const MANILA_TIME = new Intl.DateTimeFormat('en-PH', {
+  timeZone: 'Asia/Manila', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+});
+const manilaTime = (iso: string) => MANILA_TIME.format(new Date(iso));
+
+/** The value, once it has stopped changing for `ms`. */
+function useDebounced<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
+
+// ─── Add / edit dialog (pin + radius, smart suggestions) ──────────────────────
 
 interface FormState {
   name: string;
   riskType: string;
   riskLevel: RiskLevel;
-  barangay: string;
+  pin: { lat: number; lng: number } | null;
+  radius: number;
   threshold: string;
   description: string;
   isActive: boolean;
@@ -61,43 +93,75 @@ function toForm(a: RiskArea | null): FormState {
     name: a?.name ?? '',
     riskType: a?.risk_type ?? 'FLOOD',
     riskLevel: (RISK_LEVELS as readonly string[]).includes(a?.risk_level ?? '') ? (a!.risk_level as RiskLevel) : 'MODERATE',
-    barangay: a?.barangay ?? NO_BARANGAY,
+    pin: a?.pin ? { lat: a.pin.lat, lng: a.pin.lng } : null,
+    radius: a?.pin?.radius_m ?? DEFAULT_RADIUS_M,
     threshold: a && threshold(a) !== null ? String(threshold(a)) : '',
     description: a?.description ?? '',
     isActive: a?.is_active ?? true,
   };
 }
 
-function AreaDialog({ open, area, onClose }: {
-  open: boolean;
+function AreaDialog({ area, onClose }: {
   /** null = add. */
   area: RiskArea | null;
   onClose: () => void;
 }): JSX.Element {
   const [form, setForm] = useState<FormState>(() => toForm(area));
+  // An existing area keeps its own name and level; a new one takes AGAP's suggestions
+  // until the Supervisor types or picks their own.
+  const [nameTouched, setNameTouched] = useState(!!area);
+  const [levelTouched, setLevelTouched] = useState(!!area);
   const [error, setError] = useState<string | null>(null);
-  const barangays = useBarangayDirectory();
+  const [outside, setOutside] = useState(false);
   const create = useCreateRiskArea();
   const update = useUpdateRiskArea();
   const busy = create.isPending || update.isPending;
   const isFlood = form.riskType === 'FLOOD';
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
 
+  const query = useDebounced(
+    useMemo(
+      () => (form.pin ? { lat: form.pin.lat, lng: form.pin.lng, radius: form.radius, riskType: form.riskType } : null),
+      [form.pin, form.radius, form.riskType],
+    ),
+    400,
+  );
+  const suggestion = useAreaSuggestion(query);
+  const s = suggestion.data;
+
+  useEffect(() => {
+    if (!s) return;
+    setForm((f) => ({
+      ...f,
+      ...(!nameTouched && { name: s.suggestedName }),
+      ...(!levelTouched && { riskLevel: s.suggestedLevel }),
+    }));
+  }, [s, nameTouched, levelTouched]);
+
+  const pinMoved =
+    !!form.pin &&
+    (!area?.pin || area.pin.lat !== form.pin.lat || area.pin.lng !== form.pin.lng || area.pin.radius_m !== form.radius);
+
   async function save() {
+    if (!form.pin && !area) { setError('Click the map to place the pin.'); return; }
     if (form.name.trim().length < 2) { setError('Give the area a name.'); return; }
     let meters: number | null = null;
     if (isFlood && form.threshold.trim()) {
       meters = Number(form.threshold);
-      if (!Number.isFinite(meters) || meters < 0 || meters > 30) { setError('Threshold must be between 0 and 30 m.'); return; }
+      if (!Number.isFinite(meters) || meters < 0 || meters > 30) { setError('The flood threshold must be between 0 and 30 m.'); return; }
     }
     const body: RiskAreaInput = {
       name: form.name.trim(),
       riskType: form.riskType,
       riskLevel: form.riskLevel,
-      barangay: form.barangay === NO_BARANGAY ? '' : form.barangay,
       // Only a flood area is tied to the river level; switching type clears it.
       floodThresholdMeters: isFlood ? meters : null,
       description: form.description.trim(),
+      ...(form.pin && pinMoved && {
+        latitude: Number(form.pin.lat.toFixed(7)),
+        longitude: Number(form.pin.lng.toFixed(7)),
+        radiusMeters: form.radius,
+      }),
     };
     try {
       setError(null);
@@ -109,23 +173,65 @@ function AreaDialog({ open, area, onClose }: {
     }
   }
 
+  const suggestedMark = (touched: boolean) =>
+    !touched && s ? <span className="ml-1.5 rounded bg-violet-100 px-1.5 py-px text-[10px] font-bold uppercase text-violet-700">Suggested</span> : null;
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o && !busy) onClose(); }}>
-      <DialogContent className="max-w-lg">
+    <Dialog open onOpenChange={(o) => { if (!o && !busy) onClose(); }}>
+      <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{area ? 'Edit risk area' : 'Add risk area'}</DialogTitle>
-          <DialogDescription>Shown on the Risk Map for Supervisors and Dispatchers.</DialogDescription>
+          <DialogTitle>{area ? `Edit “${area.name}”` : 'Add risk area'}</DialogTitle>
+          <DialogDescription>
+            Place a pin where the risk is and set how far it reaches. AGAP fills in the barangay, a name and a level
+            from the incidents nearby; change anything before saving.
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div>
-            <label htmlFor="ra-name" className="mb-1 block text-xs font-semibold text-agap-textMid">Name</label>
-            <input id="ra-name" className={INPUT} maxLength={255} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Lolomboy riverside" />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+          {/* Map + what AGAP found */}
+          <div className="space-y-2">
+            <div className="h-[280px] md:h-[360px]">
+              <RiskAreaPinMap
+                pin={form.pin}
+                radiusM={form.radius}
+                level={form.riskLevel}
+                onPick={(lat, lng) => { setOutside(false); set('pin', { lat, lng }); }}
+                onOutside={() => setOutside(true)}
+              />
+            </div>
+            {outside && <p role="alert" className="text-xs text-agap-danger">That spot is outside Bocaue. Pick a place inside the municipality.</p>}
+            {area && !area.pin && !form.pin && (
+              <p className="flex items-start gap-1.5 text-xs text-agap-textSub">
+                <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
+                {area.shape === 'OUTLINE'
+                  ? 'This area keeps the outline of the incidents that formed it.'
+                  : 'This area covers its whole barangay.'}{' '}
+                Click the map to replace it with a pin and radius, or leave it as it is.
+              </p>
+            )}
+            {form.pin && (
+              <div className="rounded-xl border border-[rgba(124,58,237,0.20)] bg-violet-50/60 px-3 py-2 text-xs text-agap-textMid">
+                <p className="flex items-center gap-1.5 font-semibold text-agap-textMain">
+                  <MapPin size={13} className="text-violet-600" aria-hidden />
+                  {suggestion.isFetching && !s ? 'Looking up this spot…' : s?.barangay ? `Barangay ${s.barangay}` : s ? 'Outside every barangay line' : 'Barangay from the pin'}
+                </p>
+                {s && (
+                  <p className="mt-0.5">
+                    {s.incidentsByType.length === 0
+                      ? `No incidents within ${formatRadius(form.radius)} in the last ${s.windowDays} days.`
+                      : `Within ${formatRadius(form.radius)}, last ${s.windowDays} days: ` +
+                        s.incidentsByType.map((r) => `${r.count} ${titleCase(r.category).toLowerCase()}`).join(', ') + '.'}
+                  </p>
+                )}
+                {suggestion.isError && <p className="mt-0.5 text-agap-danger">Couldn&apos;t look up this spot. You can still save.</p>}
+              </div>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* Fields */}
+          <div className="space-y-3">
             <div>
-              <span className="mb-1 block text-xs font-semibold text-agap-textMid">Type</span>
+              <span className={LABEL}>Type</span>
               <Select value={form.riskType} onValueChange={(v) => set('riskType', v)}>
                 <SelectTrigger aria-label="Type" className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -133,89 +239,120 @@ function AreaDialog({ open, area, onClose }: {
                 </SelectContent>
               </Select>
             </div>
+
             <div>
-              <span className="mb-1 block text-xs font-semibold text-agap-textMid">Level</span>
-              <Select value={form.riskLevel} onValueChange={(v) => set('riskLevel', v as RiskLevel)}>
+              <label htmlFor="ra-radius" className={cn(LABEL, 'flex justify-between')}>
+                <span>Reach (radius)</span>
+                <span className="font-mono tabular-nums text-agap-textMain">{formatRadius(form.radius)}</span>
+              </label>
+              <input
+                id="ra-radius"
+                type="range"
+                min={MIN_RADIUS_M}
+                max={MAX_RADIUS_M}
+                step={50}
+                value={form.radius}
+                onChange={(e) => set('radius', Number(e.target.value))}
+                className="w-full accent-agap-green"
+              />
+              <div className="flex justify-between text-[10px] text-agap-textSub"><span>{formatRadius(MIN_RADIUS_M)}</span><span>{formatRadius(MAX_RADIUS_M)}</span></div>
+            </div>
+
+            <div>
+              <label htmlFor="ra-name" className={LABEL}>Name{suggestedMark(nameTouched)}</label>
+              <input
+                id="ra-name"
+                className={INPUT}
+                maxLength={255}
+                value={form.name}
+                onChange={(e) => { setNameTouched(true); set('name', e.target.value); }}
+                placeholder="Drop a pin for a suggestion"
+              />
+            </div>
+
+            <div>
+              <span className={LABEL}>Level{suggestedMark(levelTouched)}</span>
+              <Select value={form.riskLevel} onValueChange={(v) => { setLevelTouched(true); set('riskLevel', v as RiskLevel); }}>
                 <SelectTrigger aria-label="Level" className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {RISK_LEVELS.map((l) => <SelectItem key={l} value={l}>{titleCase(l)}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {s && (
+                <p className="mt-1 text-[11px] text-agap-textSub">
+                  {s.sameTypeIncidents} {titleCase(form.riskType).toLowerCase()} incident{s.sameTypeIncidents === 1 ? '' : 's'} here in {s.windowDays} days
+                  → {levelWord(s.suggestedLevel)}
+                  {levelTouched && s.suggestedLevel !== form.riskLevel && (
+                    <button type="button" className="ml-1.5 font-semibold text-agap-green hover:underline" onClick={() => set('riskLevel', s.suggestedLevel)}>
+                      Use it
+                    </button>
+                  )}
+                </p>
+              )}
             </div>
-          </div>
 
-          <div>
-            <span className="mb-1 block text-xs font-semibold text-agap-textMid">Barangay</span>
-            <Select value={form.barangay} onValueChange={(v) => set('barangay', v)} disabled={barangays.isLoading}>
-              <SelectTrigger aria-label="Barangay" className="h-9">
-                <SelectValue placeholder={barangays.isLoading ? 'Loading…' : 'Choose a barangay'} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_BARANGAY}>No specific barangay</SelectItem>
-                {(barangays.data ?? []).map((b) => <SelectItem key={b.id} value={b.name}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {barangays.isError && <p className="mt-1 text-xs text-agap-danger">Couldn&apos;t load the barangay list.</p>}
-          </div>
+            {isFlood && (
+              <div>
+                <label htmlFor="ra-threshold" className={LABEL}>River level that triggers it (m, optional)</label>
+                <input
+                  id="ra-threshold"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  max={30}
+                  step={0.01}
+                  className={INPUT}
+                  value={form.threshold}
+                  onChange={(e) => set('threshold', e.target.value)}
+                  placeholder={BOCAUE_RIVER_CRITICAL_M.toFixed(2)}
+                />
+                <p className="mt-1 text-[11px] text-agap-textSub">Bocaue River critical level: 11.50 m (mandatory evacuation).</p>
+              </div>
+            )}
 
-          {isFlood && (
             <div>
-              <label htmlFor="ra-threshold" className="mb-1 block text-xs font-semibold text-agap-textMid">Flood threshold (m)</label>
-              <input
-                id="ra-threshold"
-                type="number"
-                inputMode="decimal"
-                min={0}
-                max={30}
-                step={0.01}
-                className={INPUT}
-                value={form.threshold}
-                onChange={(e) => set('threshold', e.target.value)}
-                placeholder={String(BOCAUE_RIVER_CRITICAL_M.toFixed(2))}
+              <label htmlFor="ra-desc" className={LABEL}>Notes (optional)</label>
+              <textarea
+                id="ra-desc"
+                rows={2}
+                maxLength={1000}
+                value={form.description}
+                onChange={(e) => set('description', e.target.value)}
+                className={cn(INPUT, 'h-auto resize-y py-2')}
+                placeholder="e.g. Low road beside the creek floods first"
               />
-              <p className="mt-1 text-xs text-agap-textSub">Bocaue River critical level: 11.50 m (mandatory evacuation).</p>
             </div>
-          )}
 
-          <div>
-            <label htmlFor="ra-desc" className="mb-1 block text-xs font-semibold text-agap-textMid">Description</label>
-            <textarea
-              id="ra-desc"
-              rows={3}
-              maxLength={1000}
-              value={form.description}
-              onChange={(e) => set('description', e.target.value)}
-              className={cn(INPUT, 'h-auto resize-y py-2')}
-            />
+            {area && (
+              <label className="flex items-center justify-between gap-3 rounded-xl border border-[rgba(168,181,193,0.25)] px-3 py-2">
+                <span className="text-sm text-agap-textMain">
+                  Active
+                  <span className="block text-xs text-agap-textSub">Inactive areas stay listed but are hidden from the Risk Map.</span>
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={form.isActive}
+                  onClick={() => set('isActive', !form.isActive)}
+                  className={cn(
+                    'relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green',
+                    form.isActive ? 'bg-agap-green' : 'bg-agap-track',
+                  )}
+                >
+                  <span className={cn('absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform', form.isActive ? 'translate-x-5' : 'translate-x-0.5')} />
+                </button>
+              </label>
+            )}
           </div>
-
-          {area && (
-            <label className="flex items-center justify-between gap-3 rounded-xl border border-[rgba(168,181,193,0.20)] px-3 py-2">
-              <span className="text-sm text-agap-textMain">
-                Active
-                <span className="block text-xs text-agap-textSub">Inactive areas stay listed here but are hidden from the Risk Map.</span>
-              </span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={form.isActive}
-                onClick={() => set('isActive', !form.isActive)}
-                className={cn(
-                  'relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agap-green',
-                  form.isActive ? 'bg-agap-green' : 'bg-agap-track',
-                )}
-              >
-                <span className={cn('absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform', form.isActive ? 'translate-x-5' : 'translate-x-0.5')} />
-              </button>
-            </label>
-          )}
-
-          {error && <p role="alert" className="text-xs text-agap-danger">{error}</p>}
         </div>
+
+        {error && <p role="alert" className="text-xs text-agap-danger">{error}</p>}
 
         <DialogFooter>
           <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="primary" loading={busy} onClick={save}>{area ? 'Save changes' : 'Add risk area'}</Button>
+          <Button variant="primary" loading={busy} onClick={save} disabled={busy || (!area && !form.pin)}>
+            {area ? 'Save changes' : 'Add risk area'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -270,12 +407,19 @@ function RemoveDialog({ area, onClose }: { area: RiskArea | null; onClose: () =>
   );
 }
 
-// ─── Proposed areas (AUTOMATION_NEEDS_PLAN Phase 2, C7) ───────────────────────
+// ─── Proposals (AUTOMATION_NEEDS_PLAN Phase 2, C7) ────────────────────────────
+
+const proposalPlace = (p: RiskAreaProposal) =>
+  p.risk_type === 'FLOOD'
+    ? `Whole barangay · ${p.barangay ?? 'Bocaue'}`
+    : `Incident cluster · ${p.barangay ?? 'outside barangay lines'}`;
 
 function ApproveDialog({ proposal, onClose }: { proposal: RiskAreaProposal; onClose: () => void }): JSX.Element {
   const approve = useApproveRiskAreaProposal();
-  const [name, setName] = useState(`${proposal.barangay ?? 'Bocaue'} ${titleCase(proposal.risk_type).toLowerCase()} hotspot`);
-  const [level, setLevel] = useState<RiskLevel>(proposal.incident_count >= 10 ? 'HIGH' : 'MODERATE');
+  const [name, setName] = useState(`${proposal.barangay ?? 'Bocaue'} ${titleCase(proposal.risk_type).toLowerCase()} area`);
+  const [level, setLevel] = useState<RiskLevel>(
+    proposal.incident_count >= 10 ? 'CRITICAL' : proposal.incident_count >= 6 ? 'HIGH' : 'MODERATE',
+  );
   const [error, setError] = useState<string | null>(null);
 
   async function save() {
@@ -293,20 +437,21 @@ function ApproveDialog({ proposal, onClose }: { proposal: RiskAreaProposal; onCl
     <Dialog open onOpenChange={(o) => { if (!o && !approve.isPending) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Approve proposed area</DialogTitle>
+          <DialogTitle>Create this risk area?</DialogTitle>
           <DialogDescription>
-            Creates a {titleCase(proposal.risk_type).toLowerCase()} risk area
-            {proposal.barangay ? ` in ${proposal.barangay}` : ''} with the cluster&apos;s map boundary
-            ({proposal.incident_count} incidents in {proposal.window_days} days). Recorded in the audit log.
+            {proposal.risk_type === 'FLOOD'
+              ? `A flood area covering all of ${proposal.barangay ?? 'the barangay'}`
+              : `A ${titleCase(proposal.risk_type).toLowerCase()} area with the outline of the incidents that formed it`}
+            {' '}({proposal.incident_count} incidents in {proposal.window_days} days). Recorded in the audit log.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <label htmlFor="rp-name" className="mb-1 block text-xs font-semibold text-agap-textMid">Name</label>
+            <label htmlFor="rp-name" className={LABEL}>Name</label>
             <input id="rp-name" className={INPUT} maxLength={255} value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <span className="mb-1 block text-xs font-semibold text-agap-textMid">Level</span>
+            <span className={LABEL}>Level</span>
             <Select value={level} onValueChange={(v) => setLevel(v as RiskLevel)}>
               <SelectTrigger aria-label="Level" className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -325,136 +470,229 @@ function ApproveDialog({ proposal, onClose }: { proposal: RiskAreaProposal; onCl
   );
 }
 
-function ProposedAreas(): JSX.Element | null {
-  const proposals = useRiskAreaProposals();
+function ProposalCard({ proposal: p, selected, onSelect, onApprove }: {
+  proposal: RiskAreaProposal;
+  selected: boolean;
+  onSelect: () => void;
+  onApprove: () => void;
+}): JSX.Element {
   const dismiss = useDismissRiskAreaProposal();
-  const [approving, setApproving] = useState<RiskAreaProposal | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const rows = proposals.data ?? [];
+  return (
+    <li
+      className={cn(
+        'rounded-xl border bg-white px-3 py-2.5 transition',
+        selected ? 'border-agap-amber ring-2 ring-agap-amber/40' : 'border-[rgba(217,119,6,0.30)]',
+      )}
+    >
+      <button type="button" className="block w-full text-left" onClick={onSelect}>
+        <p className="text-sm font-bold text-agap-textMain">{titleCase(p.risk_type)}</p>
+        <p className="text-xs text-agap-textMid">{proposalPlace(p)}</p>
+        <p className="mt-0.5 text-xs text-agap-textSub">{p.incident_count} incidents in the last {p.window_days} days</p>
+      </button>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <Button size="sm" variant="primary" className="h-7" onClick={onApprove}><Check size={13} /> Approve</Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7"
+          loading={dismiss.isPending}
+          onClick={() => dismiss.mutate(p.id)}
+          aria-label={`Dismiss ${titleCase(p.risk_type)} proposal${p.barangay ? ` in ${p.barangay}` : ''}`}
+        >
+          <X size={13} /> Dismiss
+        </Button>
+      </div>
+      {dismiss.isError && <p role="alert" className="mt-1 text-xs text-agap-danger">{errMsg(dismiss.error, 'Could not dismiss it.')}</p>}
+    </li>
+  );
+}
 
-  // Nothing to review: keep the tab as it was.
-  if (proposals.isLoading || (!proposals.isError && rows.length === 0)) return null;
+// ─── Area card ────────────────────────────────────────────────────────────────
 
-  const columns: Column<RiskAreaProposal>[] = [
-    { key: 'type', header: 'Type', accessor: (p) => <span className="text-xs font-semibold text-agap-textMain">{titleCase(p.risk_type)}</span> },
-    { key: 'barangay', header: 'Barangay', accessor: (p) => <span className="text-xs text-agap-textMid">{p.barangay ?? 'Outside barangay lines'}</span> },
-    {
-      key: 'count',
-      header: 'Incidents',
-      accessor: (p) => <span className="font-mono text-xs tabular-nums text-agap-textMid">{p.incident_count} in {p.window_days} days</span>,
-    },
-    {
-      key: 'actions',
-      header: '',
-      accessor: (p) => (
-        <div className="flex justify-end gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={dismiss.isPending}
-            onClick={async () => {
-              try { setError(null); await dismiss.mutateAsync(p.id); } catch (e) { setError(errMsg(e, 'Could not dismiss the proposal.')); }
-            }}
-            aria-label={`Dismiss ${titleCase(p.risk_type)} proposal${p.barangay ? ` in ${p.barangay}` : ''}`}
-          >
-            <X size={14} /> Dismiss
-          </Button>
-          <Button size="sm" variant="primary" onClick={() => setApproving(p)}>
-            <Check size={14} /> Approve
-          </Button>
-        </div>
-      ),
-    },
-  ];
+function AreaCard({ area: a, canManage, selected, onSelect, onEdit, onRemove }: {
+  area: RiskArea;
+  canManage: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}): JSX.Element {
+  const update = useUpdateRiskArea();
+  const st = a.stats;
+  const trend = st.incidents_90d - st.incidents_prev_90d;
+  const hint = canManage && a.hint ? hintText(a.hint) : null;
+
+  function applyHint() {
+    if (!a.hint) return;
+    update.mutate({ id: a.id, changes: a.hint.kind === 'RAISE' ? { riskLevel: a.hint.suggestedLevel } : { isActive: false } });
+  }
 
   return (
-    <section className="space-y-2 rounded-2xl border border-[rgba(217,119,6,0.25)] bg-agap-amberSoft p-4">
-      <h2 className="flex items-center gap-2 text-sm font-extrabold text-agap-textMain">
-        <Sparkles size={15} className="text-agap-amber" aria-hidden />
-        Proposed areas
-      </h2>
-      <p className="text-xs text-agap-textSub">
-        Found by the nightly check: places where several incidents of one type happened close together in the last 90 days.
-        Nothing is added until you approve it.
-      </p>
-      {proposals.isError ? (
-        <p className="text-xs text-agap-danger">Couldn&apos;t load proposed areas.</p>
-      ) : (
-        <DataTable columns={columns} data={rows} getRowKey={(p) => p.id} />
+    <li
+      className={cn(
+        'rounded-2xl border bg-white p-3.5 shadow-card transition',
+        selected ? 'border-agap-green ring-2 ring-agap-green/30' : 'border-[rgba(168,181,193,0.22)]',
+        !a.is_active && 'opacity-70',
       )}
-      {error && <p role="alert" className="text-xs text-agap-danger">{error}</p>}
-      {approving && <ApproveDialog key={approving.id} proposal={approving} onClose={() => setApproving(null)} />}
-    </section>
+    >
+      <div className="flex items-start gap-2">
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={onSelect}>
+          <p className="truncate text-sm font-bold text-agap-textMain">{a.name}</p>
+          <p className="mt-0.5 flex items-center gap-1 text-xs text-agap-textMid">
+            <MapPin size={12} className="shrink-0 text-agap-textSub" aria-hidden />
+            <span className="truncate">{titleCase(a.risk_type)} · {placeLine(a)}</span>
+          </p>
+        </button>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Badge variant={LEVEL_VARIANT[a.risk_level as RiskLevel] ?? 'muted'}>{titleCase(a.risk_level)}</Badge>
+          {!a.is_active && <Badge variant="muted">Inactive</Badge>}
+        </div>
+      </div>
+
+      <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-agap-textSub">
+        <span className="font-semibold text-agap-textMid">
+          {st.incidents_90d === 0 ? 'No incidents in 90 days' : `${st.incidents_90d} incident${st.incidents_90d === 1 ? '' : 's'} in 90 days`}
+        </span>
+        {trend !== 0 && (st.incidents_90d > 0 || st.incidents_prev_90d > 0) && (
+          <span className={cn('inline-flex items-center gap-0.5', trend > 0 ? 'text-agap-danger' : 'text-agap-green')}>
+            {trend > 0 ? <TrendingUp size={12} aria-hidden /> : <TrendingDown size={12} aria-hidden />}
+            {trend > 0 ? `up from ${st.incidents_prev_90d}` : `down from ${st.incidents_prev_90d}`}
+          </span>
+        )}
+        {st.last_incident_at && <span>· latest {relativeDays(st.last_incident_at)}</span>}
+        {threshold(a) !== null && <span>· river ≥ {threshold(a)!.toFixed(2)} m</span>}
+      </p>
+      {a.description && <p className="mt-1 line-clamp-2 text-xs text-agap-textSub">{a.description}</p>}
+
+      {hint && (
+        <div
+          className={cn(
+            'mt-2.5 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs',
+            a.hint!.kind === 'RAISE' ? 'bg-agap-amberSoft text-agap-textMain' : 'bg-agap-surface text-agap-textMid',
+          )}
+        >
+          {a.hint!.kind === 'RAISE'
+            ? <AlertTriangle size={13} className="shrink-0 text-agap-amber" aria-hidden />
+            : <Clock size={13} className="shrink-0 text-agap-textSub" aria-hidden />}
+          <span className="min-w-0 flex-1">{hint.message}</span>
+          <Button size="sm" variant={a.hint!.kind === 'RAISE' ? 'primary' : 'secondary'} className="h-7" loading={update.isPending} onClick={applyHint}>
+            {hint.action}
+          </Button>
+          {update.isError && <span role="alert" className="w-full text-agap-danger">Could not save. Try again.</span>}
+        </div>
+      )}
+
+      <div className="mt-2.5 flex flex-wrap gap-1 border-t border-[rgba(168,181,193,0.18)] pt-2">
+        <Button size="sm" variant="ghost" className="h-7" onClick={onSelect} disabled={!a.boundary} aria-label={`Show ${a.name} on the map`}>
+          <Locate size={13} /> Show on map
+        </Button>
+        {canManage && (
+          <>
+            <Button size="sm" variant="ghost" className="h-7" onClick={onEdit} aria-label={`Edit ${a.name}`}>
+              <Edit size={13} /> Edit
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7" onClick={onRemove} aria-label={`Remove ${a.name}`}>
+              <Trash2 size={13} /> Remove
+            </Button>
+          </>
+        )}
+      </div>
+    </li>
+  );
+}
+
+// ─── Hotspot check status ─────────────────────────────────────────────────────
+
+function CheckStatus(): JSX.Element {
+  const status = useHotspotStatus();
+  const run = useRunHotspotCheck();
+  const last = status.data?.lastRun;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-agap-textSub">
+      <Sparkles size={13} className="text-violet-600" aria-hidden />
+      <span>
+        {status.isLoading
+          ? 'Checking status…'
+          : last
+            ? <>Last checked {manilaTime(last.at)}{last.trigger === 'MANUAL' ? ' (by hand)' : ''}{last.failed ? ' · failed' : ''}</>
+            : 'Not checked yet'}
+        {status.data && <> · next {manilaTime(status.data.nextRunAt)}</>}
+      </span>
+      <Button size="sm" variant="secondary" className="h-7" loading={run.isPending} onClick={() => run.mutate()}>
+        {!run.isPending && <RefreshCw size={13} />} Check now
+      </Button>
+      {run.isSuccess && (
+        <span role="status" className="font-semibold text-agap-textMid">
+          {run.data.written === 0 ? 'Nothing new found.' : `${run.data.written} proposal${run.data.written === 1 ? '' : 's'} to review.`}
+        </span>
+      )}
+      {run.isError && <span role="alert" className="text-agap-danger">{errMsg(run.error, 'The check could not run.')}</span>}
+    </div>
   );
 }
 
 // ─── Tab ──────────────────────────────────────────────────────────────────────
 
-/** canManage: the Supervisor's tab on the Risk Map. false: the System Administrator's read-only list. */
+/** canManage: the Supervisor's tab on the Risk Map. false: the System Administrator's read-only view. */
 export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element {
   const areas = useRiskAreas();
+  const proposalsQ = useRiskAreaProposals(canManage);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ area: RiskArea | null } | null>(null);
   const [removing, setRemoving] = useState<RiskArea | null>(null);
+  const [approving, setApproving] = useState<RiskAreaProposal | null>(null);
+  const [search, setSearch] = useState('');
+  const [type, setType] = useState<string>(ALL);
+  const [show, setShow] = useState<'all' | 'active' | 'inactive'>('all');
 
-  const columns: Column<RiskArea>[] = [
-    {
-      key: 'name',
-      header: 'Area',
-      accessor: (a) => (
-        <div className="min-w-0">
-          <p className="truncate font-semibold text-agap-textMain">{a.name}</p>
-          {a.description && <p className="max-w-[320px] truncate text-xs text-agap-textSub">{a.description}</p>}
-        </div>
-      ),
-    },
-    { key: 'type', header: 'Type', accessor: (a) => <span className="text-xs text-agap-textMid">{titleCase(a.risk_type)}</span> },
-    {
-      key: 'level',
-      header: 'Level',
-      accessor: (a) => <Badge variant={LEVEL_VARIANT[a.risk_level as RiskLevel] ?? 'muted'}>{titleCase(a.risk_level)}</Badge>,
-    },
-    { key: 'barangay', header: 'Barangay', accessor: (a) => <span className="text-xs text-agap-textMid">{a.barangay ?? '—'}</span> },
-    {
-      key: 'threshold',
-      header: 'Threshold',
-      accessor: (a) => (
-        <span className="font-mono text-xs tabular-nums text-agap-textMid">
-          {threshold(a) === null ? '—' : `${threshold(a)!.toFixed(2)} m`}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      accessor: (a) => <Badge variant={a.is_active ? 'green' : 'muted'}>{a.is_active ? 'Active' : 'Inactive'}</Badge>,
-    },
-  ];
-  if (canManage) columns.push(
-    {
-      key: 'actions',
-      header: '',
-      accessor: (a) => (
-        <div className="flex justify-end gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setEditing({ area: a })} aria-label={`Edit ${a.name}`}>
-            <Edit size={14} /> Edit
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setRemoving(a)} aria-label={`Remove ${a.name}`}>
-            <Trash2 size={14} /> Remove
-          </Button>
-        </div>
-      ),
-    },
-  );
+  const all = useMemo(() => areas.data ?? [], [areas.data]);
+  const proposals = canManage ? proposalsQ.data ?? [] : [];
+  const needReview = all.filter((a) => a.hint).length;
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return all
+      .filter((a) => (show === 'all' ? true : show === 'active' ? a.is_active : !a.is_active))
+      .filter((a) => type === ALL || a.risk_type === type)
+      .filter((a) => !q || `${a.name} ${a.barangay ?? ''} ${a.description ?? ''}`.toLowerCase().includes(q))
+      // Active first, then the most serious, then the busiest.
+      .sort((x, y) =>
+        Number(y.is_active) - Number(x.is_active) ||
+        levelRank(y.risk_level) - levelRank(x.risk_level) ||
+        y.stats.incidents_90d - x.stats.incidents_90d ||
+        x.name.localeCompare(y.name),
+      );
+  }, [all, search, type, show]);
+
+  const nothingYet = !areas.isLoading && !areas.isError && all.length === 0 && proposals.length === 0;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="flex max-w-2xl items-start gap-2 text-sm text-agap-textSub">
-          <Info size={15} className="mt-0.5 shrink-0" aria-hidden />
-          {canManage
-            ? 'A new area covers its whole barangay on the Risk Map. An approved proposal keeps the outline of the incidents that formed it.'
-            : 'Read-only. Risk areas are an MDRRMO operations decision: Supervisors add, change and approve them from the Risk Map.'}
-        </p>
+      {/* Summary and actions */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white px-4 py-3 shadow-card">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-agap-greenSoft px-2.5 py-0.5 font-semibold text-agap-green">
+              {all.filter((a) => a.is_active).length} active
+            </span>
+            {canManage && needReview > 0 && (
+              <span className="rounded-full bg-agap-amberSoft px-2.5 py-0.5 font-semibold text-agap-amber">{needReview} to review</span>
+            )}
+            {canManage && proposals.length > 0 && (
+              <span className="rounded-full bg-violet-100 px-2.5 py-0.5 font-semibold text-violet-700">
+                {proposals.length} proposed
+              </span>
+            )}
+          </div>
+          {canManage ? (
+            <CheckStatus />
+          ) : (
+            <p className="flex items-center gap-1.5 text-xs text-agap-textSub">
+              <Info size={13} aria-hidden />
+              Read-only. Supervisors add, change and approve risk areas from the Risk Map.
+            </p>
+          )}
+        </div>
         {canManage && (
           <Button variant="primary" onClick={() => setEditing({ area: null })}>
             <Plus size={15} /> Add risk area
@@ -462,28 +700,126 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
         )}
       </div>
 
-      {canManage && <ProposedAreas />}
-
-      {areas.isError ? (
+      {areas.isError && (
         <p className="rounded-xl border border-[rgba(212,72,88,0.2)] bg-agap-dangerSoft px-4 py-2.5 text-sm text-agap-danger">
-          Couldn&apos;t load risk areas.
+          Couldn&apos;t load risk areas. Check your connection and refresh.
         </p>
-      ) : areas.isLoading ? (
-        <Skeleton className="h-48 w-full rounded-2xl" />
-      ) : (areas.data ?? []).length === 0 ? (
-        <EmptyState
-          icon={MapPinned}
-          title="No risk areas yet"
-          description={canManage ? 'Add one, for example a flood area for Lolomboy at the 11.50 m river level.' : 'Supervisors have not added any yet.'}
-        />
-      ) : (
-        <DataTable columns={columns} data={areas.data ?? []} getRowKey={(a) => a.id} />
       )}
 
-      {editing && (
-        <AreaDialog key={editing.area?.id ?? 'new'} open area={editing.area} onClose={() => setEditing(null)} />
+      {nothingYet ? (
+        <div className="rounded-2xl border border-dashed border-[rgba(168,181,193,0.40)] bg-white">
+          <EmptyState
+            icon={MapPinned}
+            title="No risk areas yet"
+            description={
+              canManage
+                ? 'Pin a place you know is risky, like a riverside street or a fireworks storage site. AGAP also checks the incidents every night at 2:30 AM and proposes areas where the same kind of incident keeps happening, or where a barangay keeps flooding.'
+                : 'Supervisors have not added any yet.'
+            }
+            action={canManage ? (
+              <Button variant="primary" onClick={() => setEditing({ area: null })}><Plus size={15} /> Add risk area</Button>
+            ) : undefined}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,44%)]">
+          {/* Map: above the list on a phone, beside it (and staying in view) on a wide screen */}
+          <div className="h-[280px] lg:sticky lg:top-0 lg:order-2 lg:h-[calc(100vh-15rem)] lg:min-h-[420px]">
+            <RiskAreasMap areas={all} proposals={proposals} selectedId={selectedId} onSelect={setSelectedId} />
+          </div>
+
+          <div className="space-y-4 lg:order-1">
+            {canManage && proposals.length > 0 && (
+              <section className="rounded-2xl border border-[rgba(217,119,6,0.28)] bg-agap-amberSoft p-3.5">
+                <h2 className="flex items-center gap-1.5 text-sm font-extrabold text-agap-textMain">
+                  <Sparkles size={15} className="text-agap-amber" aria-hidden /> Proposed by AGAP
+                </h2>
+                <p className="mt-0.5 text-xs text-agap-textSub">
+                  Places where the same kind of incident keeps happening, and barangays with repeated floods (last 90 days).
+                  Nothing is added until you approve it.
+                </p>
+                <ul className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {proposals.map((p) => (
+                    <ProposalCard
+                      key={p.id}
+                      proposal={p}
+                      selected={selectedId === p.id}
+                      onSelect={() => setSelectedId(p.id)}
+                      onApprove={() => setApproving(p)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            )}
+            {canManage && proposalsQ.isError && <p className="text-xs text-agap-danger">Couldn&apos;t load proposed areas.</p>}
+
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="relative min-w-[180px] flex-1">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-agap-textSub" aria-hidden />
+                <input
+                  className={cn(INPUT, 'pl-8')}
+                  placeholder="Search name, barangay, notes"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  aria-label="Search risk areas"
+                />
+              </label>
+              <Select value={type} onValueChange={setType}>
+                <SelectTrigger aria-label="Type" className="h-9 w-[160px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>All types</SelectItem>
+                  {RISK_TYPES.map((t) => <SelectItem key={t} value={t}>{titleCase(t)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div role="group" aria-label="Show" className="flex rounded-xl border border-[rgba(168,181,193,0.30)] bg-white p-0.5">
+                {(['all', 'active', 'inactive'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={show === v}
+                    onClick={() => setShow(v)}
+                    className={cn(
+                      'rounded-lg px-2.5 py-1 text-xs font-semibold capitalize transition',
+                      show === v ? 'bg-agap-green text-white' : 'text-agap-textMid hover:bg-agap-surface',
+                    )}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {areas.isLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-2xl" />)}
+              </div>
+            ) : visible.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-[rgba(168,181,193,0.40)] bg-white px-4 py-6 text-center text-sm text-agap-textSub">
+                {all.length === 0 ? 'No risk areas yet. Approve a proposal above or add one.' : 'No risk areas match these filters.'}
+              </p>
+            ) : (
+              <ul className="space-y-2.5">
+                {visible.map((a) => (
+                  <AreaCard
+                    key={a.id}
+                    area={a}
+                    canManage={canManage}
+                    selected={selectedId === a.id}
+                    onSelect={() => setSelectedId(a.id)}
+                    onEdit={() => setEditing({ area: a })}
+                    onRemove={() => setRemoving(a)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       )}
+
+      {editing && <AreaDialog key={editing.area?.id ?? 'new'} area={editing.area} onClose={() => setEditing(null)} />}
       <RemoveDialog area={removing} onClose={() => setRemoving(null)} />
+      {approving && <ApproveDialog key={approving.id} proposal={approving} onClose={() => setApproving(null)} />}
     </div>
   );
 }

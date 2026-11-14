@@ -5,7 +5,9 @@ import {
   HOTSPOT_EPS_M,
   HOTSPOT_MIN_POINTS,
   HOTSPOT_WINDOW_DAYS,
+  FLOOD_BARANGAY_MIN,
   HotspotDiscoveryService,
+  LAST_RUN_KEY,
 } from '../../src/risk-intelligence/hotspot-discovery.service';
 import { RiskIntelligenceController } from '../../src/risk-intelligence/risk-intelligence.controller';
 import { ApproveRiskAreaProposalDto } from '../../src/risk-intelligence/dto/risk-area-proposal.dto';
@@ -40,6 +42,10 @@ function build() {
       update: jest.fn().mockResolvedValue({ ...PROPOSAL, status: 'APPROVED', risk_area_id: 'area-1' }),
     },
   };
+  prisma.system_configurations = {
+    findUnique: jest.fn().mockResolvedValue(null),
+    upsert: jest.fn().mockResolvedValue({}),
+  };
   const audit: any = { log: jest.fn().mockResolvedValue(undefined) };
   const risk: any = { createArea: jest.fn().mockResolvedValue({ id: 'area-1', name: 'Bunlo flood hotspot' }) };
   return { service: new HotspotDiscoveryService(prisma, audit, risk), prisma, audit, risk };
@@ -71,10 +77,76 @@ describe('HotspotDiscoveryService.discover', () => {
     expect(text).toContain("d.status = 'DISMISSED'");
   });
 
-  it('a failed run logs and returns 0, never throws', async () => {
+  it('a failed run logs and returns 0, never throws, and is recorded as failed', async () => {
     const b = build();
     b.prisma.$queryRaw.mockRejectedValue(new Error('function st_clusterdbscan does not exist'));
     await expect(b.service.discover()).resolves.toBe(0);
+    expect(b.prisma.system_configurations.upsert.mock.calls[0][0].update.config_value).toMatchObject({
+      trigger: 'NIGHTLY',
+      written: 0,
+      failed: true,
+    });
+  });
+
+  it('counts floods per barangay (3 or more), not as point clusters', async () => {
+    const b = build();
+    await b.service.discover();
+    const { text, values } = sqlOf(b.prisma.$queryRaw.mock.calls[0]);
+    // The DBSCAN branch leaves floods out...
+    expect(text).toContain("AND i.category <> 'FLOOD'");
+    // ...and a barangay with enough flood reports is proposed whole.
+    expect(text).toContain("'FLOOD'::incident_category AS category");
+    expect(text).toContain('ST_Transform(r.boundary, 32651) AS hull');
+    expect(text).toContain('HAVING count(*) >= ?::int');
+    expect(values).toContain(FLOOD_BARANGAY_MIN);
+    expect(FLOOD_BARANGAY_MIN).toBe(3);
+    // Both go through the same "already covered / recently dismissed" checks.
+    expect(text).toContain('SELECT nm.* FROM candidates nm');
+  });
+
+  it('runs nightly at 02:30 Manila time', () => {
+    expect(Reflect.getMetadata('SCHEDULE_CRON_OPTIONS', HotspotDiscoveryService.prototype.nightly)).toMatchObject({
+      cronTime: '30 2 * * *',
+      timeZone: 'Asia/Manila',
+    });
+  });
+});
+
+describe('HotspotDiscoveryService: Check now and status', () => {
+  it('a manual run is recorded under the Supervisor, audited, and returns the status', async () => {
+    const b = build();
+    b.prisma.system_configurations.findUnique.mockResolvedValue({
+      config_value: { at: '2026-11-15T04:00:00.000Z', trigger: 'MANUAL', written: 2, failed: false },
+    });
+    const res = await b.service.checkNow('sup-1');
+
+    expect(res).toMatchObject({
+      written: 2,
+      lastRun: { at: '2026-11-15T04:00:00.000Z', trigger: 'MANUAL', written: 2, failed: false },
+      nextRunAt: expect.any(String),
+    });
+    const upsert = b.prisma.system_configurations.upsert.mock.calls[0][0];
+    expect(upsert.where).toEqual({ config_key: LAST_RUN_KEY });
+    expect(upsert.update).toMatchObject({ config_value: { trigger: 'MANUAL', written: 2, failed: false }, updated_by_id: 'sup-1' });
+    expect(b.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'SYSTEM', actorId: 'sup-1', entityType: 'hotspot_check', moduleId: 'MOD-51' }),
+    );
+  });
+
+  it('status: no run yet, and the next run is 02:30 Manila', async () => {
+    const b = build();
+    await expect(b.service.status(new Date('2026-11-15T04:00:00.000Z'))).resolves.toEqual({
+      lastRun: null,
+      // 02:30 on 16 Nov in Manila = 18:30 UTC on 15 Nov.
+      nextRunAt: '2026-11-15T18:30:00.000Z',
+    });
+  });
+
+  it('listProposals adds each outline as GeoJSON', async () => {
+    const b = build();
+    const hull = { type: 'Polygon', coordinates: [] };
+    b.prisma.$queryRaw.mockResolvedValueOnce([{ id: 'prop-1', boundary: hull }]);
+    await expect(b.service.listProposals()).resolves.toEqual([{ ...PROPOSAL, boundary: hull }]);
   });
 });
 
@@ -92,6 +164,8 @@ describe('HotspotDiscoveryService review', () => {
     expect(b.risk.createArea).toHaveBeenCalledWith(
       { name: 'Bunlo flood hotspot', riskType: 'FLOOD', riskLevel: 'HIGH', barangay: 'Bunlo' },
       'admin-1',
+      // The proposal's boundary is copied below; no pin is needed.
+      { requirePin: false },
     );
     const { text, values } = sqlOf(b.prisma.$executeRaw.mock.calls[0]);
     expect(text).toContain('UPDATE risk_areas');

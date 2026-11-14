@@ -145,22 +145,49 @@ describe('RiskIntelligenceService.getRiskMap', () => {
 });
 
 describe('RiskIntelligenceService.findAreas', () => {
-  it('adds the outline to areas that have one, and null to the others', async () => {
-    const hull = { type: 'Polygon', coordinates: [[[120.94, 14.78], [120.95, 14.78], [120.95, 14.79], [120.94, 14.78]]] };
+  const NOW = new Date('2026-11-15T04:00:00.000Z');
+  const hull = { type: 'Polygon', coordinates: [[[120.94, 14.78], [120.95, 14.78], [120.95, 14.79], [120.94, 14.78]]] };
+  const area = (over: Record<string, unknown>) => ({
+    risk_type: 'FIRE',
+    risk_level: 'LOW',
+    is_active: true,
+    pin_latitude: null,
+    pin_longitude: null,
+    radius_meters: null,
+    created_at: new Date('2026-10-01T00:00:00.000Z'),
+    ...over,
+  });
+
+  it('adds the shape, the drawn boundary, the pin, live counts and a review hint', async () => {
     const { service, prisma } = makeService({
       areas: [
-        { id: 'a-1', name: 'Bundukan fireworks cluster', barangay: 'Bundukan' },
-        { id: 'a-2', name: 'Lolomboy riverside', barangay: 'Lolomboy' },
+        area({ id: 'a-1', name: 'Bundukan fireworks cluster', barangay: 'Bundukan', pin_latitude: '14.7963000', pin_longitude: '120.9272000', radius_meters: 300 }),
+        area({ id: 'a-2', name: 'Lolomboy riverside', barangay: 'Lolomboy', risk_type: 'FLOOD', risk_level: 'HIGH' }),
+        area({ id: 'a-3', name: 'Somewhere', barangay: null }),
       ],
     });
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: 'a-1', boundary: hull }]);
-
-    const areas = await service.findAreas();
-
-    expect(sqlOf(prisma.$queryRaw.mock.calls[0]).text).toContain('ST_AsGeoJSON(area_boundary::geometry, 6)');
-    expect(areas).toEqual([
-      { id: 'a-1', name: 'Bundukan fireworks cluster', barangay: 'Bundukan', boundary: hull },
-      { id: 'a-2', name: 'Lolomboy riverside', barangay: 'Lolomboy', boundary: null },
+    prisma.$queryRaw.mockResolvedValueOnce([
+      { id: 'a-1', shape: 'PIN', boundary: hull, incidents_90d: 7, incidents_prev_90d: 2, last_incident_at: new Date('2026-11-10T00:00:00Z') },
+      { id: 'a-2', shape: 'BARANGAY', boundary: hull, incidents_90d: 1, incidents_prev_90d: 0, last_incident_at: null },
+      { id: 'a-3', shape: 'NONE', boundary: null, incidents_90d: 0, incidents_prev_90d: 0, last_incident_at: null },
     ]);
+
+    const [pinned, barangay, none] = await service.findAreas(NOW);
+
+    const { text } = sqlOf(prisma.$queryRaw.mock.calls[0]);
+    expect(text).toContain('COALESCE(ra.area_boundary::geometry, r.boundary)');
+    expect(text).toContain('ST_Covers(a.geom, il.point::geometry)');
+    expect(text).toContain('i.category = a.risk_type');
+    expect(text).toContain("i.status NOT IN ('DRAFT', 'FALSE_ALERT', 'DUPLICATE', 'CANCELLED')");
+
+    expect(pinned).toMatchObject({
+      shape: 'PIN',
+      boundary: hull,
+      pin: { lat: 14.7963, lng: 120.9272, radius_m: 300 },
+      stats: { incidents_90d: 7, incidents_prev_90d: 2 },
+      hint: { kind: 'RAISE', suggestedLevel: 'HIGH', incidents: 7, windowDays: 90 },
+    });
+    expect(barangay).toMatchObject({ shape: 'BARANGAY', pin: null, hint: null });
+    expect(none).toMatchObject({ shape: 'NONE', boundary: null, hint: null });
   });
 });

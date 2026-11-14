@@ -5,6 +5,7 @@ import {
   fetchRiskMap, fetchRiskAreas,
   createRiskArea, updateRiskArea, deleteRiskArea,
   fetchRiskAreaProposals, approveRiskAreaProposal, dismissRiskAreaProposal,
+  fetchAreaSuggestion, fetchHotspotStatus, runHotspotCheck,
   type RiskAreaChanges, type RiskAreaInput, type ApproveProposalInput, type RiskMapPeriod,
 } from './api';
 
@@ -61,6 +62,42 @@ export function useRiskAreaProposals(enabled = true) {
     queryFn: fetchRiskAreaProposals,
     staleTime: 120_000,
     enabled,
+  });
+}
+
+/** Add-form help for a pin. `q` null (no pin yet) does nothing; the caller debounces it. */
+export function useAreaSuggestion(q: { lat: number; lng: number; radius: number; riskType: string } | null) {
+  return useQuery({
+    queryKey: ['risk-area-suggestion', q],
+    queryFn: () => fetchAreaSuggestion(q!),
+    enabled: q !== null,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** When the hotspot check last ran and when it runs next (Supervisor only). */
+export function useHotspotStatus(enabled = true) {
+  return useQuery({
+    queryKey: ['risk-hotspot-status'],
+    queryFn: fetchHotspotStatus,
+    staleTime: 60_000,
+    enabled,
+  });
+}
+
+/** "Check now": runs the check, then refreshes its status, the proposals and the areas. */
+export function useRunHotspotCheck() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runHotspotCheck,
+    onSuccess: (status) => {
+      qc.setQueryData(['risk-hotspot-status'], { lastRun: status.lastRun, nextRunAt: status.nextRunAt });
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: ['risk-area-proposals'] }),
+        qc.invalidateQueries({ queryKey: ['risk-areas'] }),
+      ]);
+    },
   });
 }
 

@@ -43,7 +43,9 @@ export const TabsContent = forwardRef<
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.Content
     ref={ref}
-    className={cn('mt-4 focus-visible:outline-none', className)}
+    // An inactive panel stays mounted with `hidden`; a `flex`/`grid` class would override
+    // that and keep taking space (the Risk areas tab sat under an empty Map panel).
+    className={cn('mt-4 focus-visible:outline-none data-[state=inactive]:hidden', className)}
     {...props}
   />
 ));

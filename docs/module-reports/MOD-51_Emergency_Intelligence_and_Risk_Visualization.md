@@ -107,11 +107,33 @@ Give dispatchers and supervisors a planning view of risk and incident concentrat
 
 **Test before signing:**
 1. As a Supervisor, open the Risk Map. Confirm a fire or road accident shows as a dot at its street, not at the barangay centre; tap it and check type, count, barangay and date. Report a flood and confirm its barangay turns blue with the count in the label. Switch between 30 days, 90 days and 12 months, and hide a type from the legend.
-2. As a Supervisor, on the Risk Map's Risk areas tab, create a risk area with an invalid barangay name and confirm it's refused.
-3. Create, update, and delete a risk area and confirm each action appears in the Audit log with before/after values.
-4. Confirm a Dispatcher sees the Risk Map without the Risk areas tab, and a System Administrator sees Administration → Risk Areas read-only (no buttons, no proposals) but not the Risk Map.
-5. Run the nightly job on test data (or wait for 2:30 AM), approve one proposal as a Supervisor and confirm a risk area with an outline and an audit row appear. Not yet tried through the screen.
+2. **Pinned area (2026-11-15).** As a Supervisor, open the Risk areas tab and check there is no empty gap above the content. Click **Add risk area** and click the map:
+   - the barangay, a suggested name and a suggested level fill in, with the nearby incident counts;
+   - drag the radius slider and watch the circle change;
+   - clicking outside Bocaue is refused.
+   Save it, and confirm the circle shows on the tab's map and on the Risk Map.
+3. Create, update, and delete a risk area and confirm each action appears in the Audit log with before/after values (including the pin and radius).
+4. Confirm a Dispatcher sees the Risk Map without the Risk areas tab, and a System Administrator sees Administration → Risk Areas read-only (cards and map, no buttons, no proposals) but not the Risk Map.
+5. **Check now.** Press it and confirm "Last checked" updates and the result line appears ("Nothing new found" or "N proposals to review"). With 3 or more flood reports in one barangay in 90 days, a "Whole barangay" flood proposal appears. Approve it and confirm the area and an audit row.
+6. **Hints.** With more incidents of an area's type inside it than its level suggests (3 → Moderate, 6 → High, 10 → Critical), the card offers **Raise to …**; applying it shows in the Audit log.
+
+**Risk areas (2026-11-15):**
+- A new area is a **pin with a radius** (50 m – 2 km). The barangay comes from the pin.
+- Older areas and approved whole-barangay flood proposals still cover the barangay. Approved cluster proposals keep their outline.
+- **Each card** shows the incidents of the area's type inside it (last 90 days, the 90 before, the latest), worked out by the server.
+- **Hints:**
+  - **Raise** the level when the counts call for more;
+  - **Deactivate?** after 12 quiet months, for areas older than a year.
+  - AGAP never lowers a level or changes anything itself.
+- **Hotspot check:**
+  - runs nightly at **02:30 Manila time** (before, the time zone was the server's);
+  - floods are proposed **per barangay** (3 or more reports in 90 days) instead of as point clusters;
+  - **Check now** runs it on demand, and the last run is shown.
+- **Code:**
+  - `backend/src/risk-intelligence/` (`risk-area-rules.ts` for the numbers);
+  - migration `20261115120000_risk_area_pin`;
+  - `frontend/components/admin/RiskAreasTab.tsx`, `components/risk/RiskAreasMap.tsx`, `RiskAreaPinMap.tsx`.
 
 **Do not claim:**
 - A density model or heatmap — the map shows counts per spot (~11 m) and per barangay, nothing smoothed or predicted. Only the nightly hotspot proposals use PostGIS clustering.
-- Flood forecasting, AI-driven prediction, or any guaranteed risk score — risk areas and thresholds are entered manually.
+- Flood forecasting, AI-driven prediction, or any guaranteed risk score. Suggested levels are a simple count rule (risk-area-rules.ts), and a Supervisor sets every level and threshold.

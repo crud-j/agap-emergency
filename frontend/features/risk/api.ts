@@ -38,6 +38,27 @@ export interface RiskMap {
   points_truncated: boolean;
 }
 
+export const RISK_LEVELS = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'] as const;
+export type RiskLevel = (typeof RISK_LEVELS)[number];
+
+/**
+ * How an area is drawn: a circle around a pin, an approved hotspot's outline, its whole
+ * barangay (older areas and whole-barangay flood proposals), or nowhere.
+ */
+export type RiskAreaShape = 'PIN' | 'OUTLINE' | 'BARANGAY' | 'NONE';
+
+/** Incidents of the area's type inside it (counts only), worked out by the server. */
+export interface RiskAreaStats {
+  incidents_90d: number;
+  incidents_prev_90d: number;
+  last_incident_at: string | null;
+}
+
+/** What AGAP suggests a Supervisor changes; the Supervisor decides. */
+export type RiskAreaHint =
+  | { kind: 'RAISE'; suggestedLevel: RiskLevel; incidents: number; windowDays: number }
+  | { kind: 'QUIET'; quietDays: number };
+
 export interface RiskArea {
   id: string;
   name: string;
@@ -48,24 +69,43 @@ export interface RiskArea {
   flood_threshold_meters: number | string | null;
   description: string | null;
   is_active: boolean;
-  /** Set for approved hotspots; null = the area is the whole barangay (or has no place). */
-  boundary?: AreaBoundary | null;
+  shape: RiskAreaShape;
+  /** The outline actually drawn and counted (the barangay polygon for BARANGAY); null for NONE. */
+  boundary: AreaBoundary | null;
+  pin: { lat: number; lng: number; radius_m: number } | null;
+  stats: RiskAreaStats;
+  hint: RiskAreaHint | null;
   created_at?: string;
   updated_at?: string;
 }
-
-export const RISK_LEVELS = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'] as const;
-export type RiskLevel = (typeof RISK_LEVELS)[number];
 
 export interface RiskAreaInput {
   name: string;
   riskType: string;
   riskLevel: RiskLevel;
-  /** '' clears it. */
-  barangay?: string;
+  /** The pin (inside Bocaue) and its radius, 50 to 2000 m. Required for a new area. */
+  latitude?: number;
+  longitude?: number;
+  radiusMeters?: number;
   /** null clears it. */
   floodThresholdMeters?: number | null;
   description?: string;
+}
+
+/** GET /risk-intelligence/areas/suggest: what the add form fills in from a pin. */
+export interface AreaSuggestion {
+  insideBocaue: boolean;
+  barangay: string | null;
+  windowDays: number;
+  incidentsByType: Array<{ category: string; count: number }>;
+  sameTypeIncidents: number;
+  suggestedLevel: RiskLevel;
+  suggestedName: string;
+}
+
+export interface HotspotCheckStatus {
+  lastRun: { at: string; trigger: 'NIGHTLY' | 'MANUAL'; written: number; failed: boolean } | null;
+  nextRunAt: string;
 }
 
 export type RiskAreaChanges = Partial<RiskAreaInput> & { isActive?: boolean };
@@ -92,6 +132,24 @@ export function deleteRiskArea(id: string): Promise<{ message: string }> {
   return api.delete(`/risk-intelligence/areas/${id}`, getToken());
 }
 
+export function fetchAreaSuggestion(q: { lat: number; lng: number; radius: number; riskType: string }): Promise<AreaSuggestion> {
+  const qs = new URLSearchParams({
+    lat: String(q.lat),
+    lng: String(q.lng),
+    radius: String(q.radius),
+    riskType: q.riskType,
+  });
+  return api.get(`/risk-intelligence/areas/suggest?${qs.toString()}`, getToken());
+}
+
+export function fetchHotspotStatus(): Promise<HotspotCheckStatus> {
+  return api.get('/risk-intelligence/proposals/status', getToken());
+}
+
+export function runHotspotCheck(): Promise<HotspotCheckStatus & { written: number }> {
+  return api.post('/risk-intelligence/proposals/check', {}, getToken());
+}
+
 // ─── Proposed hotspots (AUTOMATION_NEEDS_PLAN Phase 2, C7) ───────────────────
 
 export interface RiskAreaProposal {
@@ -101,6 +159,8 @@ export interface RiskAreaProposal {
   barangay: string | null;
   incident_count: number;
   window_days: number;
+  /** The cluster's outline, or the whole barangay for a flood proposal. */
+  boundary: AreaBoundary | null;
   status: 'PENDING' | 'APPROVED' | 'DISMISSED';
   created_at: string;
   updated_at: string;

@@ -13,6 +13,7 @@ import { hasRole, useAuthUser } from '@/lib/use-auth';
 import { ROLE } from '@/lib/role-access';
 import { DEFAULT_RISK_MAP_PERIOD, RISK_MAP_PERIODS, type RiskMapPeriod } from '@/features/risk/api';
 import { FLOOD_SHADES, RISK_POINT_CATEGORIES, riskCategoryColor } from '@/features/risk/categories';
+import { formatRadius } from '@/features/risk/area-geo';
 import { titleCase } from '@/lib/incident-format';
 
 // MapLibre GL uses WebGL + Web Workers; must be client-side only.
@@ -265,7 +266,8 @@ export default function RiskPage(): JSX.Element {
                       <p className="text-xs text-agap-textSub">
                         {titleCase(a.risk_type)} · {a.barangay ?? '—'}
                         {a.flood_threshold_meters ? ` · ≥${a.flood_threshold_meters} m` : ''}
-                        {!a.boundary && !a.barangay ? ' · not on map (no place)' : ''}
+                        {a.shape === 'PIN' && a.pin ? ` · ${formatRadius(a.pin.radius_m)} around a pin` : ''}
+                        {a.shape === 'NONE' ? ' · not on map (no place)' : ''}
                       </p>
                     </div>
                     <Badge variant={RISK_LEVEL_VARIANT[a.risk_level] ?? 'muted'} className="shrink-0">
