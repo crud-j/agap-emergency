@@ -1,6 +1,7 @@
 import {
   AiClientService,
   classifyAiError,
+  openAiTuningFor,
   startOfManilaDay,
   thinkingConfigFor,
 } from '../../src/ai-assist/ai-client.service';
@@ -24,7 +25,23 @@ jest.mock('@google/genai', () => ({
   }),
 }));
 
+const mockResponsesCreate = jest.fn();
+const mockOpenAiConstructed: any[] = [];
+jest.mock('openai', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((opts: any) => {
+    mockOpenAiConstructed.push(opts);
+    return { responses: { create: mockResponsesCreate } };
+  }),
+}));
+
 const ON = { AI_ASSIST_ENABLED: 'true', GEMINI_API_KEY: 'test-key-not-real', GEMINI_MODEL: 'gemini-3.8-flash' };
+const OPENAI_ON = {
+  AI_ASSIST_ENABLED: 'true',
+  AI_ASSIST_PROVIDER: 'openai',
+  OPENAI_API_KEY: 'sk-test-not-real',
+  OPENAI_AI_ASSIST_MODEL: 'gpt-4o-mini',
+};
 
 function build(env: Record<string, string | undefined> = ON, used = 0) {
   const prisma: any = { ai_suggestions: { count: jest.fn().mockResolvedValue(used) } };
@@ -229,5 +246,96 @@ describe('helpers', () => {
     expect(startOfManilaDay(new Date('2026-10-30T23:30:00Z')).toISOString()).toBe('2026-10-30T16:00:00.000Z');
     // 2026-10-30 15:59 UTC is 23:59 in Manila → day started 2026-10-29 16:00 UTC.
     expect(startOfManilaDay(new Date('2026-10-30T15:59:00Z')).toISOString()).toBe('2026-10-29T16:00:00.000Z');
+  });
+});
+
+describe('AiClientService: OpenAI provider (AI_ASSIST_PROVIDER=openai)', () => {
+  const openAiAnswer = (json: unknown, extra: Record<string, unknown> = {}) => ({
+    status: 'completed',
+    output_text: JSON.stringify(json),
+    output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(json) }] }],
+    ...extra,
+  });
+
+  beforeEach(() => {
+    mockResponsesCreate.mockReset();
+    mockOpenAiConstructed.length = 0;
+  });
+
+  it.each([
+    ['no OpenAI model', { ...OPENAI_ON, OPENAI_AI_ASSIST_MODEL: '' }],
+    ['no OpenAI key', { ...OPENAI_ON, OPENAI_API_KEY: ' ' }],
+  ])('%s: DISABLED, even with a Gemini key and model set', async (_label, env) => {
+    const b = build({ ...ON, ...env } as Record<string, string>);
+    expect(b.service.enabled).toBe(false);
+    await expect(call(b.service)).resolves.toMatchObject({ ok: false, error: 'DISABLED' });
+    expect(mockResponsesCreate).not.toHaveBeenCalled();
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+  });
+
+  it('calls OpenAI (never Gemini) with the instructions, the input, the JSON schema, one attempt, temperature 0', async () => {
+    mockResponsesCreate.mockResolvedValue(openAiAnswer({ status: 'ON_SCENE', confidence: 0.93, english: 'We are here' }));
+    const b = build({ ...ON, ...OPENAI_ON });
+    await expect(call(b.service)).resolves.toMatchObject({
+      ok: true,
+      value: { status: 'ON_SCENE', confidence: 0.93, english: 'We are here' },
+      model: 'gpt-4o-mini',
+    });
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+    expect(mockOpenAiConstructed).toEqual([{ apiKey: 'sk-test-not-real', maxRetries: 0 }]);
+
+    const [req, reqOpts] = mockResponsesCreate.mock.calls[0];
+    expect(req).toMatchObject({
+      model: 'gpt-4o-mini',
+      instructions: BARANGAY_REPLY_INSTRUCTIONS,
+      input: 'nandito na kami',
+      max_output_tokens: 512,
+      temperature: 0,
+      store: false,
+      text: { format: { type: 'json_schema', name: 'barangay_reply', schema: BARANGAY_REPLY_JSON_SCHEMA, strict: false } },
+    });
+    expect(reqOpts.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('a refusal or a content filter is BLOCKED; a cut-short answer is INVALID_OUTPUT', async () => {
+    const b = build(OPENAI_ON);
+    mockResponsesCreate.mockResolvedValueOnce({
+      status: 'completed',
+      output_text: '',
+      output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'no' }] }],
+    });
+    await expect(call(b.service)).resolves.toMatchObject({ ok: false, error: 'BLOCKED' });
+    mockResponsesCreate.mockResolvedValueOnce({
+      status: 'incomplete',
+      incomplete_details: { reason: 'content_filter' },
+      output_text: '',
+      output: [],
+    });
+    await expect(call(b.service)).resolves.toMatchObject({ ok: false, error: 'BLOCKED' });
+    mockResponsesCreate.mockResolvedValueOnce({
+      status: 'incomplete',
+      incomplete_details: { reason: 'max_output_tokens' },
+      output_text: '{"status":"ON_',
+      output: [],
+    });
+    await expect(call(b.service)).resolves.toMatchObject({ ok: false, error: 'INVALID_OUTPUT' });
+  });
+
+  it.each([
+    [401, 'AUTH'],
+    [429, 'RATE_LIMITED'],
+    [404, 'PROVIDER_ERROR'],
+  ])('an HTTP %s from OpenAI is %s', async (status, code) => {
+    mockResponsesCreate.mockRejectedValue(apiError(status));
+    await expect(call(build(OPENAI_ON).service)).resolves.toMatchObject({ ok: false, error: code });
+  });
+
+  it.each([
+    ['gpt-4o-mini', { temperature: 0 }],
+    ['gpt-4.1-mini', { temperature: 0 }],
+    ['gpt-5-mini', { reasoning: { effort: 'minimal' } }],
+    ['o4-mini', { reasoning: { effort: 'low' } }],
+  ])('openAiTuningFor(%s)', (model, expected) => {
+    expect(openAiTuningFor(model)).toEqual(expected);
   });
 });

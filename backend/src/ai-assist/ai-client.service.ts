@@ -3,9 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import type { GenerateContentResponse, GoogleGenAI, ThinkingConfig, ThinkingLevel } from '@google/genai' with {
   'resolution-mode': 'import',
 };
+import OpenAI from 'openai';
 import type { z } from 'zod';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { aiAssistEnabled } from './ai-assist.flags';
+import { aiAssistApiKey, aiAssistEnabled, aiAssistModel, aiAssistProvider, type AiProvider } from './ai-assist.flags';
 
 // The SDK is an ES module package whose Node "require" export is a CommonJS build. TypeScript
 // (node16) reads its typings as ESM, so the types come from the type-only import above and the
@@ -90,16 +91,44 @@ function blocked(response: GenerateContentResponse): boolean {
 }
 
 /**
- * The one Gemini client for AI Assist (AI_ASSIST_PLAN Phase 1). It never throws: every
- * failure comes back as `{ ok: false, error }`, so callers keep today's behaviour. Off
- * unless AI_ASSIST_ENABLED is 'true' and GEMINI_API_KEY and GEMINI_MODEL are set; the
- * client is built only on the first call. One attempt per call (no SDK retries), a hard
- * timeout, and a daily cap. The only file that imports '@google/genai'.
+ * OpenAI reasoning models (o-series, GPT-5) refuse `temperature` and take a reasoning effort
+ * instead; the lowest one keeps the answer within the timeout. Check new models against
+ * OpenAI's docs.
+ */
+export function openAiTuningFor(model: string): { temperature?: number; reasoning?: { effort: 'minimal' | 'low' } } {
+  const m = model.trim().toLowerCase();
+  if (/^gpt-5/.test(m)) return { reasoning: { effort: 'minimal' } };
+  if (/^o\d/.test(m)) return { reasoning: { effort: 'low' } };
+  return { temperature: 0 };
+}
+
+/** What a provider call produced: the JSON text, or why there is none. */
+type ProviderAnswer = { text: string } | { error: AiErrorCode };
+
+interface ProviderCall {
+  task: AiTask;
+  instructions: string;
+  input: string;
+  jsonSchema: unknown;
+  maxOutputTokens: number;
+  signal: AbortSignal;
+}
+
+/**
+ * The one AI client for AI Assist (AI_ASSIST_PLAN Phase 1). It never throws: every failure
+ * comes back as `{ ok: false, error }`, so callers keep today's behaviour. Off unless
+ * AI_ASSIST_ENABLED is 'true' and the chosen provider's key and model are set
+ * (`AI_ASSIST_PROVIDER`: gemini with GEMINI_API_KEY + GEMINI_MODEL, or openai with
+ * OPENAI_API_KEY + OPENAI_AI_ASSIST_MODEL). The SDK client is built only on the first call.
+ * One attempt per call (no SDK retries), a hard timeout, and a daily cap. The only AI
+ * Assist file that imports '@google/genai' or 'openai'.
  */
 @Injectable()
 export class AiClientService {
   private readonly logger = new Logger(AiClientService.name);
-  private client: GoogleGenAI | null = null;
+  private gemini: GoogleGenAI | null = null;
+  private openai: OpenAI | null = null;
+  private readonly provider: AiProvider;
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly dailyLimit: number;
@@ -108,7 +137,8 @@ export class AiClientService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {
-    this.model = this.config.get<string>('GEMINI_MODEL')?.trim() ?? '';
+    this.provider = aiAssistProvider(this.config);
+    this.model = aiAssistModel(this.config);
     this.timeoutMs = Number(this.config.get('AI_ASSIST_TIMEOUT_MS') ?? 8000) || 8000;
     this.dailyLimit = Number(this.config.get('AI_ASSIST_DAILY_LIMIT') ?? 500) || 0;
   }
@@ -148,42 +178,85 @@ export class AiClientService {
     }, opts.timeoutMs ?? this.timeoutMs);
 
     try {
-      const thinkingConfig = thinkingConfigFor(model);
-      const response = await this.getClient().models.generateContent({
-        model,
-        contents: input,
-        config: {
-          systemInstruction: instructions,
-          responseMimeType: 'application/json',
-          responseJsonSchema: jsonSchema,
-          temperature: 0,
-          maxOutputTokens: opts.maxOutputTokens ?? 512,
-          ...(thinkingConfig && { thinkingConfig }),
-          abortSignal: abort.signal,
-        },
-      });
+      const call = { task, instructions, input, jsonSchema, maxOutputTokens: opts.maxOutputTokens ?? 512, signal: abort.signal };
+      const answer = this.provider === 'openai' ? await this.askOpenAi(call) : await this.askGemini(call);
       const latencyMs = Date.now() - started;
       if (timedOut) return this.fail(task, 'TIMEOUT', model, latencyMs);
-      if (blocked(response)) return this.fail(task, 'BLOCKED', model, latencyMs);
+      if ('error' in answer) return this.fail(task, answer.error, model, latencyMs);
 
       let raw: unknown;
       try {
-        raw = JSON.parse(response.text ?? '');
+        raw = JSON.parse(answer.text);
       } catch {
         return this.fail(task, 'INVALID_OUTPUT', model, latencyMs);
       }
-      // Gemini's schema narrows the shape; Zod enforces our limits.
+      // The provider's schema narrows the shape; Zod enforces our limits.
       const parsed = schema.safeParse(raw);
       if (!parsed.success) return this.fail(task, 'INVALID_OUTPUT', model, latencyMs);
       return { ok: true, value: parsed.data, model, latencyMs };
     } catch (err) {
       const code = classifyAiError(err, timedOut);
-      // The error class only: the message can echo request content.
-      this.logger.warn(`AI ${task} failed: ${code} (${err instanceof Error ? err.name : 'unknown error'})`);
+      // The error class and HTTP status only: the message can echo request content.
+      const status = typeof (err as { status?: unknown })?.status === 'number' ? ` ${(err as { status: number }).status}` : '';
+      this.logger.warn(
+        `AI ${task} failed: ${code} (${this.provider} ${err instanceof Error ? err.name : 'unknown error'}${status})`,
+      );
       return { ok: false, error: code, model, latencyMs: Date.now() - started };
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private async askGemini(call: ProviderCall): Promise<ProviderAnswer> {
+    const thinkingConfig = thinkingConfigFor(this.model);
+    const response = await this.getGemini().models.generateContent({
+      model: this.model,
+      contents: call.input,
+      config: {
+        systemInstruction: call.instructions,
+        responseMimeType: 'application/json',
+        responseJsonSchema: call.jsonSchema,
+        temperature: 0,
+        maxOutputTokens: call.maxOutputTokens,
+        ...(thinkingConfig && { thinkingConfig }),
+        abortSignal: call.signal,
+      },
+    });
+    if (blocked(response)) return { error: 'BLOCKED' };
+    return { text: response.text ?? '' };
+  }
+
+  /**
+   * OpenAI Responses API with a JSON schema. Not `strict`: strict mode accepts only part of
+   * JSON Schema (our length limits), and Zod checks the answer anyway.
+   */
+  private async askOpenAi(call: ProviderCall): Promise<ProviderAnswer> {
+    const response = await this.getOpenAi().responses.create(
+      {
+        model: this.model,
+        instructions: call.instructions,
+        input: call.input,
+        max_output_tokens: call.maxOutputTokens,
+        ...openAiTuningFor(this.model),
+        text: {
+          format: {
+            type: 'json_schema',
+            name: call.task.toLowerCase(),
+            schema: call.jsonSchema as Record<string, unknown>,
+            strict: false,
+          },
+        },
+        store: false,
+      },
+      { signal: call.signal },
+    );
+    const refused = response.output?.some(
+      (item) => item.type === 'message' && item.content.some((part) => part.type === 'refusal'),
+    );
+    if (refused || response.incomplete_details?.reason === 'content_filter') return { error: 'BLOCKED' };
+    // Cut short (token limit): the JSON is incomplete.
+    if (response.status === 'incomplete') return { error: 'INVALID_OUTPUT' };
+    return { text: response.output_text ?? '' };
   }
 
   private fail(task: AiTask, error: AiErrorCode, model: string, latencyMs: number): AiResult<never> {
@@ -192,14 +265,23 @@ export class AiClientService {
   }
 
   /** Built on first use, so a disabled or unconfigured AI never creates a client. */
-  private getClient(): GoogleGenAI {
-    if (!this.client) {
+  private getGemini(): GoogleGenAI {
+    if (!this.gemini) {
       // Loaded from backend/.env by ConfigModule. Never logged, returned or stored.
-      const apiKey = this.config.get<string>('GEMINI_API_KEY')?.trim() ?? '';
+      const apiKey = aiAssistApiKey(this.config);
       // attempts 1 = no retries: the SDK otherwise retries 429 and 5xx up to 5 times.
-      this.client = new genai.GoogleGenAI({ apiKey, httpOptions: { retryOptions: { attempts: 1 } } });
+      this.gemini = new genai.GoogleGenAI({ apiKey, httpOptions: { retryOptions: { attempts: 1 } } });
     }
-    return this.client;
+    return this.gemini;
+  }
+
+  private getOpenAi(): OpenAI {
+    if (!this.openai) {
+      // Loaded from backend/.env by ConfigModule. Never logged, returned or stored.
+      // maxRetries 0: one attempt; the abort signal enforces the timeout.
+      this.openai = new OpenAI({ apiKey: aiAssistApiKey(this.config), maxRetries: 0 });
+    }
+    return this.openai;
   }
 
   /** Today's calls (Philippine day). A DAILY_LIMIT row made no call, so it doesn't count. */

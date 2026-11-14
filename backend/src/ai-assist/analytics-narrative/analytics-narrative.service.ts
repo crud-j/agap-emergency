@@ -22,7 +22,7 @@ import {
   AnalyticsNarrativeSchema,
   type AnalyticsNarrative,
 } from '../prompts/analytics-narrative.prompt';
-import { checkNarrative } from './narrative-check';
+import { checkNarrative, dropRepeatedWatchItems } from './narrative-check';
 
 /** `subject_type` of an analytics summary: a period, not a row (subject_id stays null). */
 export const ANALYTICS_SUBJECT = 'analytics_period';
@@ -150,6 +150,9 @@ export class AnalyticsNarrativeService {
       if (!check.ok) {
         this.logger.warn(`AI ANALYTICS_NARRATIVE rejected: ${check.reason}`);
         error = 'UNVERIFIED_NUMBER';
+      } else {
+        // "Worth a look" that only repeats a point is noise: drop those items.
+        narrative = dropRepeatedWatchItems(narrative);
       }
     }
     const status = error ? 'FAILED' : 'PENDING_REVIEW';

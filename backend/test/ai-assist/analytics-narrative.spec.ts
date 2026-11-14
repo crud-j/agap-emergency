@@ -7,6 +7,7 @@ import {
 } from '../../src/ai-assist/analytics-narrative/analytics-narrative.service';
 import { AnalyticsSummaryController } from '../../src/ai-assist/analytics-narrative/analytics-summary.controller';
 import { ROLES_KEY } from '../../src/common/decorators/roles.decorator';
+import { ANALYTICS_NARRATIVE_INSTRUCTIONS } from '../../src/ai-assist/prompts/analytics-narrative.prompt';
 import { buildFacts, factsToPromptText, type PeriodTotals } from '../../src/analytics/narrative/analytics-facts';
 
 /** MOD-50 AI summary on the Analytics page (Supervisor only, button, aggregates only). */
@@ -149,6 +150,27 @@ describe('AnalyticsNarrativeService.generate', () => {
     // A failed summary never replaces a good one.
     expect(b.prisma.ai_suggestions.updateMany).not.toHaveBeenCalled();
     expect(b.audit.logInTransaction.mock.calls[0][1].newValues).toMatchObject({ status: 'FAILED', error: 'UNVERIFIED_NUMBER' });
+  });
+
+  it('stores and returns the summary without watch items that repeat a point', async () => {
+    const b = build({
+      answer: {
+        ok: true,
+        value: { ...GOOD, watchItems: ['All 12 incidents acknowledged within target.', 'Lolomboy flood reports to follow next period.'] },
+        model: 'gpt-4o-mini',
+        latencyMs: 900,
+      },
+    });
+    const res = await b.service.generate(RANGE, SUPERVISOR, NOW);
+    expect(res).toMatchObject({ outcome: 'CREATED', summary: { watchItems: ['Lolomboy flood reports to follow next period.'] } });
+    expect(b.prisma.ai_suggestions.create.mock.calls[0][0].data.output.watchItems).toEqual([
+      'Lolomboy flood reports to follow next period.',
+    ]);
+  });
+
+  it('asks for the counts behind each percentage and no repeated watch items', () => {
+    expect(ANALYTICS_NARRATIVE_INSTRUCTIONS).toContain('"29% (2 of 7)"');
+    expect(ANALYTICS_NARRATIVE_INSTRUCTIONS).toContain('Never repeat or reword a point');
   });
 
   it('stores FAILED with the provider code on a timeout', async () => {

@@ -66,6 +66,9 @@ These come from the CLAUDE.md architectural rules:
 - [x] **Reply samples.** Write 30 or more realistic barangay replies in Filipino, English and Taglish, including typos and the reply codes, each with the expected label. Save them as `backend/test/ai-assist/fixtures/barangay-replies.json`. Phase 2 is measured against these.
   - **2026-10-30:** 46 synthetic replies (5 exact codes, 41 free text, 11 asking for help), drafted and revised at the user's request; the user can still edit labels.
 - [x] **Provider (changed 2026-10-30):** Google Gemini, with `GEMINI_API_KEY` from `backend/.env`. *(Was OpenAI, decided 2026-10-29.)* The evidence review and hospital name assist keep using OpenAI and aren't part of this plan (confirmed by the user 2026-10-30: don't migrate them). `AiClientService` stays the only place that would change if the provider is revisited.
+  - **2026-11-15: provider is now a setting.** `AI_ASSIST_PROVIDER=gemini|openai` (default gemini). The user chose OpenAI after a Gemini call failed with `PROVIDER_ERROR` (most likely a wrong `GEMINI_MODEL` ID). One setting covers every AI Assist task (barangay replies and the MOD-50 analytics summary).
+    - The openai option uses `OPENAI_API_KEY` and `OPENAI_AI_ASSIST_MODEL`, through the Responses API with a JSON schema, `store: false` and no retries.
+    - The data rules above apply unchanged.
 
 ### Data sent to Gemini
 

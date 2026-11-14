@@ -122,3 +122,34 @@ No migration, and no new environment variable.
    - answering questions only from a fixed list of approved queries;
    - LGU access to accepted summaries;
    - a weekly automatic run.
+
+---
+
+## Update 2026-11-15: AI provider is now a setting (OpenAI or Gemini)
+
+**Why:** the first real summary call failed with `PROVIDER_ERROR (ApiError)` from Gemini, most likely because `GEMINI_MODEL=gemini-3.8-flash` is not a valid model ID. The user chose a provider setting for all AI Assist tasks and wants OpenAI, whose key was already in `backend/.env`.
+
+**Changes:**
+- `AI_ASSIST_PROVIDER=gemini|openai` (default gemini) in [`ai-assist.flags.ts`](../../backend/src/ai-assist/ai-assist.flags.ts) (`aiAssistProvider`, `aiAssistModel`, `aiAssistApiKey`).
+- The openai option needs `OPENAI_API_KEY` and `OPENAI_AI_ASSIST_MODEL`. Config validation refuses to boot without them, or with an unknown provider.
+- `AiClientService.structured()` is unchanged for callers. It calls `askGemini` or `askOpenAi`:
+  - `askOpenAi` uses the Responses API with a `json_schema` format (not strict), `max_output_tokens`, `store: false`, `maxRetries: 0` and the same abort-signal timeout;
+  - a refusal or content filter is `BLOCKED`, and a cut-short answer is `INVALID_OUTPUT`;
+  - `openAiTuningFor`: `temperature: 0` for GPT-4-class models, and a reasoning effort for GPT-5 and o-series models (which refuse `temperature`).
+- The failure log now includes the provider and the HTTP status (never the message), e.g. `(openai ApiError 404)`.
+- Docs: `.env.example`, AI_ASSIST_PLAN provider note.
+- Tests: OpenAI cases in `test/ai-assist/ai-client.spec.ts`.
+
+**User's `backend/.env`** (add these, then restart the backend):
+```
+AI_ASSIST_PROVIDER=openai
+OPENAI_AI_ASSIST_MODEL=gpt-4o-mini
+```
+
+## Update 2026-11-15: no repeated "Worth a look", counts behind percentages
+
+- **The first real summary (OpenAI `gpt-4o-mini`) was correct, but its 3 watch items repeated points 2 to 4.**
+- **Prompt:** each target percentage comes with its counts, e.g. "29% (2 of 7)". Watch items must add something new or be an empty list.
+- **Code:** `dropRepeatedWatchItems` / `repeatsPoint` in `narrative-check.ts` drop a watch item that repeats a point or an earlier item: all its numbers are in that text, and at least 60% of its words. It runs after the number check, before the row is stored.
+- **Tests:** the real summary is a fixture in `narrative-check.spec.ts`, plus a service test that the stored output is filtered.
+- **Note:** a summary with the same facts is reused for 24 h. To see the new wording for the same period, **Dismiss** the old summary first, then Generate.

@@ -256,6 +256,18 @@ class EnvironmentVariables {
   @IsOptional()
   AI_ASSIST_ENABLED?: string;
 
+  // Who answers every AI Assist task: 'gemini' (default) or 'openai'. One setting, so the
+  // barangay reply reading and the analytics summary always use the same provider.
+  @IsString()
+  @IsOptional()
+  AI_ASSIST_PROVIDER?: string;
+
+  // With AI_ASSIST_PROVIDER=openai: an exact, pinned model ID (no "-latest" alias). No fallback.
+  // Uses OPENAI_API_KEY (shared with evidence review and hospital "Find location").
+  @IsString()
+  @IsOptional()
+  OPENAI_AI_ASSIST_MODEL?: string;
+
   @IsString()
   @IsOptional()
   GEMINI_API_KEY?: string;
@@ -324,11 +336,19 @@ export function validateConfig(config: Record<string, unknown>) {
     );
   }
 
-  if (
-    validatedConfig.AI_ASSIST_ENABLED === 'true' &&
-    (!validatedConfig.GEMINI_API_KEY?.trim() || !validatedConfig.GEMINI_MODEL?.trim())
-  ) {
-    throw new Error('Configuration validation failed: AI_ASSIST_ENABLED=true requires GEMINI_API_KEY and GEMINI_MODEL');
+  if (validatedConfig.AI_ASSIST_ENABLED === 'true') {
+    const provider = (validatedConfig.AI_ASSIST_PROVIDER ?? 'gemini').trim().toLowerCase();
+    if (provider !== 'gemini' && provider !== 'openai') {
+      throw new Error("Configuration validation failed: AI_ASSIST_PROVIDER must be 'gemini' or 'openai'");
+    }
+    if (provider === 'openai' && (!validatedConfig.OPENAI_API_KEY?.trim() || !validatedConfig.OPENAI_AI_ASSIST_MODEL?.trim())) {
+      throw new Error(
+        'Configuration validation failed: AI_ASSIST_ENABLED=true with AI_ASSIST_PROVIDER=openai requires OPENAI_API_KEY and OPENAI_AI_ASSIST_MODEL',
+      );
+    }
+    if (provider === 'gemini' && (!validatedConfig.GEMINI_API_KEY?.trim() || !validatedConfig.GEMINI_MODEL?.trim())) {
+      throw new Error('Configuration validation failed: AI_ASSIST_ENABLED=true requires GEMINI_API_KEY and GEMINI_MODEL');
+    }
   }
 
   return validatedConfig;
