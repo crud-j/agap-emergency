@@ -47,13 +47,13 @@ describe('buildBarangayAlertSms', () => {
 
   it('matches the planned format', () => {
     expect(buildBarangayAlertSms(base)).toBe(
-      'AGAP 4821 ROAD_ACCIDENT Brgy Batia 14.83221,120.94920 INC-2026-001234. Call MDRRMO +639171234567',
+      'AGAP case 4821: Road accident, Brgy Batia, 14.83221,120.94920 (INC-2026-001234). Call MDRRMO +639171234567',
     );
   });
 
   it('marks an approximate barangay and a location without GPS', () => {
     const sms = buildBarangayAlertSms({ ...base, isApproximate: true, latitude: 0, longitude: 0 });
-    expect(sms).toContain('Brgy Batia (approx) no GPS INC-2026-001234.');
+    expect(sms).toContain('Road accident, Brgy Batia (approx.), location unknown (INC-2026-001234).');
   });
 
   it('omits the call-back line when MDRRMO_OPS_PHONE is unset', () => {
@@ -195,7 +195,7 @@ describe('BarangayNotifyService: automatic alert', () => {
     expect(alerts).toHaveLength(2);
     for (const job of alerts) {
       expect(job.data).toMatchObject({ phone: OVERRIDE, incidentId: INCIDENT, noticeId: 'n-1', critical: true });
-      expect(job.data.message).toMatch(/^AGAP \d{4} FLOOD Brgy Batia 14\.79000,120\.97000 INC-2026-000042\./);
+      expect(job.data.message).toMatch(/^AGAP case \d{4}: Flood, Brgy Batia, 14\.79000,120\.97000 \(INC-2026-000042\)\./);
       expect(job.opts).toMatchObject({ attempts: 4, backoff: { type: 'exponential' } });
     }
     expect(stored().sms_status).toBe('PENDING');

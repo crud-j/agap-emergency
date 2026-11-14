@@ -1,4 +1,4 @@
-import { CITIZEN_SOS_SMS_MAX, encodeCitizenSosSms, IncidentType, parseCitizenSosSms } from '@agap/shared';
+import { CITIZEN_SOS_SMS_MAX, encodeCitizenSosSms, gsm7Length, IncidentType, isGsm7, parseCitizenSosSms } from '@agap/shared';
 
 const ID = '3f2b8c1e-9a4d-4e7f-8b2a-1c5d6e7f8a9b';
 const NOW = new Date('2026-11-14T08:00:00Z');
@@ -13,7 +13,7 @@ describe('citizen SOS SMS format', () => {
       sentAt: NOW,
       trigger: 'SHAKE_GESTURE',
     });
-    expect(text).toBe(`AGAP|${ID}|14.79877,120.92654|${UNIX}|ROAD_ACCIDENT|C:Y|T:K`);
+    expect(text).toBe(`AGAP SOS: Road accident. Press Send, don't edit.\nAGAP|${ID}|14.79877,120.92654|${UNIX}|ROAD_ACCIDENT|C:Y|T:K`);
     expect(parseCitizenSosSms(text, NOW)).toEqual({
       ok: true,
       value: { eventId: ID, type: 'ROAD_ACCIDENT', coords: { lat: 14.79877, lng: 120.92654 }, sentAt: NOW, trigger: 'SHAKE_GESTURE' },
@@ -22,12 +22,12 @@ describe('citizen SOS SMS format', () => {
 
   it('carries "no GPS" as 0,0 and C:N', () => {
     const text = encodeCitizenSosSms({ eventId: ID, type: IncidentType.FLOOD, coords: null, sentAt: NOW, trigger: 'SOS_BUTTON' });
-    expect(text).toBe(`AGAP|${ID}|0,0|${UNIX}|FLOOD|C:N|T:S`);
+    expect(text).toBe(`AGAP SOS: Flood. Press Send, don't edit.\nAGAP|${ID}|0,0|${UNIX}|FLOOD|C:N|T:S`);
     const parsed = parseCitizenSosSms(text, NOW);
     expect(parsed).toMatchObject({ ok: true, value: { coords: null, trigger: 'SOS_BUTTON' } });
   });
 
-  it('always fits one SMS segment, even with the longest type and negative coordinates', () => {
+  it('always fits one GSM-7 segment, even with the longest type and negative coordinates', () => {
     const text = encodeCitizenSosSms({
       eventId: ID,
       type: IncidentType.NATURAL_DISASTER,
@@ -35,7 +35,15 @@ describe('citizen SOS SMS format', () => {
       sentAt: NOW,
       trigger: 'MANUAL_REPORT',
     });
-    expect(text.length).toBeLessThanOrEqual(CITIZEN_SOS_SMS_MAX);
+    // Each | counts as two septets.
+    expect(isGsm7(text)).toBe(true);
+    expect(gsm7Length(text)).toBeLessThanOrEqual(CITIZEN_SOS_SMS_MAX);
+  });
+
+  it('reads the AGAP| part wherever it starts, so an edited or missing first line still works', () => {
+    const machine = `AGAP|${ID}|0,0|${UNIX}|FIRE|C:N|T:S`;
+    expect(parseCitizenSosSms(`Help po, sunog dito!\n${machine}`, NOW)).toMatchObject({ ok: true, value: { type: 'FIRE' } });
+    expect(parseCitizenSosSms(machine, NOW)).toMatchObject({ ok: true });
   });
 
   it('keeps the event id exactly as sent (it must match the HTTPS resend key)', () => {
@@ -52,7 +60,6 @@ describe('citizen SOS SMS format', () => {
   it.each([
     ['DONE 1234'],
     ['STOP'],
-    ['Hello AGAP|'],
     [`AGAP|INC-2026-001234|14.5995,120.9842|${UNIX}|FIRE|C:Y`],
   ])('returns null for text that is not a citizen SOS: %s', (body) => {
     expect(parseCitizenSosSms(body, NOW)).toBeNull();
@@ -60,6 +67,7 @@ describe('citizen SOS SMS format', () => {
 
   it.each([
     ['too few fields', `AGAP|${ID}|0,0|${UNIX}|FIRE`, 'FIELDS'],
+    ['an AGAP| with nothing after it', 'Hello AGAP|', 'FIELDS'],
     ['too many fields', `AGAP|${ID}|0,0|${UNIX}|FIRE|C:N|T:S|x`, 'FIELDS'],
     ['bad id', `AGAP|not-a-uuid|0,0|${UNIX}|FIRE|C:N`, 'EVENT_ID'],
     ['unknown type', `AGAP|${ID}|0,0|${UNIX}|EARTHQUAKE|C:N`, 'TYPE'],

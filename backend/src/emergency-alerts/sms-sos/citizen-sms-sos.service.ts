@@ -4,6 +4,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
   CITIZEN_SOS_SMS_MAX,
+  MDRRMO_HOTLINE_DISPLAY,
   QUEUE_NAMES,
   ReporterType,
   isCoordinateInBocaue,
@@ -28,13 +29,31 @@ export interface CitizenSosResult {
   incidentId: string | null;
 }
 
-/** The reply to the sender. Always one SMS segment, never a web address. */
+/**
+ * The reply to the sender: what happened, what to do now, and where else to get help.
+ * Always one GSM-7 segment, never a web address.
+ */
 export function citizenSosReply(result: { outcome: CitizenSosOutcome; reference?: string; hasLocation?: boolean }): string {
-  if ((result.outcome === 'SOS_CREATED' || result.outcome === 'SOS_EXISTING') && result.reference) {
-    const where = result.hasLocation ? '' : " We don't have your location: expect a call.";
-    return `AGAP: MDRRMO received your SOS. Ref ${result.reference}.${where} Keep your phone on. Life-threatening? Call 911.`;
+  const hotlines = `call 911 or MDRRMO ${MDRRMO_HOTLINE_DISPLAY}`;
+  switch (result.outcome) {
+    case 'SOS_CREATED':
+    case 'SOS_EXISTING':
+      if (!result.reference) break;
+      return (
+        `AGAP: MDRRMO got your emergency text. Report no. ${result.reference}. ` +
+        (result.hasLocation
+          ? 'Keep your phone on; MDRRMO may call this number. '
+          : 'We could not get your location: MDRRMO will call this number. ') +
+        'Life in danger? Call 911.'
+      );
+    case 'SOS_STALE':
+      return `AGAP: Your emergency text arrived over 6 hours late, so no report was made. If you still need help, ${hotlines}.`;
+    case 'SOS_LIMITED':
+      return `AGAP: Too many emergency texts from this number, so no new report was made. If you need help, ${hotlines} now.`;
+    case 'SOS_INVALID':
+      break;
   }
-  return 'AGAP: Your SOS text could not be processed. Call 911 or the Bocaue MDRRMO hotline now.';
+  return `AGAP: We could not read your emergency text, so no report was made. Please ${hotlines} now.`;
 }
 
 /**

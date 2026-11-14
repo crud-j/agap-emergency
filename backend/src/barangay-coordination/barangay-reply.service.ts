@@ -300,17 +300,15 @@ export class BarangayReplyService {
 export function replyText(outcome: InboundOutcome, parsed: ParsedBarangayReply | null): string | null {
   switch (outcome) {
     case 'APPLIED':
-      return (
-        `AGAP ${parsed!.code}: received "${ACK_LABEL[parsed!.status]}".` +
-        (parsed!.status === 'NEEDS_BACKUP' ? ' MDRRMO has been alerted.' : '') +
-        ' Salamat.'
-      );
+      return parsed!.status === 'NEEDS_BACKUP'
+        ? `AGAP case ${parsed!.code}: Backup request received. MDRRMO has been alerted. Thank you.`
+        : `AGAP case ${parsed!.code}: MDRRMO recorded your update "${ACK_LABEL[parsed!.status]}". Thank you.`;
     case 'UNPARSED':
-      return 'AGAP: reply with one word and the 4-digit case code, e.g. OTW 1234, DONE 1234 or NEED 1234.';
+      return 'AGAP: Reply with one word and the 4-digit case code: OTW 1234 (on the way), DONE 1234 (finished) or NEED 1234 (need backup).';
     case 'UNKNOWN_CODE':
-      return `AGAP: no open case has code ${parsed!.code}. Check the code in the alert text.`;
+      return `AGAP: No open case has code ${parsed!.code}. Check the case code in the alert text and reply again.`;
     case 'NOT_NOTIFIED':
-      return `AGAP: case ${parsed!.code} is not assigned to your barangay.`;
+      return `AGAP: Case ${parsed!.code} is not assigned to your barangay, so your reply was not recorded.`;
     default:
       return null;
   }

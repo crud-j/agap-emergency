@@ -8,6 +8,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { AUTH_SMS } from '../auth-sms';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
@@ -208,7 +209,7 @@ export class MfaService {
     await this.smsQueue
       .add('otp-sms', {
         phone: user.phone_number,
-        message: `Your AGAP sign-in code is ${code}. Expires in 5 minutes. Do not share this code.`,
+        message: AUTH_SMS.secondStep(code),
       })
       .catch((error: unknown) => {
         this.logger.error(`Failed to queue MFA SMS: ${error instanceof Error ? error.message : String(error)}`);

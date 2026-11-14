@@ -607,7 +607,7 @@ describe('MfaService — second step', () => {
 
     await on.mfa.sendSmsCode(mfaToken);
     const sent = on.smsQueue.add.mock.calls.at(-1)![1] as { phone: string; message: string };
-    const code = /code is (\d{6})/.exec(sent.message)![1]!;
+    const code = /code: (\d{6})/.exec(sent.message)![1]!;
     expect(sent.phone).toBe(smsUser.phone_number);
     const row = on.prisma.db.verifications[0];
     expect(row).toMatchObject({ verification_type: 'MFA_SMS', status: 'PENDING' });
@@ -629,7 +629,7 @@ describe('MfaService — second step', () => {
     const decision = await on.mfa.evaluateLogin(smsUser, ctx);
     const mfaToken = decision.kind === 'challenge' ? decision.challenge.mfaToken : '';
     await on.mfa.sendSmsCode(mfaToken);
-    const code = /code is (\d{6})/.exec((on.smsQueue.add.mock.calls.at(-1)![1] as any).message)![1]!;
+    const code = /code: (\d{6})/.exec((on.smsQueue.add.mock.calls.at(-1)![1] as any).message)![1]!;
 
     const { session } = await on.mfa.verify({ mfaToken, method: 'sms', code }, ctx);
     expect((on.jwt.decode(session.accessToken) as any).amr).toEqual(['pwd', 'sms']);

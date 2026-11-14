@@ -81,21 +81,21 @@ describe('barangay SMS with the access code', () => {
   it('carries the exact coordinates, the code and the call-back in one segment, and no web address', () => {
     const sms = buildBarangayAlertSms(base);
     expect(sms).toBe(
-      'AGAP 5172 ROAD_ACCIDENT Brgy Batia 14.83221,120.94920 INC-2026-001234. Code 5172-KXPM. Call MDRRMO +639171234567',
+      'AGAP case 5172: Road accident, Brgy Batia, 14.83221,120.94920 (INC-2026-001234). Page code 5172-KXPM. Call MDRRMO +639171234567',
     );
     expect(sms).not.toMatch(/https?:|www.|.(com|ph|net|org)/i);
     expect(sms.length).toBeLessThan(BARANGAY_SMS_MAX_LENGTH);
   });
 
   it('drops the MDRRMO call-back before the code when space runs out', () => {
-    const sms = buildBarangayAlertSms({ ...base, barangayName: 'x'.repeat(60) });
-    expect(sms).toContain(`Code ${accessCode}.`);
+    const sms = buildBarangayAlertSms({ ...base, barangayName: 'x'.repeat(40) });
+    expect(sms).toContain(`Page code ${accessCode}.`);
     expect(sms).not.toContain('Call MDRRMO');
     expect(sms.length).toBeLessThan(BARANGAY_SMS_MAX_LENGTH);
   });
 
   it('drops the code only as a last resort, and the alert itself is never cut', () => {
-    const sms = buildBarangayAlertSms({ ...base, barangayName: 'y'.repeat(80) });
+    const sms = buildBarangayAlertSms({ ...base, barangayName: 'y'.repeat(65) });
     expect(sms).not.toContain(accessCode);
     expect(sms).toContain('14.83221,120.94920');
     expect(() => buildBarangayAlertSms({ ...base, barangayName: 'z'.repeat(160) })).toThrow(/under 160/);
@@ -105,7 +105,7 @@ describe('barangay SMS with the access code', () => {
     const sms = buildBarangayFollowupSms({
       shortCode: '5172', barangayName: 'Batia', reference: 'INC-2026-001234', opsPhone: '+639171234567', accessCode,
     });
-    expect(sms).toContain(`Code ${accessCode}.`);
+    expect(sms).toContain(`Page code ${accessCode}.`);
     expect(sms.length).toBeLessThan(BARANGAY_SMS_MAX_LENGTH);
   });
 

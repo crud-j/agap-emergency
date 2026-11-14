@@ -3,7 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
-import { IncidentStatus, QUEUE_NAMES, TERMINAL_INCIDENT_STATUSES, normalizePhPhone } from '@agap/shared';
+import {
+  IncidentStatus,
+  QUEUE_NAMES,
+  TERMINAL_INCIDENT_STATUSES,
+  incidentTypeSmsLabel,
+  normalizePhPhone,
+  toGsm7,
+} from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
@@ -89,8 +96,8 @@ function fitSegment(
   parts: { accessCode?: string | null | undefined; replyCode?: string | null | undefined; ops?: string | null | undefined },
   what: string,
 ): string {
-  const withCode = parts.accessCode ? `${core} Code ${parts.accessCode}.` : core;
-  const withReply = parts.replyCode ? `${withCode} Reply OTW/DONE/NEED ${parts.replyCode}.` : withCode;
+  const withCode = parts.accessCode ? `${core} Page code ${parts.accessCode}.` : core;
+  const withReply = parts.replyCode ? `${withCode} Reply OTW, DONE or NEED ${parts.replyCode}.` : withCode;
   const o = parts.ops?.trim();
   const candidates = [
     o ? `${withReply} Call MDRRMO ${o}` : withReply,
@@ -116,7 +123,8 @@ function hasCoordinates(latitude: number | null, longitude: number | null): bool
 const formatCoordinates = (latitude: number, longitude: number) => `${latitude.toFixed(5)},${longitude.toFixed(5)}`;
 
 /**
- * `AGAP 4821 ROAD_ACCIDENT Brgy Batia 14.83221,120.94920 INC-2026-001234. Code 4821-KXPM. Call MDRRMO +639…`
+ * `AGAP case 4821: Road accident, Brgy Batia, 14.83221,120.94920 (INC-2026-001234).
+ * Page code 4821-KXPM. Reply OTW, DONE or NEED 4821. Call MDRRMO +639…`
  *
  * The coordinates are the exact reported position; the code opens the status page (map,
  * directions, status buttons) when typed on the saved `/b` page. Carries no reporter or
@@ -126,9 +134,9 @@ const formatCoordinates = (latitude: number, longitude: number) => `${latitude.t
 export function buildBarangayAlertSms(input: BarangayAlertSmsInput): string {
   const where = hasCoordinates(input.latitude, input.longitude)
     ? formatCoordinates(input.latitude!, input.longitude!)
-    : 'no GPS';
-  const brgy = `Brgy ${input.barangayName}${input.isApproximate ? ' (approx)' : ''}`;
-  const core = `AGAP ${input.shortCode} ${input.category} ${brgy} ${where} ${input.reference}.`;
+    : 'location unknown';
+  const brgy = `Brgy ${toGsm7(input.barangayName)}${input.isApproximate ? ' (approx.)' : ''}`;
+  const core = `AGAP case ${input.shortCode}: ${incidentTypeSmsLabel(input.category)}, ${brgy}, ${where} (${input.reference}).`;
   return fitSegment(
     core,
     { accessCode: input.accessCode, replyCode: input.replyCode, ops: input.opsPhone },
@@ -148,7 +156,7 @@ export function buildBarangayCoordinatesSms(latitude: number | null, longitude: 
 export const BARANGAY_FOLLOWUP_JOB = 'barangay-followup';
 const DEFAULT_FOLLOWUP_MINUTES = 20;
 
-/** `AGAP 4821 REMINDER Brgy Batia INC-2026-001234: please report status. Code 4821-KXPM. Call MDRRMO +639…` */
+/** `AGAP case 4821 reminder: Brgy Batia, please update MDRRMO on INC-2026-001234. Page code 4821-KXPM. …` */
 export function buildBarangayFollowupSms(input: {
   shortCode: string;
   barangayName: string;
@@ -157,7 +165,7 @@ export function buildBarangayFollowupSms(input: {
   accessCode?: string | null | undefined;
   replyCode?: string | null | undefined;
 }): string {
-  const core = `AGAP ${input.shortCode} REMINDER Brgy ${input.barangayName} ${input.reference}: please report status.`;
+  const core = `AGAP case ${input.shortCode} reminder: Brgy ${toGsm7(input.barangayName)}, please update MDRRMO on ${input.reference}.`;
   return fitSegment(
     core,
     { accessCode: input.accessCode, replyCode: input.replyCode, ops: input.opsPhone },

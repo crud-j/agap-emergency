@@ -266,7 +266,8 @@ export class DispatchService {
         await this.notificationQueue.add('dispatch-contact-notify', {
           userId: reporterUserId,
           channel: 'EMERGENCY_CONTACTS',
-          body: `AGAP: Emergency responders dispatched for ${incident.public_reference}. Help is on the way.`,
+          // To the reporter's emergency contacts, who got the "reported an emergency" text.
+          body: `AGAP: Update on emergency report ${incident.public_reference}: MDRRMO responders are now on the way. Please stand by.`,
         });
       }
     } catch (err) {

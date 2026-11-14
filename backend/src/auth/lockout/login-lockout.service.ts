@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AUTH_SMS } from '../auth-sms';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { AuditAction, QUEUE_NAMES } from '@agap/shared';
@@ -92,7 +93,7 @@ export class LoginLockoutService {
         void this.smsQueue
           .add('otp-sms', {
             phone: updated.phone_number,
-            message: "AGAP: your account was locked after failed sign-ins. If this wasn't you, tell your Supervisor.",
+            message: AUTH_SMS.locked,
           })
           .catch((error: unknown) => {
             this.logger.error(

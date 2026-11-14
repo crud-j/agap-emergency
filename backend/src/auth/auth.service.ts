@@ -7,6 +7,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { AUTH_SMS } from './auth-sms';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { JwtService } from '@nestjs/jwt';
@@ -364,7 +365,7 @@ export class AuthService {
     // and no-ops — registration must never fail because SMS delivery cannot run.
     void this.smsQueue.add('otp-sms', {
       phone: phoneNumber,
-      message: `Your AGAP verification code is ${otp}. Expires in 15 minutes. Do not share this code.`,
+      message: AUTH_SMS.verifyPhone(otp),
     }).catch((error: unknown) => {
       this.logger.error(
         `Failed to queue registration OTP delivery: ${
@@ -666,7 +667,7 @@ export class AuthService {
       this.devLog(`[DEV] Password reset code for ${phoneNumber}: ${code} (expires in 15 min)`);
       void this.smsQueue.add('otp-sms', {
         phone: phoneNumber,
-        message: `Your AGAP password reset code is ${code}. Expires in 15 minutes. Do not share this code.`,
+        message: AUTH_SMS.resetPassword(code),
       }).catch((error: unknown) => {
         this.logger.error(
           `Failed to queue password reset SMS: ${error instanceof Error ? error.message : String(error)}`,
@@ -857,7 +858,7 @@ export class AuthService {
       this.devLog(`[DEV] Login OTP for ${phoneNumber}: ${otp} (expires in 10 min)`);
       await this.smsQueue.add('otp-sms', {
         phone: phoneNumber,
-        message: `Your AGAP login code is ${otp}. Expires in 10 minutes. Do not share this code.`,
+        message: AUTH_SMS.signIn(otp),
       });
     }
 

@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { IncidentType, parseCitizenSosSms, type CitizenSosParseResult } from '@agap/shared';
+import { IncidentType, gsm7Length, isGsm7, parseCitizenSosSms, type CitizenSosParseResult } from '@agap/shared';
 import {
   CitizenSmsSosService,
   SMS_SOS_MAX_AGE_MS,
@@ -78,8 +78,9 @@ describe('CitizenSmsSosService', () => {
       expect.objectContaining({ phone: PHONE, incidentId: 'inc-1' }),
       expect.anything(),
     );
-    expect(t.replyText()).toContain('Ref INC-2026-000123');
-    expect(t.replyText()).not.toContain('location');
+    expect(t.replyText()).toBe(
+      'AGAP: MDRRMO got your emergency text. Report no. INC-2026-000123. Keep your phone on; MDRRMO may call this number. Life in danger? Call 911.',
+    );
   });
 
   it('creates an incident without GPS and tells the sender to expect a call', async () => {
@@ -88,7 +89,7 @@ describe('CitizenSmsSosService', () => {
     const dto = t.incidents.create.mock.calls[0][0];
     expect(dto.lat).toBeUndefined();
     expect(dto.description).toBeUndefined();
-    expect(t.replyText()).toContain("We don't have your location");
+    expect(t.replyText()).toContain('We could not get your location: MDRRMO will call this number.');
   });
 
   it('keeps GPS outside Bocaue as a note, not as the incident location', async () => {
@@ -104,7 +105,7 @@ describe('CitizenSmsSosService', () => {
     await expect(t.service.handle(ok(), PHONE, NOW)).resolves.toEqual({ outcome: 'SOS_EXISTING', incidentId: 'inc-0' });
     expect(t.incidents.create).not.toHaveBeenCalled();
     expect(t.limits.reserve).not.toHaveBeenCalled();
-    expect(t.replyText()).toContain('Ref INC-2026-000099');
+    expect(t.replyText()).toContain('Report no. INC-2026-000099.');
   });
 
   it(`logs a text sent more than ${SMS_SOS_MAX_AGE_MS / 3_600_000} h ago without an incident`, async () => {
@@ -112,14 +113,14 @@ describe('CitizenSmsSosService', () => {
     const r = await t.service.handle(ok({ sentAt: new Date(NOW.getTime() - SMS_SOS_MAX_AGE_MS - 1000) }), PHONE, NOW);
     expect(r).toEqual({ outcome: 'SOS_STALE', incidentId: null });
     expect(t.incidents.create).not.toHaveBeenCalled();
-    expect(t.replyText()).toContain('Call 911');
+    expect(t.replyText()).toContain('call 911 or MDRRMO 0936 330 9020');
   });
 
   it('stops at the per-number limit', async () => {
     const t = build({ limited: true });
     await expect(t.service.handle(ok(), PHONE, NOW)).resolves.toEqual({ outcome: 'SOS_LIMITED', incidentId: null });
     expect(t.incidents.create).not.toHaveBeenCalled();
-    expect(t.replyText()).toContain('Call 911');
+    expect(t.replyText()).toContain('call 911 or MDRRMO 0936 330 9020');
   });
 
   it('a malformed text, or a sender that is not a mobile number, is INVALID', async () => {
@@ -157,7 +158,9 @@ describe('CitizenSmsSosService', () => {
   it('every reply fits one SMS segment', () => {
     for (const outcome of ['SOS_CREATED', 'SOS_EXISTING', 'SOS_STALE', 'SOS_INVALID', 'SOS_LIMITED'] as const) {
       for (const hasLocation of [true, false]) {
-        expect(citizenSosReply({ outcome, reference: 'INC-2026-001234', hasLocation }).length).toBeLessThanOrEqual(160);
+        const text = citizenSosReply({ outcome, reference: 'INC-2026-001234', hasLocation });
+        expect(isGsm7(text)).toBe(true);
+        expect(gsm7Length(text)).toBeLessThanOrEqual(160);
       }
     }
   });

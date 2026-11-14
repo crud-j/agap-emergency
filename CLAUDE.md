@@ -385,8 +385,10 @@ Connectivity in Bocaue flood zones is degraded during typhoons, so a report has 
   ```
 - **Citizen SMS fallback (MOD-17/19):** when the app cannot reach the server (no network, 20 s timeout, 5xx), it offers **Send by SMS**: it opens the messages app with one text to `EXPO_PUBLIC_AGAP_SMS_NUMBER` (the Textbee SIM), and the citizen presses Send. iOS cannot send SMS silently, and Android SEND_SMS is Play-restricted, so this step is user-confirmed. Field 2 is the report's client event id, not a reference:
   ```
+  AGAP SOS: Fire. Press Send, don't edit.
   AGAP|3f2b8c1e-9a4d-4e7f-8b2a-1c5d6e7f8a9b|14.79630,120.92720|1754179200|FIRE|C:Y|T:S
   ```
+  The first line is for the citizen; the server reads only from `AGAP|` on.
   The inbound poller (every 15 s, `CITIZEN_SMS_SOS_ENABLED=true`) creates the incident (`report_channel = SMS`, guest, sender = callback number, GPS optional) and texts the reference back. Format: `shared/src/utils/citizen-sos-sms.ts`; handler: `backend/src/emergency-alerts/sms-sos/`.
 
 ---
@@ -430,7 +432,7 @@ Connectivity in Bocaue flood zones is degraded during typhoons, so a report has 
 - A failed ETA calculation must never stop dispatch.
 - Missing medical information must never stop dispatch.
 - The system must never silently fail — every connectivity state needs a clear UI indicator.
-- SMS payload must always be under 160 characters for single-segment delivery.
+- SMS payload must always be under 160 characters for single-segment delivery, and GSM-7 only (one em dash, curly quote or "…" drops a segment to 70 characters). People-facing texts use plain words and the helpers in `shared/src/utils/sms-text.ts`; `backend/test/notifications/sms-texts.spec.ts` checks them all.
 
 ---
 

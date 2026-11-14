@@ -3,7 +3,16 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
-import { AuditAction, QUEUE_NAMES, normalizePhPhone } from '@agap/shared';
+import {
+  AuditAction,
+  MDRRMO_HOTLINE_DISPLAY,
+  QUEUE_NAMES,
+  SMS_SEGMENT_MAX,
+  fitGsm7,
+  gsm7Length,
+  normalizePhPhone,
+  toGsm7,
+} from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
@@ -446,8 +455,7 @@ export class AnnouncementsService {
         select: { id: true, phone_number: true },
       });
 
-      const title = published.title.slice(0, 50);
-      const smsText = `AGAP: ${title}. ${shortText.slice(0, 130)} Reply STOP to opt out.`.slice(0, 160);
+      const smsText = buildAnnouncementSms(published.title, shortText);
 
       // One delivery row per subscriber; the SMS worker writes Textbee's result back to it.
       const deliveries = await this.prisma.announcement_deliveries.createManyAndReturn({
@@ -868,4 +876,25 @@ export class AnnouncementsService {
 
 /** Sent once after a STOP reply. Single SMS segment (< 160 characters), no web address. */
 export const SMS_OPT_OUT_CONFIRMATION =
-  'AGAP: You are unsubscribed from Bocaue MDRRMO announcements. For emergencies call 911.';
+  `AGAP: You will no longer get Bocaue MDRRMO announcement texts. For emergencies, call 911 or MDRRMO ${MDRRMO_HOTLINE_DISPLAY}.`;
+
+const ANNOUNCEMENT_SMS_STOP = ' Reply STOP to stop these texts.';
+
+/**
+ * MOD-53 SMS: `Bocaue MDRRMO: <title>. <summary> Reply STOP to stop these texts.`
+ *
+ * One GSM-7 segment. The STOP line is never cut (RA 10173 opt-out); the summary is
+ * shortened first (ending "..."), then the title. Typographic punctuation from the editor
+ * (curly quotes, dashes) is made plain, or the text would be sent at 70 characters a segment.
+ */
+export function buildAnnouncementSms(title: string, summary: string): string {
+  const head = 'Bocaue MDRRMO: ';
+  const cleanTitle = toGsm7(title).replace(/[.!:;\s]+$/, '');
+  const cleanSummary = toGsm7(summary);
+  const room = SMS_SEGMENT_MAX - gsm7Length(head) - gsm7Length(ANNOUNCEMENT_SMS_STOP);
+  const fittedTitle = fitGsm7(cleanTitle, Math.min(room - 2, 60));
+  const titlePart = `${fittedTitle}.`;
+  const summaryRoom = room - gsm7Length(titlePart) - 1;
+  const summaryPart = cleanSummary && summaryRoom > 10 ? ` ${fitGsm7(cleanSummary, summaryRoom)}` : '';
+  return `${head}${titlePart}${summaryPart}${ANNOUNCEMENT_SMS_STOP}`;
+}

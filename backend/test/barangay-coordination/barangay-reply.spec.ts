@@ -61,7 +61,7 @@ describe('parseBarangayReply', () => {
     ['OTW 3526 DONE', 'two statuses'],
     ['DONE 3526 4821', 'two codes'],
     [
-      'AGAP 3526 MEDICAL Brgy Batia 14.83221,120.94920 INC-2026-000023. Code 3526-ANWQ. Reply OTW/DONE/NEED 3526.',
+      'AGAP case 3526: Medical, Brgy Batia, 14.83221,120.94920 (INC-2026-000023). Page code 3526-ANWQ. Reply OTW, DONE or NEED 3526.',
       'a forwarded alert (its reply hint names three statuses)',
     ],
     ['DONE 352', 'a 3-digit code'],
@@ -88,8 +88,8 @@ describe('alert and reminder texts with SMS replies on', () => {
 
   it('adds the reply hint after the code', () => {
     expect(buildBarangayAlertSms({ ...base, replyCode: '3526' })).toBe(
-      'AGAP 3526 MEDICAL Brgy Batia 14.83221,120.94920 INC-2026-000023. Code 3526-ANWQ. ' +
-        'Reply OTW/DONE/NEED 3526. Call MDRRMO +639755247821',
+      'AGAP case 3526: Medical, Brgy Batia, 14.83221,120.94920 (INC-2026-000023). Page code 3526-ANWQ. ' +
+        'Reply OTW, DONE or NEED 3526. Call MDRRMO +639755247821',
     );
   });
 
@@ -111,8 +111,8 @@ describe('alert and reminder texts with SMS replies on', () => {
           replyCode: '3526',
         });
         expect(sms.length).toBeLessThan(BARANGAY_SMS_MAX_LENGTH);
-        expect(sms).toContain('Code 3526-ANWQ.');
-        if (sms.includes('Call MDRRMO')) expect(sms).toContain('Reply OTW/DONE/NEED 3526.');
+        expect(sms).toContain('Page code 3526-ANWQ.');
+        if (sms.includes('Call MDRRMO')) expect(sms).toContain('Reply OTW, DONE or NEED 3526.');
         expect(sms).not.toMatch(NO_URL);
       }
     }
@@ -126,7 +126,7 @@ describe('alert and reminder texts with SMS replies on', () => {
       accessCode: '3526-ANWQ',
       replyCode: '3526',
     });
-    expect(sms).toContain('Reply OTW/DONE/NEED 3526.');
+    expect(sms).toContain('Reply OTW, DONE or NEED 3526.');
     expect(sms.length).toBeLessThan(BARANGAY_SMS_MAX_LENGTH);
   });
 });
@@ -135,7 +135,7 @@ describe('replyText', () => {
   const parsed = { code: '3526', letters: null };
 
   it('acknowledges an applied reply, and says MDRRMO was alerted on NEED', () => {
-    expect(replyText('APPLIED', { ...parsed, status: 'ON_THE_WAY' })).toBe('AGAP 3526: received "on the way". Salamat.');
+    expect(replyText('APPLIED', { ...parsed, status: 'ON_THE_WAY' })).toBe('AGAP case 3526: MDRRMO recorded your update "on the way". Thank you.');
     expect(replyText('APPLIED', { ...parsed, status: 'NEEDS_BACKUP' })).toContain('MDRRMO has been alerted');
   });
 
@@ -229,7 +229,7 @@ describe('BarangayReplyService.handleInbound', () => {
     expect(b.notify.emitUpdated).toHaveBeenCalledWith('n-1');
     expect(b.smsQueue.add).toHaveBeenCalledWith(
       'barangay-reply-ack',
-      { phone: BATIA_CONTACT, message: 'AGAP 3526: received "done". Salamat.' },
+      { phone: BATIA_CONTACT, message: 'AGAP case 3526: MDRRMO recorded your update "done". Thank you.' },
       expect.anything(),
     );
   });

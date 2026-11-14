@@ -1,13 +1,19 @@
-# Handoff: Citizen SOS by SMS (MOD-17 / MOD-19)
+# Handoff: Citizen SOS by SMS (MOD-17 / MOD-19) + plain-English SMS texts
 
 **Date:** 2026-11-14 (third session that day)
 **For:** the next agent, starting cold. This is the current handoff; read it first.
-**First task:** ask the user how the **device test** went (section "Waiting on the user"). Don't start new work on your own.
+**First task:**
+1. Ask whether the SMS wording change has been committed (section "Git").
+2. Ask how the **device test** went (section "Waiting on the user").
+3. Ask the two open questions in "Decisions for the user".
+
+Don't start new work on your own.
+
 **Earlier handoffs:**
 - [`2026-11-14_analytics-csv-export-sla-single-source.md`](./2026-11-14_analytics-csv-export-sla-single-source.md): its browser checks are still unreported, and its "Next A" (AI summary on Analytics) is still designed only.
-- [`2026-11-13_gap-audit-medical-type-dispatch-recall-crew-medical.md`](./2026-11-13_gap-audit-medical-type-dispatch-recall-crew-medical.md): backlog item 1 (phone-side SMS fallback) is **done here**.
+- [`2026-11-13_gap-audit-medical-type-dispatch-recall-crew-medical.md`](./2026-11-13_gap-audit-medical-type-dispatch-recall-crew-medical.md): backlog item 1 (phone-side SMS fallback) is **done here**. Its "How the user works" section still holds.
 
-Plan: `C:\Users\githu\.claude\plans\dapper-baking-firefly.md` (approved by the user).
+Plan (approved): `C:\Users\githu\.claude\plans\dapper-baking-firefly.md`.
 
 ---
 
@@ -15,105 +21,170 @@ Plan: `C:\Users\githu\.claude\plans\dapper-baking-firefly.md` (approved by the u
 
 | Item | Status |
 |---|---|
-| Citizen SOS by SMS, end to end (app → Textbee → incident → reply) | DONE, tested, **not committed**, **not run on a device** |
-| App resend links and completes the SMS incident | DONE, tested |
-| Console "By SMS" badge + call-back hint | DONE, typechecked, not checked in a browser |
-| Migration `20261114120000_citizen_sms_sos` | **Applied to the local DB** (`migrate deploy`); `migrate diff` shows no drift |
+| Citizen SOS by SMS, end to end (app → Textbee → incident → reply) | DONE, tested, **committed `39f0708`**, **not run on a device** |
+| App resend links the account and completes the SMS incident | DONE, tested, committed `39f0708` |
+| Console "By SMS" badge + call-back hint | DONE, typechecked, committed, not checked in a browser |
+| Migration `20261114120000_citizen_sms_sos` | Committed; **applied to the local DB** (`migrate deploy`); `migrate diff` shows no drift |
+| Every people-facing SMS rewritten in plain English, GSM-7 safe | DONE, tested, **uncommitted** |
 
 ## Git
 
-- Everything below is uncommitted on `main`. The user commits only when asked, from Git Bash: give `git commit -F - <<'EOF' … EOF`.
-- `frontend/tsconfig.tsbuildinfo` was restored after typechecks.
+- `39f0708 feat(sms): citizen SOS by SMS…` is on `main`.
+- **Uncommitted:** the SMS wording change (22 modified + 4 new files, listed in "Second part") and this handoff file.
+- The user commits only when asked, from Git Bash (`git commit -F - <<'EOF' … EOF`). Suggested command:
+
+```bash
+git add -A && git commit -F - <<'EOF'
+feat(sms): plain-English, GSM-7-safe texts for every people-facing SMS
+
+- shared: sms-text helpers (isGsm7, gsm7Length, toGsm7, fitGsm7, type labels)
+  and one MDRRMO hotline constant for app and server
+- citizen SOS text gets a readable first line; parser reads from AGAP| on
+- clearer SOS replies, emergency-contact alert, account codes, lock notice,
+  announcement + STOP confirmation, barangay alert/reminder/acks
+- announcements never lose the STOP line (old slice could cut it)
+- test: sms-texts.spec checks every text is GSM-7, one segment, no URL
+- docs: CLAUDE.md GSM-7 rule, handoff
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+- `frontend/tsconfig.tsbuildinfo` is touched by `tsc`. Restore it with `git checkout -- frontend/tsconfig.tsbuildinfo`.
 
 ## Waiting on the user
 
 1. **Config for the device test.**
    - Backend `backend/.env`: `CITIZEN_SMS_SOS_ENABLED=true`. Textbee must have "Receive SMS" on.
    - App `mobile/.env`: `EXPO_PUBLIC_AGAP_SMS_NUMBER=<Textbee SIM number>`. Restart Metro; no EAS rebuild is needed (JavaScript and `Linking` only).
-2. **Device test:** steps 1–5 in the plan's Verification section, or step 4 of the [MOD-17 report](../module-reports/MOD-17_Multi_Channel_Emergency_Transmission_Gateway.md) "Test before signing".
-   1. Mobile data off, SIM on → SOS → **Send by SMS** → Send.
-   2. Within about 30 s the incident shows **By SMS** in Live Dispatch, and the phone gets the reference.
-   3. Data back on → the app resends → the incident gains the account and details, with no duplicate.
-   4. Check the Activity Log for an `UPDATE` with `completedFromApp`.
-3. Still unreported from earlier handoffs:
+2. **Device test** (also step 4 of the [MOD-17 report](../module-reports/MOD-17_Multi_Channel_Emergency_Transmission_Gateway.md) "Test before signing"):
+   1. Mobile data off, SIM on → SOS → **Send by SMS**. The messages app should show `AGAP SOS: <Type>. Press Send, don't edit.` followed by the `AGAP|…` line. Press Send.
+   2. Within about 30 s the incident shows **By SMS** in Live Dispatch with the phone number. The phone gets `AGAP: MDRRMO got your emergency text. Report no. INC-…`.
+   3. Data back on: the app resends, and the incident gains the account and details, with no duplicate. The Activity Log shows an `UPDATE` with `completedFromApp`.
+   4. Send the same text again: the same reference comes back. Send garbled text: "could not read your emergency text… call 911 or MDRRMO 0936 330 9020".
+3. **Check the new texts on a real phone:**
+   - a sign-in code;
+   - an emergency-contact alert;
+   - a barangay alert (it should arrive as **one** SMS);
+   - an announcement with curly quotes pasted in.
+4. Still unreported from earlier handoffs:
    - SLA alarm and Analytics CSV browser checks (2026-11-14);
    - Live Dispatch and Fleet browser checks (2026-11-14);
    - device checks (2026-11-13).
 
-## What this session changed
+## Decisions for the user
 
-**User decisions (2026-11-14):**
+1. **Barangay reply acknowledgements** now end in "Thank you." instead of "Salamat." (the user chose English). Change back if barangays should keep "Salamat".
+2. **"Responders on the way" texts to emergency contacts** (`backend/src/jobs/processors/notification.processor.ts`, `notifyEmergencyContacts`, fed by `dispatch.service.ts`) ignore the contact's `notify_on_alert` setting. The MOD-16 alert respects it. This was found but not fixed; ask whether to fix it.
+
+---
+
+## First part: citizen SOS by SMS (committed `39f0708`)
+
+**User decisions:**
 - When data returns, the app resend **links the account and fills blanks only**.
 - An SMS report with **no GPS, or GPS outside Bocaue, still creates an incident**.
 - A text **more than 6 h old is logged only**.
 
-- **Format:** [`shared/src/utils/citizen-sos-sms.ts`](../../shared/src/utils/citizen-sos-sms.ts) defines `AGAP|<eventId>|<lat5>,<lng5>|<unix>|<IncidentType>|C:Y/N|T:S/K/M`, about 100 characters.
-  - The parser returns `null` for anything that isn't a citizen SOS, including ops `AGAP|INC-…` texts.
-  - It returns a failure reason for a text that starts like a citizen SOS but is malformed.
-- **Inbound:** `BarangayReplyService.handleInbound` checks for a citizen SOS **first**, before STOP and barangay replies, then calls [`CitizenSmsSosService`](../../backend/src/emergency-alerts/sms-sos/citizen-sms-sos.service.ts), in this order:
-  1. a known event id → `SOS_EXISTING`;
+- **Format** ([`citizen-sos-sms.ts`](../../shared/src/utils/citizen-sos-sms.ts)):
+  - The machine line is `AGAP|<eventId>|<lat5>,<lng5>|<unix>|<IncidentType>|C:Y/N|T:S/K/M`.
+  - The parser returns `null` for a text that is not a citizen SOS, including ops `AGAP|INC-…` texts.
+  - It returns a failure reason for a text that looks like one but is malformed.
+- **Inbound:** `BarangayReplyService.handleInbound` checks for a citizen SOS **first**, before STOP and barangay replies, and calls [`CitizenSmsSosService`](../../backend/src/emergency-alerts/sms-sos/citizen-sms-sos.service.ts). Outcomes:
+  1. known event id → `SOS_EXISTING`;
   2. older than 6 h → `SOS_STALE`;
   3. over the per-number limit (new `phone` scope in `GuestReportLimitService`: 3 per 10 min, 10 per 24 h) → `SOS_LIMITED`;
-  4. otherwise `IncidentsService.create(…, { channel: 'SMS', senderPhone, sentAt })` → `SOS_CREATED`.
-  - A malformed text, or a sender that isn't a mobile number, is `SOS_INVALID`.
-  - A `BadRequestException` is an outcome, so a bad message never blocks the poller. A database error throws, so the poller retries.
-  - A reply SMS goes back to the sender: the reference, or "call 911", at most 1 per sender per minute.
-  - The inbound row stores the outcome and the new `incident_id`.
-  - The poller also runs when only `CITIZEN_SMS_SOS_ENABLED` is on.
-- **`IncidentsService.create`:**
-  - `channel: 'SMS'` allows a guest report with no GPS.
-  - It sets `report_channel = SMS` and `reporter_phone` / `contact_callback` = the sender.
-  - The first event's notes say "Received by SMS…; sent from the phone at <Manila time>".
-  - **`submitted_at` is the receipt time, not the phone's send time.** This differs from the plan: a late SMS must not arrive with its SLAs already breached.
-  - GPS outside Bocaue is not used as the location; it goes into the description as `Reported GPS outside Bocaue: …`.
-- **Completion (`completeSmsReport`)** applies on the existing-key paths for SMS-channel incidents ≤ 24 h old:
-  - Links a **citizen** account only if no account is linked yet (`updateMany … user_id: null`).
-  - Fills only empty fields: description (a description that is only the outside-Bocaue note counts as empty and is kept below the citizen's text), reporter status, intake answers, hazard flags, patient, and location (only if there was none).
-  - Writes an `UPDATE` audit entry with field names only (module MOD-19), fail-closed inside the transaction.
-  - Then a realtime `incident.updated` (`change: sms_report_completed`), MOD-16 contacts if newly linked, and barangay tagging if a location was added.
-  - Never throws. Category, priority and status are never touched.
-- **Database:**
-  - enum `report_channel {APP, SMS}` and `incidents.report_channel` (default APP);
-  - 5 new `barangay_inbound_outcome` values (`SOS_*`);
-  - `barangay_sms_inbound.incident_id` (FK, `ON DELETE SET NULL`, indexed).
-- **Mobile:**
-  - [`sms-gateway.ts`](../../mobile/src/config/sms-gateway.ts) reads `EXPO_PUBLIC_AGAP_SMS_NUMBER`. When it is unset, no SMS option is shown.
-  - [`sos-sms.ts`](../../mobile/src/services/sms/sos-sms.ts) opens `sms:` with `?body=` on Android and `&body=` on iOS, without `canOpenURL`.
-  - `submitIncident` now has a **20 s timeout**.
-  - [`transmission.tsx`](../../mobile/app/emergency/transmission.tsx):
-    - "Send by SMS" appears after 8 s on the spinner;
-    - it is the primary button on a connection failure (not on 4xx or 429);
-    - a new `smsOpened` screen tells the citizen to press Send and expect a reply within 2 minutes, with the hotlines;
-    - when NetInfo goes offline → online, the report is resent automatically with the same key;
-    - one attempt runs at a time (an `inFlight` ref).
-- **Console:**
-  - [`SmsChannelBadge`](../../frontend/components/incidents/SmsChannelBadge.tsx) appears on Live Dispatch queue rows and in the incident header. The header also shows a hint with the call-back number and "no location".
-  - `IncidentDetailDrawer` shows "· sent by SMS" on the Trigger line, and "Location unknown: call the reporter back".
-- **Docs:**
-  - CLAUDE.md: the Dual-Path and Offline Queue sections now describe the real flow, and the REST list adds `/sla-policies` and `/analytics/export`.
-  - The MOD-17 report covers the inbound path and its test step.
-  - Root `.env.example` gains `CITIZEN_SMS_SOS_ENABLED`.
+  4. otherwise `IncidentsService.create(…, { channel: 'SMS', senderPhone, sentAt })` → `SOS_CREATED`;
+  5. a malformed text, or a sender that is not a mobile number → `SOS_INVALID`.
 
-## Verification (last run)
+  Other behaviour:
+  - A `BadRequestException` is an outcome, so a bad message never blocks the poller. A database error throws, so the poller retries.
+  - The sender gets a reply, at most 1 per sender per minute.
+  - The inbound row stores the outcome and `incident_id`.
+  - The poller also runs when only `CITIZEN_SMS_SOS_ENABLED` is on.
+- **`IncidentsService.create` with `channel: 'SMS'`:**
+  - A guest report with no GPS is allowed.
+  - It sets `report_channel = SMS` and `reporter_phone` / `contact_callback` = the sender.
+  - The first event's notes record the phone's send time.
+  - **`submitted_at` is the receipt time**, so a late SMS does not arrive with its SLAs already breached. This differs from the plan.
+  - GPS outside Bocaue goes into the description as `Reported GPS outside Bocaue: …`.
+- **`completeSmsReport`** runs when an app resend reaches an SMS incident that is ≤ 24 h old:
+  - links a **citizen** account only if none is linked yet;
+  - fills empty fields only: description (a description that is only the outside-Bocaue note counts as empty), reporter status, intake answers, hazard flags, patient, and location (only if there was none);
+  - writes an `UPDATE` audit entry with field names only (MOD-19), fail-closed;
+  - then sends a realtime `incident.updated` (`sms_report_completed`), notifies MOD-16 contacts if newly linked, and tags the barangay if a location was added;
+  - never throws, and never touches category, priority or status.
+- **Database:**
+  - `report_channel {APP, SMS}` and `incidents.report_channel`;
+  - 5 new `SOS_*` inbound outcomes;
+  - `barangay_sms_inbound.incident_id`.
+- **Mobile:**
+  - `EXPO_PUBLIC_AGAP_SMS_NUMBER` ([`sms-gateway.ts`](../../mobile/src/config/sms-gateway.ts)); when unset, no SMS option is shown;
+  - [`sos-sms.ts`](../../mobile/src/services/sms/sos-sms.ts) opens the `sms:` link;
+  - `submitIncident` has a 20 s timeout;
+  - [`transmission.tsx`](../../mobile/app/emergency/transmission.tsx):
+    - "Send by SMS" appears after 8 s on the spinner, and on a connection failure;
+    - the `smsOpened` screen;
+    - an automatic resend when data returns (same key, one attempt at a time).
+- **Console:**
+  - [`SmsChannelBadge`](../../frontend/components/incidents/SmsChannelBadge.tsx) on Live Dispatch queue rows and the incident header, with a call-back hint;
+  - the drawer shows "sent by SMS" and "Location unknown: call the reporter back".
+
+## Second part: every people-facing SMS rewritten (uncommitted)
+
+**User's choices:** all people-facing SMS, in plain English. The machine-format ops SMS (`AGAP|INC-…`) is unchanged.
+
+- **Shared helpers** ([`sms-text.ts`](../../shared/src/utils/sms-text.ts)):
+  - `isGsm7` / `gsm7Length` (`|` counts as two septets);
+  - `toGsm7` (curly quotes, dashes and "…" become plain characters);
+  - `fitGsm7` (shortens at a word, ends with "...");
+  - `INCIDENT_TYPE_SMS_LABEL` ("Road accident").
+- **Hotline constant:** `MDRRMO_HOTLINE(_DISPLAY)` moved to [`shared/src/constants/hotlines.ts`](../../shared/src/constants/hotlines.ts); mobile `config/hotlines.ts` re-exports it.
+- **Citizen SOS text:** a first line `AGAP SOS: <Type>. Press Send, don't edit.`. The parser reads from `AGAP|` wherever it starts, so an edited or missing first line still works. The worst case is 156 of 160 septets.
+- **SOS replies:** what happened, what to do now, and 911 + MDRRMO 0936 330 9020 for every failure.
+- **Emergency contacts** (`buildContactAlertSms`): who, the type in plain words, "named you as their emergency contact", the reference. Only the name is shortened. The old code could add a non-GSM "…".
+- **"Responders on the way" text to contacts:** it now says it is an update on the same report.
+- **Account texts** ([`auth/auth-sms.ts`](../../backend/src/auth/auth-sms.ts)):
+  - codes read `AGAP code: 123456. Use it to …`, then the expiry, then "Never share it…";
+  - the account-lock text is clearer.
+- **Announcements:** `buildAnnouncementSms` always keeps `Reply STOP to stop these texts.` and shortens the summary first. The old `.slice(0, 160)` could cut the STOP line (RA 10173). Pasted punctuation is made plain. The STOP confirmation gives the hotline.
+- **Barangay:**
+  - alert: `AGAP case 4821: Road accident, Brgy Batia, 14.83221,120.94920 (INC-…). Page code 4821-KXPM. Reply OTW, DONE or NEED 4821. Call MDRRMO …`;
+  - reminder: `AGAP case 4821 reminder: Brgy Batia, please update MDRRMO on INC-…`;
+  - acknowledgements and help texts are spelled out;
+  - the MDRRMO call-back still fits in the common case.
+- **Not changed:**
+  - ID-check texts (shared with push, already clear);
+  - status updates (push only);
+  - the ops SMS.
+- **Docs:** CLAUDE.md shows the SOS text with its first line, and the reliability rule now requires GSM-7.
+
+## Verification (last run, after the wording change)
 
 - `tsc --noEmit`: shared (built), backend, frontend and mobile are all clean.
-- **Backend full run:** 124/128 suites passed. The 4 failures were the known auth/ID bcrypt timeouts. Rerun alone, 3 passed; `auth-phase3` passes 59/59 with `--testTimeout=60000`. After the last fix: incidents + emergency-alerts + barangay-coordination = 33 suites, 700 tests passing.
+- **Backend full run:** `npx jest --config ./test/jest.config.ts --maxWorkers=50% --testTimeout=60000` → **129/129 suites, 2261 tests passed**. With the default 5 s timeout, the auth/ID bcrypt suites time out under load; this is known and unrelated.
+- **Mobile jest:** 21 suites, 266 tests. **Frontend jest:** 22 suites, 216 tests (no frontend change in the second part).
 - **New tests:**
-  - `backend/test/emergency-alerts/citizen-sos-sms.spec.ts` (format, 21 tests);
+  - [`sms-texts.spec.ts`](../../backend/test/notifications/sms-texts.spec.ts): every people-facing text is GSM-7, one segment and has no web address, across 19 barangays × 9 types, with and without GPS;
+  - `citizen-sos-sms.spec.ts` (format);
   - `citizen-sms-sos.spec.ts` (service + routing);
-  - `test/incidents/sms-report-channel.spec.ts` (channel + completion);
+  - `test/incidents/sms-report-channel.spec.ts`;
   - a `phone`-scope test in `guest-report-limit.spec.ts`;
-  - a poller gating test in `barangay-reply.spec.ts`;
+  - a poller gating test;
   - `mobile/src/services/sms/__tests__/sos-sms.test.ts`.
-- **Frontend jest:** 22 suites, 216 tests. **Mobile jest:** 21 suites, 266 tests.
-- **Wiring:** the user's dev backend (watch mode, `node dist/main`) restarted with the new module and answers (401 on `/v1/incidents`), so Nest's dependency injection resolves.
-- **Not run:** a real SMS through Textbee; the screen's reconnect auto-resend (no component test, device only); the console in a browser.
+- **Wiring:** the user's dev backend (watch mode, `node dist/main`) restarted with the SMS module and answered 401 on `/v1/incidents`.
+- **Not run:**
+  - a real SMS through Textbee;
+  - the reconnect auto-resend (device only);
+  - the console in a browser;
+  - how the new texts look on a real phone.
 
 ## Known gaps left
 
-1. **Linking trusts possession of the event id.** It is in the SMS text, so anyone who can read that text could link it to their citizen account (only within 24 h, and only while unlinked). The id comes from `Math.random` (`mobile/src/lib/uuid.ts`, comment updated).
-2. **Latency:** carrier delivery plus a poll every 15 s. Webhook mode (`BARANGAY_SMS_INBOUND_MODE=webhook`) is still not built.
-3. **No console view of the inbound log** for SOS outcomes. Rows are stored with outcome and incident, but `SOS_STALE`, `SOS_INVALID` and `SOS_LIMITED` texts are visible only in the database and logs.
-4. **Reply SMS limit:** the 1-per-minute limit is held in memory (it resets on restart). Each reply uses SIM credit.
-5. `components/dispatch/IncidentDetailPanel.tsx` is **dead code** (nothing imports it). It was left unchanged; delete it or wire it.
-6. The 2026-11-13 backlog continues: announcement SMS ignoring barangay, dead code to wire or delete, then lower-value items. AI summary on Analytics is still designed only.
+1. **Linking trusts possession of the event id.** The id is in the SMS text, so anyone who can read it could link it to their citizen account (only within 24 h, and only while unlinked). The id comes from `Math.random` (`mobile/src/lib/uuid.ts`).
+2. **Latency:** carrier delivery plus a poll every 15 s. Webhook mode (`BARANGAY_SMS_INBOUND_MODE=webhook`) is not built.
+3. **No console view of the inbound log:** `SOS_STALE`, `SOS_INVALID` and `SOS_LIMITED` texts are visible only in the database and logs.
+4. **Reply SMS limit:** the 1-per-minute limit is in memory (it resets on restart). Each reply uses SIM credit.
+5. `components/dispatch/IncidentDetailPanel.tsx` is **dead code** (nothing imports it).
+6. **Shell-tool pitfall seen this session:** Python edits sent through Bash turned `\\n` into a real line break in TS strings twice. Use the Edit tool for any code containing backslashes.
+7. **Backlog** (2026-11-13): announcement SMS ignoring barangay, dead code to wire or delete, then lower-value items. AI summary on Analytics is still designed only.

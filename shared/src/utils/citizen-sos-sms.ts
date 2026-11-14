@@ -2,7 +2,14 @@
  * Citizen SOS by SMS (MOD-17 / MOD-19): the text the phone puts in the messages app
  * when it has no data, and the parser the backend runs on what the Textbee phone receives.
  *
- * `AGAP|<eventId>|<lat>,<lng>|<unix>|<type>|C:<Y|N>|T:<S|K|M>`
+ * ```
+ * AGAP SOS: Fire. Press Send, don't edit.
+ * AGAP|<eventId>|<lat>,<lng>|<unix>|<type>|C:<Y|N>|T:<S|K|M>
+ * ```
+ *
+ * The first line is for the citizen, who sees the text before pressing Send; the server
+ * reads only the `AGAP|…` part, wherever it starts, so a text without the first line
+ * (or with it edited) still works.
  *
  * Same shape as the ops SMS in CLAUDE.md, but field 2 is the report's client event id
  * (a UUID, the idempotency key) instead of an `INC-…` reference: the server has not
@@ -12,6 +19,7 @@
  * Nothing personal: no name, description or medical data travels through the carrier.
  */
 import { IncidentType } from '../enums/incident-type.enum';
+import { incidentTypeSmsLabel } from './sms-text';
 
 export type CitizenSosTrigger = 'SOS_BUTTON' | 'SHAKE_GESTURE' | 'MANUAL_REPORT';
 
@@ -37,7 +45,7 @@ export type CitizenSosParseResult =
   | { ok: true; value: CitizenSosSms }
   | { ok: false; reason: CitizenSosParseFailure };
 
-/** Single SMS segment (GSM-7). */
+/** Single SMS segment, in GSM-7 septets (each `|` counts as two). */
 export const CITIZEN_SOS_SMS_MAX = 160;
 
 /** A phone clock may run a little fast; further ahead than this is not a real send time. */
@@ -65,7 +73,8 @@ export function encodeCitizenSosSms(input: {
   const lat = input.coords ? input.coords.lat.toFixed(5) : '0';
   const lng = input.coords ? input.coords.lng.toFixed(5) : '0';
   const unix = Math.floor(input.sentAt.getTime() / 1000);
-  return [
+  const intro = `AGAP SOS: ${incidentTypeSmsLabel(String(input.type))}. Press Send, don't edit.`;
+  return `${intro}\n` + [
     'AGAP',
     input.eventId,
     `${lat},${lng}`,
@@ -78,12 +87,14 @@ export function encodeCitizenSosSms(input: {
 
 /**
  * Null when the text is not a citizen SOS at all (a barangay reply, STOP, an ops SMS
- * echoed back): the caller handles it as before. A failure when it starts like one
- * (`AGAP|` + a non-`INC-` field) but cannot be trusted.
+ * echoed back): the caller handles it as before. A failure when it carries `AGAP|` + a
+ * non-`INC-` field but cannot be trusted. Anything before `AGAP|` (the citizen's first
+ * line) is ignored.
  */
 export function parseCitizenSosSms(body: string, now: Date = new Date()): CitizenSosParseResult | null {
-  const text = body.trim();
-  if (!/^AGAP\|/i.test(text)) return null;
+  const start = body.search(/AGAP\|/i);
+  if (start < 0) return null;
+  const text = body.slice(start).trim();
   const fields = text.split('|').map((f) => f.trim());
   // An ops alert (`AGAP|INC-…`) is never a citizen report.
   if (/^INC-/i.test(fields[1] ?? '')) return null;

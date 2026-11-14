@@ -45,7 +45,7 @@ describe('buildBarangayFollowupSms', () => {
       opsPhone: '+639171234567',
     });
     expect(sms).toBe(
-      'AGAP 4821 REMINDER Brgy Batia INC-2026-001234: please report status. Call MDRRMO +639171234567',
+      'AGAP case 4821 reminder: Brgy Batia, please update MDRRMO on INC-2026-001234. Call MDRRMO +639171234567',
     );
     expect(sms.length).toBeLessThan(BARANGAY_SMS_MAX_LENGTH);
     expect(
@@ -85,7 +85,7 @@ describe('BarangayNotifyService.sendFollowup', () => {
     const jobs = smsQueue.addBulk.mock.calls[0][0];
     expect(jobs).toHaveLength(1);
     expect(jobs[0].data.phone).toBe('+639750000000');
-    expect(jobs[0].data.message).toContain('REMINDER');
+    expect(jobs[0].data.message).toContain('reminder');
     expect(jobs[0].data.noticeId).toBeUndefined(); // must not rewrite the alert's sms_status
     expect(prisma.incident_barangay_notices.update.mock.calls[0][0].data).toHaveProperty('followup_sent_at');
     expect(realtime.barangayNoticeUpdated).toHaveBeenCalledWith(expect.objectContaining({ followupDue: true }));

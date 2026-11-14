@@ -2,8 +2,26 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { QUEUE_NAMES } from '@agap/shared';
+import { QUEUE_NAMES, SMS_SEGMENT_MAX, fitGsm7, gsm7Length, incidentTypeSmsLabel, toGsm7 } from '@agap/shared';
 import type { SmsJobData } from '../jobs/processors/sms.processor';
+
+/**
+ * MOD-16: the text to the reporter's emergency contacts. Says who, what, that MDRRMO
+ * knows, and that this person was listed as their contact (so it doesn't read as spam).
+ * The name is shortened, never the rest. One GSM-7 segment.
+ *
+ * `AGAP: Juan Dela Cruz reported an emergency (Road accident) and named you as their
+ * emergency contact. MDRRMO has been alerted. Ref INC-2026-001234.`
+ */
+export function buildContactAlertSms(fullName: string | null, category: string, publicReference: string): string {
+  const label = incidentTypeSmsLabel(category);
+  const rest =
+    ` reported an emergency (${label}) and named you as their emergency contact.` +
+    ` MDRRMO has been alerted. Ref ${publicReference}.`;
+  const name = toGsm7(fullName ?? '') || 'Someone';
+  const room = SMS_SEGMENT_MAX - gsm7Length('AGAP: ') - gsm7Length(rest);
+  return `AGAP: ${fitGsm7(name, room)}${rest}`;
+}
 
 @Injectable()
 export class EmergencyContactNotificationService {
@@ -39,10 +57,7 @@ export class EmergencyContactNotificationService {
 
       if (contacts.length === 0) return;
 
-      const name = reporter?.full_name ?? 'A user';
-      const type = category.replace(/_/g, ' ');
-      const text = `AGAP: ${name} reported a ${type} emergency. Ref: ${publicReference}. Please stand by. -MDRRMO Bocaue`;
-      const message = text.length > 160 ? text.slice(0, 159) + '…' : text;
+      const message = buildContactAlertSms(reporter?.full_name ?? null, category, publicReference);
 
       const jobs = contacts.map((c) => ({
         name: 'contact-alert' as const,
