@@ -40,11 +40,14 @@ function build(opts: { crew?: string[]; queueFails?: boolean } = {}) {
       const text = Array.isArray(sql) ? sql.join('') : String((sql as { sql?: string }).sql ?? '');
       if (text.includes('FROM incidents')) return [{ status: INCIDENT.status }];
       if (text.includes('FROM dispatches')) return [{ status: 'PENDING', on_scene_at: null }];
+      if (text.includes('FROM resources')) return [{ status: 'AVAILABLE' }];
       return crew.map((user_id) => ({ user_id, status: 'AVAILABLE' }));
     }),
     dispatch_crew: {
       createMany: jest.fn().mockResolvedValue({ count: crew.length }),
       create: jest.fn().mockResolvedValue({ dispatch_id: 'disp-1', user_id: 'resp-c' }),
+      // Crew not riding another active unit (assertCrewFree).
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     resources: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     incident: { update: jest.fn() },

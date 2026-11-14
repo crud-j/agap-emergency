@@ -20,6 +20,7 @@ import { DestinationWarning, SelectableDestination, assertSelectableDestination 
 import { DESTINATION_VIEW_SELECT, toFacilityView, toTransportDestinationView } from '../../hospitals/facility-view';
 import type { EtaRefreshReason } from '../../jobs/processors/eta-refresh.processor';
 import { openTransportWhere } from './open-transport';
+import { advanceMissionUnit, UnitStatusChange } from '../../dispatch/unit-status';
 import { TransportAudienceService } from './transport-audience.service';
 import { TRANSPORT_REQUEST_TTL_SECONDS, TransportRequestCacheService } from './transport-request-cache.service';
 import { StartTransportDto } from './dto/start-transport.dto';
@@ -63,6 +64,8 @@ export interface BeginTransportResult {
    */
   outcome: 'created' | 'destination_set' | 'unchanged';
   destination: SelectableDestination | null;
+  /** A new transport moved the unit to TRANSPORTING (fleet board); announced after commit. */
+  unitChange?: UnitStatusChange | null;
 }
 
 /** Added to each transport in GET /incidents/:id/transport, except for hospital users. */
@@ -294,7 +297,7 @@ export class TransportService {
 
     const dispatch = await tx.dispatches.findUnique({
       where: { id: dispatchId },
-      select: { incident_id: true, resources: { select: { resource_type: true } } },
+      select: { incident_id: true, resource_id: true, resources: { select: { resource_type: true } } },
     });
     if (!dispatch || dispatch.incident_id !== incidentId) {
       throw new BadRequestException('Dispatch not found or does not belong to this incident');
@@ -392,7 +395,8 @@ export class TransportService {
         ...(input.clientRequestId && { clientRequestId: input.clientRequestId }),
       },
     });
-    return { ...base, record, statusChanged, outcome: 'created' };
+    const unitChange = await advanceMissionUnit(tx, { resource_id: dispatch.resource_id, incident_id: incidentId }, 'TRANSPORTING');
+    return { ...base, record, statusChanged, outcome: 'created', unitChange };
   }
 
   /**
@@ -403,6 +407,13 @@ export class TransportService {
    */
   async announceTransportBegun(result: BeginTransportResult): Promise<void> {
     const { record, outcome, destination } = result;
+    if (result.unitChange) {
+      try {
+        this.realtime.resourceStatusChanged({ ...result.unitChange, changedAt: new Date().toISOString() });
+      } catch (err) {
+        this.logger.warn(`Realtime emit failed for unit ${result.unitChange.resourceId}: ${String(err)}`);
+      }
+    }
     if (outcome === 'created') {
       // The unit is now on the hospital leg: its next fix must not reach the incident room.
       this.audience.invalidate(record.incident_id);

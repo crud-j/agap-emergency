@@ -38,11 +38,25 @@ export class ResourcesService {
           include: { resource_capabilities: true },
           orderBy: { assigned_at: 'asc' },
         },
+        // The unit's active dispatch, if any: the fleet board locks its status while on one.
+        dispatches: {
+          where: { status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
+          orderBy: { created_at: 'desc' },
+          take: 1,
+          select: { id: true, incident_id: true, incidents: { select: { public_reference: true } } },
+        },
       },
     });
     // The registry and fleet board read `organization` (MOD-27) and `capabilities` (MOD-29).
-    return rows.map(({ organizations, resource_capability_assignments, ...resource }) => ({
+    return rows.map(({ organizations, resource_capability_assignments, dispatches, ...resource }) => ({
       ...resource,
+      active_dispatch: dispatches[0]
+        ? {
+            dispatch_id: dispatches[0].id,
+            incident_id: dispatches[0].incident_id,
+            incident_reference: dispatches[0].incidents?.public_reference ?? null,
+          }
+        : null,
       organization: organizations,
       capabilities: (resource_capability_assignments ?? []).map((a) => ({
         id: a.resource_capabilities.id,
@@ -122,22 +136,50 @@ export class ResourcesService {
     });
   }
 
+  /**
+   * Fleet board status (MOD-28): Available, Out of service, Offline or Reserved only
+   * (the DTO), and never while the unit is on an active dispatch: a unit on a mission
+   * is changed through Recall or Replace, which also tell its crew. A unit stuck in a
+   * mission status with no active dispatch (old data) can still be set back here.
+   */
   async updateStatus(id: string, dto: UpdateResourceStatusDto, userId: string) {
-    const resource = await this.findById(id);
-    const [, updated] = await this.prisma.$transaction([
-      this.prisma.resource_status_log.create({
+    await this.findById(id);
+    const { resource, updated } = await this.prisma.$transaction(async (tx) => {
+      // Same row lock as dispatch create/reassign, so a dispatch can't land in between.
+      const [locked] = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT status::text AS status FROM resources WHERE id = ${id}::uuid FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Resource not found');
+      const mission = await tx.dispatches.findFirst({
+        where: { resource_id: id, status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
+        select: {
+          resources: { select: { name: true, call_sign: true } },
+          incidents: { select: { public_reference: true } },
+        },
+      });
+      if (mission) {
+        const unit = mission.resources?.call_sign ?? mission.resources?.name ?? 'This unit';
+        throw new ConflictException({
+          code: 'UNIT_ON_MISSION',
+          message:
+            `${unit} is on ${mission.incidents?.public_reference ?? 'an incident'}. ` +
+            'Recall or replace it on Live Dispatch; its status updates by itself when the crew finishes.',
+        });
+      }
+      await tx.resource_status_log.create({
         data: {
           resource_id: id,
-          from_status: resource.status,
+          from_status: locked.status as any,
           to_status: dto.status as any,
           changed_by_id: userId,
         },
-      }),
-      this.prisma.resources.update({
+      });
+      const updated = await tx.resources.update({
         where: { id },
-        data: { status: dto.status as any },
-      }),
-    ]);
+        // No active dispatch, so any incident link left from old data is cleared.
+        data: { status: dto.status as any, current_incident_id: null },
+      });
+      return { resource: { status: locked.status }, updated };
+    });
 
     void this.audit.log({
       action: AuditAction.STATUS_CHANGE,

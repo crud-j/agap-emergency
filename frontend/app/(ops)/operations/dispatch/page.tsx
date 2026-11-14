@@ -20,6 +20,7 @@ import {
 import { homeCrew, planUnitSelection, type CandidateUnit, type UnitSelectionPlan } from '@/features/dispatch/unit-selection';
 import { resourceTypeLabel } from '@/features/resources/resource-type';
 import { useResponders } from '@/features/responders/hooks';
+import { isFreeForCrew } from '@/features/responders/readiness';
 import { useIncident, useUpdateIncidentStatus } from '@/features/incidents/hooks';
 import {
   ACTIVE_RESPONSE_INCIDENT_STATUSES, isRouteLastKnown, recommendUnitsNeeded, sanitizeIntakeAnswers,
@@ -1088,7 +1089,8 @@ function RecommendationPanel({
   // someone else sent meanwhile (INCIDENT_DISPATCH_CHANGED).
   const [seenActiveUnits, setSeenActiveUnits] = useState<number | null>(null);
 
-  const availableResponders = useMemo(() => responders.filter((r) => r.availability_status === 'AVAILABLE'), [responders]);
+  // On duty and riding no other unit on any incident (the backend refuses RESPONDER_ON_ASSIGNMENT).
+  const availableResponders = useMemo(() => responders.filter(isFreeForCrew), [responders]);
   const availableResponderIds = useMemo(() => new Set(availableResponders.map((r) => r.id)), [availableResponders]);
   const activeDispatches = useMemo(() => (incidentDispatches ?? []).filter((d) => ACTIVE_DISPATCH.includes(d.status)), [incidentDispatches]);
   // A responder on a unit already responding can't also crew a new one (RESPONDER_ALREADY_ON_INCIDENT).

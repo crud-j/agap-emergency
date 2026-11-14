@@ -11,6 +11,13 @@ export interface Responder {
   availability_status: string;
   availability_changed_at: string | null;
   organization: { id: string; name: string } | null;
+  /** The active unit this responder rides (GET /responders); null when free. */
+  active_assignment?: {
+    dispatch_id: string;
+    incident_id: string;
+    unit: string;
+    incident_reference: string | null;
+  } | null;
 }
 
 export interface ResponderListParams {

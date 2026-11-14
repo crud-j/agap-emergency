@@ -4,6 +4,8 @@ import { validate } from 'class-validator';
 import { resource_status } from '@prisma/client';
 import {
   DEPLOYED_RESOURCE_STATUSES,
+  MANUAL_RESOURCE_STATUSES,
+  MISSION_RESOURCE_STATUSES,
   ResourceStatus,
   UNAVAILABLE_RESOURCE_STATUSES,
 } from '@agap/shared';
@@ -23,9 +25,20 @@ describe('Unit status values', () => {
     expect([...DEPLOYED_RESOURCE_STATUSES, ...UNAVAILABLE_RESOURCE_STATUSES]).not.toContain(ResourceStatus.AVAILABLE);
   });
 
-  it('PATCH /resources/:id/status accepts every database status', async () => {
+  it('every database status is either set by a person or by the mission, never both', () => {
+    const manual = new Set<string>(MANUAL_RESOURCE_STATUSES);
+    const mission = new Set<string>(MISSION_RESOURCE_STATUSES);
+    expect([...manual].filter((s) => mission.has(s))).toEqual([]);
+    expect([...manual, ...mission].sort()).toEqual(Object.values(resource_status).sort());
+  });
+
+  it('PATCH /resources/:id/status accepts exactly the manual statuses', async () => {
     for (const status of Object.values(resource_status)) {
-      expect(await validate(plainToInstance(UpdateResourceStatusDto, { status }))).toHaveLength(0);
+      const errors = await validate(plainToInstance(UpdateResourceStatusDto, { status }));
+      expect({ status, accepted: errors.length === 0 }).toEqual({
+        status,
+        accepted: (MANUAL_RESOURCE_STATUSES as readonly string[]).includes(status),
+      });
     }
   });
 

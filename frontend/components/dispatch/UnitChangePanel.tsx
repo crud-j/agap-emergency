@@ -15,6 +15,7 @@ import { useAvailableUnits, useCancelDispatch, useReassignDispatch } from '@/fea
 import { homeCrew } from '@/features/dispatch/unit-selection';
 import { resourceTypeLabel } from '@/features/resources/resource-type';
 import { useResponders } from '@/features/responders/hooks';
+import { isFreeForCrew } from '@/features/responders/readiness';
 import type { IncidentDispatch } from '@/features/dispatch/api';
 
 export type UnitChangeMode = 'recall' | 'replace';
@@ -53,9 +54,13 @@ export function UnitChangePanel({
 
   const { data: availableUnits = [], isLoading: unitsLoading } = useAvailableUnits();
   const { data: responders = [] } = useResponders({ perPage: 100 });
+  // Free to crew the replacement: on duty and riding no other unit. The replaced unit's
+  // own crew counts as free (its dispatch is cancelled in the same transaction).
   const onDutyIds = useMemo(
-    () => new Set(responders.filter((r) => r.availability_status === 'AVAILABLE').map((r) => r.id)),
-    [responders],
+    () => new Set(responders
+      .filter((r) => isFreeForCrew(r) || (r.availability_status === 'AVAILABLE' && r.active_assignment?.dispatch_id === dispatch.id))
+      .map((r) => r.id)),
+    [responders, dispatch.id],
   );
   // The recalled unit's own crew is free again once it is replaced, but it rides its own unit.
   const replacements = useMemo(

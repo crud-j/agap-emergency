@@ -19,6 +19,7 @@ import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { DispatchChangeDto, ReassignDispatchDto } from './dto/dispatch-actions.dto';
 import { SubmitTriageDto } from './dto/submit-triage.dto';
 import { LockedDispatch, lockIncidentAndDispatch, releaseDispatchedUnit } from './dispatch-release';
+import { assertCrewFree } from './crew-assignment';
 import {
   ASSIGNMENT_PUSH_JOB,
   ASSIGNMENT_PUSH_OPTS,
@@ -190,6 +191,14 @@ export class DispatchService {
       if (dto.expectedActiveUnits !== undefined) {
         await assertNoUnseenDispatch(tx, dto.incidentId, dto.expectedActiveUnits, dispatcherId);
       }
+      // The AVAILABLE check above ran without a lock: two dispatchers may send the same
+      // unit to two incidents, or a Supervisor may set it Out of service meanwhile.
+      // Re-read under a row lock (as reassign does) so the second one fails cleanly.
+      const [lockedResource] = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT status::text AS status FROM resources WHERE id = ${dto.resourceId}::uuid FOR UPDATE`;
+      if (lockedResource?.status !== 'AVAILABLE') {
+        throw new ConflictException({ code: 'RESOURCE_NOT_AVAILABLE', message: `${unitName(resource)} is no longer available.` });
+      }
 
       const created = await this.insertDispatch(tx, {
         incidentId: dto.incidentId,
@@ -197,9 +206,6 @@ export class DispatchService {
         dispatcherId,
         notes: dto.dispatchNotes ?? null,
         crewIds: dto.initialCrewIds,
-        // Availability has no "busy" state, so a responder already on this incident's
-        // first unit is still AVAILABLE. They can't also crew the additional unit.
-        checkCrewOnIncident: additionalUnit,
       });
 
       if (additionalUnit) {
@@ -363,7 +369,6 @@ export class DispatchService {
         dispatcherId: userId,
         notes: old.dispatch_notes ?? null,
         crewIds: dto.crewIds,
-        checkCrewOnIncident: true,
       });
 
       // The replacement hasn't moved yet. If the replaced unit was the only one on
@@ -437,8 +442,6 @@ export class DispatchService {
       dispatcherId: string;
       notes: string | null;
       crewIds?: string[] | undefined;
-      /** Refuse a responder already crewing another active unit on this incident. */
-      checkCrewOnIncident: boolean;
     },
   ) {
     const created = await tx.dispatches.create({
@@ -475,16 +478,8 @@ export class DispatchService {
         throw new ConflictException('RESPONDER_NOT_AVAILABLE');
       }
 
-      if (args.checkCrewOnIncident) {
-        const alreadyCrewed = await tx.dispatch_crew.findFirst({
-          where: {
-            user_id: { in: sorted },
-            dispatches: { incident_id: args.incidentId, status: { in: ACTIVE_DISPATCH_STATUSES as any[] } },
-          },
-          select: { user_id: true },
-        });
-        if (alreadyCrewed) throw new ConflictException('RESPONDER_ALREADY_ON_INCIDENT');
-      }
+      // Not on another active unit, on this incident or any other.
+      await assertCrewFree(tx, sorted, args.incidentId);
 
       await tx.dispatch_crew.createMany({
         data: sorted.map((uid) => ({ dispatch_id: created.id, user_id: uid })),
@@ -665,6 +660,7 @@ export class DispatchService {
       if (crewRow.status !== 'AVAILABLE') {
         throw new ConflictException('RESPONDER_NOT_AVAILABLE');
       }
+      await assertCrewFree(tx, [userId], dispatch.incident_id);
 
       return tx.dispatch_crew.create({
         data: { dispatch_id: dispatchId, user_id: userId },

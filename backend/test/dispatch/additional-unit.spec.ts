@@ -13,6 +13,10 @@ function build(opts: {
   resourceStatus?: string;
   crew?: string[];
   crewAlreadyOnIncident?: boolean;
+  /** The crew member already rides an active unit on ANOTHER incident. */
+  crewOnOtherIncident?: boolean;
+  /** Unit status re-read under the row lock inside the transaction. */
+  lockedResourceStatus?: string;
   /** Active dispatches already on the incident when the lock is taken (newest first). */
   activeDispatches?: Array<{ dispatcher_id: string; call_sign: string; full_name: string }>;
 }) {
@@ -22,10 +26,12 @@ function build(opts: {
     created_at: new Date('2026-11-02T01:00:00Z'), dispatch_notes: null,
   };
   const tx = {
-    $queryRaw: jest.fn(async (sql: TemplateStringsArray | { sql?: string }) =>
-      (Array.isArray(sql) ? sql.join('') : String((sql as { sql?: string }).sql ?? '')).includes('FROM incidents')
-        ? [{ status: opts.lockedStatus ?? opts.status }]
-        : crew.map((user_id) => ({ user_id, status: 'AVAILABLE' }))),
+    $queryRaw: jest.fn(async (sql: TemplateStringsArray | { sql?: string }) => {
+      const text = Array.isArray(sql) ? sql.join('') : String((sql as { sql?: string }).sql ?? '');
+      if (text.includes('FROM incidents')) return [{ status: opts.lockedStatus ?? opts.status }];
+      if (text.includes('FROM resources')) return [{ status: opts.lockedResourceStatus ?? 'AVAILABLE' }];
+      return crew.map((user_id) => ({ user_id, status: 'AVAILABLE' }));
+    }),
     dispatches: {
       create: jest.fn().mockResolvedValue(dispatchRow),
       findMany: jest.fn().mockResolvedValue((opts.activeDispatches ?? []).map((d) => ({
@@ -37,7 +43,18 @@ function build(opts: {
     },
     dispatch_crew: {
       createMany: jest.fn().mockResolvedValue({ count: crew.length }),
-      findFirst: jest.fn().mockResolvedValue(opts.crewAlreadyOnIncident ? { user_id: crew[0] } : null),
+      findFirst: jest.fn().mockResolvedValue(
+        opts.crewAlreadyOnIncident || opts.crewOnOtherIncident
+          ? {
+              users: { full_name: 'Maria Santos' },
+              dispatches: {
+                incident_id: opts.crewOnOtherIncident ? 'inc-other' : 'inc-1',
+                resources: { name: 'Ambulance 1', call_sign: 'AMB-1' },
+                incidents: { public_reference: opts.crewOnOtherIncident ? 'INC-2026-000999' : 'INC-2026-000123' },
+              },
+            }
+          : null,
+      ),
     },
     resources: { update: jest.fn() },
     incident: { update: jest.fn() },
@@ -155,15 +172,11 @@ describe('DispatchService.create: additional unit (Phase 5)', () => {
 
   it("refuses a responder already crewed on this incident's active dispatch", async () => {
     const b = build({ status: 'ON_SCENE', crewAlreadyOnIncident: true });
-    await expect(b.service.create(b.dto as any, 'dispatcher-1')).rejects.toThrow(
-      new ConflictException('RESPONDER_ALREADY_ON_INCIDENT'),
-    );
-    expect(b.tx.dispatch_crew.findFirst).toHaveBeenCalledWith({
-      where: {
-        user_id: { in: ['resp-fire'] },
-        dispatches: { incident_id: 'inc-1', status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
-      },
-      select: { user_id: true },
+    await expect(b.service.create(b.dto as any, 'dispatcher-1')).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'RESPONDER_ALREADY_ON_INCIDENT',
+        message: 'Maria Santos is already crewing AMB-1 on this incident.',
+      }),
     });
     expect(b.tx.dispatch_crew.createMany).not.toHaveBeenCalled();
   });
@@ -181,7 +194,10 @@ describe('DispatchService.create: first unit unchanged', () => {
     expect(b.tx.incidentEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ from_status: 'ASSESSED', to_status: 'DISPATCHED' }),
     });
-    expect(b.tx.dispatch_crew.findFirst).not.toHaveBeenCalled();
+    // Crew are checked against active units on every incident, first unit included.
+    expect(b.tx.dispatch_crew.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { user_id: { in: ['resp-fire'] }, dispatches: { status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } } },
+    }));
     expect(b.realtime.notifyIncidentStatusChanged).toHaveBeenCalledWith(expect.objectContaining({
       previousStatus: 'ASSESSED', newStatus: 'DISPATCHED',
     }));
@@ -253,5 +269,35 @@ describe('DispatchService.create: someone else dispatched first (expectedActiveU
     const b = build({ status: 'ASSESSED', lockedStatus: 'DISPATCHED', activeDispatches: [ANA] });
     await expect(b.service.create(b.dto as any, 'dispatcher-1')).resolves.toBeDefined();
     expect(b.tx.dispatches.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('DispatchService.create: one person, one unit; one unit, one incident', () => {
+  it('refuses a responder already riding a unit on ANOTHER incident (availability stays AVAILABLE on a mission)', async () => {
+    const b = build({ status: 'ASSESSED', crewOnOtherIncident: true });
+    await expect(b.service.create(b.dto as any, 'dispatcher-1')).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'RESPONDER_ON_ASSIGNMENT',
+        message: expect.stringContaining('Maria Santos is already crewing AMB-1 on INC-2026-000999'),
+      }),
+    });
+    expect(b.tx.dispatch_crew.createMany).not.toHaveBeenCalled();
+    expect(b.tx.resources.update).not.toHaveBeenCalled();
+    expect(b.tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a unit another dispatcher took meanwhile (re-read under the unit row lock)', async () => {
+    const b = build({ status: 'ASSESSED', lockedResourceStatus: 'DISPATCHED' });
+    await expect(b.service.create(b.dto as any, 'dispatcher-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'RESOURCE_NOT_AVAILABLE', message: 'CHARLIE-1 is no longer available.' }),
+    });
+    expect(b.tx.dispatches.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a unit set Out of service meanwhile', async () => {
+    const b = build({ status: 'ASSESSED', lockedResourceStatus: 'OUT_OF_SERVICE' });
+    await expect(b.service.create(b.dto as any, 'dispatcher-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'RESOURCE_NOT_AVAILABLE' }),
+    });
   });
 });

@@ -21,6 +21,7 @@ import { TransportAudienceService } from '../incidents/transport/transport-audie
 import { notifyRescueStillWaiting } from '../incidents/rescue-trip/rescue-trip.service';
 import { assertResponderFixInArea } from '../locations/responder-fix-area';
 import { lockIncidentAndDispatch, releaseDispatchedUnit } from '../dispatch/dispatch-release';
+import { advanceMissionUnit } from '../dispatch/unit-status';
 import { findSharedReporterProfile } from '../medical-profiles/patient-medical-access';
 import { UpdateAssignmentStatusDto } from './dto/update-assignment-status.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
@@ -133,6 +134,39 @@ export class RespondersService {
       },
       orderBy: { full_name: 'asc' },
     });
+    // Who rides an active unit right now. Availability is the responder's own duty
+    // switch and stays AVAILABLE on a mission, so the fleet board and the dispatch
+    // crew picker read this to show "On assignment" (one person, one unit).
+    const crewRows = users.length
+      ? await this.prisma.dispatch_crew.findMany({
+          where: {
+            user_id: { in: users.map((u) => u.id) },
+            dispatches: { status: { in: ['PENDING', 'SENT', 'ACCEPTED'] } },
+          },
+          orderBy: { added_at: 'desc' },
+          select: {
+            user_id: true,
+            dispatches: {
+              select: {
+                id: true,
+                incident_id: true,
+                resources: { select: { name: true, call_sign: true } },
+                incidents: { select: { public_reference: true } },
+              },
+            },
+          },
+        })
+      : [];
+    const assignmentOf = new Map<string, { dispatch_id: string; incident_id: string; unit: string; incident_reference: string | null }>();
+    for (const c of crewRows) {
+      if (assignmentOf.has(c.user_id)) continue;
+      assignmentOf.set(c.user_id, {
+        dispatch_id: c.dispatches.id,
+        incident_id: c.dispatches.incident_id,
+        unit: c.dispatches.resources?.call_sign ?? c.dispatches.resources?.name ?? 'Unit',
+        incident_reference: c.dispatches.incidents?.public_reference ?? null,
+      });
+    }
     return users.map((u) => ({
       id: u.id,
       full_name: u.full_name,
@@ -143,6 +177,7 @@ export class RespondersService {
       availability_changed_at:
         u.responder_availability_user?.changed_at?.toISOString() ?? null,
       organization: u.organization_memberships[0]?.organizations ?? null,
+      active_assignment: assignmentOf.get(u.id) ?? null,
     }));
   }
 
@@ -543,7 +578,7 @@ export class RespondersService {
 
     const now = new Date();
 
-    const { finishedDispatches, begun, stampedDispatch, resultingIncidentStatus } = await this.prisma.$transaction(async (tx) => {
+    const { finishedDispatches, begun, stampedDispatch, resultingIncidentStatus, unitChange } = await this.prisma.$transaction(async (tx) => {
       if (transporting) {
         // The record exists from this tap on, even if the destination picker is cancelled.
         const begun = await this.transport.beginTransport(tx, {
@@ -554,7 +589,8 @@ export class RespondersService {
           at: now,
           ...(clientRequestId && { clientRequestId }),
         });
-        return { finishedDispatches: [], begun, stampedDispatch: null, resultingIncidentStatus: incidentStatus };
+        // beginTransport moves the unit to TRANSPORTING; announceTransportBegun broadcasts it.
+        return { finishedDispatches: [], begun, stampedDispatch: null, resultingIncidentStatus: incidentStatus, unitChange: null };
       }
 
       // Lock the incident so two crews finishing at once can't both see the other
@@ -620,16 +656,24 @@ export class RespondersService {
             ? { en_route_at: now }
             : { on_scene_at: now },
         });
+        // This crew's unit follows its own progress, even when another unit already
+        // moved the incident ahead.
+        const unitChange = await advanceMissionUnit(
+          tx, dispatch, incidentStatus === IncidentStatus.EN_ROUTE ? 'EN_ROUTE' : 'ON_SCENE',
+        );
         return {
           finishedDispatches: [],
           begun: null,
           stampedDispatch: stamped,
           resultingIncidentStatus: shouldTransition ? incidentStatus : currentStatus,
+          unitChange,
         };
       }
 
       if (!resolving) {
-        return { finishedDispatches: [], begun: null, stampedDispatch: null, resultingIncidentStatus: incidentStatus };
+        // ASSISTING (treating on scene): the unit is on scene.
+        const unitChange = await advanceMissionUnit(tx, dispatch, 'ON_SCENE');
+        return { finishedDispatches: [], begun: null, stampedDispatch: null, resultingIncidentStatus: incidentStatus, unitChange };
       }
 
       await tx.dispatches.update({
@@ -660,8 +704,18 @@ export class RespondersService {
         begun: null,
         stampedDispatch: null,
         resultingIncidentStatus: callerIsLastActive ? incidentStatus : currentStatus,
+        unitChange: null,
       };
     });
+
+    // The fleet board follows the crew (MOD-28); the finish path announces AVAILABLE below.
+    if (unitChange) {
+      try {
+        this.realtime.resourceStatusChanged({ ...unitChange, changedAt: now.toISOString() });
+      } catch (err) {
+        this.logger.warn(`Realtime emit failed for unit ${unitChange.resourceId}: ${String(err)}`);
+      }
+    }
 
     // A second unit starting its own transport leaves the incident TRANSPORTING:
     // no status change to audit, announce or notify (its transport record is audited).

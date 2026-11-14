@@ -16,6 +16,11 @@ export interface Resource {
   organization_id: string;
   organization?: { id: string; name: string; short_name?: string | null };
   capabilities?: ResourceCapability[];
+  /**
+   * The unit's active dispatch (GET /resources). While set, its status is driven by
+   * dispatch and the crew, and the fleet board locks the status control.
+   */
+  active_dispatch?: { dispatch_id: string; incident_id: string; incident_reference: string | null } | null;
 }
 
 /** A capability assigned to a unit (MOD-29). Only verified ones count in recommendations. */

@@ -25,11 +25,12 @@ Maintains, in real time, every unit's current status — available, assigned, en
 Give the dispatcher a single, always-current board to check before recommending or authorizing any dispatch, instead of having to call around to ask who's free.
 
 **Tasks Performed**
-1. Shows a live status summary and a dropdown to change any unit's status manually from the web Fleet board.
-2. Lets a responder toggle their own availability from their phone.
-3. Propagates a responder's availability toggle to the web Fleet board immediately through the real-time event engine (MOD-20).
-4. Feeds this status directly into MOD-30's readiness filter and MOD-31's pre-assignment check.
-5. Persists each status change with identifiers and timestamps.
+1. Shows a live status summary and, for a unit not on a dispatch, a dropdown to set it Available, Out of service, Offline or Reserved from the web Fleet board.
+2. Moves a dispatched unit through Dispatched, En route, On scene and Transporting by itself as its crew reports progress, and back to Available when the crew finishes or the unit is recalled.
+3. Lets a responder toggle their own availability from their phone, and shows a responder riding a unit as "On assignment".
+4. Propagates every unit and responder change to the web Fleet board immediately through the real-time event engine (MOD-20).
+5. Feeds this status directly into MOD-30's readiness filter and MOD-31's pre-assignment check.
+6. Persists each status change with identifiers and timestamps.
 
 ---
 
@@ -76,11 +77,12 @@ Give the dispatcher a single, always-current board to check before recommending 
 | Step | Process Description | Step Type |
 |---|---|---|
 | 1 | The dispatcher opens the Fleet board and sees a live status summary for every unit. Its Units & Personnel tab has a Units section and a Responders section, each with a search box and filters (organization, unit type and readiness for units; availability for responders). | User Action |
-| 2 | The dispatcher can change a unit's status manually via the dropdown (e.g. to Maintenance), and the summary tile counts update immediately. | User Action |
+| 2 | For a unit not on a dispatch, the dispatcher sets its status via the dropdown (Available, Out of service, Offline or Reserved), and the summary tile counts update immediately. While the unit is on a dispatch the dropdown is locked and shows the incident; mission statuses are never set by hand. | User Action |
+| 2a | When a unit is dispatched, and as its crew reports En route, On scene (or treating) and Transporting, the unit's status follows by itself, forward only. Finishing, recall or replacement returns it to Available. | Processing |
 | 3 | Separately, a responder flips their own availability toggle on their phone. | User Action |
 | 4 | That update is persisted and broadcast through the same real-time event engine as MOD-20. | Database |
 | 5 | The web Fleet board updates live, with no page refresh, proving the mobile and web sides are genuinely one connected system. | Notification |
-| 6 | MOD-30's unit recommendation and MOD-31's dispatch-authorization check both read this status feed before a unit can be suggested or assigned. | Processing |
+| 6 | MOD-30's unit recommendation and MOD-31's dispatch-authorization check both read this status feed before a unit can be suggested or assigned. Dispatch re-checks the unit under a lock, and refuses a responder already riding another unit on any incident. | Processing |
 
 **TO-BE Outputs**
 
@@ -95,8 +97,13 @@ Give the dispatcher a single, always-current board to check before recommending 
 ## Owner notes (not part of the report)
 
 **Test before signing:**
-1. On the web Fleet board, change a unit's status via the dropdown (e.g. to Maintenance) and confirm the summary tile counts update.
-2. On the responder phone (signed in as a dispatched responder), toggle availability and confirm the web Fleet board updates live without a page refresh.
+1. On the web Fleet board, set a free unit to Out of service via the dropdown and confirm the summary tile counts update. The dropdown lists only Available, Out of service, Offline and Reserved.
+2. On the responder phone (a responder not on any unit), toggle availability and confirm the web Fleet board updates live without a page refresh.
+3. Dispatch a unit from Live Dispatch: on an open Fleet board it turns Dispatched, shows "On INC-…", and its dropdown is locked. From the crew phone tap En route, then On scene: the unit follows each step live. Tap Finish: it is Available and the dropdown unlocks.
+4. With that crew still on the unit, open another incident's dispatch form: those responders are not offered as crew, and on the Fleet board's Responders list they show "On assignment · AMB-1 · INC-…". Forcing it through the API (`POST /v1/dispatch` with one of them in `initialCrewIds`) returns 409 `RESPONDER_ON_ASSIGNMENT`.
+5. `PATCH /v1/resources/:id/status` with `TRANSPORTING` returns 400; with `OUT_OF_SERVICE` on a dispatched unit it returns 409 `UNIT_ON_MISSION` naming the incident.
+
+**Changed 2026-11-14:** mission statuses (Dispatched, En route, On scene, Transporting, Returning) can no longer be set by hand, since a unit in the workshop could otherwise be shown as transporting. They come only from dispatch and the crew's progress. A unit left in a mission status by old data, with no active dispatch, can still be set back to Available.
 
 **Do not claim:**
 - Physical readiness (fuel, equipment, crew health) — that remains a human judgment, not something this module verifies.

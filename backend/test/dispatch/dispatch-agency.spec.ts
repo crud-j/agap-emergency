@@ -17,9 +17,12 @@ function build(opts: { existing?: boolean; createFails?: boolean } = {}) {
   };
   const tx = {
     dispatches: { create: jest.fn().mockResolvedValue(dispatchRow) },
-    // The incident row lock taken by create() (Phase 5).
-    $queryRaw: jest.fn().mockResolvedValue([{ status: 'ASSESSED' }]),
-    dispatch_crew: { createMany: jest.fn() },
+    // The incident row lock taken by create() (Phase 5), then the unit row lock.
+    $queryRaw: jest.fn(async (sql: TemplateStringsArray | { sql?: string }) =>
+      (Array.isArray(sql) ? sql.join('') : String((sql as { sql?: string }).sql ?? '')).includes('FROM resources')
+        ? [{ status: 'AVAILABLE' }]
+        : [{ status: 'ASSESSED' }]),
+    dispatch_crew: { createMany: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
     resources: { update: jest.fn() },
     incident: { update: jest.fn() },
     incidentEvent: { create: jest.fn() },

@@ -64,7 +64,12 @@ function createHarness(incidentStatus: IncidentStatus) {
     },
     incident: { update: jest.fn().mockResolvedValue({ id: INCIDENT }) },
     incidentEvent: { create: jest.fn().mockResolvedValue({}) },
-    resources: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    resources: {
+      updateMany: jest.fn().mockResolvedValue({ count: 2 }),
+      // Each unit is still on this incident, not yet moving (fleet board follows the crew).
+      findUnique: jest.fn().mockResolvedValue({ status: 'DISPATCHED', current_incident_id: INCIDENT }),
+      update: jest.fn().mockResolvedValue({}),
+    },
   };
   const prisma = {
     $transaction: jest.fn((fn: (transaction: typeof tx) => unknown) => fn(tx)),

@@ -112,6 +112,11 @@ const tx = {
   incident: { update: jest.fn() },
   incidentEvent: { create: jest.fn() },
   facility_referrals: { findMany: jest.fn(), update: jest.fn() },
+  // The transporting unit, on this incident (a new transport moves it to TRANSPORTING).
+  resources: {
+    findUnique: jest.fn().mockResolvedValue({ status: 'ON_SCENE', current_incident_id: INCIDENT_ID }),
+    update: jest.fn(),
+  },
 };
 
 const mockPrisma = {

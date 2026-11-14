@@ -31,7 +31,7 @@ function setup(incidentStatus: IncidentStatus, resourceType = 'AMBULANCE') {
   const tx = {
     $queryRaw: jest.fn().mockResolvedValue([{ status: incidentStatus }]),
     dispatches: {
-      findUnique: jest.fn().mockResolvedValue({ incident_id: INCIDENT, resources: { resource_type: resourceType } }),
+      findUnique: jest.fn().mockResolvedValue({ incident_id: INCIDENT, resource_id: 'res-1', resources: { resource_type: resourceType } }),
       findMany: jest.fn().mockResolvedValue([{ id: DISPATCH, resource_id: 'res-1', status: 'ACCEPTED' }]),
       update: jest.fn().mockResolvedValue({}),
     },
@@ -49,7 +49,12 @@ function setup(incidentStatus: IncidentStatus, resourceType = 'AMBULANCE') {
     },
     incident: { update: jest.fn().mockResolvedValue({ id: INCIDENT }) },
     incidentEvent: { create: jest.fn().mockResolvedValue({}) },
-    resources: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    resources: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      // The crew's unit, on this incident (fleet board follows the crew).
+      findUnique: jest.fn().mockResolvedValue({ status: 'ON_SCENE', current_incident_id: INCIDENT }),
+      update: jest.fn().mockResolvedValue({}),
+    },
   };
   const prisma = {
     $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -228,5 +233,45 @@ describe('PATCH /responders/assignments/:id/status — RESOLVED before arrival (
     }));
     expect(tx.dispatches.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'COMPLETED' }) }));
     expect(notifier.notifyReporter).toHaveBeenCalledWith(INCIDENT, IncidentStatus.RESOLVED);
+  });
+});
+
+describe('the fleet board follows the crew (unit status on progress)', () => {
+  it('starting a transport moves the unit to TRANSPORTING and broadcasts it', async () => {
+    const { tx, responders, realtime } = setup(IncidentStatus.ON_SCENE);
+    await responders.updateStatus(DISPATCH, CREW, { status: 'TRANSPORTING' } as any);
+
+    expect(tx.resources.update).toHaveBeenCalledWith({ where: { id: 'res-1' }, data: { status: 'TRANSPORTING' } });
+    expect(realtime.resourceStatusChanged).toHaveBeenCalledWith(expect.objectContaining({
+      resourceId: 'res-1', previousStatus: 'ON_SCENE', newStatus: 'TRANSPORTING',
+    }));
+  });
+
+  it('En route moves a DISPATCHED unit to EN_ROUTE and broadcasts it', async () => {
+    const { tx, responders, realtime } = setup(IncidentStatus.DISPATCHED);
+    tx.resources.findUnique.mockResolvedValue({ status: 'DISPATCHED', current_incident_id: INCIDENT });
+    await responders.updateStatus(DISPATCH, CREW, { status: 'EN_ROUTE' } as any);
+
+    expect(tx.resources.update).toHaveBeenCalledWith({ where: { id: 'res-1' }, data: { status: 'EN_ROUTE' } });
+    expect(realtime.resourceStatusChanged).toHaveBeenCalledWith(expect.objectContaining({
+      resourceId: 'res-1', previousStatus: 'DISPATCHED', newStatus: 'EN_ROUTE',
+    }));
+  });
+
+  it('never moves a unit backwards: a late En route on an on-scene unit leaves it ON_SCENE', async () => {
+    const { tx, responders, realtime } = setup(IncidentStatus.ON_SCENE);
+    await responders.updateStatus(DISPATCH, CREW, { status: 'EN_ROUTE' } as any);
+
+    expect(tx.resources.update).not.toHaveBeenCalled();
+    expect(realtime.resourceStatusChanged).not.toHaveBeenCalled();
+  });
+
+  it('leaves a unit alone once it is no longer on this incident (recalled or replaced)', async () => {
+    const { tx, responders, realtime } = setup(IncidentStatus.DISPATCHED);
+    tx.resources.findUnique.mockResolvedValue({ status: 'DISPATCHED', current_incident_id: 'inc-other' });
+    await responders.updateStatus(DISPATCH, CREW, { status: 'EN_ROUTE' } as any);
+
+    expect(tx.resources.update).not.toHaveBeenCalled();
+    expect(realtime.resourceStatusChanged).not.toHaveBeenCalled();
   });
 });

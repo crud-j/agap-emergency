@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Suspense, useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -7,7 +8,9 @@ import {
   Search, CheckCircle2, Radio, MapPin, AlertCircle, Wrench, Undo2, Clock, WifiOff,
   UserCheck, UserX, UserMinus, X, RefreshCw,
 } from 'lucide-react';
-import { DEPLOYED_RESOURCE_STATUSES, ResourceStatus, UNAVAILABLE_RESOURCE_STATUSES } from '@agap/shared';
+import {
+  DEPLOYED_RESOURCE_STATUSES, MANUAL_RESOURCE_STATUSES, ResourceStatus, UNAVAILABLE_RESOURCE_STATUSES,
+} from '@agap/shared';
 import type { LucideIcon } from 'lucide-react';
 import {
   Button,
@@ -18,6 +21,7 @@ import { useWsState } from '@/lib/use-ws-state';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { titleCase } from '@/lib/incident-format';
 import { useResources, useUpdateResourceStatus } from '@/features/resources/hooks';
+import { assignmentLabel, responderReadiness } from '@/features/responders/readiness';
 import { useResponders } from '@/features/responders/hooks';
 import { useOrganizations } from '@/features/organizations/hooks';
 import type { Resource } from '@/features/resources/api';
@@ -31,9 +35,9 @@ import { RESOURCE_TYPES, resourceTypeLabel } from '@/features/resources/resource
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-// Exactly the database's resource_status values (shared enum). The select lists all of
-// them, so a unit the system put in TRANSPORTING still shows its current status.
-const RESOURCE_STATUSES = Object.values(ResourceStatus);
+// What a person may set (shared MANUAL_RESOURCE_STATUSES). Dispatched, En route, On scene,
+// Transporting and Returning come from dispatch and the crew, never from this board.
+const MANUAL_STATUSES: readonly string[] = MANUAL_RESOURCE_STATUSES;
 
 const ALL = 'ALL';
 
@@ -73,6 +77,7 @@ function resourceStatusStyle(status: string): StatusStyle {
 
 function responderAvailabilityStyle(status: string): StatusStyle {
   switch (status) {
+    case 'ON_ASSIGNMENT': return { badge: 'bg-amber-50 text-amber-800 ring-amber-200',          accent: 'bg-amber-500',  icon: Radio,     label: 'On assignment' };
     case 'AVAILABLE':   return { badge: 'bg-agap-greenSoft text-agap-green ring-agap-green/20', accent: 'bg-agap-green', icon: UserCheck, label: 'Available' };
     case 'OFF_DUTY':    return { badge: 'bg-slate-100 text-slate-700 ring-slate-200',           accent: 'bg-slate-400',  icon: UserMinus, label: 'Off duty' };
     case 'UNAVAILABLE': return { badge: 'bg-red-50 text-red-700 ring-red-200',                  accent: 'bg-red-500',    icon: UserX,     label: 'Unavailable' };
@@ -242,6 +247,11 @@ function UnitCard({ resource, canChangeStatus }: { resource: Resource; canChange
   const TypeIcon = resourceTypeIcon(resource.resource_type);
   const capabilities = resource.capabilities ?? [];
   const meta = [resourceTypeLabel(resource.resource_type), resource.base_barangay].filter(Boolean).join(' · ');
+  // On a dispatch the status follows the crew; changing the unit goes through Recall or
+  // Replace on Live Dispatch (the backend refuses it here too: UNIT_ON_MISSION).
+  const onMission = !!resource.active_dispatch;
+  // A unit left in a mission status by old data keeps showing it, but can't be set to it.
+  const showsCurrentOnly = !MANUAL_STATUSES.includes(resource.status);
 
   return (
     <article className={cn('relative flex flex-col gap-3 overflow-hidden p-4', PANEL)}>
@@ -289,25 +299,49 @@ function UnitCard({ resource, canChangeStatus }: { resource: Resource; canChange
         </ul>
       )}
 
+      {onMission && (
+        <Link
+          href={`/operations/dispatch?tab=responding`}
+          className="inline-flex items-center gap-1.5 self-start rounded-md bg-amber-50 px-2 py-1 text-[12px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-100"
+        >
+          <Radio size={12} aria-hidden="true" />
+          On {resource.active_dispatch?.incident_reference ?? 'an incident'}
+        </Link>
+      )}
+
       {/* Status change (Dispatcher / Supervisor only) */}
       {canChangeStatus && (
         <div className="mt-auto border-t border-agap-track/40 pt-3">
           <Select
             value={resource.status}
             onValueChange={(s) => updateStatus.mutate({ id: resource.id, status: s })}
-            disabled={updateStatus.isPending}
+            disabled={updateStatus.isPending || onMission}
           >
-            <SelectTrigger aria-label={`Change status of ${resource.name}`} className="w-full">
+            <SelectTrigger
+              aria-label={`Change status of ${resource.name}`}
+              aria-describedby={onMission ? `mission-hint-${resource.id}` : undefined}
+              className="w-full"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {RESOURCE_STATUSES.map((s) => (
+              {showsCurrentOnly && (
+                <SelectItem value={resource.status} disabled>
+                  {resourceStatusStyle(resource.status).label}
+                </SelectItem>
+              )}
+              {MANUAL_STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
                   {resourceStatusStyle(s).label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {onMission && (
+            <p id={`mission-hint-${resource.id}`} className="mt-1.5 text-xs text-slate-500">
+              Updates by itself while on a dispatch. To take the unit off, recall or replace it on Live Dispatch.
+            </p>
+          )}
           {updateStatus.isPending && <p className="mt-1.5 text-xs text-slate-500" role="status">Updating status…</p>}
           {updateStatus.isError && (
             <p className="mt-1.5 text-xs text-agap-danger" role="alert">
@@ -323,7 +357,8 @@ function UnitCard({ resource, canChangeStatus }: { resource: Resource; canChange
 // ─── Responder card ───────────────────────────────────────────────────────────
 
 function ResponderCard({ responder }: { responder: Responder }): JSX.Element {
-  const style = responderAvailabilityStyle(responder.availability_status);
+  const style = responderAvailabilityStyle(responderReadiness(responder));
+  const assignment = assignmentLabel(responder);
   const initials = responder.full_name
     .split(' ')
     .map((p) => p[0] ?? '')
@@ -342,6 +377,7 @@ function ResponderCard({ responder }: { responder: Responder }): JSX.Element {
         <p className="mt-0.5 truncate text-[13px] text-slate-500">
           {[responder.organization?.name, responder.phone_number].filter(Boolean).join(' · ') || '—'}
         </p>
+        {assignment && <p className="mt-0.5 truncate text-[12px] font-semibold text-amber-800">{assignment}</p>}
       </div>
       <StatusBadge style={style} />
     </article>
@@ -392,7 +428,7 @@ function FleetUnitsView(): JSX.Element {
   const filteredResponders = useMemo<Responder[]>(() => {
     const q = responderSearch.trim().toLowerCase();
     return responders
-      .filter((r) => (responderAvailFilter === ALL ? true : r.availability_status === responderAvailFilter))
+      .filter((r) => (responderAvailFilter === ALL ? true : responderReadiness(r) === responderAvailFilter))
       .filter((r) =>
         q
           ? r.full_name.toLowerCase().includes(q) ||
@@ -408,9 +444,11 @@ function FleetUnitsView(): JSX.Element {
     { key: 'UNAVAILABLE', label: 'Unavailable', count: inGroup('UNAVAILABLE'), tone: 'bg-red-500' },
   ];
 
-  const withAvailability = (s: string) => responders.filter((r) => r.availability_status === s).length;
+  // "Available" counts only responders free to crew a unit; riding one is "On assignment".
+  const withAvailability = (s: string) => responders.filter((r) => responderReadiness(r) === s).length;
   const responderSegments: Segment[] = [
     { key: 'AVAILABLE',   label: 'Available',   count: withAvailability('AVAILABLE'),   tone: 'bg-agap-green' },
+    { key: 'ON_ASSIGNMENT', label: 'On assignment', count: withAvailability('ON_ASSIGNMENT'), tone: 'bg-amber-500' },
     { key: 'OFF_DUTY',    label: 'Off duty',    count: withAvailability('OFF_DUTY'),    tone: 'bg-slate-400' },
     { key: 'UNAVAILABLE', label: 'Unavailable', count: withAvailability('UNAVAILABLE'), tone: 'bg-red-500' },
   ];

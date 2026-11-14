@@ -3,6 +3,7 @@
 import { useEffect, useRef, useSyncExternalStore, startTransition, type JSX, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { PaginatedResult } from '@agap/shared';
+import { MISSION_RESOURCE_STATUSES } from '@agap/shared';
 import { connectSocket, disconnectSocket, joinOps, onIncidentEvent } from '@/lib/websocket';
 import { getToken, subscribeSession } from '@/lib/auth';
 import type {
@@ -437,8 +438,22 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       'resource.status_changed',
       ({ resourceId, newStatus }) => {
         startTransition(() => {
+          // A mission status means the unit is on a dispatch: lock the fleet board's status
+          // control at once (the refetch below fills in the incident). Any other status
+          // means it is off one.
+          const onMission = (MISSION_RESOURCE_STATUSES as readonly string[]).includes(newStatus);
           const patchStatus = <T extends { id: string; status: string }>(list: T[]): T[] =>
-            list.map((r) => (r.id === resourceId ? { ...r, status: newStatus } : r));
+            list.map((r) => {
+              if (r.id !== resourceId) return r;
+              const current = (r as { active_dispatch?: unknown }).active_dispatch;
+              return {
+                ...r,
+                status: newStatus,
+                active_dispatch: onMission
+                  ? current ?? { dispatch_id: '', incident_id: '', incident_reference: null }
+                  : null,
+              };
+            });
 
           qc.setQueriesData<PaginatedResult<Resource> | Resource[]>(
             { queryKey: ['resources'], exact: false },
@@ -459,6 +474,9 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
           );
 
           qc.invalidateQueries({ queryKey: ['available-units'] });
+          // Which incident the unit is on, and which crew are now on (or off) assignment.
+          qc.invalidateQueries({ queryKey: ['resources'] });
+          qc.invalidateQueries({ queryKey: ['responders'] });
           // Unit counts on the Dispatcher and Supervisor dashboards.
           qc.invalidateQueries({ queryKey: ['dispatch-summary'] });
           qc.invalidateQueries({ queryKey: ['oversight', 'summary'] });

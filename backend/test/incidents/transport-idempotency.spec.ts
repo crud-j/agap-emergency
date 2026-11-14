@@ -89,6 +89,7 @@ function setup() {
       return row ? { entity_id: row.entity_id } : null;
     }),
   };
+  const unit = { status: 'ON_SCENE' };
   const client = {
     $queryRaw: jest.fn(async () => [{ status: state.incidentStatus }]),
     dispatches: {
@@ -112,6 +113,14 @@ function setup() {
     },
     incidentEvent: { create: jest.fn(async () => ({})) },
     facility_referrals: { findMany: jest.fn(async () => []), update: jest.fn() },
+    // The crew's unit, on this incident; a new transport moves it to TRANSPORTING once.
+    resources: {
+      findUnique: jest.fn(async () => ({ status: unit.status, current_incident_id: INCIDENT })),
+      update: jest.fn(async ({ data }: any) => {
+        unit.status = data.status;
+        return { id: 'res-1', status: data.status };
+      }),
+    },
   };
   const prisma = { ...client, $transaction: jest.fn(async (fn: (tx: typeof client) => unknown) => fn(client)) };
 
@@ -136,7 +145,7 @@ function setup() {
     }),
   };
   const realtime = {
-    statusChanged: jest.fn(), incidentTransporting: jest.fn(), transportUpdated: jest.fn(), facilityArrival: jest.fn(),
+    statusChanged: jest.fn(), incidentTransporting: jest.fn(), resourceStatusChanged: jest.fn(), transportUpdated: jest.fn(), facilityArrival: jest.fn(),
     incidentUpdated: jest.fn(), notifyIncidentStatusChanged: jest.fn(), responderStatus: jest.fn(),
   };
   const audience = {
@@ -157,7 +166,7 @@ function setup() {
     prisma as any, realtime as any, audit as any, statusService, transport, audience as any, notifier as any,
   );
   const transportAudits = () => state.audits.filter((a) => a.entity_type === 'transport_record');
-  return { state, prisma, transport, responders, transportRecord, audit, realtime, notifier, requests, transportAudits };
+  return { state, prisma, transport, responders, transportRecord, audit, realtime, notifier, requests, transportAudits, unit };
 }
 
 /** What the client receives: the HTTP body after JSON serialisation. */
@@ -180,6 +189,10 @@ describe('Transport retries with clientRequestId (Prompt 15)', () => {
       expect(wire(second)).toEqual(wire(first));
       expect(t.transportAudits()).toHaveLength(1);
       expect(t.transportAudits()[0]!.new_values).toMatchObject({ clientRequestId: REQ_A, destination_id: HOSPITAL });
+      // The unit moved to TRANSPORTING once, and the fleet board heard it once.
+      expect(t.unit.status).toBe('TRANSPORTING');
+      expect(t.prisma.resources.update).toHaveBeenCalledTimes(1);
+      expect(t.realtime.resourceStatusChanged).toHaveBeenCalledTimes(1);
     });
 
     it('keeps the answer 24 h under transport:req:{dispatchId}:{clientRequestId}', async () => {
