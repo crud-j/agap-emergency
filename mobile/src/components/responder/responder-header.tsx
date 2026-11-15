@@ -1,13 +1,15 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Image, type ImageStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AgapLogo } from '@/src/components/brand/AgapLogo';
 import { colors } from '@/src/theme/tokens';
 
+const MARK_STYLE: ImageStyle = { width: 34, height: 34 };
+
 /**
- * Shared responder app bar — mirrors the citizen app bar (back · AGAP wordmark ·
- * right slot) on the pearl background with the fine bevel line underneath.
- * Render it inside a SafeAreaView / below the status bar inset.
+ * Responder app bar for operational screens (map, mission, field forms).
+ * With `onBack`: back button · title + subtitle · right slot, like the citizen
+ * ScreenHeader. Without it (the Map tab): the AGAP mark takes the back button's
+ * place. Render it inside a SafeAreaView / below the status bar inset.
  */
 export function ResponderHeader({
   onBack,
@@ -21,35 +23,40 @@ export function ResponderHeader({
   subtitle?: string;
 }) {
   return (
-    <View>
-      <View style={styles.bar}>
-        {onBack ? (
-          <TouchableOpacity
-            onPress={onBack}
-            style={styles.iconBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-          >
-            <Ionicons name="chevron-back" size={22} color={colors.text} />
-          </TouchableOpacity>
-        ) : null}
-        <AgapLogo />
-        <View style={styles.right}>{right}</View>
+    <View style={styles.bar}>
+      {onBack ? (
+        <Pressable
+          onPress={onBack}
+          hitSlop={6}
+          style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.6 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
+          <Ionicons name="chevron-back" size={22} color={colors.text} />
+        </Pressable>
+      ) : (
+        <Image
+          source={require('@/assets/icons/agap-solo-icon.png')}
+          style={MARK_STYLE}
+          resizeMode="contain"
+          accessibilityLabel="AGAP"
+        />
+      )}
+      <View style={styles.titleBlock}>
+        <Text style={styles.title} numberOfLines={1} accessibilityRole="header">
+          {title ?? 'AGAP Responder'}
+        </Text>
+        {subtitle ? <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
       </View>
-      {title ? (
-        <View style={styles.titleBlock}>
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
-          {subtitle ? <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
-        </View>
-      ) : null}
+      {right ? <View style={styles.right}>{right}</View> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   bar: {
-    minHeight: 64,
-    paddingHorizontal: 16,
+    minHeight: 60,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -58,16 +65,16 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     backgroundColor: colors.bg,
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
+  backBtn: {
+    width: 44, height: 44, borderRadius: 22,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.white,
     borderWidth: 1, borderColor: colors.border,
   },
-  right: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 8 },
-  titleBlock: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, backgroundColor: colors.bg },
-  title: { fontSize: 22, fontWeight: '800', color: colors.text },
-  subtitle: { fontSize: 13, color: colors.textSub, marginTop: 2 },
+  titleBlock: { flex: 1, minWidth: 0 },
+  title: { fontSize: 18, fontWeight: '800', color: colors.text, letterSpacing: -0.2 },
+  subtitle: { fontSize: 12, color: colors.textMuted, marginTop: 1, fontVariant: ['tabular-nums'] },
+  right: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 });
 
 export default ResponderHeader;

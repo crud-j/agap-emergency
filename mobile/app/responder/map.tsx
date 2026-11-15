@@ -15,11 +15,13 @@ import { useTranslations } from '@/src/hooks/useAccessibility';
 import { useReporterPhotoUri } from '@/src/hooks/useReporterPhoto';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
-import { categoryColor } from '@/src/lib/incident-visuals';
 import { shouldShareLocation } from '@/src/lib/assignment-progress';
 import { formatDistance, formatDuration } from '@/src/lib/transport-target';
 import { ResponderHeader } from '@/src/components/responder/responder-header';
 import { TransportBanners } from '@/src/components/responder/transport-banners';
+import { Notice, PressScale, StatePanel } from '@/src/components/responder/ui';
+import { IncidentTypeIcon } from '@/src/components/incidents/incident-type-icon';
+import { colors, radius } from '@/src/theme/tokens';
 
 const LiveTrackingMap = React.lazy(
   () => Promise.resolve({
@@ -188,13 +190,14 @@ export default function MapScreen() {
         <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
         <ResponderHeader title="Map" />
         <View style={styles.center}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="cloud-offline-outline" size={32} color="#8795A3" />
-          </View>
-          <Text style={styles.fallbackTitle}>Could not load assignments</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          <StatePanel
+            icon="cloud-offline-outline"
+            title="Could not load assignments"
+            body="Check your connection. The map shows your route once your missions load."
+            actionLabel="Retry"
+            actionIcon="refresh"
+            onAction={() => refetch()}
+          />
         </View>
       </SafeAreaView>
     );
@@ -208,19 +211,15 @@ export default function MapScreen() {
         <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
         <ResponderHeader title="Map" />
         <View style={styles.center}>
-          <View style={[styles.iconWrap, { backgroundColor: '#FFFBEB', borderColor: 'rgba(217,119,6,0.20)' }]}>
-            <Ionicons name="warning-outline" size={32} color="#D97706" />
-          </View>
-          <Text style={styles.fallbackTitle}>Assignment state unknown</Text>
-          <Text style={styles.fallbackSub}>
-            An assignment could not be classified. Review your queue before navigating.
-          </Text>
-          <TouchableOpacity
-            style={styles.missionBtn}
-            onPress={() => router.push('/responder/assignments' as never)}
-          >
-            <Text style={styles.missionBtnText}>View Missions</Text>
-          </TouchableOpacity>
+          <StatePanel
+            icon="warning-outline"
+            tone="amber"
+            title="Assignment state unknown"
+            body="An assignment could not be classified. Review your queue before navigating."
+            actionLabel="View missions"
+            actionIcon="clipboard-outline"
+            onAction={() => router.push('/responder/assignments' as never)}
+          />
         </View>
       </SafeAreaView>
     );
@@ -234,13 +233,12 @@ export default function MapScreen() {
         <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
         <ResponderHeader title="Map" />
         <View style={styles.center}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="map-outline" size={32} color="#8795A3" />
-          </View>
-          <Text style={styles.fallbackTitle}>No active mission</Text>
-          <Text style={styles.fallbackSub}>
-            Your destination and route appear here when you have an active assignment.
-          </Text>
+          <StatePanel
+            icon="navigate-outline"
+            tone="primary"
+            title="No active mission"
+            body="Your destination and route appear here when you have an active assignment."
+          />
         </View>
       </SafeAreaView>
     );
@@ -249,7 +247,6 @@ export default function MapScreen() {
   // ── Mission present — render map or textual fallback ──────────────────────
 
   const incident = primaryAssignment.incidents;
-  const accent   = categoryColor(incident?.category);
   const address  =
     loc?.formatted_address ??
     ([loc?.barangay, loc?.municipality].filter(Boolean).join(', ') || 'Location pending');
@@ -301,25 +298,31 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* Bottom sheet */}
-      <SafeAreaView edges={['bottom']} style={styles.sheet}>
+      {/* Bottom sheet — the tab bar below it already clears the home indicator */}
+      <View style={styles.sheet}>
         <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator={false}>
 
           {/* Stale banner */}
           {(isStale || isError) && (
-            <View style={styles.staleBanner}>
-              <Ionicons name={isError ? 'cloud-offline' : 'time-outline'} size={13} color="#D97706" />
-              <Text style={styles.staleText}>{isError ? t.showingLastLoaded : 'Assignment data may be stale'}</Text>
-              <TouchableOpacity onPress={() => refetch()}>
-                <Text style={styles.refreshLink}>Refresh</Text>
-              </TouchableOpacity>
-            </View>
+            <Notice
+              icon={isError ? 'cloud-offline' : 'time-outline'}
+              tone="amber"
+              text={isError ? t.showingLastLoaded : 'Assignment data may be stale'}
+              actionLabel="Refresh"
+              onAction={() => refetch()}
+            />
           )}
 
           {/* Destination card */}
-          <View style={[styles.destCard, { borderLeftColor: accent }]}>
+          <View style={styles.destCard}>
             <View style={styles.destRow}>
-              <Ionicons name="location" size={15} color={accent} style={{ marginTop: 1 }} />
+              {transporting ? (
+                <View style={[styles.destIcon, { backgroundColor: colors.infoSoft }]}>
+                  <Ionicons name="medical" size={20} color={colors.info} />
+                </View>
+              ) : (
+                <IncidentTypeIcon type={incident?.category ?? 'OTHER'} size={44} />
+              )}
               <View style={{ flex: 1 }}>
                 {transporting ? (
                   <>
@@ -335,19 +338,21 @@ export default function MapScreen() {
                   </>
                 )}
               </View>
-              <TouchableOpacity
+              <PressScale
                 style={styles.openBtn}
                 onPress={() => router.push(`/responder/assignment/${primaryAssignment.id}` as never)}
+                accessibilityRole="button"
+                accessibilityLabel="Open mission"
               >
                 <Text style={styles.openBtnText}>Open</Text>
-                <Ionicons name="arrow-forward" size={13} color="#0D6053" />
-              </TouchableOpacity>
+                <Ionicons name="arrow-forward" size={15} color={colors.white} />
+              </PressScale>
             </View>
 
             {!isActive && (
               <View style={styles.waitingRow}>
-                <Ionicons name="time-outline" size={13} color="#D97706" />
-                <Text style={styles.waitingText}>Accepted — awaiting dispatch progress. Open the mission and tap Mark En Route when you leave.</Text>
+                <Ionicons name="time-outline" size={14} color={colors.amberText} />
+                <Text style={styles.waitingText}>Accepted. Awaiting dispatch progress: open the mission and tap Mark En Route when you leave.</Text>
               </View>
             )}
           </View>
@@ -400,7 +405,7 @@ export default function MapScreen() {
               destinationDeactivated={transport.destinationDeactivated} />
           )}
         </ScrollView>
-      </SafeAreaView>
+      </View>
     </View>
   );
 }
@@ -424,29 +429,32 @@ const styles = StyleSheet.create({
   mapArea:     { flex: 1 },
   mapFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EDF1F4' },
 
-  sheet:       { backgroundColor: '#FFFFFF', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BEVEL, maxHeight: 260, ...CARD_SHADOW },
-  sheetScroll: { padding: 14 },
+  // Flat panel under the map: no overlap, so the map's attribution stays visible,
+  // and no grab handle, because the panel does not drag.
+  sheet: {
+    maxHeight: 290, backgroundColor: colors.white,
+    borderTopWidth: 1, borderTopColor: colors.border,
+    shadowColor: '#18231F', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.08, shadowRadius: 14, elevation: 10,
+  },
+  sheetScroll: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
 
-  staleBanner: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#FFFBEB', borderRadius: 10, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(217,119,6,0.20)' },
-  staleText:   { flex: 1, fontSize: 12, color: '#D97706' },
-  refreshLink: { fontSize: 12, color: '#0D6053', fontWeight: '700' },
+  destCard:    { padding: 12, marginBottom: 10, borderRadius: radius.lg, backgroundColor: colors.bg },
+  destRow:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  destIcon:    { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  destAddress: { fontSize: 14, color: colors.text, fontWeight: '800', lineHeight: 19 },
+  destRef:     { fontSize: 12, color: colors.textMuted, fontWeight: '700', marginTop: 2, fontVariant: ['tabular-nums'] },
+  openBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5, height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.primary },
+  openBtnText: { fontSize: 13, color: colors.white, fontWeight: '800' },
+  waitingRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 10 },
+  waitingText: { flex: 1, fontSize: 12, color: colors.amberText, lineHeight: 17 },
 
-  destCard:    { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: BEVEL, borderLeftWidth: 4, ...CARD_SHADOW },
-  destRow:     { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  destAddress: { fontSize: 13, color: '#1C2B3A', fontWeight: '700', lineHeight: 18 },
-  destRef:     { fontSize: 11, color: '#8795A3', fontFamily: 'monospace', marginTop: 2 },
-  openBtn:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EEF7F4', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(13,96,83,0.20)' },
-  openBtnText: { fontSize: 12, color: '#0D6053', fontWeight: '700' },
-  waitingRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8 },
-  waitingText: { flex: 1, fontSize: 11, color: '#D97706', lineHeight: 16 },
-
-  shareStrip: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  shareStrip: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, paddingHorizontal: 2 },
   shareDot:   { width: 8, height: 8, borderRadius: 4 },
-  shareText:  { flex: 1, fontSize: 12, color: '#40536D' },
-  etaText:    { fontSize: 12, color: '#0D6053', fontWeight: '700', marginBottom: 8 },
+  shareText:  { flex: 1, fontSize: 13, color: colors.textMid },
+  etaText:    { fontSize: 13, color: colors.primary, fontWeight: '800', marginBottom: 8, paddingHorizontal: 2 },
   etaStale:   { opacity: 0.6 },
 
-  warnRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#FFFBEB', borderRadius: 10, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(217,119,6,0.20)' },
-  errorRow: { backgroundColor: '#FDF0F1', borderColor: 'rgba(212,72,88,0.20)' },
-  warnText: { flex: 1, fontSize: 12, color: '#D97706', lineHeight: 16 },
+  warnRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: colors.amberSoft, borderRadius: radius.md, padding: 10, marginBottom: 8 },
+  errorRow: { backgroundColor: colors.dangerSoft },
+  warnText: { flex: 1, fontSize: 12, color: colors.amberText, lineHeight: 17 },
 });

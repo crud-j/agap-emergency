@@ -38,7 +38,10 @@ import { newOutboxItem, type OutboxItem } from '@/src/services/offline/transport
 import { ResponderHeader } from '@/src/components/responder/responder-header';
 import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { isNativeMapAvailable } from '@/src/components/tracking/native-map-available';
-import { categoryIcon, categoryColor, priorityColor, priorityLabel, titleCase } from '@/src/lib/incident-visuals';
+import { priorityColor, priorityLabel, titleCase } from '@/src/lib/incident-visuals';
+import { IncidentTypeIcon } from '@/src/components/incidents/incident-type-icon';
+import { typeMeta } from '@/src/components/incidents/incident-meta';
+import { ListGroup, ListRow } from '@/src/components/responder/ui';
 import {
   isTransportOpenError, nextAssignmentActions, shouldShareLocation, type NextAction,
 } from '@/src/lib/assignment-progress';
@@ -116,7 +119,6 @@ export default function AssignmentDetailScreen() {
   const reporterPhotoUri = useReporterPhotoUri(incident?.id, incident?.reporter_has_photo);
   const unit = data?.resources ?? null;
   const loc = incident?.incident_locations ?? null;
-  const accent = categoryColor(incident?.category);
 
   const citizenPoint: LatLngLite | null =
     loc?.latitude != null && loc?.longitude != null
@@ -536,17 +538,20 @@ export default function AssignmentDetailScreen() {
             showsVerticalScrollIndicator={false}
           >
             {/* Command card */}
-            <View style={[styles.card, styles.commandCard, { borderLeftColor: accent }]}>
-              <View style={[styles.catIcon, { backgroundColor: `${accent}1A` }]}>
-                <Ionicons name={categoryIcon(incident?.category)} size={24} color={accent} />
+            <View style={[styles.card, styles.commandCard]}>
+              <View style={styles.commandTop}>
+                <IncidentTypeIcon type={incident?.category ?? 'OTHER'} size={52} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {incident?.category ? typeMeta(incident.category).label : 'Incident'}
+                  </Text>
+                  <Text style={styles.ref} selectable>{incident?.public_reference ?? ''}</Text>
+                </View>
+                <View style={[styles.prioPill, { backgroundColor: priorityColor(incident?.priority) }]}>
+                  <Text style={styles.prioText}>{priorityLabel(incident?.priority)}</Text>
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.title}>{titleCase(incident?.category ?? 'Incident')}</Text>
-                <Text style={styles.ref}>{incident?.public_reference ?? ''}</Text>
-              </View>
-              <View style={[styles.prioPill, { backgroundColor: priorityColor(incident?.priority) }]}>
-                <Text style={styles.prioText}>{priorityLabel(incident?.priority)}</Text>
-              </View>
+              <MissionProgress dispatchStatus={dispatchStatus} stage={stage} />
             </View>
 
             {/* The reporter's face, so the crew can find them on arrival (never labelled the patient). */}
@@ -597,35 +602,46 @@ export default function AssignmentDetailScreen() {
             <OutboxBanner pending={outbox.pending.length} drops={outbox.drops}
               onSendNow={() => void outbox.flush()} onDismiss={outbox.dismiss} />
 
-            {/* Info rows */}
-            <InfoRow
-              icon="navigate-circle"
-              label="Scene location"
-              value={address ?? 'Address not available'}
-              sub={citizenPoint ? `${citizenPoint.lat.toFixed(5)}, ${citizenPoint.lng.toFixed(5)}` : undefined}
-            />
-            {incident?.description ? (
-              <InfoRow icon="document-text" label="Details" value={incident.description} />
-            ) : null}
-            {incident?.number_of_patients != null && (
-              <InfoRow icon="people" label="Patients" value={String(incident.number_of_patients)} />
-            )}
-            {isFireUnit && (
-              <InfoRow
-                icon="flame"
-                label="Fire status"
-                value={latestFire ? fireSummaryLine(latestFire) : 'No fire report yet'}
-                sub={latestFire ? `Reported ${new Date(latestFire.reported_at).toLocaleTimeString()}` : undefined}
-              />
-            )}
-            {isRescueUnit && (
-              <InfoRow
-                icon="boat"
-                label="Rescue trips"
-                value={rescueSummary ? rescueSummaryLine(rescueSummary) : 'No trips logged yet'}
-                sub={rescueSummary?.lastTripAt ? `Last trip ${new Date(rescueSummary.lastTripAt).toLocaleTimeString()}` : undefined}
-              />
-            )}
+            {/* Scene details: one card, divided rows (same facts and conditions as before) */}
+            <Text style={styles.groupLabel}>SCENE</Text>
+            <View style={[styles.card, styles.infoGroup]}>
+              {([
+                {
+                  key: 'location',
+                  icon: 'navigate-circle',
+                  label: 'Scene location',
+                  value: address ?? 'Address not available',
+                  sub: citizenPoint ? `${citizenPoint.lat.toFixed(5)}, ${citizenPoint.lng.toFixed(5)}` : undefined,
+                },
+                incident?.description
+                  ? { key: 'details', icon: 'document-text', label: 'Details', value: incident.description }
+                  : null,
+                incident?.number_of_patients != null
+                  ? { key: 'patients', icon: 'people', label: 'Patients', value: String(incident.number_of_patients) }
+                  : null,
+                isFireUnit
+                  ? {
+                      key: 'fire',
+                      icon: 'flame',
+                      label: 'Fire status',
+                      value: latestFire ? fireSummaryLine(latestFire) : 'No fire report yet',
+                      sub: latestFire ? `Reported ${new Date(latestFire.reported_at).toLocaleTimeString()}` : undefined,
+                    }
+                  : null,
+                isRescueUnit
+                  ? {
+                      key: 'rescue',
+                      icon: 'boat',
+                      label: 'Rescue trips',
+                      value: rescueSummary ? rescueSummaryLine(rescueSummary) : 'No trips logged yet',
+                      sub: rescueSummary?.lastTripAt ? `Last trip ${new Date(rescueSummary.lastTripAt).toLocaleTimeString()}` : undefined,
+                    }
+                  : null,
+              ].filter(Boolean) as Array<{ key: string; icon: IoniconName; label: string; value: string; sub?: string }>)
+                .map((row, i) => (
+                  <InfoRow key={row.key} icon={row.icon} label={row.label} value={row.value} sub={row.sub} divider={i > 0} />
+                ))}
+            </View>
 
             {incidentStatus === 'TRANSPORTING' && (
               <View style={[styles.card, styles.transportCard]}>
@@ -710,34 +726,60 @@ export default function AssignmentDetailScreen() {
               />
             )}
 
-            {/* On-scene patient assessment (MOD-37) — available once engaged.
-                Takes the INCIDENT id, not this screen's dispatch id. */}
-            {data.incident_id && accepted && (
-              <LinkRow
-                icon="clipboard"
-                label="On-Scene Assessment"
-                onPress={() => router.push(`/responder/assessment/${data.incident_id}` as never)}
-              />
-            )}
-
-            {/* Ask dispatch for more help (plan Phase 2 step 5): every unit type, while
-                accepted and the incident is still open. Dispatch decides what to send. */}
-            {shareEnabled && (
-              <LinkRow
-                icon="megaphone"
-                label={translations.helpRequest.linkLabel}
-                onPress={() => setHelpOpen(true)}
-              />
-            )}
-
-            {/* Incident chat (MOD-33) — message the reporter + dispatch. */}
-            {data.incident_id && (
-              <LinkRow
-                icon="chatbubbles"
-                label="Incident Chat"
-                onPress={() => router.push(`/incident/chat/${data.incident_id}` as never)}
-              />
-            )}
+            {(() => {
+              const tools = [
+                // On-scene patient assessment (MOD-37) — available once engaged.
+                // Takes the INCIDENT id, not this screen's dispatch id.
+                data.incident_id && accepted
+                  ? {
+                      key: 'assessment',
+                      icon: 'clipboard-outline' as IoniconName,
+                      label: 'On-Scene Assessment',
+                      sub: 'Triage, vitals and notes',
+                      onPress: () => router.push(`/responder/assessment/${data.incident_id}` as never),
+                    }
+                  : null,
+                // Ask dispatch for more help (plan Phase 2 step 5): every unit type, while
+                // accepted and the incident is still open. Dispatch decides what to send.
+                shareEnabled
+                  ? {
+                      key: 'help',
+                      icon: 'megaphone-outline' as IoniconName,
+                      label: translations.helpRequest.linkLabel,
+                      sub: 'Dispatch decides what to send',
+                      onPress: () => setHelpOpen(true),
+                    }
+                  : null,
+                // Incident chat (MOD-33) — message the reporter + dispatch.
+                data.incident_id
+                  ? {
+                      key: 'chat',
+                      icon: 'chatbubbles-outline' as IoniconName,
+                      label: 'Incident Chat',
+                      sub: 'Message the reporter and dispatch',
+                      onPress: () => router.push(`/incident/chat/${data.incident_id}` as never),
+                    }
+                  : null,
+              ].filter((x): x is NonNullable<typeof x> => x !== null);
+              if (tools.length === 0) return null;
+              return (
+                <>
+                  <Text style={styles.groupLabel}>MISSION TOOLS</Text>
+                  <ListGroup style={{ marginBottom: 0 }}>
+                    {tools.map((tool, i) => (
+                      <ListRow
+                        key={tool.key}
+                        icon={tool.icon}
+                        label={tool.label}
+                        sub={tool.sub}
+                        last={i === tools.length - 1}
+                        onPress={tool.onPress}
+                      />
+                    ))}
+                  </ListGroup>
+                </>
+              );
+            })()}
 
             {/* Incident Command structure (MOD-36) — read-only viewer. */}
             {data.incident_id && token && (
@@ -839,39 +881,83 @@ function InfoRow({
   label,
   value,
   sub,
+  divider,
 }: {
   icon: IoniconName;
   label: string;
   value: string;
   sub?: string;
+  divider?: boolean;
 }) {
   return (
-    <View style={[styles.card, styles.infoRow]}>
+    <View style={[styles.infoRow, divider && styles.infoRowDivider]}>
       <View style={styles.infoIcon}>
         <Ionicons name={icon} size={18} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.infoLabel}>{label}</Text>
-        <Text style={styles.infoValue}>{value}</Text>
-        {sub ? <Text style={styles.infoSub}>{sub}</Text> : null}
+        <Text style={styles.infoValue} selectable>{value}</Text>
+        {sub ? <Text style={styles.infoSub} selectable>{sub}</Text> : null}
       </View>
     </View>
   );
 }
 
-function LinkRow({ icon, label, onPress }: { icon: IoniconName; label: string; onPress: () => void }) {
+// The crew's progress on this dispatch: Accepted → En route → On scene → Done.
+// Purely a reading of `stage`; the buttons below are still what change it.
+const STEPS = ['Accepted', 'En route', 'On scene', 'Done'] as const;
+
+function progressIndex(dispatchStatus: string, stage: string): number | null {
+  if (dispatchStatus === 'CANCELLED' || dispatchStatus === 'REJECTED') return null;
+  if (dispatchStatus === 'COMPLETED' || stage === 'RESOLVED' || stage === 'CLOSED') return 3;
+  if (dispatchStatus !== 'ACCEPTED') return -1; // an offer not yet accepted
+  if (stage === 'ON_SCENE' || stage === 'TRANSPORTING' || stage === 'ASSISTING') return 2;
+  if (stage === 'EN_ROUTE') return 1;
+  return 0;
+}
+
+function MissionProgress({ dispatchStatus, stage }: { dispatchStatus: string; stage: string }) {
+  const index = progressIndex(dispatchStatus, stage);
+  if (index === null) return null;
+  // On scene can be "Transporting" or "Assisting": say which.
+  const labels = STEPS.map((s, i) =>
+    i === 2 && (stage === 'TRANSPORTING' || stage === 'ASSISTING') ? titleCase(stage) : s,
+  );
   return (
-    <TouchableOpacity
-      style={[styles.card, styles.linkRow]}
-      onPress={onPress}
-      activeOpacity={0.85}
-      accessibilityRole="button"
-      accessibilityLabel={label}
+    <View
+      style={styles.progress}
+      accessibilityRole="progressbar"
+      accessibilityLabel={index < 0 ? 'Offer waiting for your answer' : `Progress: ${labels[index]}`}
     >
-      <Ionicons name={icon} size={18} color={colors.primary} style={{ marginRight: 8 }} />
-      <Text style={styles.linkText}>{label}</Text>
-      <Ionicons name="chevron-forward" size={18} color={colors.textSub} style={{ marginLeft: 'auto' }} />
-    </TouchableOpacity>
+      <View style={styles.progressRow}>
+        {labels.map((label, i) => {
+          const done = i <= index;
+          const current = i === index;
+          return (
+            <React.Fragment key={label}>
+              <View style={[styles.stepDot, done && styles.stepDotDone, current && styles.stepDotCurrent]}>
+                {done && !current ? <Ionicons name="checkmark" size={11} color={colors.white} /> : null}
+              </View>
+              {i < labels.length - 1 ? (
+                <View style={[styles.stepLine, i < index && styles.stepLineDone]} />
+              ) : null}
+            </React.Fragment>
+          );
+        })}
+      </View>
+      <View style={styles.progressLabels}>
+        {labels.map((label, i) => (
+          <Text
+            key={label}
+            numberOfLines={1}
+            style={[styles.stepLabel, i === index && styles.stepLabelCurrent, i === 0 && { textAlign: 'left' }, i === labels.length - 1 && { textAlign: 'right' }]}
+          >
+            {label}
+          </Text>
+        ))}
+      </View>
+      {index < 0 ? <Text style={styles.offerHint}>New offer. Accept it to start sharing your location.</Text> : null}
+    </View>
   );
 }
 
@@ -1160,14 +1246,34 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, ...cardShadow,
   },
 
-  commandCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderLeftWidth: 4,
-  },
-  catIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  commandCard: { padding: 16, borderRadius: radius.xl },
+  commandTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   title: { fontSize: 19, fontWeight: '800', color: colors.text },
-  ref: { fontSize: 12, fontFamily: 'monospace', color: colors.textSub, marginTop: 2 },
-  prioPill: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  ref: { fontSize: 13, fontWeight: '700', color: colors.textMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
+  prioPill: { borderRadius: 13, height: 26, paddingHorizontal: 10, justifyContent: 'center' },
   prioText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
+
+  // Progress stepper inside the command card
+  progress: { marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#EEF2F0' },
+  progressRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 2 },
+  stepDot: {
+    width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.white, borderWidth: 2, borderColor: colors.track,
+  },
+  stepDotDone: { backgroundColor: colors.primary, borderColor: colors.primary },
+  stepDotCurrent: { backgroundColor: colors.white, borderColor: colors.primary, borderWidth: 5 },
+  stepLine: { flex: 1, height: 3, borderRadius: 2, marginHorizontal: 4, backgroundColor: colors.track },
+  stepLineDone: { backgroundColor: colors.primary },
+  progressLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  stepLabel: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '700', color: colors.textMuted },
+  stepLabelCurrent: { color: colors.primary, fontWeight: '800' },
+  offerHint: { marginTop: 10, fontSize: 12, fontWeight: '600', color: colors.amberText },
+
+  groupLabel: {
+    marginTop: 20, marginBottom: 8, marginLeft: 2,
+    fontSize: 12, fontWeight: '800', color: colors.textMuted, letterSpacing: 1,
+  },
+  infoGroup: { paddingHorizontal: 14, borderRadius: radius.xl },
 
   shareStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -1188,14 +1294,15 @@ const styles = StyleSheet.create({
   errorRow: { backgroundColor: colors.dangerSoft, borderColor: 'rgba(212,72,88,0.20)' },
   warnText: { color: colors.amber, fontSize: 12, flex: 1, lineHeight: 17 },
 
-  infoRow: { flexDirection: 'row', gap: 12, padding: 14, marginTop: 12 },
+  infoRow: { flexDirection: 'row', gap: 12, paddingVertical: 14 },
+  infoRowDivider: { borderTopWidth: 1, borderTopColor: '#EEF2F0' },
   infoIcon: {
-    width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primarySoft,
+    width: 36, height: 36, borderRadius: radius.md, backgroundColor: colors.primarySoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  infoLabel: { color: colors.textSub, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
-  infoValue: { color: colors.text, fontSize: 15, lineHeight: 21 },
-  infoSub: { color: colors.textSub, fontSize: 12, fontFamily: 'monospace', marginTop: 4 },
+  infoLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 },
+  infoValue: { color: colors.text, fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  infoSub: { color: colors.textMuted, fontSize: 12, marginTop: 4, fontVariant: ['tabular-nums'] },
   transportCard: { padding: 14, marginTop: 12 },
   transportHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 7 },
   transportActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
@@ -1216,8 +1323,9 @@ const styles = StyleSheet.create({
   linkText: { color: colors.text, fontSize: 15, fontWeight: '700' },
 
   footer: {
-    paddingHorizontal: 16, paddingTop: 10, backgroundColor: colors.white,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, backgroundColor: colors.white,
     borderTopWidth: 1, borderTopColor: colors.border,
+    shadowColor: '#18231F', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.08, shadowRadius: 14, elevation: 10,
   },
   actionBtn: {
     flex: 1, flexDirection: 'row', height: 54, borderRadius: radius.lg, backgroundColor: colors.primary,

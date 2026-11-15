@@ -1,67 +1,52 @@
 import { useEffect, useState } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, StatusBar,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, StatusBar, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useResponderSummary } from '@/src/hooks/useResponderSummary';
 import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
+import type { Assignment } from '@/src/services/api/responders.api';
 import { useNetworkStatus } from '@/src/hooks/useNetworkStatus';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { AvailabilityControl } from '@/src/components/responder/availability-control';
 import { SurgeBroadcastCard } from '@/src/components/responder/SurgeBroadcastCard';
-import { AgapLogo } from '@/src/components/brand/AgapLogo';
+import { IncidentTypeIcon } from '@/src/components/incidents/incident-type-icon';
+import { typeMeta, statusMeta, TONE_COLORS } from '@/src/components/incidents/incident-meta';
+import {
+  Notice, PressScale, ResponderTopBar, SectionLabel, Skeleton, StatePanel,
+  responderCard, useScreenEntrance,
+} from '@/src/components/responder/ui';
+import { colors, radius } from '@/src/theme/tokens';
 
 type GpsState = 'checking' | 'granted' | 'denied';
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
-const AVAILABILITY_LABEL: Record<string, string> = {
-  AVAILABLE:   'Available',
-  OFF_DUTY:    'Off Duty',
-  UNAVAILABLE: 'Unavailable',
+const AVAILABILITY: Record<string, { label: string; color: string; line: string }> = {
+  AVAILABLE:   { label: 'Available',   color: '#5FD3B0', line: 'You are available for new assignments.' },
+  OFF_DUTY:    { label: 'Off Duty',    color: '#B7CEC6', line: 'You are not currently available for new assignments.' },
+  UNAVAILABLE: { label: 'Unavailable', color: '#FF8A95', line: 'You are marked unavailable.' },
 };
 
-const AVAILABILITY_DOT: Record<string, string> = {
-  AVAILABLE:   '#10B981',
-  OFF_DUTY:    '#8795A3',
-  UNAVAILABLE: '#EF4444',
-};
-
-const CATEGORY_LABEL: Record<string, string> = {
-  MEDICAL:      'Medical emergency',
-  ROAD_ACCIDENT:'Road accident',
-  FLOOD:        'Flood rescue',
-  NATURAL_DISASTER: 'Natural disaster',
-  RESCUE:       'Rescue operation',
-  FIRE:         'Fire emergency',
-  INDUSTRIAL:   'Industrial incident',
-  DEBRIS:       'Debris clearance',
-  OTHER:        'Emergency',
-};
-
-const INCIDENT_STATUS_BADGE: Record<string, { bg: string; text: string; label: string; icon: React.ComponentProps<typeof Ionicons>['name'] }> = {
-  EN_ROUTE:    { bg: '#EFF6FF', text: '#3B82F6', label: 'En route',     icon: 'navigate' },
-  ON_SCENE:    { bg: '#ECFDF5', text: '#059669', label: 'On scene',     icon: 'checkmark-circle-outline' },
-  DISPATCHED:  { bg: '#FFF7ED', text: '#D97706', label: 'Dispatched',   icon: 'radio-outline' },
-  TRANSPORTING:{ bg: '#F0FDF4', text: '#16A34A', label: 'Transporting', icon: 'car-outline' },
-  ASSISTING:   { bg: '#ECFDF5', text: '#059669', label: 'Assisting',    icon: 'people-outline' },
-};
-
-function SkeletonLine({ height = 14, width = '100%' as number | `${number}%` }: {
-  height?: number;
-  width?: number | `${number}%`;
-}) {
-  return (
-    <View style={{ height, width, backgroundColor: '#E4EAF0', borderRadius: 7, marginVertical: 3 }} />
-  );
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
 }
 
+/**
+ * Responder Home (MOD-32 / MOD-28). Duty card first (who you are, your status,
+ * what is waiting), then the one mission that matters right now, then duty
+ * availability and shortcuts. Same queries and rules as before; layout follows
+ * the citizen home (hero, cards, quick tiles).
+ */
 export default function HomeScreen() {
   const router = useRouter();
   const { isOnline } = useNetworkStatus();
   const authIsLoading = useAuthStore((s) => s.isLoading);
   const [gpsState, setGpsState] = useState<GpsState>('checking');
+  const entrance = useScreenEntrance();
 
   const {
     data: summary, isLoading: summaryLoading, isError: summaryError, refetch: refetchSummary,
@@ -91,23 +76,17 @@ export default function HomeScreen() {
   if (authIsLoading || summaryLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
+        <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <AgapLogo />
-            </View>
-            <View style={styles.headerRight}>
-              <SkeletonLine height={28} width={90} />
-              <View style={[styles.avatarCircle, { backgroundColor: '#DCE3E9' }]} />
-            </View>
+          <ResponderTopBar />
+          <View style={[styles.hero, { gap: 10 }]}>
+            <Skeleton height={12} width="35%" style={styles.skeletonOnDeep} />
+            <Skeleton height={26} width="60%" style={styles.skeletonOnDeep} />
+            <Skeleton height={56} style={[styles.skeletonOnDeep, { marginTop: 8 }]} />
           </View>
-          <SkeletonLine height={30} width="38%" />
-          <SkeletonLine height={12} width="68%" />
-          <View style={{ marginTop: 20, gap: 14 }}>
-            <View style={[styles.card, { height: 170 }]} />
-            <View style={[styles.card, { height: 270 }]} />
-          </View>
+          <Skeleton height={12} width="30%" style={{ marginBottom: 10 }} />
+          <View style={[responderCard, { height: 180, marginBottom: 20 }]} />
+          <View style={[responderCard, { height: 120 }]} />
         </ScrollView>
       </SafeAreaView>
     );
@@ -120,550 +99,425 @@ export default function HomeScreen() {
   if (summaryError && !summary) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
+        <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
+        <View style={styles.scroll}>
+          <ResponderTopBar />
+        </View>
         <View style={styles.center}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="cloud-offline-outline" size={36} color="#8795A3" />
-          </View>
-          <Text style={styles.errorTitle}>Could not load your profile.</Text>
-          <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={() => { refetchSummary(); refetchAssignments(); }}
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          <StatePanel
+            icon="cloud-offline-outline"
+            title="Could not load your profile."
+            body="Check your connection. Your assignments will appear once AGAP can reach the server."
+            actionLabel="Retry"
+            actionIcon="refresh"
+            onAction={() => { refetchSummary(); refetchAssignments(); }}
+          />
         </View>
       </SafeAreaView>
     );
   }
 
-  const fullName    = summary?.user.full_name ?? 'Responder';
-  const status      = summary?.availability.status ?? 'OFF_DUTY';
-  const statusLabel = AVAILABILITY_LABEL[status] ?? status;
-  const statusDot   = AVAILABILITY_DOT[status] ?? '#8795A3';
-  const initials    = fullName.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  const fullName = summary?.user.full_name ?? 'Responder';
+  const status   = summary?.availability.status ?? 'OFF_DUTY';
+  const avail    = AVAILABILITY[status] ?? { label: status, color: '#B7CEC6', line: '' };
+  const orgName  = summary?.user.organizations?.[0]?.name ?? 'Bocaue MDRRMO';
 
   const isActive          = activeAssignments.length > 0;
   const primaryAssignment =
     activeAssignments[0] ?? acceptedAwaitingProgressAssignments[0] ?? null;
-
-  const incidentRef    = primaryAssignment?.incidents?.public_reference;
-  const category       = primaryAssignment?.incidents?.category ?? '';
-  const incidentStatus = (primaryAssignment?.incidents?.status ?? '') as string;
-  const loc            = primaryAssignment?.incidents?.incident_locations;
-  const address        = loc?.formatted_address
-    ?? ([loc?.barangay, loc?.municipality].filter(Boolean).join(', ') || null);
-  const statusBadge    = INCIDENT_STATUS_BADGE[incidentStatus] ?? null;
-  const sharingActive  = isActive && gpsState === 'granted';
+  const sharingActive = isActive && gpsState === 'granted';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
+      <Animated.ScrollView
+        style={entrance}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
+        <ResponderTopBar name={fullName} />
 
-        {/* ── Header bar ────────────────────────────────────────────────── */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <AgapLogo />
-          </View>
-          <View style={styles.headerRight}>
-            <View style={[
-              styles.connPill,
-              {
-                backgroundColor: isOnline ? '#ECFDF5' : '#FEF2F2',
-                borderColor: isOnline ? 'rgba(5,150,105,0.22)' : 'rgba(220,38,38,0.22)',
-              },
-            ]}>
-              <View style={[styles.connDot, { backgroundColor: isOnline ? '#10B981' : '#EF4444' }]} />
-              <Text style={[styles.connText, { color: isOnline ? '#059669' : '#DC2626' }]}>
-                {isOnline ? 'Connected' : 'Offline'}
-              </Text>
-            </View>
-            <View style={styles.avatarCircle}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
-          </View>
-        </View>
+        {/* Stale / offline notice */}
+        {!isOnline ? (
+          <Notice icon="cloud-offline-outline" tone="danger" text="Offline. Showing the last loaded data." />
+        ) : isStale ? (
+          <Notice
+            icon="time-outline"
+            tone="amber"
+            text="Assignments may be out of date."
+            actionLabel="Refresh"
+            onAction={() => refetchAssignments()}
+          />
+        ) : null}
 
-        {/* Stale / offline banner */}
-        {(!isOnline || (isStale && isOnline)) && (
-          <View style={[
-            styles.banner,
-            !isOnline ? styles.bannerOffline : styles.bannerStale,
-          ]}>
-            <Ionicons
-              name={!isOnline ? 'cloud-offline-outline' : 'time-outline'}
-              size={13}
-              color={!isOnline ? '#D44858' : '#D97706'}
+        {/* ── Duty card ─────────────────────────────────────────────────── */}
+        <View style={styles.hero}>
+          <View style={styles.heroTop}>
+            <Text style={styles.heroGreeting}>{greeting()},</Text>
+            <View style={styles.heroStatus} accessibilityLabel={`Duty status: ${avail.label}`}>
+              <View style={[styles.heroStatusDot, { backgroundColor: avail.color }]} />
+              <Text style={styles.heroStatusText}>{avail.label}</Text>
+            </View>
+          </View>
+          <Text style={styles.heroName} numberOfLines={1}>{fullName}</Text>
+          <Text style={styles.heroOrg} numberOfLines={1}>{orgName}</Text>
+
+          <View style={styles.heroStats}>
+            <HeroStat value={String(activeAssignments.length)} label="Active" />
+            <View style={styles.heroDivider} />
+            <HeroStat
+              value={String(pendingOffers.length)}
+              label={pendingOffers.length === 1 ? 'Offer waiting' : 'Offers waiting'}
+              highlight={pendingOffers.length > 0}
             />
-            <Text style={[styles.bannerText, { color: !isOnline ? '#D44858' : '#D97706' }]}>
-              {!isOnline ? 'Offline — showing cached data' : 'Assignments may be stale'}
-            </Text>
-            {isOnline && isStale && (
-              <TouchableOpacity onPress={() => refetchAssignments()}>
-                <Text style={styles.refreshLink}>Refresh</Text>
-              </TouchableOpacity>
-            )}
+            <View style={styles.heroDivider} />
+            <HeroStat
+              icon={sharingActive ? 'radio' : 'radio-outline'}
+              value={sharingActive ? 'On' : 'Off'}
+              label="Location"
+              highlight={sharingActive}
+            />
           </View>
-        )}
-
-        {/* ── Page title ────────────────────────────────────────────────── */}
-        <View style={styles.pageTitle}>
-          <Text style={styles.pageTitleText}>Home</Text>
-          <Text style={styles.pageTitleSub}>Stay ready. Respond. Make a difference.</Text>
         </View>
 
         {/* ── Surge broadcasts (MOD-52) ─────────────────────────────────── */}
         <SurgeBroadcastCard />
 
-        {/* ── Bocaue coverage map ───────────────────────────────────────── */}
-        <TouchableOpacity
-          style={styles.coverageCard}
-          activeOpacity={0.85}
-          onPress={() => router.push('/coverage' as never)}
-          accessibilityRole="button"
-          accessibilityLabel="Open the Bocaue coverage map"
-        >
-          <View style={styles.coverageIconWrap}>
-            <Ionicons name="map-outline" size={20} color="#0D6053" />
+        {/* ── Current mission ──────────────────────────────────────────── */}
+        <SectionLabel
+          title="Current mission"
+          actionLabel={assignments.length > 0 ? 'See all' : undefined}
+          onAction={() => router.push('/responder/assignments' as never)}
+        />
+
+        {unclassifiedAssignments.length > 0 ? (
+          // Unclassified assignment — warn but don't classify
+          <PressScale
+            style={[responderCard, styles.stateCard]}
+            onPress={() => router.push('/responder/assignments' as never)}
+            accessibilityRole="button"
+            accessibilityLabel="An assignment has an unrecognized state. Open missions to review."
+          >
+            <View style={[styles.stateIcon, { backgroundColor: colors.amberSoft }]}>
+              <Ionicons name="warning-outline" size={22} color={colors.amberText} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.stateTitle}>Check your missions</Text>
+              <Text style={styles.stateSub}>An assignment has an unrecognized state. Tap to review.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#C4C9D1" />
+          </PressScale>
+        ) : primaryAssignment ? (
+          <MissionCard
+            assignment={primaryAssignment}
+            isActive={isActive}
+            isStale={isStale}
+            onOpen={() => router.push(`/responder/assignment/${primaryAssignment.id}` as never)}
+            onMap={() => router.push('/responder/map' as never)}
+          />
+        ) : pendingOffers.length > 0 ? (
+          <PressScale
+            style={[responderCard, styles.stateCard]}
+            onPress={() => router.push('/responder/assignments' as never)}
+            accessibilityRole="button"
+            accessibilityLabel={`${pendingOffers.length} pending offers. Open missions to review.`}
+          >
+            <View style={[styles.stateIcon, { backgroundColor: colors.amberSoft }]}>
+              <Ionicons name="notifications" size={22} color={colors.amberText} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.stateTitle}>
+                {pendingOffers.length} pending offer{pendingOffers.length > 1 ? 's' : ''}
+              </Text>
+              <Text style={styles.stateSub}>Review and accept your assignment queue.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#C4C9D1" />
+          </PressScale>
+        ) : (
+          <View style={[responderCard, styles.stateCard]}>
+            <View style={[styles.stateIcon, { backgroundColor: colors.primarySoft }]}>
+              <Ionicons name="shield-checkmark" size={22} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.stateTitle}>Standing by</Text>
+              <Text style={styles.stateSub}>No active assignments. You will be notified when dispatched.</Text>
+            </View>
           </View>
-          <View style={styles.coverageBody}>
-            <Text style={styles.coverageTitle}>Bocaue coverage map</Text>
-            <Text style={styles.coverageSub}>View the municipality and all 19 barangays</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#8795A3" />
-        </TouchableOpacity>
+        )}
 
         {/* ── Duty availability ─────────────────────────────────────────── */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Duty availability</Text>
-            <Ionicons name="information-circle-outline" size={20} color="#C3CDD8" />
-          </View>
-
-          <View style={styles.availRow}>
-            <View style={styles.availAvatar}>
-              <Ionicons name="person-outline" size={22} color="#8795A3" />
-            </View>
-            <View style={styles.availBody}>
-              <View style={styles.availStatusRow}>
-                <View style={[styles.statusDot, { backgroundColor: statusDot }]} />
-                <Text style={styles.availStatusText}>{statusLabel}</Text>
-              </View>
-              <Text style={styles.availSub}>
-                {status === 'AVAILABLE'
-                  ? 'You are available for new assignments.'
-                  : status === 'UNAVAILABLE'
-                  ? 'You are marked unavailable.'
-                  : 'You are not currently available for new assignments.'}
-              </Text>
-            </View>
-          </View>
-
+        <SectionLabel title="Duty availability" />
+        <View style={[responderCard, styles.availCard]}>
+          <Text style={styles.availLine}>{avail.line}</Text>
           <AvailabilityControl currentStatus={status} />
-
           <View style={styles.availInfo}>
-            <Ionicons name="information-circle-outline" size={13} color="#C3CDD8" />
+            <Ionicons name="information-circle-outline" size={15} color={colors.textMuted} />
             <Text style={styles.availInfoText}>
               This is your personal availability. It does not change any current assignment or incident status.
             </Text>
           </View>
         </View>
 
-        {/* ── Your mission ──────────────────────────────────────────────── */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Your mission</Text>
-            {assignments.length > 0 && (
-              <TouchableOpacity
-                style={styles.viewAllBtn}
-                onPress={() => router.push('/responder/assignments' as never)}
-              >
-                <Text style={styles.viewAllText}>View all</Text>
-                <Ionicons name="chevron-forward" size={13} color="#8795A3" />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Unclassified assignment — warn but don't classify */}
-          {unclassifiedAssignments.length > 0 ? (
-            <TouchableOpacity
-              style={styles.alertRow}
-              onPress={() => router.push('/responder/assignments' as never)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="warning-outline" size={16} color="#D97706" />
-              <Text style={styles.alertRowText}>
-                An assignment has an unrecognized state. Tap to review.
-              </Text>
-              <Ionicons name="chevron-forward" size={15} color="#D97706" />
-            </TouchableOpacity>
-
-          ) : primaryAssignment ? (
-            <>
-              {/* Priority badge + live/stale indicator */}
-              <View style={styles.priorityRow}>
-                <View style={[
-                  styles.priorityBadge,
-                  isActive
-                    ? { backgroundColor: '#FFF7ED', borderColor: 'rgba(217,119,6,0.22)' }
-                    : { backgroundColor: '#EFF6FF', borderColor: 'rgba(59,130,246,0.22)' },
-                ]}>
-                  <Ionicons
-                    name={isActive ? 'warning' : 'time-outline'}
-                    size={11}
-                    color={isActive ? '#D97706' : '#3B82F6'}
-                  />
-                  <Text style={[styles.priorityText, { color: isActive ? '#D97706' : '#3B82F6' }]}>
-                    {isActive ? 'ACTIVE ASSIGNMENT' : 'ACCEPTED'}
-                  </Text>
-                </View>
-                <Text style={styles.timestampText}>
-                  {isStale ? 'May be stale' : 'Live'}
-                </Text>
-              </View>
-
-              {/* Details (left) + map thumbnail (right) */}
-              <View style={styles.missionContent}>
-                <View style={styles.missionLeft}>
-                  {incidentRef ? (
-                    <Text style={styles.missionRef}>{incidentRef}</Text>
-                  ) : null}
-
-                  {category ? (
-                    <View style={styles.missionCatRow}>
-                      <Ionicons name="medkit-outline" size={14} color="#0D6053" />
-                      <Text style={styles.missionCatText}>
-                        {CATEGORY_LABEL[category] ?? category}
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {address ? (
-                    <View style={styles.missionDetailRow}>
-                      <Ionicons name="location-outline" size={13} color="#8795A3" style={{ marginTop: 1 }} />
-                      <View style={{ flex: 1 }}>
-                        {(loc?.barangay || loc?.municipality) ? (
-                          <Text style={styles.detailLabel}>
-                            {[loc.barangay, loc.municipality].filter(Boolean).join(', ')}
-                          </Text>
-                        ) : null}
-                        <Text style={styles.detailValue} numberOfLines={2}>{address}</Text>
-                      </View>
-                    </View>
-                  ) : null}
-
-                  <View style={styles.missionDetailRow}>
-                    <Ionicons name="people-outline" size={13} color="#8795A3" />
-                    <View>
-                      <Text style={styles.detailLabel}>Your role</Text>
-                      <Text style={styles.detailValue}>Responder</Text>
-                    </View>
-                  </View>
-
-                  {statusBadge ? (
-                    <View style={[styles.statusBadge, { backgroundColor: statusBadge.bg }]}>
-                      <Ionicons name={statusBadge.icon} size={11} color={statusBadge.text} />
-                      <Text style={[styles.statusBadgeText, { color: statusBadge.text }]}>
-                        {statusBadge.label}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                {/* Tappable map thumbnail → opens map screen */}
-                <TouchableOpacity
-                  style={styles.mapThumb}
-                  onPress={() => router.push('/responder/map' as never)}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.mapThumbBody}>
-                    <Ionicons name="map" size={28} color="#0D6053" />
-                    <Text style={styles.mapThumbLabel}>Live{'\n'}map</Text>
-                  </View>
-                  <View style={styles.mapThumbNav}>
-                    <Ionicons name="navigate" size={14} color="#FFFFFF" />
-                  </View>
-                </TouchableOpacity>
-              </View>
-
-              {/* Action buttons */}
-              <View style={styles.missionActions}>
-                <TouchableOpacity
-                  style={styles.missionBtnPrimary}
-                  onPress={() => router.push(`/responder/assignment/${primaryAssignment.id}` as never)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="document-text-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.missionBtnPrimaryText}>View mission</Text>
-                  <Ionicons name="chevron-forward" size={15} color="#FFFFFF" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.missionBtnSecondary}
-                  onPress={() => router.push('/responder/map' as never)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="map-outline" size={16} color="#1C2B3A" />
-                  <Text style={styles.missionBtnSecondaryText}>Open map</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-
-          ) : pendingOffers.length > 0 ? (
-            <TouchableOpacity
-              style={styles.stateRow}
-              onPress={() => router.push('/responder/assignments' as never)}
-              activeOpacity={0.85}
-            >
-              <View style={[styles.stateIcon, { backgroundColor: '#FFFBEB' }]}>
-                <Ionicons name="notifications-outline" size={20} color="#D97706" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.stateTitle}>
-                  {pendingOffers.length} pending offer{pendingOffers.length > 1 ? 's' : ''}
-                </Text>
-                <Text style={styles.stateSub}>Review and accept your assignment queue.</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#C3CDD8" />
-            </TouchableOpacity>
-
-          ) : (
-            <View style={styles.stateRow}>
-              <View style={[styles.stateIcon, { backgroundColor: '#EEF7F4' }]}>
-                <Ionicons name="shield-checkmark-outline" size={20} color="#0D6053" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.stateTitle}>Standing by</Text>
-                <Text style={styles.stateSub}>
-                  No active assignments. You will be notified when dispatched.
-                </Text>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* ── Operational overview ──────────────────────────────────────── */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Operational overview</Text>
-          <View style={styles.overviewRow}>
-            <View style={styles.overviewItem}>
-              <View style={[styles.overviewIconWrap, { backgroundColor: '#EEF7F4' }]}>
-                <Ionicons name="document-text-outline" size={18} color="#0D6053" />
-              </View>
-              <Text style={styles.overviewCount}>{activeAssignments.length}</Text>
-              <Text style={styles.overviewLabel}>Active{'\n'}mission</Text>
-            </View>
-
-            <View style={styles.overviewSep} />
-
-            <View style={styles.overviewItem}>
-              <View style={[styles.overviewIconWrap, { backgroundColor: '#FFFBEB' }]}>
-                <Ionicons name="time-outline" size={18} color="#D97706" />
-              </View>
-              <Text style={styles.overviewCount}>{pendingOffers.length}</Text>
-              <Text style={styles.overviewLabel}>Pending{'\n'}offers</Text>
-            </View>
-
-            <View style={styles.overviewSep} />
-
-            <TouchableOpacity
-              style={styles.overviewItem}
-              onPress={() => isActive ? router.push('/responder/map' as never) : undefined}
-              activeOpacity={isActive ? 0.7 : 1}
-            >
-              <View style={[styles.overviewIconWrap, {
-                backgroundColor: sharingActive ? '#EEF7F4' : '#F0F3F6',
-              }]}>
-                <Ionicons
-                  name="location-outline"
-                  size={18}
-                  color={sharingActive ? '#0D6053' : '#8795A3'}
-                />
-              </View>
-              <Text style={styles.overviewLabel}>Sharing</Text>
-              <View style={styles.sharingRow}>
-                <View style={[styles.connDot, {
-                  backgroundColor: sharingActive ? '#10B981' : '#8795A3',
-                }]} />
-                <Text style={[styles.sharingText, {
-                  color: sharingActive ? '#10B981' : '#8795A3',
-                }]}>
-                  {sharingActive ? 'Active' : 'Inactive'}
-                </Text>
-                {isActive ? (
-                  <Ionicons name="chevron-forward" size={11} color="#C3CDD8" />
-                ) : null}
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-
         {/* ── Quick access ──────────────────────────────────────────────── */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Quick access</Text>
-          <View style={styles.quickList}>
-            <TouchableOpacity
-              style={styles.quickItem}
-              onPress={() => router.push('/responder/assignments' as never)}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="list-outline" size={16} color="#40536D" />
-              <Text style={styles.quickText}>My missions</Text>
-              <Ionicons name="chevron-forward" size={13} color="#C3CDD8" />
-            </TouchableOpacity>
-            <View style={styles.quickSep} />
-            <TouchableOpacity
-              style={styles.quickItem}
-              onPress={() => router.push('/responder/map' as never)}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="map-outline" size={16} color="#40536D" />
-              <Text style={styles.quickText}>Open map</Text>
-              <Ionicons name="chevron-forward" size={13} color="#C3CDD8" />
-            </TouchableOpacity>
-            <View style={styles.quickSep} />
-            <TouchableOpacity
-              style={styles.quickItem}
-              onPress={() => router.push('/responder/profile' as never)}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="person-outline" size={16} color="#40536D" />
-              <Text style={styles.quickText}>Profile & availability</Text>
-              <Ionicons name="chevron-forward" size={13} color="#C3CDD8" />
-            </TouchableOpacity>
-          </View>
+        <SectionLabel title="Quick access" />
+        <View style={styles.quickGrid}>
+          <QuickTile
+            icon="clipboard-outline"
+            label="My missions"
+            sub="Offers and assignments"
+            badge={pendingOffers.length}
+            onPress={() => router.push('/responder/assignments' as never)}
+          />
+          <QuickTile
+            icon="navigate-outline"
+            label="Live map"
+            sub="Route and your position"
+            onPress={() => router.push('/responder/map' as never)}
+          />
+          <QuickTile
+            icon="map-outline"
+            label="Coverage map"
+            sub="Bocaue and 19 barangays"
+            onPress={() => router.push('/coverage' as never)}
+          />
+          <QuickTile
+            icon="person-outline"
+            label="Profile"
+            sub="Duty status and account"
+            onPress={() => router.push('/responder/profile' as never)}
+          />
         </View>
-
-      </ScrollView>
+      </Animated.ScrollView>
     </SafeAreaView>
   );
 }
 
-// ─── Shared tokens ────────────────────────────────────────────────────────────
+// ─── Pieces ─────────────────────────────────────────────────────────────────
 
-const BEVEL = 'rgba(168,181,193,0.18)';
-const SHADOW = {
-  shadowColor: '#8795A3',
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.08,
-  shadowRadius: 8,
-  elevation: 2,
-};
+function HeroStat({ value, label, icon, highlight }: {
+  value: string;
+  label: string;
+  icon?: IconName;
+  highlight?: boolean;
+}) {
+  return (
+    <View style={styles.heroStat}>
+      <View style={styles.heroStatValueRow}>
+        {icon ? <Ionicons name={icon} size={15} color={highlight ? '#5FD3B0' : colors.onDeepMuted} /> : null}
+        <Text style={[styles.heroStatValue, highlight && { color: '#5FD3B0' }]}>{value}</Text>
+      </View>
+      <Text style={styles.heroStatLabel} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+
+function MissionCard({
+  assignment, isActive, isStale, onOpen, onMap,
+}: {
+  assignment: Assignment;
+  isActive: boolean;
+  isStale: boolean;
+  onOpen: () => void;
+  onMap: () => void;
+}) {
+  const incident = assignment.incidents;
+  const category = incident?.category ?? 'OTHER';
+  const meta = typeMeta(category);
+  const loc = incident?.incident_locations;
+  const area = [loc?.barangay, loc?.municipality].filter(Boolean).join(', ');
+  const address = loc?.formatted_address ?? (area || null);
+  const incidentStatus = String(incident?.status ?? '');
+  const st = incidentStatus ? statusMeta(incidentStatus) : null;
+  const tone = st ? TONE_COLORS[st.tone] : null;
+
+  return (
+    <View style={[responderCard, styles.missionCard]}>
+      <View style={styles.missionHead}>
+        <View style={[styles.missionFlag, isActive ? styles.flagActive : styles.flagAccepted]}>
+          {isActive ? <View style={styles.liveDot} /> : <Ionicons name="time-outline" size={12} color={colors.info} />}
+          <Text style={[styles.missionFlagText, { color: isActive ? colors.dangerStrong : colors.info }]}>
+            {isActive ? 'ACTIVE ASSIGNMENT' : 'ACCEPTED'}
+          </Text>
+        </View>
+        <Text style={styles.liveText}>{isStale ? 'May be stale' : 'Live'}</Text>
+      </View>
+
+      <View style={styles.missionMain}>
+        <IncidentTypeIcon type={category} size={52} />
+        <View style={styles.missionTitleWrap}>
+          <Text style={styles.missionTitle} numberOfLines={1}>{meta.label}</Text>
+          {incident?.public_reference ? (
+            <Text style={styles.missionRef} selectable>{incident.public_reference}</Text>
+          ) : null}
+        </View>
+      </View>
+
+      {address ? (
+        <View style={styles.missionRow}>
+          <Ionicons name="location" size={15} color={colors.danger} />
+          <View style={{ flex: 1 }}>
+            {area ? <Text style={styles.missionArea}>{area}</Text> : null}
+            <Text style={styles.missionAddress} numberOfLines={2}>{address}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {st && tone ? (
+        <View style={[styles.statusPill, { backgroundColor: tone.bg }]}>
+          <Ionicons name={st.icon} size={13} color={tone.fg} />
+          <Text style={[styles.statusPillText, { color: tone.fg }]}>{st.label}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.missionActions}>
+        <PressScale
+          wrapStyle={{ flex: 1 }}
+          style={styles.btnPrimary}
+          onPress={onOpen}
+          accessibilityRole="button"
+          accessibilityLabel="View mission"
+        >
+          <Text style={styles.btnPrimaryText}>View mission</Text>
+          <Ionicons name="arrow-forward" size={17} color={colors.white} />
+        </PressScale>
+        <PressScale
+          style={styles.btnSecondary}
+          onPress={onMap}
+          accessibilityRole="button"
+          accessibilityLabel="Open map"
+        >
+          <Ionicons name="navigate" size={18} color={colors.primary} />
+          <Text style={styles.btnSecondaryText}>Map</Text>
+        </PressScale>
+      </View>
+    </View>
+  );
+}
+
+function QuickTile({ icon, label, sub, badge, onPress }: {
+  icon: IconName;
+  label: string;
+  sub: string;
+  badge?: number;
+  onPress: () => void;
+}) {
+  return (
+    <PressScale
+      wrapStyle={styles.quickWrap}
+      style={[responderCard, styles.quickTile]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={badge ? `${label}, ${badge} waiting` : label}
+    >
+      <View style={styles.quickIcon}>
+        <Ionicons name={icon} size={22} color={colors.primary} />
+        {badge ? (
+          <View style={styles.quickBadge}>
+            <Text style={styles.quickBadgeText}>{badge > 99 ? '99+' : badge}</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text style={styles.quickLabel}>{label}</Text>
+      <Text style={styles.quickSub} numberOfLines={2}>{sub}</Text>
+    </PressScale>
+  );
+}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F2F5F8' },
-  scroll:    { padding: 16, paddingBottom: 32 },
-  center:    { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
-  iconWrap:  { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EDF1F4', alignItems: 'center', justifyContent: 'center', marginBottom: 8, borderWidth: 1, borderColor: BEVEL },
-  errorTitle:{ fontSize: 15, fontWeight: '700', color: '#1C2B3A' },
-  retryBtn:  { marginTop: 12, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
-  retryText: { color: '#FFFFFF', fontWeight: '700' },
+  container: { flex: 1, backgroundColor: colors.bg },
+  scroll:    { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 24 },
+  center:    { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // Header
-  header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  headerLeft:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  connPill:    { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
-  connDot:     { width: 7, height: 7, borderRadius: 4 },
-  connText:    { fontSize: 12, fontWeight: '600' },
-  avatarCircle:{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF7F4', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(13,96,83,0.18)' },
-  avatarText:  { fontSize: 13, fontWeight: '800', color: '#0D6053' },
+  // Duty card — the citizen profile's deep-green identity surface.
+  hero: {
+    marginTop: 6, marginBottom: 20, padding: 20, borderRadius: radius.xl,
+    backgroundColor: colors.primaryDeep, borderWidth: 1, borderColor: '#245248',
+    shadowColor: colors.primaryDeep, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.22, shadowRadius: 18, elevation: 6,
+  },
+  skeletonOnDeep: { backgroundColor: 'rgba(255,255,255,0.12)' },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroGreeting: { fontSize: 14, fontWeight: '700', color: colors.onDeepMuted },
+  heroStatus: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, height: 28, paddingHorizontal: 11, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
+  },
+  heroStatusDot: { width: 8, height: 8, borderRadius: 4 },
+  heroStatusText: { fontSize: 12, fontWeight: '800', color: colors.white },
+  heroName: { marginTop: 6, fontSize: 26, lineHeight: 32, fontWeight: '900', letterSpacing: -0.5, color: colors.white },
+  heroOrg: { marginTop: 2, fontSize: 13, fontWeight: '600', color: colors.onDeepMuted },
+  heroStats: {
+    flexDirection: 'row', alignItems: 'stretch', marginTop: 18, paddingTop: 16,
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  heroStat: { flex: 1, alignItems: 'flex-start' },
+  heroStatValueRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  heroStatValue: { fontSize: 22, lineHeight: 26, fontWeight: '800', color: colors.white, fontVariant: ['tabular-nums'] },
+  heroStatLabel: { marginTop: 2, fontSize: 11, fontWeight: '600', color: colors.onDeepMuted },
+  heroDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.12)', marginHorizontal: 12 },
 
-  // Banner
-  banner:        { flexDirection: 'row', alignItems: 'center', gap: 7, borderRadius: 12, padding: 10, marginBottom: 14, borderWidth: 1 },
-  bannerOffline: { backgroundColor: '#FDF0F1', borderColor: 'rgba(212,72,88,0.20)' },
-  bannerStale:   { backgroundColor: '#FFFBEB', borderColor: 'rgba(217,119,6,0.20)' },
-  bannerText:    { flex: 1, fontSize: 12, fontWeight: '500' },
-  refreshLink:   { fontSize: 12, color: '#0D6053', fontWeight: '700' },
+  // Simple state cards (standby / pending / unclassified)
+  stateCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, marginBottom: 20 },
+  stateIcon: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  stateTitle: { fontSize: 15, fontWeight: '800', color: colors.text, marginBottom: 3 },
+  stateSub: { fontSize: 12, color: colors.textMuted, lineHeight: 17 },
 
-  // Page title
-  pageTitle:    { marginBottom: 18 },
-  pageTitleText:{ fontSize: 28, fontWeight: '800', color: '#1C2B3A', lineHeight: 33 },
-  pageTitleSub: { fontSize: 13, color: '#8795A3', marginTop: 3 },
-
-  // Cards
-  card:         { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: BEVEL, ...SHADOW },
-  cardTitle:    { fontSize: 16, fontWeight: '700', color: '#1C2B3A' },
-
-  // Coverage-map shortcut
-  coverageCard:    { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 18, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: BEVEL, ...SHADOW },
-  coverageIconWrap:{ width: 42, height: 42, borderRadius: 21, backgroundColor: '#EEF7F4', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(13,96,83,0.14)' },
-  coverageBody:    { flex: 1 },
-  coverageTitle:   { fontSize: 14, fontWeight: '800', color: '#1C2B3A' },
-  coverageSub:     { fontSize: 12, color: '#8795A3', marginTop: 2 },
-  cardHeaderRow:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  // Mission card
+  missionCard: { padding: 18, marginBottom: 20 },
+  missionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  missionFlag: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 26, paddingHorizontal: 10, borderRadius: 13 },
+  flagActive: { backgroundColor: colors.dangerSoft },
+  flagAccepted: { backgroundColor: colors.infoSoft },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.danger },
+  missionFlagText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  liveText: { fontSize: 12, fontWeight: '600', color: colors.textMuted },
+  missionMain: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  missionTitleWrap: { flex: 1, minWidth: 0 },
+  missionTitle: { fontSize: 18, fontWeight: '800', color: colors.text },
+  missionRef: { marginTop: 2, fontSize: 13, fontWeight: '700', color: colors.textMuted, fontVariant: ['tabular-nums'] },
+  missionRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 16, padding: 12,
+    borderRadius: radius.md, backgroundColor: colors.bg,
+  },
+  missionArea: { fontSize: 11, fontWeight: '800', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 },
+  missionAddress: { fontSize: 14, fontWeight: '600', color: colors.text, lineHeight: 19 },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    height: 28, paddingHorizontal: 11, borderRadius: 14, marginTop: 12,
+  },
+  statusPillText: { fontSize: 12, fontWeight: '800' },
+  missionActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  btnPrimary: {
+    height: 52, borderRadius: radius.lg, backgroundColor: colors.primary,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  btnPrimaryText: { color: colors.white, fontSize: 15, fontWeight: '800' },
+  btnSecondary: {
+    height: 52, paddingHorizontal: 18, borderRadius: radius.lg, backgroundColor: colors.primarySoft,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  btnSecondaryText: { color: colors.primary, fontSize: 15, fontWeight: '800' },
 
   // Availability
-  availRow:       { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14 },
-  availAvatar:    { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F0F3F6', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BEVEL },
-  availBody:      { flex: 1 },
-  availStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  statusDot:      { width: 8, height: 8, borderRadius: 4 },
-  availStatusText:{ fontSize: 15, fontWeight: '700', color: '#1C2B3A' },
-  availSub:       { fontSize: 12, color: '#8795A3', lineHeight: 17 },
-  availInfo:      { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 12, backgroundColor: '#F5F7FA', borderRadius: 10, padding: 10 },
-  availInfoText:  { flex: 1, fontSize: 11, color: '#8795A3', lineHeight: 16 },
+  availCard: { padding: 16, marginBottom: 20 },
+  availLine: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 12 },
+  availInfo: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 12 },
+  availInfoText: { flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 },
 
-  // Mission header
-  viewAllBtn:  { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  viewAllText: { fontSize: 13, color: '#8795A3', fontWeight: '600' },
-
-  // Alert row
-  alertRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFFBEB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: 'rgba(217,119,6,0.18)' },
-  alertRowText:{ flex: 1, fontSize: 13, color: '#D97706', fontWeight: '500' },
-
-  // Priority badge
-  priorityRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  priorityBadge:{ flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1 },
-  priorityText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
-  timestampText:{ fontSize: 11, color: '#8795A3' },
-
-  // Mission content
-  missionContent:  { flexDirection: 'row', gap: 12, marginBottom: 14 },
-  missionLeft:     { flex: 1 },
-  missionRef:      { fontSize: 18, fontWeight: '800', color: '#1C2B3A', marginBottom: 6, fontVariant: ['tabular-nums'] },
-  missionCatRow:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  missionCatText:  { fontSize: 13, color: '#0D6053', fontWeight: '600' },
-  missionDetailRow:{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginBottom: 8 },
-  detailLabel:     { fontSize: 11, color: '#8795A3', marginBottom: 1 },
-  detailValue:     { fontSize: 12, color: '#1C2B3A', fontWeight: '600', lineHeight: 17 },
-  statusBadge:     { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5, marginTop: 2 },
-  statusBadgeText: { fontSize: 12, fontWeight: '700' },
-
-  // Map thumbnail
-  mapThumb:     { width: 108, borderRadius: 14, backgroundColor: '#EEF7F4', overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(13,96,83,0.15)' },
-  mapThumbBody: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, padding: 10 },
-  mapThumbLabel:{ fontSize: 11, color: '#0D6053', fontWeight: '600', textAlign: 'center', lineHeight: 15 },
-  mapThumbNav:  { backgroundColor: '#0D6053', alignItems: 'center', justifyContent: 'center', padding: 10 },
-
-  // Mission action buttons
-  missionActions:       { flexDirection: 'row', gap: 10 },
-  missionBtnPrimary:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#0D6053', borderRadius: 13, paddingVertical: 13 },
-  missionBtnPrimaryText:{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
-  missionBtnSecondary:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#F0F3F6', borderRadius: 13, paddingVertical: 13, paddingHorizontal: 16, borderWidth: 1, borderColor: BEVEL },
-  missionBtnSecondaryText:{ color: '#1C2B3A', fontWeight: '600', fontSize: 14 },
-
-  // State rows (standby, pending, unclassified)
-  stateRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  stateIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  stateTitle:{ fontSize: 14, fontWeight: '700', color: '#1C2B3A', marginBottom: 3 },
-  stateSub:  { fontSize: 12, color: '#8795A3', lineHeight: 17 },
-
-  // Operational overview
-  overviewRow:    { flexDirection: 'row', alignItems: 'flex-start', marginTop: 14 },
-  overviewItem:   { flex: 1, alignItems: 'center', gap: 4 },
-  overviewSep:    { width: 1, backgroundColor: BEVEL, alignSelf: 'stretch', marginHorizontal: 4 },
-  overviewIconWrap:{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
-  overviewCount:  { fontSize: 22, fontWeight: '800', color: '#1C2B3A' },
-  overviewLabel:  { fontSize: 11, color: '#8795A3', textAlign: 'center', lineHeight: 15 },
-  sharingRow:     { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  sharingText:    { fontSize: 11, fontWeight: '600' },
-
-  // Quick access
-  quickList: { marginTop: 12 },
-  quickItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13 },
-  quickText: { flex: 1, fontSize: 13, color: '#40536D', fontWeight: '600' },
-  quickSep:  { height: StyleSheet.hairlineWidth, backgroundColor: BEVEL },
+  // Quick tiles (citizen home pattern)
+  quickGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
+  quickWrap: { width: '48.5%' },
+  quickTile: { padding: 16, minHeight: 132 },
+  quickIcon: {
+    width: 44, height: 44, borderRadius: 22, marginBottom: 12,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface,
+  },
+  quickBadge: {
+    position: 'absolute', top: -3, right: -5, minWidth: 19, height: 19, paddingHorizontal: 5, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.danger, borderWidth: 1.5, borderColor: colors.white,
+  },
+  quickBadgeText: { fontSize: 10, fontWeight: '800', color: colors.white },
+  quickLabel: { fontSize: 15, fontWeight: '800', color: colors.text, marginBottom: 3 },
+  quickSub: { fontSize: 12, lineHeight: 16, color: colors.textMuted },
 });

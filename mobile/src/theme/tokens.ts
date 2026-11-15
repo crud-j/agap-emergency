@@ -13,6 +13,12 @@ export const colors = {
 
   primary: '#0D6053',
   primarySoft: '#EEF7F4',
+  /** Brighter end of the brand gradient (tab indicator, + button). */
+  primaryBright: '#17917C',
+  /** Deep green for identity / hero surfaces (citizen profile card, responder duty card). */
+  primaryDeep: '#12362F',
+  /** Muted mint text on primaryDeep. */
+  onDeepMuted: '#B7CEC6',
 
   text: '#1C2B3A',
   textMid: '#40536D',

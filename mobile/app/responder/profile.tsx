@@ -1,35 +1,25 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Alert, StatusBar, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { ProfileAvatar } from '@/src/components/profile/profile-avatar';
 import { useResponderSummary } from '@/src/hooks/useResponderSummary';
 import { AvailabilityControl } from '@/src/components/responder/availability-control';
-import { AgapLogo } from '@/src/components/brand/AgapLogo';
+import {
+  ListGroup, ListRow, PageTitle, PressScale, ResponderTopBar, SectionLabel, StatePanel, responderCard,
+} from '@/src/components/responder/ui';
+import { MDRRMO_HOTLINE, MDRRMO_HOTLINE_DISPLAY } from '@/src/config/hotlines';
+import { colors, radius } from '@/src/theme/tokens';
 
-const AVAILABILITY_COLOR: Record<string, string> = {
-  AVAILABLE:   '#0D6053',
-  OFF_DUTY:    '#8795A3',
-  UNAVAILABLE: '#D44858',
+const AVAILABILITY: Record<string, { label: string; color: string }> = {
+  AVAILABLE:   { label: 'Available',   color: '#5FD3B0' },
+  OFF_DUTY:    { label: 'Off Duty',    color: colors.onDeepMuted },
+  UNAVAILABLE: { label: 'Unavailable', color: '#FF8A95' },
 };
-
-const AVAILABILITY_LABEL: Record<string, string> = {
-  AVAILABLE:   'Available',
-  OFF_DUTY:    'Off Duty',
-  UNAVAILABLE: 'Unavailable',
-};
-
-const CARD_SHADOW = {
-  shadowColor: '#8795A3',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.09,
-  shadowRadius: 12,
-  elevation: 3,
-};
-
-const BEVEL = 'rgba(168,181,193,0.20)';
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const logout = useAuthStore((s) => s.logout);
   const { data: summary, isLoading, isError, refetch } = useResponderSummary();
 
@@ -44,49 +34,52 @@ export default function ProfileScreen() {
     );
   }
 
+  const signOutButton = (
+    <PressScale style={styles.signOutBtn} onPress={handleLogout} accessibilityRole="button" accessibilityLabel="Sign out">
+      <Ionicons name="log-out-outline" size={19} color={colors.dangerStrong} />
+      <Text style={styles.signOutText}>Sign out</Text>
+    </PressScale>
+  );
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
+        <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
+        <View style={styles.pad}><ResponderTopBar /></View>
         <View style={styles.center}>
-          <ActivityIndicator color="#0D6053" size="large" />
+          <ActivityIndicator color={colors.primary} size="large" />
         </View>
       </SafeAreaView>
     );
   }
 
-  if (isError) {
+  if (isError || !summary) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
-        <View style={styles.header}>
-          <Text style={styles.pageTitle}>Profile</Text>
+        <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
+        <View style={styles.pad}>
+          <ResponderTopBar />
+          <PageTitle title="Profile" />
         </View>
         <View style={styles.center}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="cloud-offline-outline" size={32} color="#8795A3" />
-          </View>
-          <Text style={styles.muted}>Could not load profile.</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          <StatePanel
+            icon="cloud-offline-outline"
+            title="Could not load profile."
+            body="Check your connection and try again. You can still sign out."
+            actionLabel="Retry"
+            actionIcon="refresh"
+            onAction={() => refetch()}
+          />
         </View>
         {/* Always show logout even when profile fails */}
-        <View style={styles.logoutSection}>
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={20} color="#D44858" />
-            <Text style={styles.logoutText}>Sign out</Text>
-          </TouchableOpacity>
-        </View>
+        <View style={styles.pad}>{signOutButton}</View>
       </SafeAreaView>
     );
   }
 
-  const user         = summary!.user;
-  const availability = summary!.availability;
-  const status       = availability.status;
-  const statusColor  = AVAILABILITY_COLOR[status] ?? '#8795A3';
-  const statusLabel  = AVAILABILITY_LABEL[status] ?? status.replace('_', ' ');
+  const user         = summary.user;
+  const status       = summary.availability.status;
+  const avail        = AVAILABILITY[status] ?? { label: status.replace('_', ' '), color: colors.onDeepMuted };
   const initials     = user.full_name
     ?.split(' ')
     .map((w) => w[0])
@@ -96,78 +89,74 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F2F5F8" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ResponderTopBar name={user.full_name} />
+        <PageTitle title="Profile" />
 
-        <View style={styles.header}>
-          <AgapLogo />
-        </View>
-        <Text style={[styles.pageTitle, { marginBottom: 14 }]}>Profile</Text>
-
-        {/* Identity card */}
-        <View style={styles.card}>
-          <View style={styles.identityRow}>
-            <ProfileAvatar style={styles.avatar} textStyle={styles.avatarText} initial={initials} />
-            <View style={styles.identityText}>
-              <Text style={styles.name}>{user.full_name ?? 'Responder'}</Text>
-              <Text style={styles.role}>MDRRMO Responder</Text>
+        {/* Identity card — same deep-green surface as the citizen profile */}
+        <View style={styles.identityCard}>
+          <ProfileAvatar style={styles.avatar} textStyle={styles.avatarText} initial={initials} />
+          <Text style={styles.name} numberOfLines={1}>{user.full_name ?? 'Responder'}</Text>
+          <View style={styles.roleRow}>
+            <View style={styles.roleBadge}>
+              <Ionicons name="shield-checkmark" size={12} color={colors.primary} />
+              <Text style={styles.roleBadgeText}>MDRRMO Responder</Text>
+            </View>
+            <View style={styles.statusBadge}>
+              <View style={[styles.statusDot, { backgroundColor: avail.color }]} />
+              <Text style={styles.statusBadgeText}>{avail.label}</Text>
             </View>
           </View>
         </View>
 
         {/* Duty status */}
-        <View style={styles.sectionLabel}>
-          <Text style={styles.sectionTitle}>DUTY STATUS</Text>
-        </View>
-        <View style={styles.card}>
-          <View style={styles.statusRow}>
-            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-            <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
-          </View>
-          <View style={{ marginTop: 12 }}>
-            <AvailabilityControl currentStatus={status} />
-          </View>
+        <SectionLabel title="Duty status" />
+        <View style={[responderCard, styles.dutyCard]}>
+          <AvailabilityControl currentStatus={status} />
         </View>
 
         {/* Organizations */}
         {user.organizations.length > 0 && (
           <>
-            <View style={styles.sectionLabel}>
-              <Text style={styles.sectionTitle}>
-                ORGANIZATION{user.organizations.length > 1 ? 'S' : ''}
-              </Text>
-            </View>
-            <View style={styles.card}>
+            <SectionLabel title={user.organizations.length > 1 ? 'Organizations' : 'Organization'} />
+            <ListGroup>
               {user.organizations.map((org, i) => (
-                <View
+                <ListRow
                   key={org.id}
-                  style={[styles.orgRow, i < user.organizations.length - 1 && styles.orgRowBorder]}
-                >
-                  <View style={styles.orgIconWrap}>
-                    <Ionicons name="business-outline" size={18} color="#8795A3" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.orgName}>{org.name}</Text>
-                    {org.position && <Text style={styles.orgPosition}>{org.position}</Text>}
-                  </View>
-                </View>
+                  icon="business-outline"
+                  label={org.name}
+                  sub={org.position ?? undefined}
+                  last={i === user.organizations.length - 1}
+                />
               ))}
-            </View>
+            </ListGroup>
           </>
         )}
 
+        {/* Field references */}
+        <SectionLabel title="Field references" />
+        <ListGroup>
+          <ListRow
+            icon="map-outline"
+            label="Bocaue coverage map"
+            sub="The municipality and all 19 barangays"
+            onPress={() => router.push('/coverage' as never)}
+          />
+          <ListRow
+            icon="call-outline"
+            label="MDRRMO operations"
+            sub="Call the operations center"
+            value={MDRRMO_HOTLINE_DISPLAY}
+            last
+            onPress={() => Linking.openURL(`tel:${MDRRMO_HOTLINE}`).catch(() => undefined)}
+            accessibilityLabel={`Call MDRRMO operations, ${MDRRMO_HOTLINE_DISPLAY}`}
+          />
+        </ListGroup>
+
         {/* Account */}
-        <View style={styles.sectionLabel}>
-          <Text style={styles.sectionTitle}>ACCOUNT</Text>
-        </View>
-        <View style={styles.card}>
-          <TouchableOpacity style={styles.row} onPress={handleLogout}>
-            <View style={[styles.rowIconWrap, { backgroundColor: '#FDF0F1', borderColor: 'rgba(212,72,88,0.20)' }]}>
-              <Ionicons name="log-out-outline" size={18} color="#D44858" />
-            </View>
-            <Text style={[styles.rowText, { color: '#D44858' }]}>Sign out</Text>
-          </TouchableOpacity>
-        </View>
+        <SectionLabel title="Account" />
+        {signOutButton}
 
         <Text style={styles.footerNote}>AGAP Responder · Bocaue MDRRMO</Text>
       </ScrollView>
@@ -176,47 +165,44 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F2F5F8' },
-  scroll:    { padding: 16, paddingBottom: 32 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  pad:       { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16 },
+  scroll:    { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 24 },
+  center:    { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  center:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  iconWrap:  { width: 72, height: 72, borderRadius: 36, backgroundColor: '#EDF1F4', alignItems: 'center', justifyContent: 'center', marginBottom: 8, borderWidth: 1, borderColor: BEVEL },
-  muted:     { color: '#40536D', fontSize: 15 },
-  retryBtn:  { marginTop: 12, backgroundColor: '#0D6053', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
-  retryText: { color: '#FFFFFF', fontWeight: '700' },
+  identityCard: {
+    alignItems: 'center', padding: 22, marginBottom: 20, borderRadius: radius.xl,
+    backgroundColor: colors.primaryDeep, borderWidth: 1, borderColor: '#245248',
+    shadowColor: colors.primaryDeep, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 18, elevation: 5,
+  },
+  avatar: {
+    width: 84, height: 84, borderRadius: 42, marginBottom: 12, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#E2F0EA', borderWidth: 3, borderColor: '#DDEFE8',
+  },
+  avatarText: { fontSize: 30, fontWeight: '800', color: colors.primary },
+  name: { fontSize: 23, fontWeight: '800', letterSpacing: -0.4, color: colors.white, marginBottom: 10 },
+  roleRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+  roleBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, height: 28, paddingHorizontal: 11, borderRadius: 14,
+    backgroundColor: '#DDEFE8',
+  },
+  roleBadgeText: { fontSize: 12, fontWeight: '800', color: colors.primary },
+  statusBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, height: 28, paddingHorizontal: 11, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusBadgeText: { fontSize: 12, fontWeight: '800', color: colors.white },
 
-  header:    { marginBottom: 20 },
-  pageTitle: { fontSize: 22, fontWeight: '800', color: '#1C2B3A' },
+  dutyCard: { padding: 14, marginBottom: 20 },
 
-  card: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: BEVEL, ...CARD_SHADOW },
+  signOutBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 52, borderRadius: radius.lg, backgroundColor: colors.white,
+    borderWidth: 1, borderColor: '#F0D8D5',
+  },
+  signOutText: { color: colors.dangerStrong, fontWeight: '800', fontSize: 15 },
 
-  identityRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  avatar:       { width: 52, height: 52, borderRadius: 26, backgroundColor: '#0D6053', alignItems: 'center', justifyContent: 'center', shadowColor: '#0D6053', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 },
-  avatarText:   { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
-  identityText: { flex: 1 },
-  name:         { fontSize: 18, fontWeight: '800', color: '#1C2B3A' },
-  role:         { fontSize: 13, color: '#8795A3', marginTop: 2 },
-
-  sectionLabel: { marginBottom: 8, marginTop: 10 },
-  sectionTitle: { fontSize: 11, color: '#8795A3', fontWeight: '700', letterSpacing: 0.9 },
-
-  statusRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  statusDot:  { width: 9, height: 9, borderRadius: 5 },
-  statusText: { fontSize: 15, fontWeight: '700' },
-
-  orgRow:       { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
-  orgRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#DCE3E9' },
-  orgIconWrap:  { width: 34, height: 34, borderRadius: 10, backgroundColor: '#EDF1F4', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BEVEL },
-  orgName:      { fontSize: 14, fontWeight: '700', color: '#1C2B3A' },
-  orgPosition:  { fontSize: 12, color: '#8795A3', marginTop: 2 },
-
-  row:         { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  rowIconWrap: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  rowText:     { fontSize: 15, fontWeight: '700' },
-
-  logoutSection: { padding: 16, paddingBottom: 24 },
-  logoutBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FDF0F1', borderRadius: 14, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(212,72,88,0.20)' },
-  logoutText:    { color: '#D44858', fontWeight: '700', fontSize: 15 },
-
-  footerNote: { textAlign: 'center', color: '#DCE3E9', fontSize: 12, marginTop: 20 },
+  footerNote: { textAlign: 'center', color: colors.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 0.7, marginTop: 20 },
 });

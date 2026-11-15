@@ -46,7 +46,7 @@ export function SurgeBroadcastCard() {
 }
 
 const styles = StyleSheet.create({
-  card: { marginBottom: 16, borderRadius: 16, borderWidth: 1, borderColor: '#FCD34D', backgroundColor: '#FFFBEB', padding: 14 },
+  card: { marginBottom: 20, borderRadius: 20, borderWidth: 1, borderColor: '#FCD34D', backgroundColor: '#FFFBEB', padding: 14 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   headerText: { color: '#92400E', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   item: { paddingTop: 8, borderTopWidth: 1, borderTopColor: '#FDE68A', marginTop: 4 },
