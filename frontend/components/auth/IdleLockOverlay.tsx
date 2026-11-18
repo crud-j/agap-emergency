@@ -62,6 +62,8 @@ export function IdleLockOverlay(): JSX.Element | null {
     // z-[1500]: above everything else (map overlays 1000, top bar 1100, dialogs 1300, toasts 1400).
     <div className="fixed inset-0 z-[1500] flex items-center justify-center bg-slate-950/75 p-6" role="dialog" aria-modal="true">
       <form onSubmit={(event) => { event.preventDefault(); void unlock(); }} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        {/* Tells password managers which account this password is for. */}
+        <input type="email" name="username" autoComplete="username" value={user?.email ?? ''} readOnly hidden />
         <p className="text-xs font-semibold uppercase tracking-wider text-agap-green">AGAP console locked</p>
         <h2 className="mt-2 text-xl font-bold text-slate-900">Unlock to continue</h2>
         <p className="mt-2 text-sm text-slate-600">Your session was locked after inactivity. New incident alerts continue in the background.</p>

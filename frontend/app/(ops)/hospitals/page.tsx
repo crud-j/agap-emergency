@@ -10,6 +10,7 @@ import {
   EmptyState, Skeleton,
   type Column,
 } from '@/components/ui';
+import { notify, promptText } from '@/components/ui/alerts';
 import { useAuthUser, hasRole, type AuthUser } from '@/lib/use-auth';
 import { titleCase, timeAgo } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
@@ -371,131 +372,73 @@ function SetLocationDialog({ hospital, onClose, needsReview, visibleHospitals, o
   );
 }
 
-function ReviewLocationDialog({ review, onClose }: {
-  review: { hospital: Hospital; decision: 'VERIFIED' | 'REJECTED' } | null;
-  onClose: () => void;
-}): JSX.Element {
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [openedFor, setOpenedFor] = useState<string | null>(null);
+/**
+ * Location review and deactivate / reactivate (Supervisor, System Admin), as
+ * SweetAlert2 popups. The optional note or reason goes to the audit log; every
+ * popup starts empty, so a note never carries over to the next decision.
+ */
+function useHospitalDecisions() {
   const verify = useVerifyHospitalLocation();
-  const verifying = review?.decision === 'VERIFIED';
-
-  // A note typed for one decision must never be sent with the next one (it goes to the audit log).
-  const reviewKey = review ? `${review.hospital.id}:${review.decision}` : null;
-  if (reviewKey !== openedFor) {
-    setOpenedFor(reviewKey);
-    setNote('');
-    setError(null);
-  }
-
-  async function handleConfirm() {
-    if (!review) return;
-    setError(null);
-    try {
-      await verify.mutateAsync({
-        id: review.hospital.id,
-        body: { decision: review.decision, ...(note.trim() && { note: note.trim() }) },
-      });
-      onClose();
-    } catch (err) {
-      setError(describeHospitalError(err).message);
-    }
-  }
-
-  return (
-    <Dialog open={!!review} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{verifying ? 'Verify location' : 'Reject location'}</DialogTitle>
-          <DialogDescription>
-            {review?.hospital.name}
-            {review && hasCoordinates(review.hospital) && ` · ${formatCoordinates(review.hospital.latitude, review.hospital.longitude)}`}
-            {verifying
-              ? '. Ambulance crews can then select it as a destination.'
-              : '. It stays hidden from ambulance crews until a new location is set and verified.'}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-1.5 py-2">
-          <label htmlFor="review-note" className="text-sm font-medium text-agap-textMain">
-            Note <span className="font-normal text-agap-textSub">(optional)</span>
-          </label>
-          <input id="review-note" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} className={inputCls} />
-          {error && <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger" role="alert">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" size="sm" onClick={onClose} disabled={verify.isPending}>Cancel</Button>
-          <Button variant={verifying ? 'primary' : 'danger'} size="sm" loading={verify.isPending}
-            onClick={() => void handleConfirm()}>
-            {verifying ? 'Verify' : 'Reject'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** Deactivate / reactivate confirmation (Supervisor, System Admin). The reason goes to the audit log. */
-function ActiveStatusDialog({ hospital, onClose }: {
-  hospital: Hospital | null;
-  onClose: () => void;
-}): JSX.Element {
-  const [reason, setReason] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [openedFor, setOpenedFor] = useState<string | null>(null);
   const setActive = useSetHospitalActive();
-  const deactivating = !!hospital?.is_active;
 
-  if ((hospital?.id ?? null) !== openedFor) {
-    setOpenedFor(hospital?.id ?? null);
-    setReason('');
-    setError(null);
-  }
-
-  async function handleConfirm() {
-    if (!hospital) return;
-    setError(null);
-    try {
-      await setActive.mutateAsync({
-        id: hospital.id,
-        body: { isActive: !deactivating, ...(reason.trim() && { reason: reason.trim() }) },
-      });
-      onClose();
-    } catch (err) {
-      setError(describeHospitalError(err).message);
+  async function reviewLocation(hospital: Hospital, decision: 'VERIFIED' | 'REJECTED') {
+    const verifying = decision === 'VERIFIED';
+    const where = hasCoordinates(hospital)
+      ? ` · ${formatCoordinates(hospital.latitude, hospital.longitude)}`
+      : '';
+    const saved = await promptText({
+      title: verifying ? 'Verify location' : 'Reject location',
+      text: `${hospital.name}${where}${verifying
+        ? '. Ambulance crews can then select it as a destination.'
+        : '. It stays hidden from ambulance crews until a new location is set and verified.'}`,
+      icon: verifying ? 'question' : 'warning',
+      tone: verifying ? 'primary' : 'danger',
+      input: 'text',
+      inputLabel: 'Note (optional)',
+      maxLength: 500,
+      confirmText: verifying ? 'Verify' : 'Reject',
+      onConfirm: async (note) => {
+        try {
+          await verify.mutateAsync({ id: hospital.id, body: { decision, ...(note && { note }) } });
+        } catch (err) {
+          throw new Error(describeHospitalError(err).message);
+        }
+      },
+    });
+    if (saved !== null) {
+      void notify('success', { title: verifying ? 'Location verified' : 'Location rejected', text: hospital.name });
     }
   }
 
-  return (
-    <Dialog open={!!hospital} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          {/* The name is in the title and button: the registry preselects its first hospital. */}
-          <DialogTitle>{deactivating ? `Deactivate ${hospital?.name}?` : `Reactivate ${hospital?.name}?`}</DialogTitle>
-          <DialogDescription>
-            {deactivating
-              ? `Ambulance crews can no longer choose ${hospital?.name} as a destination. Transports already heading there continue: their crews and the dispatcher are warned so they can change the destination.`
-              : `${hospital?.name} can be chosen as a destination again.`}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-1.5 py-2">
-          <label htmlFor="active-reason" className="text-sm font-medium text-agap-textMain">
-            Reason <span className="font-normal text-agap-textSub">(optional)</span>
-          </label>
-          <input id="active-reason" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)}
-            placeholder={deactivating ? 'e.g. ER closed after a fire' : 'e.g. ER reopened'} className={inputCls} />
-          {error && <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger" role="alert">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" size="sm" onClick={onClose} disabled={setActive.isPending}>Cancel</Button>
-          <Button variant={deactivating ? 'danger' : 'primary'} size="sm" loading={setActive.isPending}
-            onClick={() => void handleConfirm()}>
-            {deactivating ? `Deactivate ${hospital?.name}` : `Reactivate ${hospital?.name}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+  async function changeActive(hospital: Hospital) {
+    const deactivating = hospital.is_active;
+    // The name is in the title and button: the registry preselects its first hospital.
+    const saved = await promptText({
+      title: deactivating ? `Deactivate ${hospital.name}?` : `Reactivate ${hospital.name}?`,
+      text: deactivating
+        ? `Ambulance crews can no longer choose ${hospital.name} as a destination. Transports already heading there continue: their crews and the dispatcher are warned so they can change the destination.`
+        : `${hospital.name} can be chosen as a destination again.`,
+      icon: deactivating ? 'warning' : 'question',
+      tone: deactivating ? 'danger' : 'primary',
+      input: 'text',
+      inputLabel: 'Reason (optional)',
+      placeholder: deactivating ? 'e.g. ER closed after a fire' : 'e.g. ER reopened',
+      maxLength: 500,
+      confirmText: deactivating ? `Deactivate ${hospital.name}` : `Reactivate ${hospital.name}`,
+      onConfirm: async (reason) => {
+        try {
+          await setActive.mutateAsync({ id: hospital.id, body: { isActive: !deactivating, ...(reason && { reason }) } });
+        } catch (err) {
+          throw new Error(describeHospitalError(err).message);
+        }
+      },
+    });
+    if (saved !== null) {
+      void notify('success', { title: deactivating ? 'Hospital deactivated' : 'Hospital reactivated', text: hospital.name });
+    }
+  }
+
+  return { reviewLocation, changeActive };
 }
 
 /** Active / deactivated, with the reviewer's switch. */
@@ -851,8 +794,7 @@ export default function HospitalCoordinationPage(): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [locationFor, setLocationFor] = useState<Hospital | null>(null);
-  const [review, setReview] = useState<{ hospital: Hospital; decision: 'VERIFIED' | 'REJECTED' } | null>(null);
-  const [activeFor, setActiveFor] = useState<Hospital | null>(null);
+  const decisions = useHospitalDecisions();
   const [statusFor, setStatusFor] = useState<Hospital | null>(null);
 
   const all = useMemo(() => hospitals ?? [], [hospitals]);
@@ -988,11 +930,11 @@ export default function HospitalCoordinationPage(): JSX.Element {
                       {inlineReview && (
                         <div className="flex justify-end gap-2 px-3 pb-3">
                           {hasCoordinates(h) && (
-                            <Button variant="primary" size="sm" onClick={() => setReview({ hospital: h, decision: 'VERIFIED' })}>
+                            <Button variant="primary" size="sm" onClick={() => void decisions.reviewLocation(h, 'VERIFIED')}>
                               <Check size={13} className="mr-1" /> Verify
                             </Button>
                           )}
-                          <Button variant="secondary" size="sm" onClick={() => setReview({ hospital: h, decision: 'REJECTED' })}>
+                          <Button variant="secondary" size="sm" onClick={() => void decisions.reviewLocation(h, 'REJECTED')}>
                             <X size={13} className="mr-1" /> Reject
                           </Button>
                         </div>
@@ -1012,7 +954,7 @@ export default function HospitalCoordinationPage(): JSX.Element {
                 canSet={perms.canSetLocation(selected)}
                 canReview={perms.isReviewer}
                 onSet={() => setLocationFor(selected)}
-                onReview={(decision) => setReview({ hospital: selected, decision })}
+                onReview={(decision) => void decisions.reviewLocation(selected, decision)}
               />
             )}
             {selected && selected.is_active && (
@@ -1020,7 +962,7 @@ export default function HospitalCoordinationPage(): JSX.Element {
                 onReport={() => setStatusFor(selected)} />
             )}
             {selected && (perms.isReviewer || !selected.is_active) && (
-              <ActivePanel hospital={selected} canChange={perms.isReviewer} onChange={() => setActiveFor(selected)} />
+              <ActivePanel hospital={selected} canChange={perms.isReviewer} onChange={() => void decisions.changeActive(selected)} />
             )}
             {selected && !canViewReferrals ? (
               <EmptyState
@@ -1045,8 +987,6 @@ export default function HospitalCoordinationPage(): JSX.Element {
         visibleHospitals={all} onCreated={(h) => openHospital(h.id)} onOpenRegistered={openHospital} />
       <SetLocationDialog hospital={locationFor} onClose={() => setLocationFor(null)} needsReview={perms.isOrgAdmin}
         visibleHospitals={all} onOpenRegistered={openHospital} />
-      <ReviewLocationDialog review={review} onClose={() => setReview(null)} />
-      <ActiveStatusDialog hospital={activeFor} onClose={() => setActiveFor(null)} />
       <ReceivingStatusDialog hospital={statusFor} onClose={() => setStatusFor(null)} />
     </div>
   );

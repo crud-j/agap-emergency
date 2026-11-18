@@ -52,6 +52,19 @@ cd backend
 pnpm db:reset-data                   # empties all AGAP tables (scripts/db/reset-data.sql)
 pnpm db:seed
 cd ..
+
+# Keep the demo laptop awake
+powercfg /change standby-timeout-ac 0     # never sleep when plugged in
+powercfg /change standby-timeout-dc 0     # never sleep on battery
+
+# Put the demo accounts back to AgapDev2026!
+cd backend
+pnpm dev:reset-password supervisor@mdrrmo.bocaue.gov.ph
+pnpm dev:reset-password dispatcher1@mdrrmo.bocaue.gov.ph
+pnpm dev:reset-password citizen@demo.agap
+
+# Build and start with the API proxied through the frontend
+$env:PROXY_API = 'true'; pnpm build; pnpm start
 ```
 
 Faster; good for "clean slate" between demo rehearsals.
@@ -80,6 +93,7 @@ To put dispatcher passwords back to `AgapDev2026!` later:
 cd backend
 pnpm dev:reset-dispatcher            # all dispatchers
 pnpm dev:reset-dispatcher --mfa      # also wipe passkeys / authenticator / backup codes
+pnpm dev:reset-password supervisor@mdrrmo.bocaue.gov.ph   # any one account, any role (add --mfa / --no-change)
 cd ..
 ```
 
@@ -92,6 +106,14 @@ Production builds are faster and won't restart if a file is touched mid-demo.
 ```powershell
 pnpm --filter @agap/shared build
 pnpm --filter @agap/backend build
+```
+
+Or build and start everything at once, with the API proxied through the frontend:
+
+```powershell
+$env:PROXY_API = 'true'
+pnpm build
+pnpm start
 ```
 
 (The frontend builds itself in step 4.)

@@ -66,6 +66,28 @@ function PasswordInput({
   );
 }
 
+/** Same comparison as the backend (backend/src/auth/password-policy.ts): accents and symbols ignored. */
+function normalizeForPolicy(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * The backend refuses a password containing AGAP, Bocaue, the email's name part or any
+ * part of the person's name (3+ characters). Checked here too, so the rule turns red
+ * before submitting instead of the server answering 400.
+ */
+function containsRestrictedTerm(password: string, email?: string | null, name?: string | null): boolean {
+  const personal = [email?.split('@')[0] ?? '', ...(name?.split(/[^a-zA-Z0-9]+/) ?? [])]
+    .map(normalizeForPolicy)
+    .filter((term) => term.length >= 3);
+  const normalized = normalizeForPolicy(password);
+  return ['agap', 'bocaue', ...personal].some((term) => normalized.includes(term));
+}
+
 export default function ChangePasswordPage(): JSX.Element {
   const router = useRouter();
   const user = useAuthUser();
@@ -86,7 +108,8 @@ export default function ChangePasswordPage(): JSX.Element {
 
   // Validation Checks for Submission
   const isLengthValid = newPassword.length >= 12 && newPassword.length <= 128;
-  const isSecurityValid = newPassword.length > 0 && !/agap|bocaue/i.test(newPassword);
+  const isSecurityValid =
+    newPassword.length > 0 && !containsRestrictedTerm(newPassword, user?.email, user?.name);
   const isMatchValid = confirmPassword.length > 0 && newPassword === confirmPassword;
 
   // BrewedOps Motion Library Logic
@@ -286,7 +309,9 @@ export default function ChangePasswordPage(): JSX.Element {
             </div>
 
             <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4" noValidate>
-              
+              {/* Lets password managers save the new password under the right account. */}
+              <input type="email" name="username" autoComplete="username" value={user?.email ?? ''} readOnly hidden />
+
               <PasswordInput 
                 id="current" 
                 label="Current password" 
@@ -351,7 +376,7 @@ export default function ChangePasswordPage(): JSX.Element {
                   <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors duration-300 ${isSecurityValid ? 'bg-[#126247] text-white' : 'bg-slate-200 text-transparent'}`}>
                     <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
-                  Must not contain your name, AGAP, or Bocaue
+                  Must not contain your name, email, AGAP, or Bocaue
                 </div>
 
                 <div className={`flex items-center gap-2.5 text-sm transition-colors duration-300 ${isMatchValid ? 'text-slate-900' : 'text-slate-600'}`}>

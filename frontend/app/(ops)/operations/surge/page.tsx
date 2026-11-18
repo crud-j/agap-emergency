@@ -3,13 +3,14 @@
 import { useState, type JSX, type FormEvent } from 'react';
 import {
   Siren, ShieldAlert, Users, Truck, Megaphone,
-  CheckCircle2, XCircle, Clock, AlertTriangle, Waves, Edit, SlidersHorizontal, LifeBuoy,
+  XCircle, Clock, AlertTriangle, Waves, Edit, SlidersHorizontal, LifeBuoy,
 } from 'lucide-react';
 import {
   Card, CardHeader, CardTitle, Badge, Button, DataTable, Skeleton, EmptyState,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   type Column,
 } from '@/components/ui';
+import { alertMessage, confirmAction, notify, promptText } from '@/components/ui/alerts';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
 import {
   useSurgeState,
@@ -232,108 +233,48 @@ function ActivateDialog({ onClose, initial, onActivated }: {
   );
 }
 
-// ─── Deactivate dialog ───────────────────────────────────────────────────────
+// ─── Deactivate and broadcast (SweetAlert2) ──────────────────────────────────
 
-function DeactivateDialog({ surgeId, onClose }: { surgeId: string; onClose: () => void }): JSX.Element {
+function useSurgeActions() {
   const deactivate = useDeactivateSurge();
-
-  function confirm() {
-    deactivate.mutate(surgeId, { onSuccess: onClose });
-  }
-
-  return (
-    <DialogContent className="max-w-sm">
-      <DialogHeader>
-        <DialogTitle>Deactivate Surge Mode?</DialogTitle>
-        <DialogDescription>
-          This will end the mass-casualty event and notify all active responders.
-          All triage tags and incident links will be retained for the record.
-        </DialogDescription>
-      </DialogHeader>
-      {deactivate.isError && (
-        <p className="text-xs text-agap-danger">
-          {(deactivate.error as Error)?.message ?? 'Deactivation failed.'}
-        </p>
-      )}
-      <DialogFooter>
-        <Button variant="ghost" onClick={onClose} disabled={deactivate.isPending}>Cancel</Button>
-        <Button variant="primary" loading={deactivate.isPending} onClick={confirm}>
-          <CheckCircle2 size={14} />
-          Confirm Deactivate
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  );
-}
-
-// ─── Broadcast dialog ────────────────────────────────────────────────────────
-
-function BroadcastDialog({ surgeId, onClose }: { surgeId: string; onClose: () => void }): JSX.Element {
   const broadcast = useSurgeBroadcast();
-  const [message, setMessage] = useState('');
-  const result = broadcast.data as { delivered?: number; recipientCount?: number } | undefined;
 
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!message.trim()) return;
-    broadcast.mutate({ surgeId, message: message.trim() });
+  async function confirmDeactivate(surgeId: string) {
+    const ok = await confirmAction({
+      title: 'Deactivate Surge Mode?',
+      text: 'This will end the mass-casualty event and notify all active responders. All triage tags and incident links will be retained for the record.',
+      icon: 'warning',
+      confirmText: 'Confirm Deactivate',
+      onConfirm: () => deactivate.mutateAsync(surgeId),
+    });
+    if (ok) void notify('success', { title: 'Surge Mode deactivated', text: 'Responders have been notified.' });
   }
 
-  if (broadcast.isSuccess) {
-    return (
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Megaphone size={16} className="text-agap-amber" />
-            Broadcast sent
-          </DialogTitle>
-          <DialogDescription>
-            Delivered to {result?.delivered ?? 0} of {result?.recipientCount ?? 0} active responder
-            {result?.recipientCount === 1 ? '' : 's'}. It shows on their AGAP home screen.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="primary" onClick={onClose}>Done</Button>
-        </DialogFooter>
-      </DialogContent>
-    );
+  async function sendBroadcast(surgeId: string) {
+    let result: { delivered?: number; recipientCount?: number } | undefined;
+    const sent = await promptText({
+      title: 'Broadcast to Responders',
+      text: 'Sent to every active responder account as a notice on their AGAP home screen.',
+      icon: 'info',
+      input: 'textarea',
+      placeholder: 'Surge broadcast message…',
+      maxLength: 1000,
+      required: { minLength: 1, message: 'Write the message to send.' },
+      confirmText: 'Send Broadcast',
+      onConfirm: async (message) => {
+        result = (await broadcast.mutateAsync({ surgeId, message })) as typeof result;
+      },
+    });
+    if (sent === null) return;
+    const total = result?.recipientCount ?? 0;
+    await alertMessage({
+      icon: 'success',
+      title: 'Broadcast sent',
+      text: `Delivered to ${result?.delivered ?? 0} of ${total} active responder${total === 1 ? '' : 's'}. It shows on their AGAP home screen.`,
+    });
   }
 
-  return (
-    <DialogContent className="max-w-sm">
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          <Megaphone size={16} className="text-agap-amber" />
-          Broadcast to Responders
-        </DialogTitle>
-        <DialogDescription>
-          Sent to every active responder account as a notice on their AGAP home screen.
-        </DialogDescription>
-      </DialogHeader>
-      <form onSubmit={submit} className="mt-2 space-y-3">
-        <textarea
-          className="w-full rounded-xl border border-agap-track bg-white px-3 py-2 text-sm text-agap-textMain placeholder-agap-textSub outline-none focus:border-agap-green focus:ring-1 focus:ring-agap-green resize-none"
-          placeholder="Surge broadcast message…"
-          rows={3}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          maxLength={1000}
-          required
-        />
-        {broadcast.isError && (
-          <p className="text-xs text-agap-danger">
-            {(broadcast.error as Error)?.message ?? 'Broadcast failed.'}
-          </p>
-        )}
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={broadcast.isPending} disabled={!message.trim()}>
-            Send Broadcast
-          </Button>
-        </DialogFooter>
-      </form>
-    </DialogContent>
-  );
+  return { confirmDeactivate, sendBroadcast };
 }
 
 // ─── Surge recommendation (AUTOMATION_NEEDS_PLAN Phase 2, C2) ─────────────────
@@ -734,8 +675,7 @@ export default function SurgePage(): JSX.Element {
   const markRead = useMarkRead();
 
   const [showActivate, setShowActivate] = useState(false);
-  const [showDeactivate, setShowDeactivate] = useState(false);
-  const [showBroadcast, setShowBroadcast] = useState(false);
+  const surgeActions = useSurgeActions();
   // Set when the activate dialog was opened from a recommendation (prefilled).
   const [fromRecommendation, setFromRecommendation] = useState<SurgeRecommendation | null>(null);
 
@@ -767,11 +707,11 @@ export default function SurgePage(): JSX.Element {
         )}
         {canManage && isActive && surge?.id && (
           <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={() => setShowBroadcast(true)}>
+            <Button variant="secondary" onClick={() => { if (surge.id) void surgeActions.sendBroadcast(surge.id); }}>
               <Megaphone size={14} />
               Broadcast
             </Button>
-            <Button variant="ghost" onClick={() => setShowDeactivate(true)}>
+            <Button variant="ghost" onClick={() => { if (surge.id) void surgeActions.confirmDeactivate(surge.id); }}>
               <XCircle size={14} />
               Deactivate
             </Button>
@@ -938,18 +878,6 @@ export default function SurgePage(): JSX.Element {
               onActivated: () => markRead.mutate(fromRecommendation.notification.id),
             })}
           />
-        )}
-      </Dialog>
-
-      <Dialog open={showDeactivate} onOpenChange={setShowDeactivate}>
-        {showDeactivate && surge?.id && (
-          <DeactivateDialog surgeId={surge.id} onClose={() => setShowDeactivate(false)} />
-        )}
-      </Dialog>
-
-      <Dialog open={showBroadcast} onOpenChange={setShowBroadcast}>
-        {showBroadcast && surge?.id && (
-          <BroadcastDialog surgeId={surge.id} onClose={() => setShowBroadcast(false)} />
         )}
       </Dialog>
     </div>

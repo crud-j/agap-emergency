@@ -239,6 +239,8 @@ export function AccountPicker({
                     </div>
                   ) : (
                   <form onSubmit={(event) => void submit(event, account)} noValidate className="px-3.5 pb-4 pt-0.5">
+                    {/* Tells password managers (and Chrome's form check) which account this password is for. */}
+                    <input type="email" name="username" autoComplete="username" value={account.email} readOnly hidden />
                     <div
                       className={`flex h-11 items-center gap-2.5 rounded-xl bg-slate-50 px-3 text-slate-400 ring-1 transition-shadow focus-within:bg-white focus-within:text-[#126247] focus-within:ring-2 focus-within:ring-[#126247]/50 ${
                         error ? 'auth-shake bg-red-50/40 text-red-500 ring-2 ring-red-400' : 'ring-slate-200'

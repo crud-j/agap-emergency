@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { PaginatedResult } from '@agap/shared';
 import { MISSION_RESOURCE_STATUSES } from '@agap/shared';
 import { connectSocket, disconnectSocket, joinOps, onIncidentEvent } from '@/lib/websocket';
-import { getToken, subscribeSession } from '@/lib/auth';
+import { getSessionUser, getToken, subscribeSession } from '@/lib/auth';
 import type {
   IncidentStatusChangedPayload,
   IncidentCreatedPayload,
@@ -63,8 +63,14 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
   const seedRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // The access token is in memory and only exists once the session is restored or
-  // signed in, so connect when a session appears and disconnect when it ends.
-  const signedIn = useSyncExternalStore(subscribeSession, () => !!getToken(), () => false);
+  // signed in, so connect when a session appears and disconnect when it ends. A session
+  // that still has to change its password is not "signed in" here: the gateway refuses
+  // that token, and connecting only after the change gives the socket the new token.
+  const signedIn = useSyncExternalStore(
+    subscribeSession,
+    () => !!getToken() && !getSessionUser()?.mustChangePassword,
+    () => false,
+  );
 
   useEffect(() => {
     if (!signedIn) {
@@ -74,6 +80,21 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
 
     const socket = connectSocket();
     const leaveOps = joinOps();
+
+    // The gateway drops a socket whose token it refuses (expired, revoked, forced password
+    // change), and Socket.IO never retries a server-side disconnect by itself. Try again
+    // as soon as a new access token arrives (silent refresh, or signing in again).
+    let droppedByServer = false;
+    const onDisconnect = (reason: string) => {
+      if (reason === 'io server disconnect') droppedByServer = true;
+    };
+    socket.on('disconnect', onDisconnect);
+    const offSession = subscribeSession(() => {
+      if (droppedByServer && getToken() && !socket.connected) {
+        droppedByServer = false;
+        connectSocket();
+      }
+    });
 
     // ─── reconnect: catch up ─────────────────────────────────────────────────
     // Events sent while the socket was down are lost, so after a reconnect refetch
@@ -488,6 +509,8 @@ export function SocketProvider({ children }: SocketProviderProps): JSX.Element {
       offTransporting();
       offFacilityArrival();
       leaveOps();
+      offSession();
+      socket.off('disconnect', onDisconnect);
       socket.off('connect', onConnect);
       offStatus();
       offCreated();

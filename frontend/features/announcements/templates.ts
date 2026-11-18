@@ -944,6 +944,49 @@ export const SOURCE_REQUIRED_CATEGORIES = new Set([
   'FIRE_ADVISORY', 'INDUSTRIAL_HAZARD', 'RESCUE_UPDATE', 'POST_DISASTER_UPDATE',
 ]);
 
+/**
+ * The source / reference line written from details the operator already confirmed: who
+ * observed or issued the information and when. English, like the "Reference:" line it fills.
+ * Empty until the details it needs are entered, so a half-filled form never shows a made-up
+ * source. The operator can still overwrite it (an actual bulletin or order number, say).
+ */
+export function suggestSource(t: AnnouncementTemplate, v: Values, office: { EN: string }): string {
+  const when = (key: string) => (str(v[key]) ? fmtDateTime(str(v[key]), 'EN') : '');
+  const issuer = office.EN.trim();
+  switch (t.key) {
+    case 'RIVER_LEVEL': {
+      const at = when('observedAt');
+      if (!at) return '';
+      const gauge = str(v['gauge']).trim();
+      return gauge ? `MDRRMO reading at ${gauge}, ${at}` : `MDRRMO Bocaue River gauge reading, ${at}`;
+    }
+    case 'RAINFALL': {
+      const level = RAIN_LEVELS[str(v['level'])];
+      const at = when('issuedAt');
+      return level && at ? `PAGASA ${level.EN} Heavy Rainfall Warning, issued ${at}` : '';
+    }
+    case 'FLOOD': {
+      const at = when('observedAt');
+      return at ? `MDRRMO field report, as of ${at}` : '';
+    }
+    case 'EVACUATION': {
+      const at = when('effectiveAt');
+      if (!at || !issuer) return '';
+      const kind = str(v['type']) === 'FORCED' ? 'Forced' : 'Preemptive';
+      return `${kind} evacuation order, ${issuer}, effective ${at}`;
+    }
+    case 'CLASS_SUSPENSION':
+      // The order or memo the operator named is the source itself.
+      return str(v['basis']).trim();
+    case 'ROAD_CLOSURE': {
+      const at = when('start');
+      return at && issuer ? `Traffic advisory, ${issuer}, from ${at}` : '';
+    }
+    default:
+      return issuer ? `Advisory of the ${issuer}` : '';
+  }
+}
+
 export interface ReadinessItem {
   label: string;
   ok: boolean;

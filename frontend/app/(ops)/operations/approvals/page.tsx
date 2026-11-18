@@ -2,10 +2,8 @@
 
 import { useState, type JSX } from 'react';
 import { CheckCircle2, Info, MessageSquareWarning, ShieldCheck, Undo2 } from 'lucide-react';
-import {
-  Button, Badge, Skeleton,
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
-} from '@/components/ui';
+import { Button, Badge, Skeleton } from '@/components/ui';
+import { confirmAction, escapeHtml, promptText } from '@/components/ui/alerts';
 import { cn } from '@/lib/utils';
 import {
   useAnnouncementImage,
@@ -44,85 +42,52 @@ function waitingFor(iso: string | null | undefined, now: number): string {
   return `${h} h ${min % 60} min`;
 }
 
-// ─── Return dialog ────────────────────────────────────────────────────────────
-
-function ReturnDialog({ target, onClose, onDone }: {
-  target: Announcement | null;
-  onClose: () => void;
-  onDone: () => void;
-}): JSX.Element {
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const ret = useReturnAnnouncement();
-
-  async function confirm() {
-    if (!target) return;
-    if (note.trim().length < MIN_NOTE) { setError('Say what the officer must change (at least 10 characters).'); return; }
-    try {
-      setError(null);
-      await ret.mutateAsync({ id: target.id, note: note.trim() });
-      setNote('');
-      onDone();
-    } catch (e) {
-      setError(errMsg(e, 'Failed to return.'));
-    }
-  }
-
-  return (
-    <Dialog open={!!target} onOpenChange={(o) => { if (!o) { setError(null); onClose(); } }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Undo2 size={16} className="text-agap-amber" /> Return to the officer
-          </DialogTitle>
-          {target && <DialogDescription className="line-clamp-2">{target.title}</DialogDescription>}
-        </DialogHeader>
-        <label htmlFor="rnote" className="mb-1.5 block text-xs font-semibold text-agap-textMid">
-          What must change
-        </label>
-        <textarea
-          id="rnote"
-          rows={4}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="e.g. Idagdag ang mga evacuation center para sa Lolomboy at Bunlo."
-          className="w-full resize-y rounded-lg border border-[rgba(168,181,193,0.35)] bg-white px-3 py-2 text-sm text-agap-textMain focus:border-transparent focus:outline-none focus:ring-2 focus:ring-agap-green"
-        />
-        <p className="mt-2 text-xs text-agap-textSub">
-          The advisory goes back to draft. The officer sees this note on the Announcements page. Nothing is sent to residents.
-        </p>
-        {error && <p className="mt-2 text-xs text-agap-danger">{error}</p>}
-        <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>Back</Button>
-          <Button variant="primary" loading={ret.isPending} onClick={confirm}>Return with note</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ─── Review panel ─────────────────────────────────────────────────────────────
 
-function Review({ item, onReturn, onApproved }: {
+function Review({ item, onReturned, onApproved }: {
   item: Announcement;
-  onReturn: () => void;
+  onReturned: () => void;
   onApproved: (scheduled: boolean) => void;
 }): JSX.Element {
   const image = useAnnouncementImage(item.id, !!item.image_storage_key, item.updated_at, 'approval');
   const approve = useApproveAnnouncement();
-  const [confirming, setConfirming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const ret = useReturnAnnouncement();
   const later = !!item.scheduled_at && new Date(item.scheduled_at).getTime() > Date.now();
 
-  async function confirm() {
-    try {
-      setError(null);
-      await approve.mutateAsync(item.id);
-      setConfirming(false);
-      onApproved(later);
-    } catch (e) {
-      setError(errMsg(e, 'Failed to approve.'));
-    }
+  async function confirmApprove() {
+    const ok = await confirmAction({
+      title: later ? `Approve for release at ${fmtManila(item.scheduled_at)}?` : 'Approve and release now?',
+      html:
+        `<p class="font-semibold text-agap-textMain">${escapeHtml(item.title)}</p>` +
+        '<p class="mt-2">It appears in the citizen app and goes to push and SMS subscribers. You are recorded as the approver.</p>',
+      icon: 'question',
+      confirmText: 'Approve',
+      onConfirm: async () => {
+        try { await approve.mutateAsync(item.id); } catch (e) { throw new Error(errMsg(e, 'Failed to approve.')); }
+      },
+    });
+    if (ok) onApproved(later);
+  }
+
+  async function returnWithNote() {
+    const note = await promptText({
+      title: 'Return to the officer',
+      html:
+        `<p class="font-semibold text-agap-textMain">${escapeHtml(item.title)}</p>` +
+        '<p class="mt-2">The advisory goes back to draft. The officer sees this note on the Announcements page. Nothing is sent to residents.</p>',
+      icon: 'warning',
+      input: 'textarea',
+      inputLabel: 'What must change',
+      placeholder: 'e.g. Idagdag ang mga evacuation center para sa Lolomboy at Bunlo.',
+      maxLength: 1000,
+      required: { minLength: MIN_NOTE, message: 'Say what the officer must change (at least 10 characters).' },
+      confirmText: 'Return with note',
+      cancelText: 'Back',
+      onConfirm: async (value) => {
+        try { await ret.mutateAsync({ id: item.id, note: value }); } catch (e) { throw new Error(errMsg(e, 'Failed to return.')); }
+      },
+    });
+    if (note !== null) onReturned();
   }
 
   const rows: [string, string][] = [
@@ -165,34 +130,11 @@ function Review({ item, onReturn, onApproved }: {
         ))}
       </dl>
 
-      {confirming && (
-        <div className="rounded-xl border border-agap-green bg-agap-greenSoft px-4 py-3 text-sm">
-          <p className="font-semibold text-agap-textMain">
-            {later ? `Approve for release at ${fmtManila(item.scheduled_at)}?` : 'Approve and release now?'}
-          </p>
-          <p className="mt-1 text-xs text-agap-textMid">
-            It appears in the citizen app and goes to push and SMS subscribers. You are recorded as the approver.
-          </p>
-          <div className="mt-3 flex gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setConfirming(false)}>Back</Button>
-            <Button size="sm" variant="primary" loading={approve.isPending} onClick={confirm}>
-              <ShieldCheck size={13} /> Approve
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {error && (
-        <p role="alert" className="rounded-lg border border-[rgba(212,72,88,0.2)] bg-agap-dangerSoft px-3 py-2 text-xs text-agap-danger">
-          {error}
-        </p>
-      )}
-
       <div className="flex flex-wrap gap-2">
-        <Button variant="primary" onClick={() => setConfirming(true)} disabled={confirming}>
+        <Button variant="primary" onClick={() => void confirmApprove()}>
           <ShieldCheck size={15} /> Approve
         </Button>
-        <Button variant="secondary" onClick={onReturn}>
+        <Button variant="secondary" onClick={() => void returnWithNote()}>
           <Undo2 size={15} /> Return with note
         </Button>
       </div>
@@ -206,7 +148,6 @@ export default function ApprovalsPage(): JSX.Element {
   const query = usePendingApprovals();
   const policy = useAnnouncementPolicy();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [returnTarget, setReturnTarget] = useState<Announcement | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
   const items = query.data ?? [];
@@ -288,7 +229,10 @@ export default function ApprovalsPage(): JSX.Element {
             <Review
               key={selected.id}
               item={selected}
-              onReturn={() => setReturnTarget(selected)}
+              onReturned={() => {
+                setFlash(`Returned to the officer: "${selected.title}".`);
+                setSelectedId(null);
+              }}
               onApproved={(scheduled) => {
                 setFlash(scheduled
                   ? `Approved. "${selected.title}" goes out at ${fmtManila(selected.scheduled_at)}.`
@@ -299,16 +243,6 @@ export default function ApprovalsPage(): JSX.Element {
           )}
         </div>
       )}
-
-      <ReturnDialog
-        target={returnTarget}
-        onClose={() => setReturnTarget(null)}
-        onDone={() => {
-          setFlash(returnTarget ? `Returned to the officer: "${returnTarget.title}".` : null);
-          setReturnTarget(null);
-          setSelectedId(null);
-        }}
-      />
 
       <p className="flex items-center gap-1.5 text-xs text-agap-textSub">
         <MessageSquareWarning size={13} aria-hidden />

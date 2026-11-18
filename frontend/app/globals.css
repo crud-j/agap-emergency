@@ -57,6 +57,47 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Modal motion ────────────────────────────────────────────────────────────
+   Radix dialogs and drawers, in the same feel as the SweetAlert2 popups: a
+   centred dialog "pops" in on SweetAlert2's own curve (overshoot, settle) and
+   shrinks away faster; drawers slide; backdrops fade. Radix keeps an element
+   mounted until its closing animation ends, so exits play too. The dialog is
+   centred with translate(-50%, -50%), so every keyframe repeats it. */
+@keyframes agap-modal-in {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+  45%  { opacity: 1; transform: translate(-50%, -50%) scale(1.04); }
+  80%  { transform: translate(-50%, -50%) scale(0.98); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes agap-modal-out {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to   { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
+}
+@keyframes agap-backdrop-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes agap-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes agap-drawer-in-right  { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes agap-drawer-out-right { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@keyframes agap-drawer-in-left   { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@keyframes agap-drawer-out-left  { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+
+.agap-modal[data-state='open']   { animation: agap-modal-in 0.3s ease-out both; }
+.agap-modal[data-state='closed'] { animation: agap-modal-out 0.15s ease-in both; }
+.agap-backdrop[data-state='open']   { animation: agap-backdrop-in 0.2s ease-out both; }
+.agap-backdrop[data-state='closed'] { animation: agap-backdrop-out 0.15s ease-in both; }
+.agap-drawer[data-side='right'][data-state='open']   { animation: agap-drawer-in-right 0.32s cubic-bezier(0.23, 1, 0.32, 1) both; }
+.agap-drawer[data-side='right'][data-state='closed'] { animation: agap-drawer-out-right 0.2s ease-in both; }
+.agap-drawer[data-side='left'][data-state='open']    { animation: agap-drawer-in-left 0.32s cubic-bezier(0.23, 1, 0.32, 1) both; }
+.agap-drawer[data-side='left'][data-state='closed']  { animation: agap-drawer-out-left 0.2s ease-in both; }
+
+/* SweetAlert2 popups: blur what is behind them, like the dialogs. */
+.agap-swal-backdrop.swal2-backdrop-show { backdrop-filter: blur(3px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .agap-modal[data-state],
+  .agap-backdrop[data-state],
+  .agap-drawer[data-state] { animation: none; }
+}
+
 .animate-slide-up {
   animation: slide-up-fade 0.2s ease-out forwards;
 }

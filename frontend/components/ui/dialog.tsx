@@ -22,8 +22,8 @@ export const DialogOverlay = forwardRef<
       // which opens from within the incident drawer, layers correctly — and above
       // Leaflet map UI (z-index 1000).
       'fixed inset-0 z-[1300] bg-black/30 backdrop-blur-sm',
-      'data-[state=open]:animate-in data-[state=closed]:animate-out',
-      'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      // Fade in/out (keyframes in globals.css).
+      'agap-backdrop',
       className,
     )}
     {...props}
@@ -51,11 +51,8 @@ export const DialogContent = forwardRef<
         'max-h-[calc(100dvh-2rem)] overflow-y-auto',
         'bg-white rounded-2xl shadow-[0_20px_60px_rgba(135,149,163,0.20)] border border-[rgba(168,181,193,0.20)]',
         'p-6 focus:outline-none',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out',
-        'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-        'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
-        'data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%]',
-        'data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]',
+        // SweetAlert2-style pop in, quick shrink out (keyframes in globals.css).
+        'agap-modal',
         className,
       )}
       {...props}

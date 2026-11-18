@@ -17,6 +17,7 @@ import {
   Tabs, TabsList, TabsTrigger, TabsContent,
   PriorityBadge, StatusChip, Button, Skeleton, EmptyState, EtaLabel, Badge,
 } from '@/components/ui';
+import { modalHost, notify, promptText } from '@/components/ui/alerts';
 import { reporterIdLabel } from '@/features/identity-verification/format';
 import {
   useIncident, useUpdateIncidentStatus, useCreateResolution, useCloseIncident, useReporterStanding,
@@ -1540,8 +1541,6 @@ function CitizenPhotoStrip({
   attachments: IncidentAttachment[];
 }): JSX.Element | null {
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
-  const [rejectTarget, setRejectTarget] = useState<IncidentAttachment | null>(null);
-  const [rejectNotes, setRejectNotes] = useState('');
   const mediaUrls = useAttachmentUrls(incidentId, attachments);
   const rejectMutation = useRejectAttachment();
 
@@ -1551,18 +1550,22 @@ function CitizenPhotoStrip({
     new Set(attachments.flatMap((a) => a.authenticity_flags ?? [])),
   );
 
-  function closeRejectDialog() {
-    setRejectTarget(null);
-    setRejectNotes('');
-  }
-
-  function confirmReject() {
-    if (!rejectTarget) return;
-    const notes = rejectNotes.trim();
-    rejectMutation.mutate(
-      { incidentId, attachmentId: rejectTarget.id, ...(notes ? { notes } : {}) },
-      { onSuccess: closeRejectDialog },
-    );
+  // SweetAlert2, mounted inside this drawer (Radix would block a popup outside it).
+  async function rejectEvidence(attachment: IncidentAttachment, from: Element) {
+    const notes = await promptText({
+      title: 'Reject this evidence?',
+      text: `${attachment.file_name} will be marked as not credible. The reporter is warned that submitting false evidence may affect their reporting standing. This never changes the incident's status or blocks dispatch.`,
+      icon: 'warning',
+      tone: 'danger',
+      input: 'textarea',
+      placeholder: 'Optional notes (e.g. why this looks fake)',
+      maxLength: 500,
+      confirmText: 'Reject evidence',
+      target: modalHost(from),
+      onConfirm: (value) =>
+        rejectMutation.mutateAsync({ incidentId, attachmentId: attachment.id, ...(value ? { notes: value } : {}) }),
+    });
+    if (notes !== null) void notify('success', { title: 'Evidence rejected', text: attachment.file_name });
   }
 
   return (
@@ -1683,7 +1686,7 @@ function CitizenPhotoStrip({
                     type="button"
                     title="Reject this evidence"
                     aria-label="Reject this evidence"
-                    onClick={() => setRejectTarget(a)}
+                    onClick={(e) => void rejectEvidence(a, e.currentTarget)}
                     className={`absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm transition-colors ${
                       aiFlagged
                         ? 'border-red-300 bg-red-600 text-white hover:bg-red-700'
@@ -1713,43 +1716,6 @@ function CitizenPhotoStrip({
           </div>
         )}
       </Section>
-
-      {/* ── Reject evidence confirmation ── */}
-      <Dialog open={!!rejectTarget} onOpenChange={(open) => { if (!open) closeRejectDialog(); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <Ban size={16} className="text-red-600" />
-              Reject this evidence?
-            </DialogTitle>
-            <DialogDescription className="text-xs text-agap-textSub">
-              {rejectTarget?.file_name} will be marked as not credible. The reporter is warned that
-              submitting false evidence may affect their reporting standing. This never changes the
-              incident&apos;s status or blocks dispatch.
-            </DialogDescription>
-          </DialogHeader>
-          <textarea
-            value={rejectNotes}
-            onChange={(e) => setRejectNotes(e.target.value)}
-            placeholder="Optional notes (e.g. why this looks fake)"
-            maxLength={500}
-            rows={3}
-            className="w-full resize-none rounded-lg border border-[rgba(168,181,193,0.30)] bg-white px-3 py-2 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green"
-          />
-          <DialogFooter>
-            <Button variant="ghost" onClick={closeRejectDialog} disabled={rejectMutation.isPending}>
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              onClick={confirmReject}
-              disabled={rejectMutation.isPending}
-            >
-              {rejectMutation.isPending ? 'Rejecting…' : 'Reject evidence'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* ── Inline video player — opens when a video thumbnail is clicked ── */}
       <Dialog open={!!activeVideoUrl} onOpenChange={(open) => { if (!open) setActiveVideoUrl(null); }}>

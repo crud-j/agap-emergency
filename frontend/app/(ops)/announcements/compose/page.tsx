@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Check, CircleAlert, CloudRain, Construction, DoorOpen, Droplets,
-  ImagePlus, Megaphone, PencilLine, RotateCcw, School, Send, Sparkles, Waves, X,
+  ImagePlus, MapPin, Megaphone, PencilLine, RotateCcw, School, Send, Sparkles, Users, Waves, X,
   type LucideIcon,
 } from 'lucide-react';
 import { Button, Skeleton } from '@/components/ui';
@@ -25,7 +25,7 @@ import {
 } from '@/features/announcements/hooks';
 import type { CreateAnnouncementBody } from '@/features/announcements/api';
 import {
-  TEMPLATES, getTemplate, visibleFields, generate, readiness, areaText, cap,
+  TEMPLATES, getTemplate, visibleFields, generate, readiness, areaText, cap, suggestSource,
   BOCAUE_BARANGAYS, FLOOD_PRONE_BARANGAYS, ISSUERS, SAFETY_ACTIONS,
   manilaInputToIso,
   type AnnouncementTemplate, type CommonInput, type IssuerKey, type LanguageMode,
@@ -70,6 +70,8 @@ interface ComposerState {
   extraAction: string;
   manual: boolean;
   severityTouched: boolean;
+  /** The operator typed their own source; stop filling it in from the details. */
+  sourceTouched?: boolean;
 }
 
 // ─── Small building blocks ────────────────────────────────────────────────────
@@ -161,6 +163,48 @@ function CheckCard({
         <span className={cn('block text-sm text-agap-textMain', compact ? 'font-medium' : 'font-semibold')}>{title}</span>
         {help && <span id={`${id}-help`} className="mt-0.5 block text-xs leading-snug text-agap-hint">{help}</span>}
       </span>
+    </label>
+  );
+}
+
+/** One of the two audience choices: a radio presented as a card. */
+function AudienceOption({
+  id, checked, onSelect, icon, title, help,
+}: { id: string; checked: boolean; onSelect: () => void; icon: ReactNode; title: string; help: string }) {
+  return (
+    <label
+      htmlFor={id}
+      className={cn(
+        // `relative` keeps the sr-only radio (position: absolute) inside this card. Without it the
+        // radio is placed against the page, outside the scrolling <main>, and focusing it on
+        // click scrolls the whole document away (the page went blank).
+        'relative flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border p-3 motion-safe:transition-colors',
+        'focus-within:ring-2 focus-within:ring-agap-green focus-within:ring-offset-1',
+        checked ? 'border-agap-green bg-agap-greenSoft ring-1 ring-agap-green' : 'border-agap-fieldBorder bg-white hover:border-agap-textMid',
+      )}
+    >
+      <input
+        id={id}
+        type="radio"
+        name="audience"
+        checked={checked}
+        onChange={onSelect}
+        aria-describedby={`${id}-help`}
+        className="sr-only"
+      />
+      <span
+        className={cn(
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg motion-safe:transition-colors',
+          checked ? 'bg-agap-green text-white' : 'bg-agap-surface text-agap-textMid',
+        )}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-agap-textMain">{title}</span>
+        <span id={`${id}-help`} className="mt-0.5 block text-xs leading-snug text-agap-hint">{help}</span>
+      </span>
+      {checked && <Check size={16} className="mt-0.5 shrink-0 text-agap-green" aria-hidden />}
     </label>
   );
 }
@@ -269,7 +313,7 @@ function Composer(): JSX.Element {
   const [templateKey, setTemplateKey] = useState<string | null>(null);
   const [state, setState] = useState<ComposerState>({
     values: {}, issuer: 'MAYOR', otherIssuer: '', wholeMunicipality: true,
-    actions: [], extraAction: '', manual: false, severityTouched: false,
+    actions: [], extraAction: '', manual: false, severityTouched: false, sourceTouched: false,
   });
   const [language, setLanguage] = useState<LanguageMode>('FIL');
   const [barangays, setBarangays] = useState<string[]>([]);
@@ -314,6 +358,8 @@ function Composer(): JSX.Element {
       // Drafts made before templates existed have no field values — edit their text directly.
       manual: saved.manual ?? !existing.template_key,
       severityTouched: true,
+      // Older drafts did not record it: keep their saved source as typed.
+      sourceTouched: saved.sourceTouched ?? true,
     });
     setLanguage(existing.language ?? 'FIL');
     setBarangays(existing.target_barangays ?? []);
@@ -354,6 +400,14 @@ function Composer(): JSX.Element {
   }), [state.wholeMunicipality, state.actions, state.extraAction, barangays, office, source, contact, template]);
 
   const suggested: Severity | null = template?.suggestSeverity ? template.suggestSeverity(state.values) : null;
+
+  // Source / reference: written from the confirmed details and the issuer, and kept in step
+  // with them until the operator types their own.
+  const suggestedSource = template ? suggestSource(template, state.values, office) : '';
+  useEffect(() => {
+    if (!state.sourceTouched) setSource(suggestedSource);
+  }, [suggestedSource, state.sourceTouched]);
+  const sourceIsAuto = !state.sourceTouched && !!suggestedSource;
 
   // Follow the suggested severity until the operator overrides it.
   useEffect(() => {
@@ -533,9 +587,27 @@ function Composer(): JSX.Element {
   // Phase 7: with approval on, a CRITICAL notice goes to an MDRRMO Supervisor instead.
   const needsApproval = !!policy.data?.criticalNeedsApproval && severity === 'CRITICAL';
 
+  // Who it reaches. Same rule as the backend's SMS and push fan-out
+  // (announcementReachesBarangay): a barangay notice also reaches everyone with no barangay set.
+  const barangaySpecific = !state.wholeMunicipality && barangays.length > 0;
+  const audience = barangaySpecific
+    ? {
+        label: `Brgy. ${barangays.join(', ')}`,
+        detail: 'Subscribers and app users in these barangays, plus those who have not set a barangay.',
+      }
+    : { label: 'All of Bocaue', detail: 'Every SMS subscriber and every citizen app user.' };
+
+  function goToAudience() {
+    const el = document.getElementById('audience');
+    if (!el) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+    el.querySelector<HTMLInputElement>('input[name="audience"]:checked')?.focus({ preventScroll: true });
+  }
+
   function publishSummaryHtml(): string {
     const sev = severityMeta(severity);
-    const area = state.wholeMunicipality || barangays.length === 0 ? 'All of Bocaue' : barangays.join(', ');
+    const area = barangaySpecific ? `${audience.label} (plus subscribers with no barangay set)` : audience.label;
     const lead = needsApproval
       ? `An MDRRMO Supervisor reviews this notice for <strong class="text-agap-textMain">${escapeHtml(preview.issuingOffice)}</strong> before anything is sent.`
       : `You are approving this notice for release by <strong class="text-agap-textMain">${escapeHtml(preview.issuingOffice)}</strong>.`;
@@ -752,20 +824,43 @@ function Composer(): JSX.Element {
                 )}
               </Section>
 
-              <Section step={3} title="Area, issuer and source">
+              <Section
+                step={3}
+                title="Who receives it, issuer and source"
+                hint="The audience decides who gets the SMS, the push notification and the in-app notice."
+              >
                 <div className="space-y-4">
-                  <fieldset>
+                  <fieldset id="audience" className="scroll-mt-6">
                     <legend className={cn(labelCls, 'flex items-center')}>
-                      <span>Affected area{template.requiresArea && <RequiredMark />}</span>
+                      <span>Who receives it{template.requiresArea && <RequiredMark />}</span>
                       {!state.wholeMunicipality && <SelectedCount n={barangays.length} />}
                     </legend>
-                    <CheckCard
-                      id="wholeMunicipality"
-                      checked={state.wholeMunicipality}
-                      onChange={(v) => setState((s) => ({ ...s, wholeMunicipality: v }))}
-                      title="Buong Bocaue (municipality-wide)"
-                      help={state.wholeMunicipality ? 'Uncheck to choose specific barangays.' : 'Choose the affected barangays below.'}
-                    />
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      <AudienceOption
+                        id="audience-all"
+                        checked={state.wholeMunicipality}
+                        onSelect={() => setState((s) => ({ ...s, wholeMunicipality: true }))}
+                        icon={<Users size={17} aria-hidden />}
+                        title="All of Bocaue (municipality-wide)"
+                        help="Every SMS subscriber and every citizen app user."
+                      />
+                      <AudienceOption
+                        id="audience-barangays"
+                        checked={!state.wholeMunicipality}
+                        onSelect={() => setState((s) => ({ ...s, wholeMunicipality: false }))}
+                        icon={<MapPin size={17} aria-hidden />}
+                        title="Specific barangays"
+                        help="Subscribers and app users in the barangays you pick, plus those who have not set a barangay."
+                      />
+                    </div>
+                    {!state.wholeMunicipality && barangays.length === 0 && (
+                      <p className="mt-2 flex items-start gap-1.5 text-xs font-semibold text-agap-amberText" role="status">
+                        <CircleAlert size={14} className="mt-px shrink-0" aria-hidden />
+                        {template.requiresArea
+                          ? 'Pick at least one barangay below.'
+                          : 'Pick at least one barangay below. Until you do, this goes to all of Bocaue.'}
+                      </p>
+                    )}
                     {!state.wholeMunicipality && (
                       <div className="mt-3 rounded-xl bg-agap-pearl p-3">
                         <div className="flex flex-wrap gap-2">
@@ -841,17 +936,48 @@ function Composer(): JSX.Element {
                       </div>
                     )}
                     <div className="sm:col-span-2">
-                      <label htmlFor="source" className={labelCls}>
-                        Source / reference
-                        {checks.find((c) => c.label.startsWith('Verified source')) && <RequiredMark />}
-                      </label>
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <label htmlFor="source" className="block text-xs font-semibold text-agap-textMid">
+                          Source / reference
+                          {checks.find((c) => c.label.startsWith('Verified source')) && <RequiredMark />}
+                        </label>
+                        {sourceIsAuto && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-agap-greenSoft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-agap-green">
+                            <Sparkles size={11} aria-hidden /> Auto
+                          </span>
+                        )}
+                        {state.sourceTouched && suggestedSource && source.trim() !== suggestedSource && (
+                          <button
+                            type="button"
+                            onClick={() => setState((s) => ({ ...s, sourceTouched: false }))}
+                            className={cn('inline-flex items-center gap-1 rounded text-xs font-semibold text-agap-green hover:underline', focusRing)}
+                          >
+                            <Sparkles size={12} aria-hidden /> Use suggested
+                          </button>
+                        )}
+                      </div>
                       <input
                         id="source"
                         value={source}
-                        onChange={(e) => setSource(e.target.value)}
-                        placeholder="e.g. PAGASA Heavy Rainfall Warning No. 3; MDRRMO river gauge reading"
+                        onChange={(e) => {
+                          setSource(e.target.value);
+                          setState((s) => (s.sourceTouched ? s : { ...s, sourceTouched: true }));
+                        }}
+                        placeholder={
+                          suggestedSource
+                            ? suggestedSource
+                            : 'Filled in automatically once the details above are entered'
+                        }
+                        aria-describedby="source-help"
                         className={inputCls}
                       />
+                      <p id="source-help" className={hintCls}>
+                        {sourceIsAuto
+                          ? 'Written from the details above. Edit it to cite the exact bulletin, memo or order number.'
+                          : state.sourceTouched && suggestedSource
+                            ? `Suggested: ${suggestedSource}`
+                            : 'Who observed or issued this information, and when.'}
+                      </p>
                     </div>
                     <div className="sm:col-span-2">
                       <label htmlFor="contact" className={labelCls}>Contact for questions</label>
@@ -976,12 +1102,43 @@ function Composer(): JSX.Element {
           )}
         </div>
 
-        {/* ── Right: preview + approval ── */}
-        <aside className="min-w-0 space-y-4 lg:sticky lg:top-4 lg:self-start">
-          <AnnouncementPreview model={preview} />
-
+        {/* ── Right: one panel. Audience and severity, the citizen preview, then publish ──
+            Desktop: pinned while the form scrolls and never taller than the visible area
+            (100dvh minus the 3.5rem top bar and the main area's 1.5rem padding top and
+            bottom). Settings and preview scroll together inside it; the publish footer
+            always stays in view. */}
+        <aside className="min-w-0 lg:sticky lg:top-6 lg:self-start">
+          <div className="flex flex-col overflow-hidden rounded-2xl border border-agap-track bg-white shadow-card lg:max-h-[calc(100dvh-6.5rem)]">
+          <div
+            role="region"
+            aria-label={template ? 'Audience, severity and preview' : 'Announcement preview'}
+            tabIndex={0}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-agap-green"
+          >
           {template && (
-            <div className="space-y-4 rounded-2xl border border-agap-track bg-white p-4 shadow-card">
+            <div className="space-y-4 border-b border-agap-track p-4">
+              <div className="rounded-xl border border-agap-track bg-agap-pearl px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-agap-textMid">Sends to</span>
+                  <button
+                    type="button"
+                    onClick={goToAudience}
+                    className={cn('rounded text-xs font-semibold text-agap-green hover:underline', focusRing)}
+                  >
+                    Change
+                  </button>
+                </div>
+                <p className="mt-1 flex items-start gap-1.5 text-sm font-semibold text-agap-textMain">
+                  {barangaySpecific
+                    ? <MapPin size={15} className="mt-0.5 shrink-0 text-agap-green" aria-hidden />
+                    : <Users size={15} className="mt-0.5 shrink-0 text-agap-green" aria-hidden />}
+                  <span className="min-w-0 break-words">{audience.label}</span>
+                </p>
+                <p className="mt-0.5 text-[11px] leading-snug text-agap-hint">
+                  {audience.detail} By SMS, push and the in-app feed.
+                </p>
+              </div>
+
               <div>
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span id="severity-label" className="text-xs font-semibold text-agap-textMid">Severity</span>
@@ -1040,7 +1197,16 @@ function Composer(): JSX.Element {
                   </p>
                 )}
               </div>
+            </div>
+          )}
 
+            {/* Part of the same panel: no outer border or rounding of its own. */}
+            <AnnouncementPreview model={preview} className="rounded-none border-0" />
+          </div>
+
+          {/* Publish footer: always visible at the bottom of the panel. */}
+          {template && (
+            <div className="shrink-0 space-y-3 border-t border-agap-track bg-white p-4 shadow-[0_-10px_20px_-16px_rgba(15,45,32,0.35)]">
               {checks.length > 0 && (
                 <div>
                   <div className="mb-1.5 flex items-center justify-between text-xs">
@@ -1058,16 +1224,22 @@ function Composer(): JSX.Element {
                       style={{ width: `${Math.round((checksDone / checks.length) * 100)}%` }}
                     />
                   </div>
-                  <ul className="space-y-1.5">
-                    {checks.map((c) => (
-                      <li key={c.label} className="flex items-start gap-2 text-xs">
-                        {c.ok
-                          ? <Check size={14} className="mt-px shrink-0 text-agap-green" aria-label="Done" />
-                          : <CircleAlert size={14} className="mt-px shrink-0 text-agap-amberText" aria-label="Missing" />}
-                        <span className={c.ok ? 'text-agap-hint' : 'font-semibold text-agap-textMain'}>{c.label}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  {/* Only what is still missing, so the card stays short enough to keep the
+                      publish buttons in view. */}
+                  {checksDone === checks.length ? (
+                    <p className="flex items-center gap-1.5 text-xs font-semibold text-agap-green">
+                      <Check size={14} className="shrink-0" aria-hidden /> Everything required is filled in.
+                    </p>
+                  ) : (
+                    <ul className="max-h-24 space-y-1.5 overflow-y-auto scrollbar-thin" aria-label="Still missing">
+                      {checks.filter((c) => !c.ok).map((c) => (
+                        <li key={c.label} className="flex items-start gap-2 text-xs">
+                          <CircleAlert size={14} className="mt-px shrink-0 text-agap-amberText" aria-label="Missing" />
+                          <span className="font-semibold text-agap-textMain">{c.label}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
 
@@ -1090,6 +1262,7 @@ function Composer(): JSX.Element {
               </p>
             </div>
           )}
+          </div>
         </aside>
       </div>
     </div>

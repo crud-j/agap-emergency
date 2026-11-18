@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import dynamic from 'next/dynamic';
 import { isCoordinateInBocaue } from '@agap/shared';
 import {
-  AlertTriangle, Check, Clock, Edit, Info, Locate, MapPin, MapPinned, Plus, Power, RefreshCw, Search,
+  AlertTriangle, Check, Clock, Edit, Info, Locate, MapPin, MapPinned, Plus, RefreshCw, Search,
   Sparkles, Trash2, TrendingDown, TrendingUp, X,
 } from 'lucide-react';
 import {
@@ -13,6 +13,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   type BadgeVariant,
 } from '@/components/ui';
+import { chooseAction, notify } from '@/components/ui/alerts';
 import { titleCase } from '@/lib/incident-format';
 import { cn } from '@/lib/utils';
 import {
@@ -418,50 +419,34 @@ function AreaDialog({ area, onClose }: {
 
 // ─── Remove dialog: deactivate first, delete second ───────────────────────────
 
-function RemoveDialog({ area, onClose }: { area: RiskArea | null; onClose: () => void }): JSX.Element {
-  const [error, setError] = useState<string | null>(null);
+/** One SweetAlert2 popup: Deactivate (only while active), Delete, or Cancel. */
+function useRemoveArea() {
   const update = useUpdateRiskArea();
   const remove = useDeleteRiskArea();
-  const busy = update.isPending || remove.isPending;
+  const rethrow = (fallback: string) => (e: unknown) => { throw new Error(errMsg(e, fallback)); };
 
-  async function run(fn: () => Promise<unknown>, fallback: string) {
-    try { setError(null); await fn(); onClose(); } catch (e) { setError(errMsg(e, fallback)); }
-  }
-
-  return (
-    <Dialog open={!!area} onOpenChange={(o) => { if (!o && !busy) { setError(null); onClose(); } }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Remove “{area?.name}”?</DialogTitle>
-          <DialogDescription>
-            Deactivating keeps the record and its history and can be undone. Deleting removes it for good; the Audit Log keeps what it was.
-          </DialogDescription>
-        </DialogHeader>
-        {error && <p role="alert" className="text-xs text-agap-danger">{error}</p>}
-        <DialogFooter className="flex-wrap">
-          <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button
-            variant="danger"
-            loading={remove.isPending}
-            disabled={busy}
-            onClick={() => area && run(() => remove.mutateAsync(area.id), 'Could not delete the area.')}
-          >
-            <Trash2 size={14} /> Delete
-          </Button>
-          {area?.is_active && (
-            <Button
-              variant="primary"
-              loading={update.isPending}
-              disabled={busy}
-              onClick={() => run(() => update.mutateAsync({ id: area.id, changes: { isActive: false } }), 'Could not deactivate the area.')}
-            >
-              <Power size={14} /> Deactivate
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+  return async function removeArea(area: RiskArea) {
+    const choice = await chooseAction({
+      title: `Remove “${area.name}”?`,
+      text: 'Deactivating keeps the record and its history and can be undone. Deleting removes it for good; the Audit Log keeps what it was.',
+      icon: 'warning',
+      ...(area.is_active && {
+        confirm: {
+          text: 'Deactivate',
+          tone: 'primary' as const,
+          run: () => update.mutateAsync({ id: area.id, changes: { isActive: false } }).catch(rethrow('Could not deactivate the area.')),
+        },
+      }),
+      deny: {
+        text: 'Delete',
+        tone: 'danger',
+        run: () => remove.mutateAsync(area.id).catch(rethrow('Could not delete the area.')),
+      },
+    });
+    if (choice) {
+      void notify('success', { title: choice === 'deny' ? 'Risk area deleted' : 'Risk area deactivated', text: area.name });
+    }
+  };
 }
 
 // ─── Proposals (AUTOMATION_NEEDS_PLAN Phase 2, C7) ────────────────────────────
@@ -696,7 +681,7 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
   const proposalsQ = useRiskAreaProposals(canManage);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ area: RiskArea | null } | null>(null);
-  const [removing, setRemoving] = useState<RiskArea | null>(null);
+  const removeArea = useRemoveArea();
   const [approving, setApproving] = useState<RiskAreaProposal | null>(null);
   const [search, setSearch] = useState('');
   const [type, setType] = useState<string>(ALL);
@@ -865,7 +850,7 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
                     selected={selectedId === a.id}
                     onSelect={() => setSelectedId(a.id)}
                     onEdit={() => setEditing({ area: a })}
-                    onRemove={() => setRemoving(a)}
+                    onRemove={() => void removeArea(a)}
                   />
                 ))}
               </ul>
@@ -875,7 +860,6 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
       )}
 
       {editing && <AreaDialog key={editing.area?.id ?? 'new'} area={editing.area} onClose={() => setEditing(null)} />}
-      <RemoveDialog area={removing} onClose={() => setRemoving(null)} />
       {approving && <ApproveDialog key={approving.id} proposal={approving} onClose={() => setApproving(null)} />}
     </div>
   );

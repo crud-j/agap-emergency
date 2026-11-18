@@ -8,6 +8,7 @@ import { BackupCodesPanel } from '@/components/auth/BackupCodesPanel';
 import { PasskeyRegistration } from '@/components/auth/PasskeyRegistration';
 import { TotpEnrollment } from '@/components/auth/TotpEnrollment';
 import { useTranslations } from '@/hooks/use-translations';
+import { getSessionUser } from '@/lib/auth';
 import {
   mfaRequest,
   type MfaStatus,
@@ -188,6 +189,8 @@ function PasswordPrompt({
       onSubmit={submit}
       className={`mt-3 max-w-sm space-y-3 rounded-xl border p-4 ${danger ? 'border-red-200 bg-red-50/50' : 'border-slate-200 bg-slate-50'}`}
     >
+      {/* Tells password managers which account this password is for. */}
+      <input type="email" name="username" autoComplete="username" value={getSessionUser()?.email ?? ''} readOnly hidden />
       <label className="block text-sm font-medium text-slate-700">
         {t.passwordPrompt}
         <input

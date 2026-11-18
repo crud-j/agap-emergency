@@ -51,7 +51,8 @@ const CONFIRM_TONE = {
 const CONTAINER = '!z-[1350]';
 
 const MODAL_CLASSES: SweetAlertOptions['customClass'] = {
-  container: CONTAINER,
+  // agap-swal-backdrop (globals.css): blurs the page behind, like the dialogs. Not on toasts.
+  container: `${CONTAINER} agap-swal-backdrop`,
   popup: '!rounded-2xl !p-6 !font-sans !shadow-card-md',
   title: '!px-0 !pt-2 !text-[18px] !font-bold !text-agap-textMain',
   htmlContainer: '!mx-0 !mt-3 !px-0 !text-left !text-[14px] !leading-relaxed !text-agap-textMid',
@@ -59,6 +60,9 @@ const MODAL_CLASSES: SweetAlertOptions['customClass'] = {
   cancelButton: `${BTN} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus-visible:ring-slate-400`,
   validationMessage: '!mx-0 !mt-4 !justify-start !rounded-lg !bg-agap-dangerSoft !px-3 !py-2 !text-left !text-[13px] !text-agap-danger',
   loader: '!border-agap-green !border-r-transparent',
+  inputLabel: '!mx-0 !mt-5 !mb-1.5 !justify-start !text-[13px] !font-semibold !text-agap-textMid',
+  input:
+    '!mx-0 !mt-0 !w-full !rounded-xl !border !border-[rgba(168,181,193,0.45)] !bg-white !px-3 !py-2.5 !text-[14px] !text-agap-textMain !shadow-none placeholder:!text-agap-textSub focus:!border-agap-green focus:!ring-2 focus:!ring-agap-green/25',
 };
 
 /** True while a confirmation or message (not a toast) is on screen. */
@@ -141,6 +145,155 @@ export async function confirmAction(opts: ConfirmOptions): Promise<boolean> {
   });
   if (opts.target) await whenClosed;
   return result.isConfirmed;
+}
+
+export interface PromptOptions {
+  /** Plain text. */
+  title: string;
+  /** Plain text body above the field. */
+  text?: string;
+  /** Pre-escaped HTML body (build it with `escapeHtml`). */
+  html?: string;
+  input: 'text' | 'textarea';
+  /** Plain text label above the field. */
+  inputLabel?: string;
+  placeholder?: string;
+  maxLength?: number;
+  /** Omit for an optional field. */
+  required?: { minLength: number; message: string };
+  confirmText: string;
+  cancelText?: string;
+  tone?: keyof typeof CONFIRM_TONE;
+  icon?: SweetAlertIcon;
+  /**
+   * Runs with the trimmed value inside the popup: spinner on the button, failures
+   * shown in the popup (which stays open, keeping what was typed).
+   */
+  onConfirm: (value: string) => Promise<unknown>;
+  target?: HTMLElement | null;
+}
+
+/**
+ * Ask for one short piece of text (a note, a reason, a message) and act on it.
+ * Resolves the trimmed value once `onConfirm` has succeeded, or null if cancelled.
+ */
+export async function promptText(opts: PromptOptions): Promise<string | null> {
+  const Swal = await loadSwal();
+  const { didClose, whenClosed } = closedSignal();
+  let saved: string | null = null;
+  const result = await Swal.fire({
+    titleText: opts.title,
+    ...(opts.html !== undefined ? { html: opts.html } : opts.text !== undefined ? { text: opts.text } : {}),
+    icon: opts.icon ?? 'question',
+    iconColor: opts.tone === 'danger' ? '#CF3B4E' : '#0D6053',
+    input: opts.input,
+    ...(opts.inputLabel ? { inputLabel: opts.inputLabel } : {}),
+    ...(opts.placeholder ? { inputPlaceholder: opts.placeholder } : {}),
+    inputAttributes: {
+      ...(opts.maxLength ? { maxlength: String(opts.maxLength) } : {}),
+      ...(opts.input === 'textarea' ? { rows: '4' } : {}),
+    },
+    inputAutoTrim: true,
+    ...(opts.required
+      ? {
+          inputValidator: (value: string) =>
+            (value ?? '').trim().length < opts.required!.minLength ? escapeHtml(opts.required!.message) : null,
+        }
+      : {}),
+    showCancelButton: true,
+    confirmButtonText: escapeHtml(opts.confirmText),
+    cancelButtonText: escapeHtml(opts.cancelText ?? 'Cancel'),
+    buttonsStyling: false,
+    reverseButtons: true,
+    allowEscapeKey: () => !Swal.isLoading(),
+    allowOutsideClick: () => !Swal.isLoading(),
+    ...(opts.target ? { target: opts.target } : {}),
+    showLoaderOnConfirm: true,
+    preConfirm: async (value: string) => {
+      const trimmed = (value ?? '').trim();
+      try {
+        await opts.onConfirm(trimmed);
+        saved = trimmed;
+        return true;
+      } catch (e) {
+        Swal.showValidationMessage(escapeHtml(errorText(e)));
+        return false;
+      }
+    },
+    customClass: { ...MODAL_CLASSES, confirmButton: `${BTN} ${CONFIRM_TONE[opts.tone ?? 'primary']}` },
+    didClose,
+    ...motion(),
+  });
+  if (opts.target) await whenClosed;
+  return result.isConfirmed ? saved : null;
+}
+
+export interface ChoiceOptions {
+  title: string;
+  text?: string;
+  /** Pre-escaped HTML body (build it with `escapeHtml`). */
+  html?: string;
+  icon?: SweetAlertIcon;
+  /** The main choice; omit to offer only the deny choice and Cancel. */
+  confirm?: { text: string; tone?: keyof typeof CONFIRM_TONE; run: () => Promise<unknown> };
+  /** The second choice, e.g. a destructive alternative. */
+  deny: { text: string; tone?: keyof typeof CONFIRM_TONE; run: () => Promise<unknown> };
+  cancelText?: string;
+  target?: HTMLElement | null;
+}
+
+/**
+ * Two actions and Cancel in one popup (e.g. "Deactivate" or "Delete"). The chosen
+ * action runs inside the popup like `confirmAction`. Resolves which one succeeded.
+ */
+export async function chooseAction(opts: ChoiceOptions): Promise<'confirm' | 'deny' | null> {
+  const Swal = await loadSwal();
+  const { didClose, whenClosed } = closedSignal();
+  const attempt = (run: () => Promise<unknown>) => async () => {
+    try {
+      await run();
+      return true;
+    } catch (e) {
+      Swal.showValidationMessage(escapeHtml(errorText(e)));
+      return false;
+    }
+  };
+  const result = await Swal.fire({
+    titleText: opts.title,
+    ...(opts.html !== undefined ? { html: opts.html } : opts.text !== undefined ? { text: opts.text } : {}),
+    icon: opts.icon ?? 'warning',
+    iconColor: '#CF3B4E',
+    showConfirmButton: !!opts.confirm,
+    ...(opts.confirm
+      ? { confirmButtonText: escapeHtml(opts.confirm.text), showLoaderOnConfirm: true, preConfirm: attempt(opts.confirm.run) }
+      : {}),
+    showDenyButton: true,
+    denyButtonText: escapeHtml(opts.deny.text),
+    showLoaderOnDeny: true,
+    preDeny: attempt(opts.deny.run),
+    showCancelButton: true,
+    cancelButtonText: escapeHtml(opts.cancelText ?? 'Cancel'),
+    buttonsStyling: false,
+    reverseButtons: true,
+    allowEscapeKey: () => !Swal.isLoading(),
+    allowOutsideClick: () => !Swal.isLoading(),
+    ...(opts.target ? { target: opts.target } : {}),
+    customClass: {
+      ...MODAL_CLASSES,
+      actions: '!mt-6 !w-full !flex-wrap !justify-end gap-2',
+      confirmButton: `${BTN} ${CONFIRM_TONE[opts.confirm?.tone ?? 'primary']}`,
+      denyButton: `${BTN} ${CONFIRM_TONE[opts.deny.tone ?? 'danger']}`,
+    },
+    didClose,
+    ...motion(),
+  });
+  if (opts.target) await whenClosed;
+  return result.isConfirmed ? 'confirm' : result.isDenied ? 'deny' : null;
+}
+
+/** The open Radix drawer or dialog an element sits in, for `target` (see top). */
+export function modalHost(el: Element | null | undefined): HTMLElement | null {
+  return (el?.closest('[role="dialog"]') as HTMLElement | null) ?? null;
 }
 
 /** A blocking message the user must read (a failed or partial action). */

@@ -264,7 +264,10 @@ pnpm dev:reset-dispatcher --mfa
 pnpm dev:reset-dispatcher dispatcher1@mdrrmo.bocaue.gov.ph --mfa
 
 
-node "C:\Users\Zionne\AppData\Local\Temp\claude\c--Users-Zionne-Music-agap-emergency\f4c4d684-af85-437f-a61b-a59d42d84835\scratchpad\reset-password.js" dispatcher1@mdrrmo.bocaue.gov.ph
+# Any one account, any role (from backend/): password back to AgapDev2026!
+pnpm dev:reset-password supervisor@mdrrmo.bocaue.gov.ph
+pnpm dev:reset-password supervisor@mdrrmo.bocaue.gov.ph --mfa        # also wipe its passkeys / authenticator / backup codes
+pnpm dev:reset-password supervisor@mdrrmo.bocaue.gov.ph --no-change  # skip the forced change at next sign-in
 
 
 

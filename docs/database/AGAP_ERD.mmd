@@ -1,0 +1,1955 @@
+erDiagram
+
+        barangay_contact_kind {
+            MOBILE MOBILE
+LANDLINE LANDLINE
+        }
+    
+
+
+        barangay_contact_role {
+            PRIMARY PRIMARY
+BACKUP BACKUP
+OTHER OTHER
+        }
+    
+
+
+        barangay_match_method {
+            POLYGON POLYGON
+NEAREST NEAREST
+MANUAL MANUAL
+        }
+    
+
+
+        barangay_sms_status {
+            PENDING PENDING
+SENT SENT
+PARTIAL PARTIAL
+FAILED FAILED
+SKIPPED SKIPPED
+DISABLED DISABLED
+        }
+    
+
+
+        barangay_report_type {
+            SEEN SEEN
+ON_SCENE ON_SCENE
+ON_THE_WAY ON_THE_WAY
+HANDLED HANDLED
+NEEDS_BACKUP NEEDS_BACKUP
+NO_ANSWER NO_ANSWER
+        }
+    
+
+
+        barangay_report_source {
+            LINK LINK
+SMS_REPLY SMS_REPLY
+PHONE_CALL PHONE_CALL
+        }
+    
+
+
+        barangay_inbound_outcome {
+            APPLIED APPLIED
+DUPLICATE DUPLICATE
+UNKNOWN_SENDER UNKNOWN_SENDER
+UNKNOWN_CODE UNKNOWN_CODE
+NOT_NOTIFIED NOT_NOTIFIED
+UNPARSED UNPARSED
+DISABLED DISABLED
+OPT_OUT OPT_OUT
+SOS_CREATED SOS_CREATED
+SOS_EXISTING SOS_EXISTING
+SOS_STALE SOS_STALE
+SOS_INVALID SOS_INVALID
+SOS_LIMITED SOS_LIMITED
+        }
+    
+
+
+        report_channel {
+            APP APP
+SMS SMS
+        }
+    
+
+
+        announcement_category {
+            CLASS_SUSPENSION CLASS_SUSPENSION
+FLOOD_ALERT FLOOD_ALERT
+EVACUATION_ORDER EVACUATION_ORDER
+ROAD_CLOSURE ROAD_CLOSURE
+FIRE_ADVISORY FIRE_ADVISORY
+INDUSTRIAL_HAZARD INDUSTRIAL_HAZARD
+POST_DISASTER_UPDATE POST_DISASTER_UPDATE
+RESCUE_UPDATE RESCUE_UPDATE
+GENERAL_INFORMATION GENERAL_INFORMATION
+WEATHER_ADVISORY WEATHER_ADVISORY
+PUBLIC_ADVISORY PUBLIC_ADVISORY
+MUNICIPAL_SERVICE MUNICIPAL_SERVICE
+        }
+    
+
+
+        announcement_scope {
+            MUNICIPALITY_WIDE MUNICIPALITY_WIDE
+BARANGAY_SPECIFIC BARANGAY_SPECIFIC
+CATEGORY_SPECIFIC CATEGORY_SPECIFIC
+        }
+    
+
+
+        announcement_severity {
+            INFORMATIONAL INFORMATIONAL
+ADVISORY ADVISORY
+WARNING WARNING
+CRITICAL CRITICAL
+        }
+    
+
+
+        announcement_status {
+            DRAFT DRAFT
+PENDING_APPROVAL PENDING_APPROVAL
+SCHEDULED SCHEDULED
+PUBLISHED PUBLISHED
+ARCHIVED ARCHIVED
+SUPERSEDED SUPERSEDED
+CANCELLED CANCELLED
+        }
+    
+
+
+        audit_action {
+            CREATE CREATE
+READ READ
+UPDATE UPDATE
+DELETE DELETE
+LOGIN LOGIN
+LOGOUT LOGOUT
+PERMISSION_DENIED PERMISSION_DENIED
+STATUS_CHANGE STATUS_CHANGE
+DISPATCH DISPATCH
+ESCALATE ESCALATE
+PUBLISH PUBLISH
+SUBSCRIBE SUBSCRIBE
+UNSUBSCRIBE UNSUBSCRIBE
+CONSENT_GRANT CONSENT_GRANT
+CONSENT_WITHDRAW CONSENT_WITHDRAW
+DATA_EXPORT DATA_EXPORT
+SYSTEM SYSTEM
+LOGIN_FAILED LOGIN_FAILED
+ACCOUNT_LOCKED ACCOUNT_LOCKED
+ACCOUNT_UNLOCKED ACCOUNT_UNLOCKED
+PASSWORD_CHANGE PASSWORD_CHANGE
+MFA_CHANGE MFA_CHANGE
+SESSION_REVOKED SESSION_REVOKED
+IDENTITY_VERIFICATION_CLAIMED IDENTITY_VERIFICATION_CLAIMED
+ID_IMAGE_VIEWED ID_IMAGE_VIEWED
+IDENTITY_VERIFICATION_APPROVED IDENTITY_VERIFICATION_APPROVED
+IDENTITY_VERIFICATION_REJECTED IDENTITY_VERIFICATION_REJECTED
+ID_CARD_LOOKUP ID_CARD_LOOKUP
+IDENTITY_VERIFICATION_RELEASED IDENTITY_VERIFICATION_RELEASED
+        }
+    
+
+
+        breathing_status {
+            NORMAL NORMAL
+DIFFICULTY DIFFICULTY
+NOT_BREATHING NOT_BREATHING
+UNKNOWN UNKNOWN
+        }
+    
+
+
+        cancellation_reason {
+            ACCIDENTAL_TRIGGER ACCIDENTAL_TRIGGER
+SITUATION_RESOLVED SITUATION_RESOLVED
+DUPLICATE_REPORT DUPLICATE_REPORT
+WRONG_APP WRONG_APP
+TEST TEST
+OTHER OTHER
+        }
+    
+
+
+        consciousness_state {
+            CONSCIOUS CONSCIOUS
+UNCONSCIOUS UNCONSCIOUS
+ALTERED ALTERED
+UNKNOWN UNKNOWN
+        }
+    
+
+
+        consent_status {
+            GRANTED GRANTED
+WITHDRAWN WITHDRAWN
+EXPIRED EXPIRED
+        }
+    
+
+
+        dispatch_status {
+            PENDING PENDING
+SENT SENT
+ACCEPTED ACCEPTED
+REJECTED REJECTED
+CANCELLED CANCELLED
+COMPLETED COMPLETED
+        }
+    
+
+
+        escalation_level {
+            LEVEL_1_SUPERVISOR LEVEL_1_SUPERVISOR
+LEVEL_2_INCIDENT_COMMANDER LEVEL_2_INCIDENT_COMMANDER
+LEVEL_3_ADMINISTRATOR LEVEL_3_ADMINISTRATOR
+LEVEL_4_DRRMO LEVEL_4_DRRMO
+        }
+    
+
+
+        escalation_status {
+            ACTIVE ACTIVE
+ACKNOWLEDGED ACKNOWLEDGED
+RESOLVED RESOLVED
+CANCELLED CANCELLED
+        }
+    
+
+
+        facility_location_status {
+            UNVERIFIED UNVERIFIED
+PENDING_REVIEW PENDING_REVIEW
+VERIFIED VERIFIED
+REJECTED REJECTED
+        }
+    
+
+
+        facility_receiving_status {
+            OPEN OPEN
+AT_CAPACITY AT_CAPACITY
+CLOSED CLOSED
+EMERGENCY_ONLY EMERGENCY_ONLY
+UNKNOWN UNKNOWN
+        }
+    
+
+
+        facility_type {
+            HOSPITAL HOSPITAL
+EVACUATION_CENTER EVACUATION_CENTER
+BARANGAY_HALL BARANGAY_HALL
+RELIEF_CENTER RELIEF_CENTER
+CLINIC CLINIC
+OTHER OTHER
+        }
+    
+
+
+        false_alert_type {
+            ACCIDENTAL ACCIDENTAL
+DUPLICATE DUPLICATE
+TEST TEST
+PRANK PRANK
+MISIDENTIFIED MISIDENTIFIED
+OTHER OTHER
+        }
+    
+
+
+        ics_position {
+            INCIDENT_COMMANDER INCIDENT_COMMANDER
+OPERATIONS_SECTION_CHIEF OPERATIONS_SECTION_CHIEF
+LOGISTICS_SECTION_CHIEF LOGISTICS_SECTION_CHIEF
+PLANNING_SECTION_CHIEF PLANNING_SECTION_CHIEF
+SAFETY_OFFICER SAFETY_OFFICER
+PUBLIC_INFORMATION_OFFICER PUBLIC_INFORMATION_OFFICER
+LIAISON_OFFICER LIAISON_OFFICER
+        }
+    
+
+
+        incident_category {
+            MEDICAL MEDICAL
+ROAD_ACCIDENT ROAD_ACCIDENT
+FLOOD FLOOD
+NATURAL_DISASTER NATURAL_DISASTER
+RESCUE RESCUE
+FIRE FIRE
+INDUSTRIAL INDUSTRIAL
+DEBRIS DEBRIS
+OTHER OTHER
+        }
+    
+
+
+        incident_priority {
+            CRITICAL CRITICAL
+HIGH HIGH
+MEDIUM MEDIUM
+LOW LOW
+        }
+    
+
+
+        incident_status {
+            DRAFT DRAFT
+SUBMITTED SUBMITTED
+RECEIVED RECEIVED
+ACKNOWLEDGED ACKNOWLEDGED
+ASSESSED ASSESSED
+DISPATCH_PENDING DISPATCH_PENDING
+DISPATCHED DISPATCHED
+EN_ROUTE EN_ROUTE
+ON_SCENE ON_SCENE
+TRANSPORTING TRANSPORTING
+ASSISTING ASSISTING
+RESOLVED RESOLVED
+CLOSED CLOSED
+CANCELLED CANCELLED
+FALSE_ALERT FALSE_ALERT
+DUPLICATE DUPLICATE
+UNABLE_TO_RESPOND UNABLE_TO_RESPOND
+REFERRED REFERRED
+        }
+    
+
+
+        notification_channel {
+            PUSH PUSH
+SMS SMS
+IN_APP IN_APP
+EMAIL EMAIL
+        }
+    
+
+
+        notification_status {
+            PENDING PENDING
+SENT SENT
+DELIVERED DELIVERED
+FAILED FAILED
+RETRYING RETRYING
+CANCELLED CANCELLED
+        }
+    
+
+
+        organization_type {
+            MDRRMO MDRRMO
+BFP BFP
+PNP PNP
+HOSPITAL HOSPITAL
+EMS_PROVIDER EMS_PROVIDER
+NGO NGO
+LGU LGU
+OTHER OTHER
+        }
+    
+
+
+        patient_disposition {
+            TREATED_ON_SCENE TREATED_ON_SCENE
+TRANSPORTED_TO_HOSPITAL TRANSPORTED_TO_HOSPITAL
+TRANSPORTED_TO_EVACUATION_CENTER TRANSPORTED_TO_EVACUATION_CENTER
+REFUSED_TRANSPORT REFUSED_TRANSPORT
+DECEASED_ON_SCENE DECEASED_ON_SCENE
+TRANSFERRED_TO_OTHER_AGENCY TRANSFERRED_TO_OTHER_AGENCY
+UNABLE_TO_LOCATE UNABLE_TO_LOCATE
+NO_PATIENT_FOUND NO_PATIENT_FOUND
+OTHER OTHER
+        }
+    
+
+
+        resource_request_status {
+            PENDING PENDING
+OFFERED OFFERED
+ACCEPTED ACCEPTED
+REJECTED REJECTED
+CANCELLED CANCELLED
+FULFILLED FULFILLED
+        }
+    
+
+
+        resource_status {
+            AVAILABLE AVAILABLE
+DISPATCHED DISPATCHED
+EN_ROUTE EN_ROUTE
+ON_SCENE ON_SCENE
+TRANSPORTING TRANSPORTING
+RETURNING RETURNING
+OUT_OF_SERVICE OUT_OF_SERVICE
+OFFLINE OFFLINE
+RESERVED RESERVED
+        }
+    
+
+
+        resource_type {
+            AMBULANCE AMBULANCE
+RESCUE_BOAT RESCUE_BOAT
+FIRE_TRUCK FIRE_TRUCK
+RESCUE_TRUCK RESCUE_TRUCK
+CLEARING_EQUIPMENT CLEARING_EQUIPMENT
+MOTORCYCLE_RESPONDER MOTORCYCLE_RESPONDER
+COMMAND_VEHICLE COMMAND_VEHICLE
+OTHER OTHER
+        }
+    
+
+
+        responder_availability_status {
+            AVAILABLE AVAILABLE
+OFF_DUTY OFF_DUTY
+UNAVAILABLE UNAVAILABLE
+        }
+    
+
+
+        surge_status {
+            INACTIVE INACTIVE
+MONITORING MONITORING
+ACTIVE ACTIVE
+DEACTIVATING DEACTIVATING
+        }
+    
+
+
+        risk_area_proposal_status {
+            PENDING PENDING
+APPROVED APPROVED
+DISMISSED DISMISSED
+        }
+    
+
+
+        ai_suggestion_kind {
+            BARANGAY_REPLY BARANGAY_REPLY
+CASE_BRIEF CASE_BRIEF
+HANDOVER_DRAFT HANDOVER_DRAFT
+CLOSURE_DRAFT CLOSURE_DRAFT
+ANNOUNCEMENT_DRAFT ANNOUNCEMENT_DRAFT
+ANALYTICS_NARRATIVE ANALYTICS_NARRATIVE
+        }
+    
+
+
+        ai_suggestion_status {
+            PENDING_REVIEW PENDING_REVIEW
+ACCEPTED ACCEPTED
+DISMISSED DISMISSED
+INFO INFO
+FAILED FAILED
+SUPERSEDED SUPERSEDED
+        }
+    
+
+
+        sync_status {
+            PENDING PENDING
+SYNCED SYNCED
+FAILED FAILED
+DUPLICATE_REJECTED DUPLICATE_REJECTED
+        }
+    
+
+
+        trigger_method {
+            SOS_BUTTON SOS_BUTTON
+SHAKE_GESTURE SHAKE_GESTURE
+MANUAL_REPORT MANUAL_REPORT
+DISPATCHER_CREATED DISPATCHER_CREATED
+SYSTEM_GENERATED SYSTEM_GENERATED
+        }
+    
+
+
+        user_role {
+            CITIZEN CITIZEN
+BYSTANDER BYSTANDER
+DISPATCHER DISPATCHER
+SUPERVISOR SUPERVISOR
+RESPONDER RESPONDER
+HOSPITAL_USER HOSPITAL_USER
+ORG_ADMINISTRATOR ORG_ADMINISTRATOR
+ANNOUNCEMENTS_PUBLISHER ANNOUNCEMENTS_PUBLISHER
+SYSTEM_ADMINISTRATOR SYSTEM_ADMINISTRATOR
+        }
+    
+
+
+        user_sex {
+            MALE MALE
+FEMALE FEMALE
+PREFER_NOT_TO_SAY PREFER_NOT_TO_SAY
+        }
+    
+
+
+        user_status {
+            PENDING_VERIFICATION PENDING_VERIFICATION
+ACTIVE ACTIVE
+SUSPENDED SUSPENDED
+DEACTIVATED DEACTIVATED
+        }
+    
+
+
+        verification_status {
+            PENDING PENDING
+VERIFIED VERIFIED
+EXPIRED EXPIRED
+CANCELLED CANCELLED
+        }
+    
+
+
+        verification_type {
+            EMAIL EMAIL
+PHONE PHONE
+PASSWORD_RESET PASSWORD_RESET
+MFA_SMS MFA_SMS
+        }
+    
+
+
+        webauthn_ceremony_status {
+            PENDING PENDING
+COMPLETED COMPLETED
+EXPIRED EXPIRED
+FAILED FAILED
+        }
+    
+
+
+        webauthn_ceremony_type {
+            REGISTRATION REGISTRATION
+AUTHENTICATION AUTHENTICATION
+        }
+    
+
+
+        webauthn_transport {
+            USB USB
+NFC NFC
+BLE BLE
+INTERNAL INTERNAL
+HYBRID HYBRID
+SMART_CARD SMART_CARD
+        }
+    
+
+
+        announcement_language {
+            FIL FIL
+EN EN
+FIL_EN FIL_EN
+        }
+    
+
+
+        readiness_permission_state {
+            GRANTED GRANTED
+DENIED DENIED
+UNDETERMINED UNDETERMINED
+UNAVAILABLE UNAVAILABLE
+        }
+    
+
+
+        readiness_connectivity {
+            ONLINE ONLINE
+LIMITED LIMITED
+OFFLINE OFFLINE
+        }
+    
+
+
+        readiness_status {
+            READY READY
+LIMITED LIMITED
+NOT_READY NOT_READY
+        }
+    
+
+
+        id_document_type {
+            PHILHEALTH PHILHEALTH
+NATIONAL_ID NATIONAL_ID
+        }
+    
+
+
+        identity_verification_status {
+            AUTO_VERIFIED AUTO_VERIFIED
+PENDING_REVIEW PENDING_REVIEW
+APPROVED APPROVED
+REJECTED REJECTED
+EXPIRED EXPIRED
+RELEASED RELEASED
+        }
+    
+  "users" {
+    String id "PK"
+    String full_name 
+    String email "nullable"
+    String phone_number "nullable"
+    String password_hash "nullable"
+    user_role role 
+    user_status status 
+    Boolean must_change_password 
+    DateTime password_changed_at "nullable"
+    Int failed_login_count 
+    DateTime locked_until "nullable"
+    Int lockout_level 
+    Int profile_completeness 
+    Boolean is_guest 
+    Boolean is_email_verified 
+    Boolean is_phone_verified 
+    String barangay "nullable"
+    String municipality "nullable"
+    String province "nullable"
+    String full_address "nullable"
+    String preferred_language 
+    DateTime last_login_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    Boolean high_contrast 
+    Boolean reduced_motion 
+    String text_size 
+    user_sex sex "nullable"
+    DateTime identity_verified_at "nullable"
+    String profile_photo_location "nullable"
+    DateTime profile_photo_updated_at "nullable"
+    }
+  
+
+  "emergency_contacts" {
+    String id "PK"
+    String contact_name 
+    String relationship "nullable"
+    String phone_number 
+    String email "nullable"
+    Int priority_order 
+    Boolean notify_on_alert 
+    Boolean is_active 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "medical_profiles" {
+    String id "PK"
+    String blood_type "nullable"
+    String allergies 
+    String current_medications 
+    String medical_conditions 
+    String disabilities 
+    String responder_notes "nullable"
+    DateTime last_reviewed_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "organizations" {
+    String id "PK"
+    String name 
+    String short_name "nullable"
+    organization_type organization_type 
+    String barangay "nullable"
+    String municipality "nullable"
+    String province "nullable"
+    String address "nullable"
+    String contact_number "nullable"
+    String email "nullable"
+    Boolean is_active 
+    DateTime joined_at 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "incidents" {
+    String id "PK"
+    String public_reference 
+    trigger_method trigger_method 
+    report_channel report_channel 
+    String client_event_id "nullable"
+    incident_category category 
+    incident_priority priority 
+    incident_status status 
+    consciousness_state consciousness_state "nullable"
+    breathing_status breathing_status "nullable"
+    String description "nullable"
+    Int number_of_patients "nullable"
+    String hazard_flags 
+    Decimal river_level_meters "nullable"
+    Boolean is_surge_incident 
+    DateTime submitted_at 
+    DateTime received_at "nullable"
+    DateTime acknowledged_at "nullable"
+    DateTime assessed_at "nullable"
+    DateTime dispatch_pending_at "nullable"
+    DateTime dispatched_at "nullable"
+    DateTime en_route_at "nullable"
+    DateTime on_scene_at "nullable"
+    DateTime resolved_at "nullable"
+    DateTime closed_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "incident_reporters" {
+    String id "PK"
+    Boolean is_guest 
+    String reporter_name "nullable"
+    String reporter_phone "nullable"
+    String contact_callback "nullable"
+    String reporter_status "nullable"
+    DateTime created_at 
+    }
+  
+
+  "incident_attachments" {
+    String id "PK"
+    String file_name 
+    String file_type 
+    Int file_size_bytes "nullable"
+    String storage_bucket 
+    String storage_key 
+    String storage_url "nullable"
+    Boolean is_processed 
+    DateTime uploaded_at 
+    DateTime capture_timestamp "nullable"
+    Decimal capture_latitude "nullable"
+    Decimal capture_longitude "nullable"
+    Decimal capture_accuracy_meters "nullable"
+    String capture_source "nullable"
+    Int authenticity_score "nullable"
+    String authenticity_flags 
+    DateTime authenticity_checked_at "nullable"
+    String ai_review_label "nullable"
+    String ai_review_reason "nullable"
+    DateTime ai_review_checked_at "nullable"
+    DateTime rejected_at "nullable"
+    String rejection_notes "nullable"
+    }
+  
+
+  "incident_events" {
+    String id "PK"
+    incident_status from_status "nullable"
+    incident_status to_status 
+    user_role triggered_by_role "nullable"
+    String notes "nullable"
+    DateTime occurred_at 
+    }
+  
+
+  "vehicles" {
+    String id "PK"
+    String plate_number "nullable"
+    String unit_code "nullable"
+    resource_type resource_type 
+    String make "nullable"
+    String model "nullable"
+    Int year "nullable"
+    Int capacity_persons "nullable"
+    Boolean is_active 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "facilities" {
+    String id "PK"
+    String name 
+    facility_type facility_type 
+    String barangay "nullable"
+    String municipality "nullable"
+    String province "nullable"
+    String address "nullable"
+    Decimal latitude "nullable"
+    Decimal longitude "nullable"
+    facility_location_status location_status 
+    String location_source "nullable"
+    String location_source_ref "nullable"
+    Decimal location_confidence "nullable"
+    String contact_number "nullable"
+    String emergency_contact "nullable"
+    facility_receiving_status receiving_status 
+    DateTime receiving_status_updated_at "nullable"
+    Int capacity_total "nullable"
+    Int capacity_available "nullable"
+    Boolean has_emergency_room "nullable"
+    Boolean has_icu "nullable"
+    Boolean blood_bank "nullable"
+    Boolean is_evacuation_center "nullable"
+    Decimal elevation_masl "nullable"
+    Boolean is_active 
+    DateTime last_verified_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "transport_records" {
+    String id "PK"
+    DateTime transport_started_at "nullable"
+    DateTime estimated_arrival_at "nullable"
+    DateTime arrived_at "nullable"
+    DateTime handover_completed_at "nullable"
+    Boolean destination_changed 
+    String change_reason "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    DateTime reporter_patient_confirmed_at "nullable"
+    }
+  
+
+  "notifications" {
+    String id "PK"
+    String recipient_phone "nullable"
+    notification_channel channel 
+    String event_type 
+    String title "nullable"
+    String body 
+    Json data_payload "nullable"
+    String sms_payload "nullable"
+    notification_status status 
+    Int retry_count 
+    Int max_retries 
+    DateTime scheduled_at "nullable"
+    DateTime sent_at "nullable"
+    DateTime delivered_at "nullable"
+    DateTime failed_at "nullable"
+    String failure_reason "nullable"
+    DateTime created_at 
+    }
+  
+
+  "escalations" {
+    String id "PK"
+    escalation_level escalation_level 
+    escalation_status status 
+    String triggered_reason 
+    DateTime sla_breach_at 
+    DateTime acknowledged_at "nullable"
+    DateTime resolved_at "nullable"
+    DateTime created_at 
+    }
+  
+
+  "resource_requests" {
+    String id "PK"
+    resource_type resource_type 
+    Int quantity 
+    String capability_needed 
+    incident_priority priority 
+    resource_request_status status 
+    String request_notes "nullable"
+    String response_notes "nullable"
+    DateTime requested_at 
+    DateTime fulfilled_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "audit_logs" {
+    String id "PK"
+    user_role actor_role "nullable"
+    audit_action action 
+    String entity_type "nullable"
+    String entity_id "nullable"
+    String module_id "nullable"
+    Json old_values "nullable"
+    Json new_values "nullable"
+    String ip_address "nullable"
+    String user_agent "nullable"
+    DateTime occurred_at 
+    }
+  
+
+  "announcements" {
+    String id "PK"
+    String title 
+    String body 
+    announcement_category category 
+    announcement_severity severity 
+    announcement_scope scope 
+    String target_barangays 
+    announcement_status status 
+    Boolean publish_now 
+    DateTime scheduled_at "nullable"
+    DateTime published_at "nullable"
+    DateTime archived_at "nullable"
+    Int push_sent_count "nullable"
+    Int sms_sent_count "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    String image_storage_key "nullable"
+    String image_url "nullable"
+    String action_required "nullable"
+    DateTime approved_at "nullable"
+    DateTime cancelled_at "nullable"
+    String contact_info "nullable"
+    String correction_note "nullable"
+    DateTime effective_end_at "nullable"
+    DateTime effective_start_at "nullable"
+    String image_alt_text "nullable"
+    String issuing_office "nullable"
+    announcement_language language 
+    String source_reference "nullable"
+    String summary "nullable"
+    Json template_data "nullable"
+    String template_key "nullable"
+    DateTime approval_requested_at "nullable"
+    String review_note "nullable"
+    }
+  
+
+  "account_lifecycle_events" {
+    String id "PK"
+    String event_type 
+    String reason "nullable"
+    DateTime occurred_at 
+    }
+  
+
+  "alert_triggers" {
+    String id "PK"
+    trigger_method trigger_method 
+    String client_event_id 
+    Json device_info "nullable"
+    Decimal shake_magnitude "nullable"
+    Decimal latitude "nullable"
+    Decimal longitude "nullable"
+    Decimal accuracy_meters "nullable"
+    DateTime triggered_at 
+    DateTime cancel_deadline_at "nullable"
+    Boolean was_cancelled 
+    cancellation_reason cancellation_reason "nullable"
+    DateTime cancelled_at "nullable"
+    }
+  
+
+  "announcement_deliveries" {
+    String id "PK"
+    notification_channel channel 
+    String recipient_phone "nullable"
+    notification_status status 
+    Int retry_count 
+    DateTime sent_at "nullable"
+    DateTime delivered_at "nullable"
+    DateTime failed_at "nullable"
+    String failure_reason "nullable"
+    DateTime created_at 
+    }
+  
+
+  "consent_records" {
+    String id "PK"
+    String consent_type 
+    consent_status status 
+    DateTime granted_at 
+    DateTime withdrawn_at "nullable"
+    DateTime expires_at "nullable"
+    String ip_address "nullable"
+    Json device_info "nullable"
+    DateTime created_at 
+    }
+  
+
+  "identity_verifications" {
+    String id "PK"
+    id_document_type document_type 
+    identity_verification_status status 
+    String claim_token_hash 
+    DateTime claim_expires_at 
+    String pin_hmac "nullable"
+    String pin_last4 "nullable"
+    String name_on_id_sealed "nullable"
+    String image_storage_key "nullable"
+    Boolean client_read_ok "nullable"
+    Json match_result "nullable"
+    Int attempt_number 
+    DateTime reviewed_at "nullable"
+    String rejection_reason "nullable"
+    DateTime created_at 
+    }
+  
+
+  "dispatch_crew" {
+    String id "PK"
+    String role_on_scene "nullable"
+    DateTime added_at 
+    }
+  
+
+  "dispatches" {
+    String id "PK"
+    dispatch_status status 
+    String dispatch_notes "nullable"
+    DateTime authorized_at 
+    DateTime sent_at "nullable"
+    DateTime accepted_at "nullable"
+    DateTime en_route_at "nullable"
+    DateTime on_scene_at "nullable"
+    DateTime field_done_at "nullable"
+    DateTime rejected_at "nullable"
+    String rejected_reason "nullable"
+    DateTime completed_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "facility_capabilities" {
+    String id "PK"
+    String capability_name 
+    Boolean is_available 
+    String notes "nullable"
+    }
+  
+
+  "facility_referrals" {
+    String id "PK"
+    String pre_arrival_notes "nullable"
+    Int eta_minutes "nullable"
+    String acknowledgment_status "nullable"
+    DateTime acknowledged_at "nullable"
+    DateTime patient_arrived_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "false_alerts" {
+    String id "PK"
+    false_alert_type false_alert_type 
+    String notes "nullable"
+    DateTime classified_at 
+    DateTime created_at 
+    }
+  
+
+  "feedback_ratings" {
+    String id "PK"
+    Int overall_rating "nullable"
+    Int response_time_rating "nullable"
+    Int responder_rating "nullable"
+    Int app_usability_rating "nullable"
+    String comments "nullable"
+    DateTime submitted_at 
+    }
+  
+
+  "first_aid_guides" {
+    String id "PK"
+    incident_category category 
+    String title 
+    String content_fil 
+    String content_en 
+    Json steps 
+    Boolean is_active 
+    Int display_order "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "ics_assignments" {
+    String id "PK"
+    ics_position position 
+    DateTime assigned_at 
+    DateTime relieved_at "nullable"
+    }
+  
+
+  "incident_agency_participants" {
+    String id "PK"
+    DateTime joined_at 
+    DateTime left_at "nullable"
+    String role_in_incident "nullable"
+    }
+  
+
+  "incident_command_structures" {
+    String id "PK"
+    DateTime activated_at 
+    DateTime deactivated_at "nullable"
+    String objectives 
+    String situation_notes "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "incident_details" {
+    String id "PK"
+    String subcategory "nullable"
+    Int people_affected "nullable"
+    Boolean property_damage "nullable"
+    Boolean fire_spreading "nullable"
+    Boolean road_blocked "nullable"
+    String water_level_note "nullable"
+    String additional_notes "nullable"
+    Json caller_answers "nullable"
+    String priority_reasons 
+    DateTime submitted_at 
+    }
+  
+
+  "incident_handovers" {
+    String id "PK"
+    String situation_summary 
+    String pending_actions 
+    Json resources_in_field "nullable"
+    DateTime handed_over_at 
+    DateTime acknowledged_at "nullable"
+    }
+  
+
+  "incident_locations" {
+    String id "PK"
+    Decimal latitude 
+    Decimal longitude 
+    Decimal accuracy_meters "nullable"
+    Decimal altitude_meters "nullable"
+    String formatted_address "nullable"
+    String landmark "nullable"
+    String street "nullable"
+    String barangay "nullable"
+    String municipality "nullable"
+    String province "nullable"
+    Decimal geocoding_confidence "nullable"
+    DateTime captured_at 
+    String source "nullable"
+    }
+  
+
+  "incident_messages" {
+    String id "PK"
+    String message_text 
+    Boolean is_deleted 
+    DateTime sent_at 
+    }
+  
+
+  "incident_metrics" {
+    String id "PK"
+    incident_category category "nullable"
+    incident_priority priority "nullable"
+    String barangay "nullable"
+    trigger_method trigger_method "nullable"
+    DateTime submitted_at "nullable"
+    DateTime acknowledged_at "nullable"
+    DateTime dispatched_at "nullable"
+    DateTime on_scene_at "nullable"
+    DateTime resolved_at "nullable"
+    Int acknowledge_duration_secs "nullable"
+    Int dispatch_duration_secs "nullable"
+    Int response_duration_secs "nullable"
+    Int total_duration_secs "nullable"
+    Boolean acknowledge_sla_met "nullable"
+    Boolean dispatch_sla_met "nullable"
+    incident_status final_status "nullable"
+    patient_disposition patient_disposition "nullable"
+    DateTime aggregated_at 
+    }
+  
+
+  "incident_patients" {
+    String id "PK"
+    Boolean is_reporter 
+    Boolean is_unknown 
+    String patient_name "nullable"
+    Int approximate_age "nullable"
+    String sex "nullable"
+    String scene_assessment_notes "nullable"
+    Json vitals_at_scene "nullable"
+    String interventions_done 
+    DateTime created_at 
+    DateTime updated_at 
+    Int patient_sequence 
+    }
+  
+
+  "incident_resolutions" {
+    String id "PK"
+    String outcome 
+    patient_disposition patient_disposition "nullable"
+    Int time_to_acknowledge_secs "nullable"
+    Int time_to_dispatch_secs "nullable"
+    Int time_to_on_scene_secs "nullable"
+    Int time_to_resolved_secs "nullable"
+    Int total_response_secs "nullable"
+    String resolution_notes "nullable"
+    Boolean follow_up_required 
+    String follow_up_notes "nullable"
+    DateTime closed_at 
+    }
+  
+
+  "location_history" {
+    String id "PK"
+    Decimal latitude 
+    Decimal longitude 
+    Decimal accuracy_meters "nullable"
+    Decimal speed_kmh "nullable"
+    Decimal heading_degrees "nullable"
+    DateTime recorded_at 
+    }
+  
+
+  "message_reads" {
+    String id "PK"
+    DateTime read_at 
+    }
+  
+
+  "notification_deliveries" {
+    String id "PK"
+    String provider 
+    String provider_message_id "nullable"
+    String provider_status "nullable"
+    Json provider_response "nullable"
+    DateTime delivered_at "nullable"
+    DateTime created_at 
+    }
+  
+
+  "offline_event_queue" {
+    String id "PK"
+    String client_event_id 
+    String event_type 
+    Json payload 
+    Json device_info "nullable"
+    DateTime queued_at_device 
+    DateTime received_at_server 
+    sync_status sync_status 
+    DateTime processed_at "nullable"
+    String error_message "nullable"
+    DateTime created_at 
+    }
+  
+
+  "on_scene_assessments" {
+    String id "PK"
+    Int blood_pressure_sys "nullable"
+    Int blood_pressure_dia "nullable"
+    Int pulse_bpm "nullable"
+    Int respiratory_rate "nullable"
+    Decimal temperature_celsius "nullable"
+    Int oxygen_saturation "nullable"
+    Int gcs_score "nullable"
+    consciousness_state consciousness_state "nullable"
+    breathing_status breathing_status "nullable"
+    String visible_injuries 
+    String interventions 
+    String triage_tag "nullable"
+    String assessment_notes "nullable"
+    DateTime assessed_at 
+    }
+  
+
+  "fire_field_reports" {
+    String id "PK"
+    String alarm_level "nullable"
+    String fire_status "nullable"
+    Int structures_involved "nullable"
+    String occupancy_type "nullable"
+    String hazards 
+    Boolean spreading "nullable"
+    Boolean evacuation_needed "nullable"
+    Int casualties_seen "nullable"
+    Int trapped_persons "nullable"
+    String notes "nullable"
+    String client_request_id "nullable"
+    DateTime reported_at 
+    }
+  
+
+  "rescue_trip_reports" {
+    String id "PK"
+    Int rescued_count "nullable"
+    Int families "nullable"
+    Int children "nullable"
+    Int elderly "nullable"
+    Int pwd "nullable"
+    Int pregnant "nullable"
+    Int still_waiting "nullable"
+    String water_level "nullable"
+    String access "nullable"
+    String taken_to "nullable"
+    String taken_to_other "nullable"
+    String notes "nullable"
+    String client_request_id "nullable"
+    DateTime reported_at 
+    }
+  
+
+  "organization_memberships" {
+    String id "PK"
+    String position "nullable"
+    Boolean is_active 
+    DateTime joined_at 
+    DateTime left_at "nullable"
+    }
+  
+
+  "permissions" {
+    String id "PK"
+    String name 
+    String description "nullable"
+    String module_id "nullable"
+    DateTime created_at 
+    }
+  
+
+  "resource_capabilities" {
+    String id "PK"
+    String name 
+    String description "nullable"
+    String category "nullable"
+    DateTime created_at 
+    }
+  
+
+  "resource_capability_assignments" {
+    String id "PK"
+    Boolean is_verified 
+    DateTime assigned_at 
+    }
+  
+
+  "resource_recommendations" {
+    String id "PK"
+    Int rank 
+    Decimal score "nullable"
+    Int distance_meters "nullable"
+    Int eta_seconds "nullable"
+    Json reasoning "nullable"
+    DateTime generated_at 
+    }
+  
+
+  "resource_status_log" {
+    String id "PK"
+    resource_status from_status "nullable"
+    resource_status to_status 
+    Decimal latitude "nullable"
+    Decimal longitude "nullable"
+    Decimal speed_kmh "nullable"
+    DateTime recorded_at 
+    }
+  
+
+  "resources" {
+    String id "PK"
+    String name 
+    String call_sign "nullable"
+    resource_type resource_type 
+    resource_status status 
+    String base_barangay "nullable"
+    Boolean is_active 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "resource_crew_members" {
+    String id "PK"
+    DateTime created_at 
+    }
+  
+
+  "responder_availability" {
+    ResponderAvailabilityStatus status 
+    DateTime changed_at 
+    String source 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "risk_areas" {
+    String id "PK"
+    String name 
+    String description "nullable"
+    incident_category risk_type 
+    String risk_level 
+    String barangay "nullable"
+    Decimal flood_threshold_meters "nullable"
+    Decimal pin_latitude "nullable"
+    Decimal pin_longitude "nullable"
+    Int radius_meters "nullable"
+    Boolean is_active 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "risk_area_proposals" {
+    String id "PK"
+    incident_category risk_type 
+    String barangay "nullable"
+    Int incident_count 
+    Int window_days 
+    risk_area_proposal_status status 
+    DateTime reviewed_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "ai_suggestions" {
+    String id "PK"
+    String subject_type "nullable"
+    String subject_id "nullable"
+    ai_suggestion_kind kind 
+    ai_suggestion_status status 
+    String input_hash 
+    Json output "nullable"
+    String model 
+    Int latency_ms "nullable"
+    String error "nullable"
+    DateTime reviewed_at "nullable"
+    DateTime created_at 
+    }
+  
+
+  "role_permissions" {
+    String id "PK"
+    user_role role 
+    DateTime created_at 
+    }
+  
+
+  "sensitive_data_access_log" {
+    String id "PK"
+    String data_type 
+    String entity_id 
+    String purpose "nullable"
+    DateTime accessed_at 
+    }
+  
+
+  "sla_policies" {
+    String id "PK"
+    incident_category incident_category "nullable"
+    incident_priority priority "nullable"
+    Int acknowledge_threshold_secs 
+    Int dispatch_threshold_secs 
+    Int on_scene_threshold_secs 
+    Boolean is_active 
+    DateTime created_at 
+    }
+  
+
+  "sms_subscribers" {
+    String id "PK"
+    String phone_number 
+    String barangay_preference "nullable"
+    announcement_scope scope_preference "nullable"
+    Boolean is_active 
+    DateTime subscribed_at 
+    DateTime opted_out_at "nullable"
+    String opt_out_source "nullable"
+    }
+  
+
+  "spatial_ref_sys" {
+    Int srid "PK"
+    String auth_name "nullable"
+    Int auth_srid "nullable"
+    String srtext "nullable"
+    String proj4text "nullable"
+    }
+  
+
+  "surge_incidents" {
+    String id "PK"
+    String name 
+    String description "nullable"
+    incident_category category 
+    String affected_barangays 
+    surge_status status 
+    Decimal bocaue_river_level "nullable"
+    DateTime activated_at 
+    DateTime deactivated_at "nullable"
+    DateTime created_at 
+    }
+  
+
+  "surge_rules" {
+    String id "PK"
+    String rule_key 
+    Int window_minutes 
+    Int min_incidents 
+    incident_category category "nullable"
+    String barangays 
+    Boolean is_active 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "surge_settings" {
+    String id "PK"
+    Boolean singleton 
+    Decimal river_level_m "nullable"
+    DateTime river_level_at "nullable"
+    DateTime updated_at 
+    }
+  
+
+  "system_configurations" {
+    String id "PK"
+    String config_key 
+    Json config_value 
+    String description "nullable"
+    Boolean is_sensitive 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "triage_tags" {
+    String id "PK"
+    String triage_color 
+    String triage_notes "nullable"
+    DateTime tagged_at 
+    }
+  
+
+  "user_sessions" {
+    String id "PK"
+    String token_hash 
+    String refresh_token_hash "nullable"
+    Json device_info "nullable"
+    String ip_address "nullable"
+    Boolean is_revoked 
+    DateTime last_active_at 
+    DateTime expires_at 
+    DateTime created_at 
+    }
+  
+
+  "user_mfa_totp" {
+    String id "PK"
+    String secret_encrypted 
+    DateTime confirmed_at "nullable"
+    BigInt last_used_step "nullable"
+    DateTime created_at 
+    }
+  
+
+  "user_backup_codes" {
+    String id "PK"
+    String code_hash 
+    DateTime used_at "nullable"
+    DateTime created_at 
+    }
+  
+
+  "trusted_devices" {
+    String id "PK"
+    String token_hash 
+    String label "nullable"
+    String ip_address "nullable"
+    DateTime expires_at 
+    DateTime last_used_at "nullable"
+    DateTime revoked_at "nullable"
+    DateTime created_at 
+    }
+  
+
+  "device_readiness_reports" {
+    String id "PK"
+    String device_id 
+    String platform 
+    String app_version "nullable"
+    readiness_permission_state location_permission 
+    Boolean location_services_enabled 
+    readiness_permission_state notification_permission 
+    readiness_permission_state camera_permission 
+    Boolean motion_sensor_available 
+    readiness_connectivity connectivity 
+    String connection_type "nullable"
+    readiness_status overall_status 
+    DateTime checked_at 
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "user_verifications" {
+    String id "PK"
+    verification_type verification_type 
+    String token 
+    verification_status status 
+    DateTime expires_at 
+    DateTime verified_at "nullable"
+    DateTime created_at 
+    Int attempt_count 
+    }
+  
+
+  "webauthn_authentication_log" {
+    String id "PK"
+    Boolean was_successful 
+    String failure_reason "nullable"
+    String ip_address "nullable"
+    String user_agent "nullable"
+    DateTime occurred_at 
+    }
+  
+
+  "webauthn_challenges" {
+    String id "PK"
+    webauthn_ceremony_type ceremony_type 
+    webauthn_ceremony_status status 
+    String challenge 
+    String ip_address "nullable"
+    String user_agent "nullable"
+    DateTime expires_at 
+    DateTime completed_at "nullable"
+    DateTime created_at 
+    }
+  
+
+  "webauthn_credentials" {
+    String id "PK"
+    String credential_id 
+    String public_key 
+    BigInt sign_count 
+    String aaguid "nullable"
+    String attestation_format "nullable"
+    webauthn_transport transports 
+    Boolean is_backup_eligible 
+    Boolean is_backed_up 
+    String device_label "nullable"
+    Boolean is_active 
+    DateTime last_used_at "nullable"
+    String last_used_ip "nullable"
+    DateTime revoked_at "nullable"
+    String revoked_reason "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "geo_regions" {
+    String id "PK"
+    String name 
+    String region_type 
+    DateTime last_updated_at 
+    DateTime created_at 
+    }
+  
+
+  "barangay_contacts" {
+    String id "PK"
+    String phone_e164 
+    String phone_raw "nullable"
+    barangay_contact_kind kind 
+    Boolean can_sms 
+    barangay_contact_role role 
+    String label "nullable"
+    Boolean is_active 
+    Boolean is_demo 
+    DateTime verified_at "nullable"
+    String source "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "incident_barangay_notices" {
+    String id "PK"
+    barangay_match_method match_method 
+    Boolean is_approximate 
+    String short_code 
+    barangay_sms_status sms_status 
+    DateTime sms_sent_at "nullable"
+    barangay_report_type last_report "nullable"
+    barangay_report_source last_report_source "nullable"
+    DateTime last_report_at "nullable"
+    DateTime followup_due_at "nullable"
+    DateTime followup_sent_at "nullable"
+    DateTime closed_at "nullable"
+    DateTime created_at 
+    DateTime updated_at 
+    }
+  
+
+  "barangay_sms_inbound" {
+    String id "PK"
+    String provider_message_id 
+    String from_phone 
+    String from_phone_e164 "nullable"
+    String body 
+    DateTime received_at 
+    String parsed_command "nullable"
+    String parsed_code "nullable"
+    barangay_inbound_outcome outcome 
+    DateTime created_at 
+    }
+  
+    "users" |o--|| "user_role" : "enum:role"
+    "users" |o--|| "user_status" : "enum:status"
+    "users" |o--|o "user_sex" : "enum:sex"
+    "users" |o--|o "users" : "users"
+    "emergency_contacts" }o--|| "users" : "users"
+    "medical_profiles" }o--|| "consent_records" : "consent_records"
+    "medical_profiles" |o--|| "users" : "users"
+    "organizations" |o--|| "organization_type" : "enum:organization_type"
+    "incidents" |o--|| "trigger_method" : "enum:trigger_method"
+    "incidents" |o--|| "report_channel" : "enum:report_channel"
+    "incidents" |o--|| "incident_category" : "enum:category"
+    "incidents" |o--|| "incident_priority" : "enum:priority"
+    "incidents" |o--|| "incident_status" : "enum:status"
+    "incidents" |o--|o "consciousness_state" : "enum:consciousness_state"
+    "incidents" |o--|o "breathing_status" : "enum:breathing_status"
+    "incidents" |o--|o "incidents" : "duplicate_of"
+    "incidents" }o--|o "surge_incidents" : "surge_incidents"
+    "incident_reporters" |o--|| "incidents" : "incidents"
+    "incident_reporters" }o--|o "users" : "users"
+    "incident_attachments" }o--|| "incidents" : "incidents"
+    "incident_attachments" }o--|o "users" : "users"
+    "incident_attachments" }o--|o "users" : "rejected_by"
+    "incident_events" |o--|o "incident_status" : "enum:from_status"
+    "incident_events" |o--|| "incident_status" : "enum:to_status"
+    "incident_events" |o--|o "user_role" : "enum:triggered_by_role"
+    "incident_events" }o--|| "incidents" : "incidents"
+    "incident_events" }o--|o "users" : "users"
+    "vehicles" |o--|| "resource_type" : "enum:resource_type"
+    "vehicles" }o--|| "organizations" : "organizations"
+    "facilities" |o--|| "facility_type" : "enum:facility_type"
+    "facilities" |o--|| "facility_location_status" : "enum:location_status"
+    "facilities" |o--|| "facility_receiving_status" : "enum:receiving_status"
+    "facilities" }o--|o "organizations" : "organizations"
+    "facilities" }o--|o "users" : "location_verified_by"
+    "transport_records" }o--|o "users" : "reporter_patient_confirmed_by"
+    "transport_records" }o--|o "facilities" : "facilities"
+    "transport_records" }o--|| "dispatches" : "dispatches"
+    "transport_records" }o--|| "incidents" : "incidents"
+    "transport_records" }o--|o "incident_patients" : "incident_patients"
+    "notifications" |o--|| "notification_channel" : "enum:channel"
+    "notifications" |o--|| "notification_status" : "enum:status"
+    "notifications" }o--|o "incidents" : "incidents"
+    "notifications" }o--|o "users" : "users"
+    "escalations" |o--|| "escalation_level" : "enum:escalation_level"
+    "escalations" |o--|| "escalation_status" : "enum:status"
+    "escalations" }o--|| "incidents" : "incidents"
+    "escalations" }o--|o "users" : "users"
+    "escalations" }o--|o "sla_policies" : "sla_policies"
+    "resource_requests" |o--|| "resource_type" : "enum:resource_type"
+    "resource_requests" |o--|| "incident_priority" : "enum:priority"
+    "resource_requests" |o--|| "resource_request_status" : "enum:status"
+    "resource_requests" }o--|| "incidents" : "incidents"
+    "resource_requests" }o--|o "organizations" : "organizations_resource_requests_providing_org_idToorganizations"
+    "resource_requests" }o--|| "organizations" : "organizations_resource_requests_requesting_org_idToorganizations"
+    "audit_logs" |o--|o "user_role" : "enum:actor_role"
+    "audit_logs" |o--|| "audit_action" : "enum:action"
+    "audit_logs" }o--|o "users" : "users"
+    "audit_logs" }o--|o "incidents" : "incidents"
+    "announcements" |o--|| "announcement_category" : "enum:category"
+    "announcements" |o--|| "announcement_severity" : "enum:severity"
+    "announcements" |o--|| "announcement_scope" : "enum:scope"
+    "announcements" |o--|| "announcement_status" : "enum:status"
+    "announcements" |o--|| "announcement_language" : "enum:language"
+    "announcements" }o--|o "users" : "users_announcements_approved_by_idTousers"
+    "announcements" }o--|o "users" : "users_announcements_approval_requested_by_idTousers"
+    "announcements" }o--|o "organizations" : "organizations"
+    "announcements" }o--|| "users" : "users"
+    "announcements" |o--|o "announcements" : "announcements"
+    "account_lifecycle_events" }o--|o "users" : "users_account_lifecycle_events_performed_by_idTousers"
+    "account_lifecycle_events" }o--|| "users" : "users_account_lifecycle_events_user_idTousers"
+    "alert_triggers" |o--|| "trigger_method" : "enum:trigger_method"
+    "alert_triggers" |o--|o "cancellation_reason" : "enum:cancellation_reason"
+    "alert_triggers" }o--|o "incidents" : "incidents"
+    "alert_triggers" }o--|o "users" : "users"
+    "announcement_deliveries" |o--|| "notification_channel" : "enum:channel"
+    "announcement_deliveries" |o--|| "notification_status" : "enum:status"
+    "announcement_deliveries" }o--|| "announcements" : "announcements"
+    "announcement_deliveries" }o--|o "users" : "users"
+    "announcement_deliveries" }o--|o "sms_subscribers" : "sms_subscribers"
+    "consent_records" |o--|| "consent_status" : "enum:status"
+    "consent_records" }o--|| "users" : "users"
+    "identity_verifications" |o--|| "id_document_type" : "enum:document_type"
+    "identity_verifications" |o--|| "identity_verification_status" : "enum:status"
+    "identity_verifications" }o--|o "users" : "user"
+    "identity_verifications" }o--|o "users" : "reviewer"
+    "identity_verifications" }o--|o "consent_records" : "consent_record"
+    "dispatch_crew" }o--|| "dispatches" : "dispatches"
+    "dispatch_crew" }o--|| "users" : "users"
+    "dispatches" |o--|| "dispatch_status" : "enum:status"
+    "dispatches" }o--|| "users" : "users"
+    "dispatches" }o--|| "incidents" : "incidents"
+    "dispatches" }o--|| "organizations" : "organizations"
+    "dispatches" }o--|| "resources" : "resources"
+    "facility_capabilities" }o--|| "facilities" : "facilities"
+    "facility_referrals" }o--|o "users" : "users"
+    "facility_referrals" }o--|o "dispatches" : "dispatches"
+    "facility_referrals" }o--|| "facilities" : "facilities"
+    "facility_referrals" }o--|| "incidents" : "incidents"
+    "facility_referrals" }o--|o "incident_patients" : "incident_patients"
+    "false_alerts" |o--|| "false_alert_type" : "enum:false_alert_type"
+    "false_alerts" }o--|o "users" : "users_false_alerts_classified_by_idTousers"
+    "false_alerts" }o--|| "incidents" : "incidents"
+    "false_alerts" }o--|o "users" : "users_false_alerts_user_idTousers"
+    "feedback_ratings" }o--|| "incidents" : "incidents"
+    "feedback_ratings" }o--|o "users" : "users"
+    "first_aid_guides" |o--|| "incident_category" : "enum:category"
+    "ics_assignments" |o--|| "ics_position" : "enum:position"
+    "ics_assignments" }o--|| "incident_command_structures" : "incident_command_structures"
+    "ics_assignments" }o--|o "organizations" : "organizations"
+    "ics_assignments" }o--|| "users" : "users"
+    "incident_agency_participants" }o--|| "incidents" : "incidents"
+    "incident_agency_participants" }o--|o "users" : "users"
+    "incident_agency_participants" }o--|| "organizations" : "organizations"
+    "incident_command_structures" |o--|| "incidents" : "incidents"
+    "incident_details" }o--|o "first_aid_guides" : "first_aid_guides"
+    "incident_details" |o--|| "incidents" : "incidents"
+    "incident_handovers" }o--|| "users" : "users_incident_handovers_from_user_idTousers"
+    "incident_handovers" }o--|| "incidents" : "incidents"
+    "incident_handovers" }o--|| "users" : "users_incident_handovers_to_user_idTousers"
+    "incident_locations" |o--|| "incidents" : "incidents"
+    "incident_messages" }o--|o "incident_attachments" : "incident_attachments"
+    "incident_messages" }o--|| "incidents" : "incidents"
+    "incident_messages" }o--|o "organizations" : "organizations"
+    "incident_messages" }o--|| "users" : "users"
+    "incident_metrics" |o--|o "incident_category" : "enum:category"
+    "incident_metrics" |o--|o "incident_priority" : "enum:priority"
+    "incident_metrics" |o--|o "trigger_method" : "enum:trigger_method"
+    "incident_metrics" |o--|o "incident_status" : "enum:final_status"
+    "incident_metrics" |o--|o "patient_disposition" : "enum:patient_disposition"
+    "incident_metrics" |o--|| "incidents" : "incidents"
+    "incident_metrics" }o--|o "organizations" : "organizations"
+    "incident_patients" }o--|| "incidents" : "incidents"
+    "incident_patients" }o--|o "medical_profiles" : "medical_profiles"
+    "incident_patients" }o--|o "users" : "users"
+    "incident_resolutions" |o--|o "patient_disposition" : "enum:patient_disposition"
+    "incident_resolutions" }o--|| "users" : "users"
+    "incident_resolutions" |o--|| "incidents" : "incidents"
+    "location_history" }o--|o "resources" : "resources"
+    "location_history" }o--|| "incidents" : "incidents"
+    "location_history" }o--|o "users" : "users"
+    "message_reads" }o--|| "incident_messages" : "incident_messages"
+    "message_reads" }o--|| "users" : "users"
+    "notification_deliveries" }o--|| "notifications" : "notifications"
+    "offline_event_queue" |o--|| "sync_status" : "enum:sync_status"
+    "offline_event_queue" }o--|o "incidents" : "incidents"
+    "offline_event_queue" }o--|o "users" : "users"
+    "on_scene_assessments" |o--|o "consciousness_state" : "enum:consciousness_state"
+    "on_scene_assessments" |o--|o "breathing_status" : "enum:breathing_status"
+    "on_scene_assessments" }o--|| "users" : "users"
+    "on_scene_assessments" }o--|o "dispatches" : "dispatches"
+    "on_scene_assessments" }o--|| "incidents" : "incidents"
+    "on_scene_assessments" }o--|o "incident_patients" : "incident_patients"
+    "fire_field_reports" }o--|| "incidents" : "incidents"
+    "fire_field_reports" }o--|o "dispatches" : "dispatches"
+    "fire_field_reports" }o--|| "users" : "users"
+    "rescue_trip_reports" }o--|| "incidents" : "incidents"
+    "rescue_trip_reports" }o--|o "dispatches" : "dispatches"
+    "rescue_trip_reports" }o--|| "users" : "users"
+    "rescue_trip_reports" }o--|o "facilities" : "facilities"
+    "organization_memberships" }o--|| "organizations" : "organizations"
+    "organization_memberships" }o--|| "users" : "users"
+    "resource_capability_assignments" }o--|| "resource_capabilities" : "resource_capabilities"
+    "resource_capability_assignments" }o--|| "resources" : "resources"
+    "resource_recommendations" }o--|| "incidents" : "incidents"
+    "resource_recommendations" }o--|| "resources" : "resources"
+    "resource_status_log" |o--|o "resource_status" : "enum:from_status"
+    "resource_status_log" |o--|| "resource_status" : "enum:to_status"
+    "resource_status_log" }o--|o "users" : "users"
+    "resource_status_log" }o--|o "incidents" : "incidents"
+    "resource_status_log" }o--|| "resources" : "resources"
+    "resources" |o--|| "resource_type" : "enum:resource_type"
+    "resources" |o--|| "resource_status" : "enum:status"
+    "resources" }o--|o "incidents" : "incidents"
+    "resources" }o--|| "organizations" : "organizations"
+    "resources" }o--|o "vehicles" : "vehicles"
+    "resource_crew_members" }o--|| "resources" : "resources"
+    "resource_crew_members" |o--|| "users" : "users"
+    "responder_availability" |o--|| "responder_availability_status" : "enum:status"
+    "responder_availability" }o--|| "users" : "changed_by"
+    "responder_availability" |o--|| "users" : "user"
+    "risk_areas" |o--|| "incident_category" : "enum:risk_type"
+    "risk_area_proposals" |o--|| "incident_category" : "enum:risk_type"
+    "risk_area_proposals" |o--|| "risk_area_proposal_status" : "enum:status"
+    "risk_area_proposals" }o--|o "users" : "reviewed_by"
+    "risk_area_proposals" }o--|o "risk_areas" : "risk_area"
+    "ai_suggestions" |o--|| "ai_suggestion_kind" : "enum:kind"
+    "ai_suggestions" |o--|| "ai_suggestion_status" : "enum:status"
+    "ai_suggestions" }o--|o "incidents" : "incidents"
+    "ai_suggestions" }o--|o "users" : "requested_by"
+    "ai_suggestions" }o--|o "users" : "reviewed_by"
+    "role_permissions" |o--|| "user_role" : "enum:role"
+    "role_permissions" }o--|| "permissions" : "permissions"
+    "sensitive_data_access_log" }o--|| "users" : "users"
+    "sensitive_data_access_log" }o--|o "incidents" : "incidents"
+    "sla_policies" |o--|o "incident_category" : "enum:incident_category"
+    "sla_policies" |o--|o "incident_priority" : "enum:priority"
+    "sla_policies" }o--|| "organizations" : "organizations"
+    "sms_subscribers" |o--|o "announcement_scope" : "enum:scope_preference"
+    "sms_subscribers" }o--|o "users" : "users"
+    "surge_incidents" |o--|| "incident_category" : "enum:category"
+    "surge_incidents" |o--|| "surge_status" : "enum:status"
+    "surge_incidents" }o--|| "users" : "users"
+    "surge_incidents" }o--|| "organizations" : "organizations"
+    "surge_rules" |o--|o "incident_category" : "enum:category"
+    "surge_settings" }o--|o "users" : "river_level_by"
+    "system_configurations" }o--|o "users" : "users"
+    "triage_tags" }o--|o "incidents" : "incidents"
+    "triage_tags" }o--|o "incident_patients" : "incident_patients"
+    "triage_tags" }o--|| "surge_incidents" : "surge_incidents"
+    "triage_tags" }o--|o "users" : "users"
+    "user_sessions" }o--|| "users" : "users"
+    "user_mfa_totp" |o--|| "users" : "users"
+    "user_backup_codes" }o--|| "users" : "users"
+    "trusted_devices" }o--|| "users" : "users"
+    "device_readiness_reports" |o--|| "readiness_permission_state" : "enum:location_permission"
+    "device_readiness_reports" |o--|| "readiness_permission_state" : "enum:notification_permission"
+    "device_readiness_reports" |o--|| "readiness_permission_state" : "enum:camera_permission"
+    "device_readiness_reports" |o--|| "readiness_connectivity" : "enum:connectivity"
+    "device_readiness_reports" |o--|| "readiness_status" : "enum:overall_status"
+    "device_readiness_reports" }o--|| "users" : "users"
+    "user_verifications" |o--|| "verification_type" : "enum:verification_type"
+    "user_verifications" |o--|| "verification_status" : "enum:status"
+    "user_verifications" }o--|| "users" : "users"
+    "webauthn_authentication_log" }o--|o "webauthn_credentials" : "webauthn_credentials"
+    "webauthn_authentication_log" }o--|o "users" : "users"
+    "webauthn_challenges" |o--|| "webauthn_ceremony_type" : "enum:ceremony_type"
+    "webauthn_challenges" |o--|| "webauthn_ceremony_status" : "enum:status"
+    "webauthn_challenges" }o--|o "users" : "users"
+    "webauthn_credentials" |o--}o "webauthn_transport" : "enum:transports"
+    "webauthn_credentials" }o--|| "users" : "users"
+    "barangay_contacts" |o--|| "barangay_contact_kind" : "enum:kind"
+    "barangay_contacts" |o--|| "barangay_contact_role" : "enum:role"
+    "barangay_contacts" }o--|| "geo_regions" : "barangay"
+    "incident_barangay_notices" |o--|| "barangay_match_method" : "enum:match_method"
+    "incident_barangay_notices" |o--|| "barangay_sms_status" : "enum:sms_status"
+    "incident_barangay_notices" |o--|o "barangay_report_type" : "enum:last_report"
+    "incident_barangay_notices" |o--|o "barangay_report_source" : "enum:last_report_source"
+    "incident_barangay_notices" }o--|| "incidents" : "incidents"
+    "incident_barangay_notices" }o--|| "geo_regions" : "barangay"
+    "incident_barangay_notices" }o--|o "users" : "last_report_by"
+    "barangay_sms_inbound" |o--|| "barangay_inbound_outcome" : "enum:outcome"
+    "barangay_sms_inbound" }o--|o "incident_barangay_notices" : "notice"
+    "barangay_sms_inbound" }o--|o "incidents" : "incident"

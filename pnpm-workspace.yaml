@@ -17,6 +17,9 @@ allowBuilds:
   onnxruntime-node: false
   prisma: true
   protobufjs: true
+  # Only used by `pnpm db:erd` (backend). Its install script downloads Chrome; skip it so CI/Docker
+  # installs stay lean. Install the browser once by hand: see backend/scripts/generate-erd.js.
+  puppeteer: false
   # Uses its prebuilt @img/sharp-<platform> binary (Windows and Alpine/musl included); the install script
   # only builds from source when a global libvips or --build-from-source is present.
   sharp: false

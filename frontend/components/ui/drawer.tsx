@@ -21,8 +21,8 @@ export const DrawerOverlay = forwardRef<
       // the dispatch page's z-[1000] floating overlays — otherwise the drawer opens
       // hidden behind the map.
       'fixed inset-0 z-[1200] bg-black/20 backdrop-blur-[2px]',
-      'data-[state=open]:animate-in data-[state=closed]:animate-out',
-      'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      // Fade in/out (keyframes in globals.css).
+      'agap-backdrop',
       className,
     )}
     {...props}
@@ -43,17 +43,17 @@ export const DrawerContent = forwardRef<
     <DrawerOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // Slide in from / out to this side (keyframes in globals.css).
+      data-side={side}
       // Escape closes an open confirmation first, not the drawer behind it.
       onEscapeKeyDown={(e) => {
         if (isModalAlertOpen()) e.preventDefault();
         onEscapeKeyDown?.(e);
       }}
       className={cn(
-        'fixed top-0 z-[1210] h-full bg-white shadow-[−4px_0_40px_rgba(135,149,163,0.12)] border-l border-[rgba(168,181,193,0.20)] flex flex-col',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out duration-300',
-        side === 'right'
-          ? 'right-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right'
-          : 'left-0 data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left',
+        'fixed top-0 z-[1210] h-full bg-white shadow-[-4px_0_40px_rgba(135,149,163,0.12)] border-l border-[rgba(168,181,193,0.20)] flex flex-col',
+        'agap-drawer',
+        side === 'right' ? 'right-0' : 'left-0',
         width,
         className,
       )}

@@ -77,9 +77,15 @@ export class NotificationProcessor extends WorkerHost {
         where: { config_key: `fcm_token:${data.userId}` },
       });
 
-      const token = tokenFromConfig(tokenRecord?.config_value);
+      // No row = the user never signed in to the mobile app (normal for console-only staff
+      // such as Dispatchers and Supervisors); the in-app notification already covers them.
+      if (!tokenRecord) {
+        this.logger.debug(`No push device registered for userId=${data.userId}; PUSH skipped`);
+        return;
+      }
+      const token = tokenFromConfig(tokenRecord.config_value);
       if (!token) {
-        this.logger.warn(`No FCM token for userId=${data.userId}`);
+        this.logger.warn(`Unreadable FCM token record for userId=${data.userId}; PUSH skipped`);
         return;
       }
 
