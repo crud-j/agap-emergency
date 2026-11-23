@@ -176,6 +176,8 @@ AWS SDK 3.1138 sends CRC32 checksums by default. If the first R2 upload fails wi
 
 ### 3.1 Services
 
+**No domain yet?** Do all of Phase 3 on Railway's free `*.up.railway.app` address and attach `api.<domain>` later. The domain must exist before Phase 5, because the APK has the address built in. Push the Phase 1–2 commits to GitHub first: Railway builds from the repo.
+
 1. **Create the project** in the **Singapore** region.
 2. **Add Postgres from the PostGIS template**, not plain Postgres. The schema enables `postgis`, `pg_trgm` and `uuid-ossp`.
 3. **Add Redis.**
@@ -197,13 +199,14 @@ Generate each key separately with:
 | `NODE_ENV` | `production` |
 | `BACKEND_PORT` / `BACKEND_HOST` | `3000` / `0.0.0.0` |
 | `DATABASE_URL` | Railway reference to the PostGIS service URL |
-| `REDIS_URL` | Railway reference to the Redis URL |
+| `REDIS_URL` | `${{Redis.REDIS_URL}}?family=0`. Railway's private network can be IPv6; `family=0` lets ioredis use either. Every Redis client in the backend (BullMQ included) takes the URL as-is, so the option reaches all of them |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | new, different values |
 | `MEDICAL_ENCRYPTION_KEY` | new (required in production) |
 | `MFA_ENCRYPTION_KEY` | new |
 | `ID_VERIFICATION_REQUIRED` | `true` |
 | `ID_DOCUMENT_ENCRYPTION_KEY` | new |
 | `ID_PIN_PEPPER` | new, at least 32 characters |
+| `BARANGAY_LINK_SECRET` | new; signs the barangay `/b` links. Without it, the key is derived from `JWT_SECRET` |
 | `CORS_ORIGIN` | `https://app.<domain>` |
 | `PUBLIC_APP_URL` | `https://app.<domain>` |
 | `WEBAUTHN_RP_ID` | `api.<domain>,app.<domain>`. The backend host goes **first**: the APK sends no Origin and uses the first entry |
@@ -222,7 +225,7 @@ Generate each key separately with:
 | `MAP_PROVIDER`, `MAP_API_KEY`, `MAP_STYLE_URL`, `MAP_SATELLITE_STYLE_URL`, `MAP_ROUTER`, `MAP_PROVIDER_ROUTING_URL`, `MAP_GEOCODER_URL` | same as local |
 | `AI_ASSIST_ENABLED` | `false` unless a paid key and DPO sign-off exist |
 | `PROFILE_PHOTO_CHECKS` | from Phase 0 |
-| `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | new; never the dev default |
+| `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | only the seed reads these (3.3, on the laptop); Railway does not need them. Never the dev default |
 | `TRUST_PROXY` | leave the default for now; decide in Phase 6 |
 
 Leave `PUBLIC_STORAGE_URL` unset. Nothing reads it for display.
