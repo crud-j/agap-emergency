@@ -1,6 +1,6 @@
 # Plan: Deploy AGAP (Web on Vercel, Backend on Railway, Files on R2, Preview APK)
 
-> **Status:** Planned 2026-11-23. Not started.
+> **Status:** Phase 1 done 2026-11-23 (pending commit). Phase 0 is the team's own steps.
 > **How to use:** do one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts.
 > **Scope:** a working public deployment for demos and pilot testing. It is not yet a hardened production setup for real LGU operations; see [Phase 7](#phase-7-known-limits-and-follow-ups).
 > **Modules touched:** MOD-10 (media), MOD-17/19 (SMS paths), MOD-20 (WebSocket), MOD-21 (ops dashboard), MOD-47 (auth), MOD-48 (privacy).
@@ -107,13 +107,20 @@ These come from CLAUDE.md and from how the code works today:
 - In the production stage, copy the whole `/app` from the build stage and start from `/app/backend` (`node dist/main`).
 - The image is bigger, because it keeps dev dependencies. In return the links stay valid, and the Prisma CLI and `ts-node` stay available for `prisma migrate deploy` and the seed.
 
+**Also needed (found while building, done 2026-11-23):**
+- Copy `backend/prisma` and `backend/prisma.config.ts` **before** `pnpm install`: the backend's `postinstall` runs `prisma generate`. This also fixes the `development` stage.
+- Install `openssl` in the base image: the Prisma CLI's schema engine (`prisma migrate deploy`) needs it.
+- No `--mount=type=cache` in the build stage: Railway rejects cache ids that are not prefixed with its service id.
+- `.dockerignore`: `**/.env` instead of `.env`. The bare pattern matched only the repo root, so `backend/.env` was copied into locally built images. `frontend/` is excluded too.
+- Result: the image is 2.89 GB.
+
 *(Later, a smaller image: `pnpm deploy --filter @agap/backend --prod`. That needs `"files": ["dist"]` in `shared/package.json`, because `dist/` is gitignored, and a `prisma generate` inside the output. Not needed now.)*
 
 ### 1.2 Let Socket.io connect straight to the backend ([frontend/next.config.mjs](../../frontend/next.config.mjs))
 
 **Problem:** with `PROXY_API=true`, the config blanks **both** `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`. Socket.io then tries the Vercel domain, which cannot forward WebSockets.
 
-**Fix:** keep blanking `NEXT_PUBLIC_API_URL`, so REST stays same-origin. Keep `NEXT_PUBLIC_WS_URL` whenever it is set. Local dev is unchanged, because the variable is unset there.
+**Fix:** keep blanking `NEXT_PUBLIC_API_URL`, so REST stays same-origin. Keep `NEXT_PUBLIC_WS_URL` only in a **production build** where it is set. `next dev` still blanks it: `frontend/.env.local` sets `ws://localhost:3000`, which would break the tunnel. Socket.io's allowed origins come from `CORS_ORIGIN`, the same as REST.
 
 ### 1.3 Add `frontend/vercel.json`
 
@@ -135,12 +142,15 @@ These come from CLAUDE.md and from how the code works today:
 
 AWS SDK 3.1138 sends CRC32 checksums by default. If the first R2 upload fails with `NotImplemented` or a checksum error, add `requestChecksumCalculation: 'WHEN_REQUIRED'` and `responseChecksumValidation: 'WHEN_REQUIRED'` to the `S3Client` in [media.service.ts](../../backend/src/media/media.service.ts).
 
+**Local test note:** the container runs the Textbee pollers against the real device, like a second backend. Stop it right after the health check.
+
 **Done when:**
-- [ ] The production image starts and `/v1/health` returns 200 locally.
-- [ ] The frontend builds with `PROXY_API=true` and the shared build.
-- [ ] Locally, a production-mode web build keeps `NEXT_PUBLIC_WS_URL` (Socket.io connects to the backend directly).
-- [ ] Typecheck passes for all four packages.
+- [x] The production image starts and `/v1/health` returns 200 locally. *(2026-11-23: database connected, login path returned 401 as expected.)*
+- [x] The frontend builds with `PROXY_API=true` and the shared build.
+- [x] Locally, a production-mode web build keeps `NEXT_PUBLIC_WS_URL` (Socket.io connects to the backend directly). *(The WS address is in the built pages; the `localhost` API address from `.env.local` is not.)*
+- [x] Typecheck passes for all four packages.
 - [ ] The changes are committed.
+- [ ] Still untested: the `vercel.json` filtered install (first Vercel deploy, Phase 4).
 
 ---
 

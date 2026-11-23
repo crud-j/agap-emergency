@@ -28,6 +28,12 @@ const backendUrl = process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:3000';
 // A production build keeps using NEXT_PUBLIC_API_URL / NEXT_PUBLIC_WS_URL.
 const proxyApi = process.env.NODE_ENV !== 'production' || process.env.PROXY_API === 'true';
 
+// Socket.io in a production build (Vercel) goes straight to the backend: Vercel does not
+// forward WebSocket upgrades, and the socket signs in with the access token, not the
+// SameSite=Strict cookie, so another origin is fine. `next dev` still blanks it, so a
+// tunnel keeps working even though frontend/.env.local sets ws://localhost:3000.
+const keepWsUrl = process.env.NODE_ENV === 'production' && !!process.env.NEXT_PUBLIC_WS_URL;
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -35,7 +41,9 @@ const nextConfig = {
   // overwriting its .next folder. Unset = the usual .next.
   ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   // Empty base URL = same origin. Overrides any NEXT_PUBLIC_API_URL from .env files.
-  ...(proxyApi ? { env: { NEXT_PUBLIC_API_URL: '', NEXT_PUBLIC_WS_URL: '' } } : {}),
+  ...(proxyApi
+    ? { env: { NEXT_PUBLIC_API_URL: '', ...(keepWsUrl ? {} : { NEXT_PUBLIC_WS_URL: '' }) } }
+    : {}),
   // Socket.io's path ends in a slash (/socket.io/?EIO=4…); Next would redirect it away.
   ...(proxyApi ? { skipTrailingSlashRedirect: true } : {}),
   transpilePackages: ['@agap/shared'],

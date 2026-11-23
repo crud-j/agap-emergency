@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "pnpm install --frozen-lockfile --filter @agap/frontend...",
+  "buildCommand": "pnpm --filter @agap/shared build && pnpm build",
+  "regions": ["sin1"]
+}
