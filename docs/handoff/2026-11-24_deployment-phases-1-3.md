@@ -37,7 +37,8 @@ Get AGAP running without the laptop: website on **Vercel**, NestJS backend + Pos
   - Settings: Healthcheck Path `/v1/health`; **Pre-deploy Command** `npx prisma migrate deploy` (Custom Start Command must stay EMPTY — it was wrongly filled once).
   - **Migrations ran on Railway**: "41 migrations found", all applied, later deploy says "No pending migrations to apply."
   - **Last deploy (`2d97a1ec…`, after commit `07bbca8`)**: `Nest application successfully started`, `AGAP Backend running on http://0.0.0.0:3000`, `Database connection established`. Healthcheck outcome of that deploy NOT confirmed by the user.
-  - **Remaining problem 1 — Redis not connected**: logs show `Redis unavailable for the geocode cache…`, `…guest report limits…`, `…session revocation…`, `…route cache…`, `…transport retries…`, each with an EMPTY error message (typical of an AggregateError when connecting to `localhost` → REDIS_URL was probably empty). BullMQ jobs (SMS, push, SLA, ETA) cannot run without Redis. The user was about to fix `REDIS_URL` (either `${{Redis.REDIS_URL}}?family=0` or the literal private URL + `?family=0`) and redeploy.
+  - **UPDATE (deploy `dcd8e870…`, 17:52 UTC): Redis FIXED** — REDIS_URL set to the private Redis URL + `?family=0`; no "Redis unavailable" lines anymore. App started, migrations "No pending". Firebase still "could not start (Failed to parse private key.)"; DB still via public proxy. One `BarangaySmsPoller` warning `HTTP no response (ECONNABORTED)` at 17:54 (single Textbee timeout; only a concern if it repeats — check the Textbee phone is on/online).
+  - **(Resolved) problem 1 — Redis not connected**: logs showed `Redis unavailable for the geocode cache…`, `…guest report limits…`, `…session revocation…`, `…route cache…`, `…transport retries…`, each with an EMPTY error message (typical of an AggregateError when connecting to `localhost` → REDIS_URL was probably empty). BullMQ jobs (SMS, push, SLA, ETA) cannot run without Redis. The user was about to fix `REDIS_URL` (either `${{Redis.REDIS_URL}}?family=0` or the literal private URL + `?family=0`) and redeploy.
   - **Remaining problem 2 — Firebase key unreadable**: `Firebase Admin could not start (Failed to parse private key.) … Push is off.` (both NotificationProcessor and AnnouncementPushProcessor). Backend no longer crashes because of it (fix `07bbca8`). User told to re-paste `private_key` straight from the Firebase service-account JSON, no quotes; and asked whether push works on the laptop today (unanswered).
   - **Remaining problem 3 — DATABASE_URL uses the public proxy** `gondola.proxy.rlwy.net:35360` (i.e. points at `DATABASE_PUBLIC_URL`). Works, but egress costs; should be the private `${{<db>.DATABASE_URL}}` (`…railway.internal…`).
 - **Phase 3 Part C (seed) — NOT started.** Seed from laptop with Railway's public DB URL + production `ID_PIN_PEPPER` + `INITIAL_ADMIN_EMAIL/PASSWORD`, then change every demo account password.
@@ -260,7 +261,7 @@ Keys: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, TEXTBEE_
 ## Where We're Going
 
 1. **Finish Phase 3 backend health** (user mid-way):
-   a. `REDIS_URL` = `${{Redis.REDIS_URL}}?family=0` (or the private literal + `?family=0`); eye icon must show `redis://…@redis.railway.internal:6379?family=0`.
+   a. ~~`REDIS_URL`~~ — DONE (confirmed by deploy `dcd8e870…`). Optional: switch the pasted literal to the reference `${{Redis.REDIS_URL}}?family=0` and rotate the Redis password (it was pasted into chat once).
    b. `DATABASE_URL` → private reference (eye shows `…railway.internal…`, not `gondola.proxy.rlwy.net`).
    c. `FIREBASE_PRIVATE_KEY` re-pasted from the service-account JSON `private_key` value, no quotes; confirm `FIREBASE_CLIENT_EMAIL`/`PROJECT_ID` from the same JSON.
    d. Redeploy; logs must show no `Redis unavailable`, `Firebase Admin initialized`, `Nest application successfully started`; browser `https://agap-emergency-production.up.railway.app/v1/health` → `{"status":"ok"…}`.
@@ -275,7 +276,7 @@ Keys: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, TEXTBEE_
 
 - **Railway Trial credit** ($5 / 30 days, banner "30 days or $5.00 left"). Failing builds and the public DB proxy consume it. Hobby upgrade likely needed for an always-on backend.
 - **Textbee double-processing**: while Railway backend runs, do NOT run the local backend (or set `CITIZEN_SMS_SOS_ENABLED=false` and `BARANGAY_SMS_REPLIES_ENABLED=false` locally). Same applies to any local prod container test.
-- **Redis down ⇒ BullMQ jobs (SMS/push/SLA/ETA) don't run** even though the app is "up".
+- Redis is connected now (fixed late in the session); if `Redis unavailable` ever returns, BullMQ jobs (SMS/push/SLA/ETA) stop while the app still looks "up".
 - **Every push to `main` triggers a Railway deploy** — avoid pushing broken work.
 - Image 2.89 GB → slow builds (~1.5–10 min); Railway Trial image limit believed 4 GB.
 - `frontend/vercel.json` filtered install untested.
@@ -310,7 +311,7 @@ cd backend && npx jest --config ./test/jest.config.ts --maxWorkers=50%
 pnpm typecheck
 
 # Next action
-Ask the user for the result of the redeploy after fixing REDIS_URL / DATABASE_URL / FIREBASE_PRIVATE_KEY
+Redis is fixed. Ask the user for the result of the redeploy after fixing DATABASE_URL / FIREBASE_PRIVATE_KEY
 (Deploy Logs: no "Redis unavailable", "Firebase Admin initialized"), then do Phase 3 Part C (seed).
 ```
 
