@@ -2,8 +2,12 @@
 # Debian (glibc), not Alpine: the ONNX runtime used by the on-server profile photo check
 # (onnxruntime-node) ships glibc binaries only.
 FROM node:22-bookworm-slim AS base
-RUN npm install -g pnpm@9
 WORKDIR /app
+# pnpm version comes from "packageManager" in the root package.json (one place for it).
+# pnpm-workspace.yaml uses pnpm 11 settings (allowBuilds), which older pnpm ignores.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+COPY package.json ./
+RUN corepack enable && corepack install
 
 # Development stage
 FROM base AS development
@@ -32,8 +36,7 @@ RUN pnpm db:generate
 RUN pnpm build
 
 # Production stage
-FROM node:22-bookworm-slim AS production
-RUN npm install -g pnpm
+FROM base AS production
 WORKDIR /app
 COPY --from=build /app/backend/dist ./dist
 COPY --from=build /app/backend/package.json ./
