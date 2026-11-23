@@ -1,6 +1,6 @@
 # Plan: Deploy AGAP (Web on Vercel, Backend on Railway, Files on R2, Preview APK)
 
-> **Status:** Phases 1 and 2 done 2026-11-23. Phase 3 done 2026-11-24 on `agap-emergency-production.up.railway.app` (no domain yet). Keys live in Bitwarden (collection "AGAP Deployment"). Database starts fresh.
+> **Status:** Phases 1 and 2 done 2026-11-23. Phase 3 done 2026-11-24 on `agap-emergency-production.up.railway.app`, Phase 4 done 2026-11-24 on `agap-emergency.vercel.app` (no domain yet). Keys live in Bitwarden (collection "AGAP Deployment"). Database starts fresh.
 > **How to use:** do one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts.
 > **Scope:** a working public deployment for demos and pilot testing. It is not yet a hardened production setup for real LGU operations; see [Phase 7](#phase-7-known-limits-and-follow-ups).
 > **Modules touched:** MOD-10 (media), MOD-17/19 (SMS paths), MOD-20 (WebSocket), MOD-21 (ops dashboard), MOD-47 (auth), MOD-48 (privacy).
@@ -294,11 +294,18 @@ Set the pre-deploy command to `npx prisma migrate deploy`, so new migrations run
 4. **Add the domain** `app.<domain>`. Add the CNAME Vercel shows in Cloudflare DNS (**DNS only**).
 5. **Use only `app.<domain>`.** Preview deployments get random addresses that are not in `CORS_ORIGIN` or the passkey settings, and Vercel's deployment protection blocks barangays from opening `/b` on them.
 
+**Notes from the first deploy (2026-11-24, `https://agap-emergency.vercel.app`, no domain yet):**
+- Vercel shows the repo as "Services" (backend + frontend). Use **Import single project** on `frontend` only; the backend stays on Railway.
+- Also set `ENABLE_EXPERIMENTAL_COREPACK=1`, so Vercel installs with the pnpm version pinned in the root `package.json`, not the one it guesses from the lockfile. Set the variables for Production and Preview.
+- The `NEXT_PUBLIC_MAP_*` variables are not needed: no frontend code reads them (the map settings come from the backend).
+- On Railway, with the Vercel address in place of `app.<domain>`: `CORS_ORIGIN` and `PUBLIC_APP_URL` = `https://agap-emergency.vercel.app`; `WEBAUTHN_RP_ID=agap-emergency-production.up.railway.app,agap-emergency.vercel.app`; `WEBAUTHN_ORIGIN=https://agap-emergency.vercel.app,https://agap-emergency-production.up.railway.app`.
+- Checked: the built pages contain the Railway `wss://` address and no `localhost:3000`; `/v1/health` through Vercel returns 200.
+
 **Done when:**
-- [ ] `https://app.<domain>/login` loads.
-- [ ] Signing in works, and **reloading the page keeps the session**.
-- [ ] The Live indicator turns on.
-- [ ] `https://app.<domain>/b` loads on a phone without signing in.
+- [x] `https://app.<domain>/login` loads. *(On `agap-emergency.vercel.app` for now.)*
+- [x] Signing in works, and **reloading the page keeps the session**.
+- [x] The Live indicator turns on.
+- [x] `https://app.<domain>/b` loads on a phone without signing in.
 
 ---
 
