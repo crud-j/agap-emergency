@@ -2,12 +2,13 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job } from 'bullmq';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getApps } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { QUEUE_NAMES, announcementReachesBarangay } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { tokenFromConfig } from '../../notifications/push-token';
+import { ensureFirebaseApp } from '../../notifications/firebase-admin';
 
 export interface AnnouncementPushJobData {
   announcementId: string;
@@ -26,17 +27,7 @@ export class AnnouncementPushProcessor extends WorkerHost {
     private readonly realtime: RealtimeService,
   ) {
     super();
-    if (getApps().length === 0) {
-      const projectId = config.get<string>('FIREBASE_PROJECT_ID');
-      const clientEmail = config.get<string>('FIREBASE_CLIENT_EMAIL');
-      const privateKey = config.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n');
-      if (projectId && clientEmail && privateKey) {
-        initializeApp({ credential: cert({ projectId, clientEmail, privateKey }) });
-        this.logger.log('Firebase Admin initialized for announcement push');
-      } else {
-        this.logger.warn('Firebase not configured — announcement push broadcasts will be skipped');
-      }
-    }
+    ensureFirebaseApp(config, this.logger);
   }
 
   async process(job: Job<AnnouncementPushJobData>): Promise<void> {

@@ -2,11 +2,12 @@ import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Queue } from 'bullmq';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getApps } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { tokenFromConfig } from '../../notifications/push-token';
+import { ensureFirebaseApp } from '../../notifications/firebase-admin';
 
 export interface NotificationJobData {
   userId?: string;
@@ -29,17 +30,7 @@ export class NotificationProcessor extends WorkerHost {
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
   ) {
     super();
-    if (getApps().length === 0) {
-      const projectId = config.get<string>('FIREBASE_PROJECT_ID');
-      const clientEmail = config.get<string>('FIREBASE_CLIENT_EMAIL');
-      const privateKey = config.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n');
-      if (projectId && clientEmail && privateKey) {
-        initializeApp({ credential: cert({ projectId, clientEmail, privateKey }) });
-        this.logger.log('Firebase Admin initialized');
-      } else {
-        this.logger.warn('Firebase Admin not initialized — FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, or FIREBASE_PRIVATE_KEY missing');
-      }
-    }
+    ensureFirebaseApp(config, this.logger);
   }
 
   async process(job: Job<NotificationJobData>): Promise<void> {
