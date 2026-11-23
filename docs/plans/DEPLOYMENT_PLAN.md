@@ -1,6 +1,6 @@
 # Plan: Deploy AGAP (Web on Vercel, Backend on Railway, Files on R2, Preview APK)
 
-> **Status:** Phase 1 done 2026-11-23 (pending commit). Phase 0 is the team's own steps.
+> **Status:** Phases 1 and 2 done 2026-11-23. Keys live in Bitwarden (collection "AGAP Deployment"). Database starts fresh.
 > **How to use:** do one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts.
 > **Scope:** a working public deployment for demos and pilot testing. It is not yet a hardened production setup for real LGU operations; see [Phase 7](#phase-7-known-limits-and-follow-ups).
 > **Modules touched:** MOD-10 (media), MOD-17/19 (SMS paths), MOD-20 (WebSocket), MOD-21 (ops dashboard), MOD-47 (auth), MOD-48 (privacy).
@@ -162,9 +162,13 @@ AWS SDK 3.1138 sends CRC32 checksums by default. If the first R2 upload fails wi
    - Create the bucket first. A bucket-scoped token cannot create buckets, although the code tries to create a missing one.
 3. **Optional: move old files.** If old attachments from Garage should keep working, copy the bucket to R2 with the same bucket name and keys (e.g. `rclone copy garage:agap-media r2:agap-media`). Skip this if the database starts fresh.
 
+4. **Test the token** without putting keys in any file: set `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` (PowerShell `Read-Host`) and run `node scripts/check-storage.mjs` from `backend/`. It runs the backend's startup `HeadBucket` check and an upload/read/delete round trip, and says whether step 1.5 is needed.
+
 **Done when:**
-- [ ] The bucket exists and is private.
-- [ ] The token is saved in the key store.
+- [x] The bucket exists and is private. *(2026-11-23: `agap-media`, APAC hint, r2.dev off.)*
+- [x] The token is saved in the key store. *(Account API token `agap-backend`, Object Read & Write, `agap-media` only; in Bitwarden, collection "AGAP Deployment".)*
+- [x] `check-storage.mjs` passes. *(HeadBucket and default checksums work, so step 1.5 is not needed.)*
+- Old files: **not moved**. The Railway database starts fresh (decided 2026-11-23).
 
 ---
 
