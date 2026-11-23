@@ -26,6 +26,7 @@
     "db:reset-data": "prisma db execute --file ../scripts/db/reset-data.sql",
     "dev:reset-dispatcher": "ts-node scripts/reset-dispatcher-password.ts",
     "dev:reset-password": "ts-node scripts/reset-password.ts",
+    "db:rotate-seeded-passwords": "ts-node scripts/rotate-seeded-passwords.ts",
     "medical:encrypt": "ts-node scripts/encrypt-medical-profiles.ts",
     "db:studio": "prisma studio",
     "db:erd": "node scripts/generate-erd.js",

@@ -1,6 +1,6 @@
 # Plan: Deploy AGAP (Web on Vercel, Backend on Railway, Files on R2, Preview APK)
 
-> **Status:** Phases 1 and 2 done 2026-11-23. Keys live in Bitwarden (collection "AGAP Deployment"). Database starts fresh.
+> **Status:** Phases 1 and 2 done 2026-11-23. Phase 3 done 2026-11-24 on `agap-emergency-production.up.railway.app` (no domain yet). Keys live in Bitwarden (collection "AGAP Deployment"). Database starts fresh.
 > **How to use:** do one phase at a time, in order. Each phase ends with a **Done when** checklist that must pass before the next phase starts.
 > **Scope:** a working public deployment for demos and pilot testing. It is not yet a hardened production setup for real LGU operations; see [Phase 7](#phase-7-known-limits-and-follow-ups).
 > **Modules touched:** MOD-10 (media), MOD-17/19 (SMS paths), MOD-20 (WebSocket), MOD-21 (ops dashboard), MOD-47 (auth), MOD-48 (privacy).
@@ -247,16 +247,34 @@ pnpm db:seed
 - **Seed with the production `ID_PIN_PEPPER`.** The seed uses it, and the duplicate-ID check breaks if the values differ.
 - **Demo passwords are public.** The seed creates demo staff accounts with the dev password from [seed.ts](../../backend/prisma/seed/seed.ts) and adds presentation data. Those accounts are marked "must change password", but anyone who can read the repo knows the first password. **Sign in to every demo account right after seeding** and set new passwords.
 
+- **The repository is public, so every seed password is public.** Right after `pnpm db:seed`, in the same shell, run `pnpm db:rotate-seeded-passwords` with `NEW_DEMO_PASSWORD` set ([script](../../backend/scripts/rotate-seeded-passwords.ts)). It gives every account still on a public seed password one new password, signs those accounts out and audits each change. Run it after **every** seed: the seed puts the presentation citizen back on its public password.
+- **Read secrets with `Read-Host -AsSecureString`.** Plain `Read-Host` shows what is pasted, and terminal transcripts get copied around.
+- **Close the database's public door afterwards** (PostGIS → Settings → Networking → remove the TCP proxy). The backend uses the private network; turn the proxy on again only for the next laptop seed.
+
 ### 3.4 Later deploys
 
 Set the pre-deploy command to `npx prisma migrate deploy`, so new migrations run before each release. The Phase 1 image keeps the Prisma CLI, which makes this possible.
 
+### 3.5 Railway lessons (2026-11-23/24)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| "Railpack failed to prepare the build" | No Dockerfile at the repo root | Service variable `RAILWAY_DOCKERFILE_PATH=backend/Dockerfile` |
+| "The Dockerfile failed validation" | Railway checks every stage and rejects BuildKit cache mounts | No `--mount=type=cache` anywhere in the Dockerfile |
+| Healthcheck hits `:8080` and fails | Railway injects `PORT`; the backend listens on `BACKEND_PORT` | Variable `PORT=3000` |
+| `Connection url is empty` | Migrate command in **Custom Start Command**; database services missing | Command goes in **Pre-deploy**, Start Command stays empty; PostGIS and Redis must be in the **same project** |
+| `Failed to parse private key.` | `FIREBASE_PRIVATE_KEY` cut short | Paste `private_key` from the service-account JSON without the quotes; the backend now turns push off instead of crashing |
+| `Redis unavailable …` with an empty error | `REDIS_URL` empty | `${{Redis.REDIS_URL}}?family=0` |
+| Datasource at `*.proxy.rlwy.net` | In the PostGIS template, `DATABASE_URL` is the **public** address | Backend `DATABASE_URL=${{PostGIS.DATABASE_PRIVATE_URL}}` (shows `postgis.railway.internal`) |
+| `maxmemory-policy` check | Template start command sets none | Redis default is `noeviction`; nothing to do |
+
 **Done when:**
-- [ ] `https://api.<domain>/v1/health` returns 200.
-- [ ] `https://api.<domain>/.well-known/assetlinks.json` returns the package and fingerprint.
-- [ ] The Railway logs show no config errors at boot, and no `Object storage unreachable`.
-- [ ] Migrations and seed are done, and the demo passwords are changed.
-- [ ] Redis `maxmemory-policy` is `noeviction`.
+- [x] `https://api.<domain>/v1/health` returns 200. *(On the Railway address for now; repeat on `api.<domain>` once the domain exists.)*
+- [x] `https://api.<domain>/.well-known/assetlinks.json` returns the package and fingerprint. *(Railway address; both fingerprints listed.)*
+- [x] The Railway logs show no config errors at boot, and no `Object storage unreachable`. *(Firebase initialized, Redis connected, database on the private network.)*
+- [x] Migrations and seed are done, and the demo passwords are changed. *(41 migrations; 17 seeded accounts moved off public passwords; the admin has its own password and must change it at first sign-in.)*
+- [x] Redis `maxmemory-policy` is `noeviction`.
+- [ ] Before a real pilot: change the PostGIS and Redis passwords. Both were exposed in a chat transcript on 2026-11-24. Both services are private-only now, so only the project's own backend can reach them.
 
 ---
 
