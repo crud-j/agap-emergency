@@ -21,8 +21,9 @@ COPY pnpm-workspace.yaml ./
 # The backend's postinstall runs `prisma generate`, which needs the schema and config.
 COPY backend/prisma.config.ts ./backend/
 COPY backend/prisma ./backend/prisma
-RUN --mount=type=cache,id=agap-pnpm-store,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+# No --mount=type=cache: Railway validates every stage, not only the one it builds,
+# and rejects cache mounts whose id is not prefixed with its service id.
+RUN pnpm install --frozen-lockfile
 COPY . .
 WORKDIR /app/backend
 RUN pnpm db:generate
@@ -37,8 +38,7 @@ COPY pnpm-workspace.yaml ./
 # The backend's postinstall runs `prisma generate`, which needs the schema and config.
 COPY backend/prisma.config.ts ./backend/
 COPY backend/prisma ./backend/prisma
-# No --mount=type=cache here: Railway rejects cache mounts whose id is not prefixed
-# with its service id. The development stage keeps the cache (docker compose only).
+# No --mount=type=cache (see the development stage).
 RUN pnpm install --frozen-lockfile
 COPY . .
 # The backend imports @agap/shared from shared/dist (gitignored, not built on install).

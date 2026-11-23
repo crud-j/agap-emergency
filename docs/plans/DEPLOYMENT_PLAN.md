@@ -110,7 +110,7 @@ These come from CLAUDE.md and from how the code works today:
 **Also needed (found while building, done 2026-11-23):**
 - Copy `backend/prisma` and `backend/prisma.config.ts` **before** `pnpm install`: the backend's `postinstall` runs `prisma generate`. This also fixes the `development` stage.
 - Install `openssl` in the base image: the Prisma CLI's schema engine (`prisma migrate deploy`) needs it.
-- No `--mount=type=cache` in the build stage: Railway rejects cache ids that are not prefixed with its service id.
+- No `--mount=type=cache` in **any** stage: Railway validates every stage, even ones it does not build, and rejects cache ids not prefixed with its service id ("The Dockerfile failed validation"; found on the first Railway build).
 - `.dockerignore`: `**/.env` instead of `.env`. The bare pattern matched only the repo root, so `backend/.env` was copied into locally built images. `frontend/` is excluded too.
 - Result: the image is 2.89 GB.
 
