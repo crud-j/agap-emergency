@@ -167,16 +167,17 @@ describe('cleaned reads in a scan', () => {
 
     it('falls back to the raw image when the cleaned reads miss, and the raw read alone decides "wrong card"', async () => {
       // Cleaned reads are confident garbage; the raw read is unsure: unreadable, not the wrong card.
+      // Nine cleaned reads: the eight, plus the 180° read after the first pair.
       readsInOrder(
-        ...Array(8).fill({ text: GARBLED, confidence: 90 }),
+        ...Array(9).fill({ text: GARBLED, confidence: 90 }),
         { text: GARBLED, confidence: 30 },
         { text: GARBLED, confidence: 30 },
       );
       expect(await failureOf(scan(landscape))).toBe(IdVerificationErrorCode.UNREADABLE);
-      expect(calls()).toHaveLength(10);
-      expect(calls().slice(0, 8).every(([image]) => isPng(image))).toBe(true);
-      expect(calls().slice(8).every(([image]) => image === landscape)).toBe(true);
-      expect(calls()[8]).toHaveLength(1);
+      expect(calls()).toHaveLength(11);
+      expect(calls().slice(0, 9).every(([image]) => isPng(image))).toBe(true);
+      expect(calls().slice(9).every(([image]) => image === landscape)).toBe(true);
+      expect(calls()[9]).toHaveLength(1);
 
       // A confident raw read with no heading is the wrong card, as before.
       readsInOrder(...Array(8).fill({ text: GARBLED, confidence: 30 }), { text: PHILHEALTH_TEXT, confidence: 80 }, { text: PHILHEALTH_TEXT, confidence: 80 });
@@ -270,6 +271,46 @@ describe('cleaned reads in a scan', () => {
       expect(calls()).toHaveLength(3);
     });
 
+    it('reads an upside-down card: one 180° read sees the heading, and the reads start over on the turned image', async () => {
+      readsInOrder(
+        { text: GARBLED, confidence: 50 },
+        { text: GARBLED, confidence: 40 },
+        { text: card(), confidence: 60 }, // the 180° read
+        { text: card(), confidence: 50 },
+        { text: card(), confidence: 70 },
+      );
+      const result = await scan(landscape);
+      expect(result.nameOnId).toEqual({ last: 'DELA CRUZ', first: 'JUAN', middle: 'SANTOS' });
+      // The garbled 0° pair was dropped: the turned pair alone settled the card.
+      expect(calls()).toHaveLength(5);
+      expect(calls().every(([image]) => isPng(image))).toBe(true);
+      expect(kit.prisma.db.idv[0]).toMatchObject({ status: 'AUTO_VERIFIED' });
+    });
+
+    it('drops a 180° read that sees no heading, goes on as before, and logs that it tried', async () => {
+      readsInOrder(
+        { text: GARBLED, confidence: 50 },
+        { text: GARBLED, confidence: 40 },
+        { text: GARBLED, confidence: 45 }, // the 180° read
+        { text: card(), confidence: 60 },
+        { text: card(), confidence: 70 },
+      );
+      const logged = await withWarnings(async () => {
+        const result = await scan(landscape);
+        expect(result.pinLast4).toBe('0001');
+      });
+      expect(calls()).toHaveLength(5);
+      expect(logged).toContain('turned=0(180 tried)');
+      expect(logged).toContain('outcome=passed after 4 reads');
+    });
+
+    it('tries no 180° read once a read saw the heading', async () => {
+      readsInOrder(...Array(8).fill({ text: HEADING_NUMBER_ONLY, confidence: 50 }), { text: card(), confidence: 60 });
+      await scan(landscape);
+      // Eight cleaned reads and the name column, as before.
+      expect(calls()).toHaveLength(9);
+    });
+
     it('logs the reads by name, and no name, number or card text', async () => {
       readsInOrder(
         { text: HEADING_NUMBER_ONLY, confidence: 50 },
@@ -298,14 +339,33 @@ describe('cleaned reads in a scan', () => {
     it('falls back to the cleaned reads only when both raw reads fail', async () => {
       readsInOrder(
         { text: GARBLED, confidence: 30 },
+        { text: GARBLED, confidence: 30 }, // the 180° read, after the first raw read
         { text: GARBLED, confidence: 30 },
         { text: PHILHEALTH_TEXT, confidence: 60 },
         { text: PHILHEALTH_TEXT, confidence: 70 },
       );
       const result = await scan(landscape, 'PHILHEALTH');
       expect(result.pinLast4).toBe('0010');
-      expect(calls().slice(0, 2).every(([image]) => image === landscape)).toBe(true);
-      expect(calls().slice(2).every(([image]) => isPng(image))).toBe(true);
+      expect(calls()[0]![0]).toBe(landscape);
+      expect(isPng(calls()[1]![0])).toBe(true);
+      expect(calls()[2]![0]).toBe(landscape);
+      expect(calls().slice(3).every(([image]) => isPng(image))).toBe(true);
+    });
+
+    it('reads an upside-down card: the raw read starts over on the image turned 180°', async () => {
+      readsInOrder(
+        { text: GARBLED, confidence: 30 },
+        { text: PHILHEALTH_TEXT, confidence: 70 }, // the 180° read
+        { text: PHILHEALTH_TEXT, confidence: 80 },
+      );
+      const result = await scan(landscape, 'PHILHEALTH');
+      expect(result.pinLast4).toBe('0010');
+      expect(calls()).toHaveLength(3);
+      const [turned] = calls()[2]!;
+      expect(turned).not.toBe(landscape);
+      expect(isPng(turned)).toBe(false);
+      expect(imageSize(turned)).toEqual({ width: 320, height: 200 });
+      expect(kit.prisma.db.idv[0]).toMatchObject({ status: 'AUTO_VERIFIED', document_type: 'PHILHEALTH' });
     });
   });
 });

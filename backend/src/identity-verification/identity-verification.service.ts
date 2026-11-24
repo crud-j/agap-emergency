@@ -297,7 +297,7 @@ export class IdentityVerificationService {
     // Several reads of this one image complete each other (combineIdReads): a layout that keeps the name can
     // drop the number, and each name part is voted across the reads that found a name. Each ID's parsers run
     // only for that ID, so a PIN can't be stored as a PhilSys card number or the reverse.
-    const { reads, prepared, turn } = await this.readCard(image, rules, documentType);
+    const { reads, prepared, turn, halfTurnTried } = await this.readCard(image, rules, documentType);
     const serverTexts = textsByConfidence(reads);
     let combined = combineCardReads(rules, reads);
 
@@ -334,7 +334,7 @@ export class IdentityVerificationService {
     if (firstRead !== null && !readsWholeCard(rules, [firstRead])) {
       this.logger.warn(
         `ID scan needed a second read (${documentType}): phone=${phoneReadSummary(rules, input.clientText, allTexts)} conflict=${numberConflict} ` +
-          `cleaned=${prepared ? 'yes' : 'no'} turned=${turn} nameVotes=${nameVoteCounts(rules, serverTexts)} ` +
+          `cleaned=${prepared ? 'yes' : 'no'} turned=${turn}${halfTurnTried && turn !== 180 ? '(180 tried)' : ''} nameVotes=${nameVoteCounts(rules, serverTexts)} ` +
           reads.map(({ label, read }) => `${label}[${readSummary(rules, read)}] `).join('') +
           `nameColumn[${nameColumn ? readSummary(rules, nameRead) : 'not run'}] ` +
           `outcome=${failure ?? (nameRead ? 'name column read passed' : `passed after ${reads.length} reads`)}`,
@@ -712,12 +712,15 @@ export class IdentityVerificationService {
    * PhilHealth: raw first, exactly as before cleaned reads existed, and cleaned only if raw didn't read the whole
    * card (CLEANED_FIRST). An image that can't be decoded gets the raw stage only.
    * After SCAN_READ_BUDGET_MS no new stage or pair of reads starts; the first stage always runs.
+   * Upside down: a landscape image whose first read (or first cleaned pair) didn't see the heading gets one
+   * cleaned read turned 180°. If that read sees the heading, the card was upside down: the reads so far are
+   * dropped and the stages run again on the turned image. Otherwise that read is dropped and the scan goes on.
    */
   private async readCard(
     image: Buffer,
     rules: IdRules,
     documentType: IdDocumentType,
-  ): Promise<{ reads: CardRead[]; prepared: PreparedIdImage | null; turn: number }> {
+  ): Promise<{ reads: CardRead[]; prepared: PreparedIdImage | null; turn: number; halfTurnTried: boolean }> {
     const reads: CardRead[] = [];
     const deadline = Date.now() + SCAN_READ_BUDGET_MS;
     const overBudget = (): boolean => Date.now() >= deadline;
@@ -727,18 +730,44 @@ export class IdentityVerificationService {
     };
     const settled = (): boolean => settledReads(rules, reads);
     const headingSeen = (): boolean => combineCardReads(rules, reads).headingSeen;
-    const upright = await uprightIdImage(image);
+    let upright = await uprightIdImage(image);
     let raw = upright?.upright ?? image;
     let prepared: PreparedIdImage | null = null;
     let turn: QuarterTurn = 0;
     let cleanedFailed = false;
+    let halfTurnTried = false;
+    let halfTurned = false;
 
-    const rawStage = async (): Promise<void> => {
+    /**
+     * True when the card turned out to be upside down: the scan then starts over on the turned image. Runs once
+     * per scan, only for a landscape image with no heading seen yet (a portrait image is chooseTurn's job).
+     */
+    const turnedHalfway = async (): Promise<boolean> => {
+      if (halfTurnTried || !upright || upright.portrait || headingSeen() || overBudget()) return false;
+      halfTurnTried = true;
+      const turned = await turnIdImage(upright.upright, 180);
+      const candidate = turned ? await prepareIdImage(turned) : null;
+      if (!turned || !candidate) return false;
+      const read = await this.ocr.read(candidate.clean, 'block', undefined, CLEANED_READ_TIMEOUT_MS);
+      if (!read || !rules.hasHeading(read.text)) return false;
+      upright = { upright: turned, portrait: false };
+      raw = turned;
+      reads.length = 0;
+      prepared = null;
+      cleanedFailed = false;
+      halfTurned = true;
+      return true;
+    };
+
+    /** True when the scan must start over (turnedHalfway). */
+    const rawStage = async (): Promise<boolean> => {
       const first = await this.ocr.read(raw);
       reads.push({ label: 'raw/block', read: first });
+      if (first !== null && (await turnedHalfway())) return true;
       if (first !== null && !whole() && !(CLEANED_FIRST[documentType] && overBudget())) {
         reads.push({ label: 'raw/auto', read: await this.ocr.read(raw, 'auto') });
       }
+      return false;
     };
 
     /** The card's quarter turn, for an image on its side: the turn whose read looks most like the card. */
@@ -760,8 +789,9 @@ export class IdentityVerificationService {
       return best.prepared;
     };
 
-    const cleanedStage = async (scale: number): Promise<void> => {
-      if (!upright || cleanedFailed) return;
+    /** True when the scan must start over (turnedHalfway). */
+    const cleanedStage = async (scale: number): Promise<boolean> => {
+      if (!upright || cleanedFailed) return false;
       const suffix = scale === 1 ? '' : `@${scale}`;
       const images =
         scale === 1
@@ -771,11 +801,11 @@ export class IdentityVerificationService {
           : await prepareIdImage(upright.upright, turn, scale);
       if (!images) {
         cleanedFailed = true;
-        return;
+        return false;
       }
       if (scale === 1) prepared = images;
       for (const kind of CLEANED_IMAGES) {
-        if (settled() || overBudget()) return;
+        if (settled() || overBudget()) return false;
         const steps = LAYOUTS.map((layout) => ({ layout, label: `${kind}${suffix}/${layout}` })).filter(
           ({ label }) => !reads.some((entry) => entry.label === label),
         );
@@ -789,21 +819,30 @@ export class IdentityVerificationService {
         // A read that failed or timed out restarts its worker; more reads now would only queue behind it.
         if (results.some((read) => read === null)) {
           cleanedFailed = true;
-          return;
+          return false;
         }
+        if (scale === 1 && (await turnedHalfway())) return true;
       }
+      return false;
     };
 
-    if (CLEANED_FIRST[documentType]) {
-      await cleanedStage(1);
-      if (!settled() && !overBudget()) await cleanedStage(RESCALED_READ);
-      if (!whole() && !headingSeen() && !overBudget()) await rawStage();
-    } else {
-      await rawStage();
-      if (!whole() && !overBudget()) await cleanedStage(1);
-      if (!whole() && !overBudget()) await cleanedStage(RESCALED_READ);
-    }
-    return { reads, prepared, turn };
+    /** True when the scan must start over (turnedHalfway). */
+    const stages = async (): Promise<boolean> => {
+      if (CLEANED_FIRST[documentType]) {
+        if (await cleanedStage(1)) return true;
+        if (!settled() && !overBudget() && (await cleanedStage(RESCALED_READ))) return true;
+        if (!whole() && !headingSeen() && !overBudget() && (await rawStage())) return true;
+      } else {
+        if (await rawStage()) return true;
+        if (!whole() && !overBudget() && (await cleanedStage(1))) return true;
+        if (!whole() && !overBudget() && (await cleanedStage(RESCALED_READ))) return true;
+      }
+      return false;
+    };
+
+    // At most one restart: turnedHalfway runs once per scan.
+    if (await stages()) await stages();
+    return { reads, prepared, turn: halfTurned ? 180 : turn, halfTurnTried };
   }
 
   /** Refuses a new claim while the account is verified or holds a check, on either ID. */

@@ -124,8 +124,11 @@ export async function uprightIdImage(image: Buffer): Promise<{ upright: Buffer; 
   }
 }
 
-/** The image turned a quarter, as a JPEG for a raw read. null when it can't be decoded. Never throws. */
-export async function turnIdImage(image: Buffer, turn: QuarterTurn): Promise<Buffer | null> {
+/**
+ * The image turned a quarter (a card on its side) or a half (upside down), as a JPEG for a raw read. null when
+ * it can't be decoded. Never throws.
+ */
+export async function turnIdImage(image: Buffer, turn: QuarterTurn | 180): Promise<Buffer | null> {
   try {
     return await sharp(image).rotate(turn).jpeg({ quality: 95 }).toBuffer();
   } catch {
