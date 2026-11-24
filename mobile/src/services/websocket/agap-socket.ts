@@ -68,7 +68,9 @@ function createSocket(): Socket {
     stableTimer = null;
     // Socket.IO retries every other reason by itself. The server disconnects an
     // expired or revoked token; refresh once and reconnect only if that worked, so
-    // a revoked or deactivated account can't loop (a failed refresh logs out).
+    // a revoked or deactivated account can't loop (a refused refresh logs out). If the
+    // server can't be reached, the session stays and screens fall back to REST polling;
+    // the next connectSocket() (a screen watching an incident) reconnects.
     if (reason !== 'io server disconnect' || retriedServerDisconnect) return;
     retriedServerDisconnect = true;
     void refreshAccessToken().then((ok) => {

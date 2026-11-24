@@ -1,35 +1,56 @@
 import { refreshAuthToken } from './auth.api';
 import { useAuthStore } from '../../stores/auth.store';
-import { defaultHeaders, NetworkError } from './http';
+import { ApiError, defaultHeaders, NetworkError } from './http';
+
+/**
+ * - `refreshed`: new tokens are stored.
+ * - `ended`: the server refused the refresh token, so the session was logged out.
+ * - `unreachable`: no answer from the server, so the session is kept.
+ */
+export type RefreshOutcome = 'refreshed' | 'ended' | 'unreachable';
 
 // Deduplicates concurrent 401s so only one token exchange is in flight at a time.
-let pendingRefresh: Promise<boolean> | null = null;
+let pendingRefresh: Promise<RefreshOutcome> | null = null;
 
-async function doRefresh(): Promise<boolean> {
+/** Statuses the refresh route uses to refuse a token (invalid, expired, revoked, deactivated). */
+const SESSION_REFUSED = new Set([400, 401, 403]);
+
+async function doRefresh(): Promise<RefreshOutcome> {
   const { refreshToken, login, logout, user } = useAuthStore.getState();
   if (!refreshToken) {
     await logout();
-    return false;
+    return 'ended';
   }
   try {
     const tokens = await refreshAuthToken(refreshToken);
     if (user) await login(tokens, user);
-    return true;
-  } catch {
-    await logout();
-    return false;
+    return 'refreshed';
+  } catch (err) {
+    // Only the server refusing the token ends the session. A dropped connection, a
+    // 429 or 5xx, or a non-JSON page (a Wi-Fi sign-in portal) keeps it: weak signal
+    // during a typhoon must not sign a citizen out. The next 401 tries again.
+    if (err instanceof ApiError && SESSION_REFUSED.has(err.status)) {
+      await logout();
+      return 'ended';
+    }
+    return 'unreachable';
   }
 }
 
 /**
  * Exchange the refresh token once, shared by every caller waiting at the same time
- * (concurrent 401s and the realtime socket). Resolves false after logging out.
+ * (concurrent 401s and the realtime socket).
  */
-export function refreshAccessToken(): Promise<boolean> {
+export function refreshSession(): Promise<RefreshOutcome> {
   if (!pendingRefresh) {
     pendingRefresh = doRefresh().finally(() => { pendingRefresh = null; });
   }
   return pendingRefresh;
+}
+
+/** True when new tokens are stored; false after a logout or when the server can't be reached. */
+export function refreshAccessToken(): Promise<boolean> {
+  return refreshSession().then((outcome) => outcome === 'refreshed');
 }
 
 /**
@@ -63,8 +84,9 @@ export async function authedFetch(url: string, init: RequestInit = {}): Promise<
 
   if (res.status !== 401) return res;
 
-  const refreshed = await refreshAccessToken();
-  if (!refreshed) throw new Error('Session expired. Please log in again.');
+  const outcome = await refreshSession();
+  if (outcome === 'unreachable') throw new NetworkError();
+  if (outcome === 'ended') throw new Error('Session expired. Please log in again.');
 
   try {
     return await fetch(url, { ...init, headers: buildHeaders(useAuthStore.getState().accessToken) });
