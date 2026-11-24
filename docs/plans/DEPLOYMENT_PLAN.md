@@ -267,6 +267,7 @@ Set the pre-deploy command to `npx prisma migrate deploy`, so new migrations run
 | `Redis unavailable …` with an empty error | `REDIS_URL` empty | `${{Redis.REDIS_URL}}?family=0` |
 | Datasource at `*.proxy.rlwy.net` | In the PostGIS template, `DATABASE_URL` is the **public** address | Backend `DATABASE_URL=${{PostGIS.DATABASE_PRIVATE_URL}}` (shows `postgis.railway.internal`) |
 | `maxmemory-policy` check | Template start command sets none | Redis default is `noeviction`; nothing to do |
+| A push deployed, but the old behaviour is still live (build took ~00:10) | Railway reused an old image (seen once, 2026-11-24, deployment `6e1a8b91`) | Railway → service → **Ctrl+K → "Deploy Latest Commit"** (plain **Redeploy** reuses the same image). Always check a backend fix live with a request only the new code answers differently |
 
 **Done when:**
 - [x] `https://api.<domain>/v1/health` returns 200. *(On the Railway address for now; repeat on `api.<domain>` once the domain exists.)*
@@ -329,9 +330,19 @@ Run everything from `mobile/`; [mobile/eas.json](../../mobile/eas.json) is the o
 4. **Install the APK** on the test phones. It uses the same package name as the dev client (`com.agap.emergency`), so uninstall the dev client first.
 5. **Know the registration limits.** Registration requires a PhilHealth ID scan and a location inside Bocaue. The backend refuses coordinates outside the service area, and `EXPO_PUBLIC_DEV_SKIP_GEO_FENCE` is not read anywhere in the code. Testers outside Bocaue should use the seeded demo citizen account, or guest SOS.
 
+**Notes from the first build (2026-11-24, no domain yet):**
+- **Fingerprint:** the preview keystore SHA-256 (`C9:A0:C6:1B:…:66:48`) was already the second entry in `WEBAUTHN_ANDROID_CERT_FINGERPRINTS`, so the backend needed no change.
+- **The variables already existed** in `preview`, still pointing at the old ngrok address. Overwrite them with `--force` (Git Bash): `eas env:create --environment preview --name "$n" --value "$v" --visibility plaintext --force --non-interactive`.
+- **Values used:** `EXPO_PUBLIC_API_URL=https://agap-emergency-production.up.railway.app` (**no `/v1`**: every call adds `/v1/...` itself), `EXPO_PUBLIC_WS_URL=wss://agap-emergency-production.up.railway.app`, `EXPO_PUBLIC_PASSKEY_RP_ID=agap-emergency-production.up.railway.app` (only `app.config.js` reads it, for iOS; on Android the backend picks the RP ID), `EXPO_PUBLIC_AGAP_SMS_NUMBER` unchanged.
+- **`EXPO_PUBLIC_MAP_API_KEY` is not needed:** no code reads it (the maps are MapLibre). It was left in place, which is harmless.
+- **No EAS FCM key is needed:** the app registers the raw FCM device token (`getDevicePushTokenAsync`), and the backend sends through Firebase Admin.
+- **`mobile/android` is committed**, so EAS builds from it and ignores `android.*` in `app.config.js`. The `app.json` changes since that folder was last regenerated are iOS-only, so no prebuild was needed. If an Android-side plugin or permission is added later, regenerate `android/` first.
+- **ID OCR runs on the server**, so a backend fix reaches every installed APK without a rebuild. The 180° (upside-down card) fix is `0ecf05c`.
+- **Sign-in needs internet.** A phone on mobile data with no load cannot reach the server, so sign-in fails there. That is expected. A user who signed in earlier **stays signed in offline**: the session is read from Secure Store with no server call, so SOS and "Send by SMS" still work.
+
 **Done when:**
-- [ ] The APK installs.
-- [ ] Sign-in works over mobile data, not only Wi-Fi.
+- [x] The APK installs. *(2026-11-24; ID scan checked on the APK too.)*
+- [ ] Sign-in works over mobile data, not only Wi-Fi. *(Wi-Fi sign-in works against Railway, so the app does not depend on the laptop or LAN. Still to test on a phone that has load: it checks that the carrier can reach Railway's IPv4-only address. First open `https://agap-emergency-production.up.railway.app/v1/health` in Chrome on data.)*
 - [ ] Push permission is granted, and the device token registers.
 
 ---
