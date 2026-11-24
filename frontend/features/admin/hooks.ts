@@ -1,16 +1,20 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchAdminUsers,
   fetchSystemHealth,
   fetchSystemConfig,
+  fetchSmsLog,
+  fetchSmsSummary,
   changeUserRole,
   activateUser,
   deactivateUser,
   deleteUser,
   upsertSystemConfig,
   type AdminUserListParams,
+  type ConfigListParams,
+  type SmsLogParams,
 } from './api';
 
 export function useAdminUsers(params?: AdminUserListParams) {
@@ -18,6 +22,7 @@ export function useAdminUsers(params?: AdminUserListParams) {
     queryKey: ['admin-users', params],
     queryFn: () => fetchAdminUsers(params),
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -30,11 +35,32 @@ export function useSystemHealth() {
   });
 }
 
-export function useSystemConfig() {
+export function useSystemConfig(params: ConfigListParams = {}) {
   return useQuery({
-    queryKey: ['system-config'],
-    queryFn: fetchSystemConfig,
+    queryKey: ['system-config', params],
+    queryFn: () => fetchSystemConfig(params),
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Outbound SMS log; refreshes every 30 s so new sends show up while the page is open. */
+export function useSmsLog(params: SmsLogParams) {
+  return useQuery({
+    queryKey: ['sms-log', params],
+    queryFn: () => fetchSmsLog(params),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSmsSummary() {
+  return useQuery({
+    queryKey: ['sms-summary'],
+    queryFn: fetchSmsSummary,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
   });
 }
 

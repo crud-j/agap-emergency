@@ -2,15 +2,15 @@
 
 import { useState, type JSX, type ReactNode } from 'react';
 import {
-  Search, ChevronLeft, ChevronRight,
+  Search,
   UserCheck, UserX, Trash2, Edit, XCircle,
-  Settings, KeyRound, Plus, Info,
+  Settings, KeyRound, Plus, Info, CheckCircle2,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
-  Skeleton, EmptyState,
+  Skeleton, EmptyState, Pagination,
   type Column,
 } from '@/components/ui';
 import { titleCase } from '@/lib/incident-format';
@@ -23,7 +23,7 @@ import {
   useDeleteUser,
   useUpsertConfig,
 } from '@/features/admin/hooks';
-import type { AdminUser, AdminUserListParams } from '@/features/admin/api';
+import type { AdminUser, AdminUserListParams, SystemConfigEntry } from '@/features/admin/api';
 import {
   usePermissions,
   useRolePermissions,
@@ -200,6 +200,7 @@ function DeleteDialog({
 
 export function UsersTab({ initialSearch = '' }: { initialSearch?: string } = {}): JSX.Element {
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(PER_PAGE);
   const [search, setSearch] = useState(initialSearch);
   const [filterRole, setFilterRole] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
@@ -208,13 +209,13 @@ export function UsersTab({ initialSearch = '' }: { initialSearch?: string } = {}
 
   const params: AdminUserListParams = {
     page,
-    perPage: PER_PAGE,
+    perPage,
     ...(search && { search }),
     ...(filterRole !== 'ALL' && { role: filterRole }),
     ...(filterStatus !== 'ALL' && { status: filterStatus }),
   };
 
-  const { data, isLoading } = useAdminUsers(params);
+  const { data, isLoading, isFetching } = useAdminUsers(params);
   const activate = useActivateUser();
   const deactivate = useDeactivateUser();
 
@@ -366,37 +367,17 @@ export function UsersTab({ initialSearch = '' }: { initialSearch?: string } = {}
         emptyDescription="Try adjusting the filters."
       />
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-xs text-agap-textSub">Page {page} of {totalPages}</span>
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className={cn(
-                'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
-                page === 1
-                  ? 'border-[rgba(168,181,193,0.20)] text-agap-textSub cursor-not-allowed bg-agap-surface'
-                  : 'border-[rgba(168,181,193,0.20)] text-agap-textMid hover:bg-agap-surface bg-white',
-              )}
-            >
-              <ChevronLeft size={13} /> Prev
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className={cn(
-                'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
-                page === totalPages
-                  ? 'border-[rgba(168,181,193,0.20)] text-agap-textSub cursor-not-allowed bg-agap-surface'
-                  : 'border-[rgba(168,181,193,0.20)] text-agap-textMid hover:bg-agap-surface bg-white',
-              )}
-            >
-              Next <ChevronRight size={13} />
-            </button>
-          </div>
-        </div>
+      {data && (
+        <Pagination
+          page={data.meta.page}
+          totalPages={totalPages}
+          total={data.meta.total}
+          perPage={perPage}
+          onPageChange={setPage}
+          onPerPageChange={(n) => { setPerPage(n); setPage(1); }}
+          noun="users"
+          fetching={isFetching && !isLoading}
+        />
       )}
 
       <RoleChangeDialog target={roleTarget} onClose={() => setRoleTarget(null)} />
@@ -407,95 +388,246 @@ export function UsersTab({ initialSearch = '' }: { initialSearch?: string } = {}
 
 // ─── Config Tab ───────────────────────────────────────────────────────────────
 
-export function ConfigTab(): JSX.Element {
-  const { data, isLoading } = useSystemConfig();
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [editError, setEditError] = useState<string | null>(null);
+function fmtConfigValue(entry: SystemConfigEntry): string {
+  const v = entry.config_value;
+  if (typeof v === 'boolean') return v ? 'On' : 'Off';
+  if ((typeof v === 'number' || typeof v === 'string') && entry.unit) return `${v} ${entry.unit}`;
+  if (typeof v === 'string') return v;
+  return JSON.stringify(v);
+}
+
+/** The edit text for a value: plain for scalars, JSON for anything else. */
+function editText(entry: SystemConfigEntry): string {
+  const v = entry.config_value;
+  return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : JSON.stringify(v, null, 2);
+}
+
+/** Parse the edit text by the key's type. Returns the value or a message. */
+function parseConfigInput(entry: SystemConfigEntry, text: string): { value: unknown } | { error: string } {
+  const label = entry.label ?? entry.config_key;
+  switch (entry.value_type) {
+    case 'boolean':
+      return { value: text === 'true' };
+    case 'number': {
+      const n = Number(text);
+      if (text.trim() === '' || !Number.isFinite(n)) return { error: `${label} must be a number.` };
+      if (entry.min !== null && n < entry.min) return { error: `Must be at least ${entry.min}${entry.unit ? ` ${entry.unit}` : ''}.` };
+      if (entry.max !== null && n > entry.max) return { error: `Must be at most ${entry.max}${entry.unit ? ` ${entry.unit}` : ''}.` };
+      return { value: n };
+    }
+    case 'string':
+      return text.trim() ? { value: text.trim() } : { error: `${label} cannot be empty.` };
+    default:
+      try {
+        return { value: JSON.parse(text) };
+      } catch {
+        // Unknown keys accept plain text as a string, like before.
+        return text.trim() ? { value: text } : { error: 'Enter a value.' };
+      }
+  }
+}
+
+function ConfigEditDialog({ entry, onClose }: { entry: SystemConfigEntry | null; onClose: () => void }): JSX.Element {
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const upsert = useUpsertConfig();
+  const [openedFor, setOpenedFor] = useState<string | null>(null);
+
+  // Reset the form each time a different entry opens.
+  if (entry && openedFor !== entry.id) {
+    setOpenedFor(entry.id);
+    setText(editText(entry));
+    setError(null);
+  }
 
   async function handleSave() {
-    if (!editKey) return;
+    if (!entry) return;
+    const parsed = parseConfigInput(entry, text);
+    if ('error' in parsed) { setError(parsed.error); return; }
     try {
-      setEditError(null);
-      let parsed: unknown = editValue;
-      try { parsed = JSON.parse(editValue); } catch { /* keep as string */ }
-      await upsert.mutateAsync({ key: editKey, value: parsed });
-      setEditKey(null);
+      setError(null);
+      await upsert.mutateAsync({ key: entry.config_key, value: parsed.value });
+      onClose();
     } catch (e: unknown) {
-      setEditError(e instanceof Error ? e.message : 'Save failed.');
+      setError(e instanceof Error ? e.message : 'Save failed.');
     }
   }
 
-  if (isLoading) {
-    return (
-      <div className="space-y-3">
-        {[0,1,2].map(i => <Skeleton key={i} className="h-12 rounded-xl" />)}
-      </div>
-    );
-  }
-
-  if (!data?.length) {
-    return <EmptyState icon={Settings} title="No configuration entries" description="System configuration entries will appear here." />;
-  }
+  const fieldClass = 'w-full rounded-xl border border-agap-fieldBorder bg-white px-3 py-2 text-sm text-agap-textMain focus:outline-none focus:ring-2 focus:ring-agap-green';
 
   return (
-    <div className="rounded-2xl bg-white border border-[rgba(168,181,193,0.20)] shadow-card overflow-hidden">
-      {data.map((entry, i) => (
-        <div
-          key={entry.id}
-          className={cn(
-            'flex items-center gap-4 px-4 py-3',
-            i < data.length - 1 && 'border-b border-[rgba(168,181,193,0.12)]',
-          )}
-        >
-          <code className="text-xs font-mono text-agap-green flex-1">{entry.config_key}</code>
-          <span className="text-sm text-agap-textMain flex-1 truncate">
-            {JSON.stringify(entry.config_value)}
-          </span>
-          <span className="text-xs text-agap-textSub shrink-0">
-            Updated {fmtDate(entry.updated_at)}
-          </span>
-          <button
-            onClick={() => {
-              setEditKey(entry.config_key);
-              setEditValue(JSON.stringify(entry.config_value));
-              setEditError(null);
-            }}
-            className="p-1.5 rounded-lg hover:bg-agap-surface text-agap-textSub hover:text-agap-textMain transition-colors shrink-0"
-          >
-            <Edit size={13} />
-          </button>
-        </div>
-      ))}
+    <Dialog open={!!entry} onOpenChange={(open) => { if (!open) { setOpenedFor(null); onClose(); } }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings size={16} className="text-agap-green" />
+            {entry?.label ?? 'Edit setting'}
+          </DialogTitle>
+          {entry && <DialogDescription><code className="text-agap-green">{entry.config_key}</code></DialogDescription>}
+        </DialogHeader>
 
-      <Dialog open={!!editKey} onOpenChange={(open) => { if (!open) setEditKey(null); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Settings size={16} className="text-agap-green" />
-              Edit Config
-            </DialogTitle>
-            {editKey && <DialogDescription><code className="text-agap-green">{editKey}</code></DialogDescription>}
-          </DialogHeader>
-          <div>
-            <label className="block text-xs font-semibold text-agap-textSub uppercase tracking-wide mb-1.5">
-              Value (JSON or string)
-            </label>
-            <input
-              type="text"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              className="w-full rounded-xl border border-[rgba(168,181,193,0.20)] bg-white px-3 py-2 text-sm font-mono text-agap-textMain focus:outline-none focus:ring-2 focus:ring-agap-green"
-            />
-            {editError && <p className="mt-1.5 text-xs text-agap-danger">{editError}</p>}
+        {entry && (
+          <div className="space-y-3">
+            {entry.description && <p className="text-sm text-agap-textMid">{entry.description}</p>}
+            {entry.read_by ? (
+              <p className="flex items-start gap-2 rounded-xl bg-agap-greenSoft px-3 py-2 text-xs text-agap-green">
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0" /> {entry.read_by}. Takes effect on the next check.
+              </p>
+            ) : (
+              <p className="flex items-start gap-2 rounded-xl bg-agap-amberSoft px-3 py-2 text-xs text-agap-amberText">
+                <Info size={14} className="mt-0.5 shrink-0" /> No code reads this key yet: saving it changes nothing in the system.
+              </p>
+            )}
+
+            <div>
+              <label htmlFor="config-value" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-agap-textSub">
+                Value{entry.unit ? ` (${entry.unit})` : ''}
+                {entry.value_type === 'number' && entry.min !== null && entry.max !== null && (
+                  <span className="ml-1 font-normal normal-case tracking-normal">· {entry.min}–{entry.max}</span>
+                )}
+              </label>
+              {entry.value_type === 'boolean' ? (
+                <select id="config-value" value={text} onChange={(e) => setText(e.target.value)} className={fieldClass}>
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+              ) : entry.value_type === 'number' ? (
+                <input
+                  id="config-value" type="number" inputMode="decimal" value={text}
+                  min={entry.min ?? undefined} max={entry.max ?? undefined}
+                  onChange={(e) => setText(e.target.value)} className={cn(fieldClass, 'tabular-nums')}
+                />
+              ) : entry.value_type === 'string' ? (
+                <input id="config-value" type="text" value={text} onChange={(e) => setText(e.target.value)} className={fieldClass} />
+              ) : (
+                <textarea id="config-value" rows={4} value={text} onChange={(e) => setText(e.target.value)} className={cn(fieldClass, 'font-mono text-xs')} />
+              )}
+              {error && <p role="alert" className="mt-1.5 text-xs text-agap-danger">{error}</p>}
+            </div>
+            <p className="text-[11px] text-agap-textSub">Saving asks for your password again if you signed in a while ago, and is recorded in the audit log.</p>
           </div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setEditKey(null)}>Cancel</Button>
-            <Button variant="primary" loading={upsert.isPending} onClick={handleSave}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        )}
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => { setOpenedFor(null); onClose(); }}>Cancel</Button>
+          <Button variant="primary" loading={upsert.isPending} onClick={handleSave}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function ConfigTab(): JSX.Element {
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+  const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState<SystemConfigEntry | null>(null);
+  const { data, isLoading, isError, isFetching } = useSystemConfig({ page, perPage, ...(search.trim() && { search: search.trim() }) });
+
+  const rows = data?.data ?? [];
+  const columns: Column<SystemConfigEntry>[] = [
+    {
+      key: 'setting',
+      header: 'Setting',
+      accessor: (row) => (
+        <div className="min-w-0 max-w-md">
+          <p className="font-semibold text-agap-textMain">{row.label ?? row.config_key}</p>
+          {row.label && <code className="text-[11px] text-agap-textSub">{row.config_key}</code>}
+          {row.description && <p className="mt-0.5 text-xs text-agap-textSub">{row.description}</p>}
+        </div>
+      ),
+    },
+    {
+      key: 'value',
+      header: 'Value',
+      accessor: (row) => <span className="font-mono text-sm font-semibold text-agap-textMain">{fmtConfigValue(row)}</span>,
+    },
+    {
+      key: 'use',
+      header: 'Used by',
+      accessor: (row) =>
+        row.read_by ? (
+          <span title={row.read_by}><Badge variant="green"><CheckCircle2 size={12} /> In use</Badge></span>
+        ) : (
+          <span title="Stored, but no code reads this key yet"><Badge variant="muted">Stored only</Badge></span>
+        ),
+    },
+    {
+      key: 'updated',
+      header: 'Updated',
+      accessor: (row) => (
+        <div className="text-xs text-agap-textSub">
+          <p>{fmtDate(row.updated_at)}</p>
+          {row.updated_by_name && <p className="truncate">by {row.updated_by_name}</p>}
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      cellClassName: 'text-right',
+      accessor: (row) => (
+        <button
+          type="button"
+          onClick={() => setEditing(row)}
+          aria-label={`Edit ${row.label ?? row.config_key}`}
+          className="rounded-lg p-1.5 text-agap-textSub transition-colors hover:bg-agap-surface hover:text-agap-textMain"
+        >
+          <Edit size={14} />
+        </button>
+      ),
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[220px] max-w-sm flex-1">
+          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-agap-textSub" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search key or description…"
+            aria-label="Search settings"
+            className="h-9 w-full rounded-xl border border-agap-track bg-white pl-8 pr-3 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green"
+          />
+        </div>
+        <p className="ml-auto flex items-center gap-1.5 text-xs text-agap-textSub">
+          <Info size={13} /> Device push tokens and job bookkeeping are stored in the same table and are never shown here.
+        </p>
+      </div>
+
+      {isError ? (
+        <p role="alert" className="rounded-xl bg-agap-dangerSoft px-4 py-3 text-sm text-agap-danger">Couldn&apos;t load the configuration.</p>
+      ) : isLoading ? (
+        <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>
+      ) : rows.length === 0 && !search ? (
+        <EmptyState icon={Settings} title="No configuration entries" description="Settings saved by the system appear here." />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={rows}
+          getRowKey={(r) => r.id}
+          emptyTitle="No settings match"
+          emptyDescription="Try another word."
+        />
+      )}
+
+      {data && (
+        <Pagination
+          page={data.meta.page}
+          totalPages={data.meta.totalPages}
+          total={data.meta.total}
+          perPage={data.meta.perPage}
+          onPageChange={setPage}
+          onPerPageChange={(n) => { setPerPage(n); setPage(1); }}
+          noun="settings"
+          fetching={isFetching && !isLoading}
+        />
+      )}
+
+      <ConfigEditDialog entry={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }

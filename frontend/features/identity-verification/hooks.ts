@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { IdCardReleaseReason, IdDocumentType, IdRejectionReason } from '@agap/shared';
 import {
   approveIdReview,
@@ -20,6 +20,7 @@ export function useIdReviews(params?: IdReviewParams) {
     queryKey: [QUEUE_KEY, params],
     queryFn: () => fetchIdReviews(params),
     staleTime: 15_000,
+    placeholderData: keepPreviousData,
   });
 }
 

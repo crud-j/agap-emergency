@@ -2,16 +2,16 @@
 
 import { useState, type JSX } from 'react';
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, Filter, ShieldAlert, X } from 'lucide-react';
+import { Filter, X } from 'lucide-react';
 import {
   Badge, DataTable,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+  Pagination,
   type BadgeVariant, type Column,
 } from '@/components/ui';
 import { useAuditLog } from '@/features/audit/hooks';
 import type { AuditLogEntry, AuditLogParams } from '@/features/audit/api';
 import { titleCase } from '@/lib/incident-format';
-import { cn } from '@/lib/utils';
 
 /** Account-security actions in `audit_action` (no schema change needed). */
 const SECURITY_ACTIONS = [
@@ -86,6 +86,7 @@ interface AccountFilter {
  */
 export function SecurityEvents(): JSX.Element {
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(PER_PAGE);
   const [action, setAction] = useState('ALL');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -93,14 +94,14 @@ export function SecurityEvents(): JSX.Element {
 
   const params: AuditLogParams = {
     page,
-    perPage: PER_PAGE,
+    perPage,
     action: action === 'ALL' ? SECURITY_ACTIONS.join(',') : action,
     ...(from && { from: new Date(from).toISOString() }),
     ...(to && { to: new Date(to + 'T23:59:59').toISOString() }),
     ...(account && { entityId: account.id }),
   };
 
-  const { data, isLoading, isError } = useAuditLog(params);
+  const { data, isLoading, isError, isFetching } = useAuditLog(params);
   const rows = data?.data ?? [];
   const total = data?.meta.total ?? 0;
   const totalPages = Math.max(1, data?.meta.totalPages ?? 1);
@@ -239,32 +240,18 @@ export function SecurityEvents(): JSX.Element {
         />
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-        <p className="flex items-center gap-1.5 text-xs text-agap-textSub">
-          <ShieldAlert size={12} /> {total} event{total === 1 ? '' : 's'} · page {page} of {totalPages}
-        </p>
-        {totalPages > 1 && (
-          <div className="flex items-center gap-1.5">
-            {([
-              ['prev', page === 1, () => setPage((p) => Math.max(1, p - 1))],
-              ['next', page >= totalPages, () => setPage((p) => Math.min(totalPages, p + 1))],
-            ] as const).map(([dir, disabled, onClick]) => (
-              <button
-                key={dir}
-                type="button"
-                onClick={onClick}
-                disabled={disabled}
-                className={cn(
-                  'inline-flex items-center gap-1 rounded-lg border border-[rgba(168,181,193,0.20)] px-3 py-1.5 text-xs font-semibold transition-colors',
-                  disabled ? 'cursor-not-allowed bg-agap-surface text-agap-textSub' : 'bg-white text-agap-textMid hover:bg-agap-surface',
-                )}
-              >
-                {dir === 'prev' ? <><ChevronLeft size={13} /> Previous</> : <>Next <ChevronRight size={13} /></>}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {data && (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          perPage={perPage}
+          onPageChange={setPage}
+          onPerPageChange={(n) => { setPerPage(n); setPage(1); }}
+          noun={total === 1 ? 'event' : 'events'}
+          fetching={isFetching && !isLoading}
+        />
+      )}
     </div>
   );
 }

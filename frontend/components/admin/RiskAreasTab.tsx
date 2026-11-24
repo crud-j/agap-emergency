@@ -8,7 +8,7 @@ import {
   Sparkles, Trash2, TrendingDown, TrendingUp, X,
 } from 'lucide-react';
 import {
-  Button, Badge, EmptyState, Skeleton,
+  Button, Badge, EmptyState, Skeleton, Pagination, paginate,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   type BadgeVariant,
@@ -686,6 +686,8 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
   const [search, setSearch] = useState('');
   const [type, setType] = useState<string>(ALL);
   const [show, setShow] = useState<'all' | 'active' | 'inactive'>('all');
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
 
   const all = useMemo(() => areas.data ?? [], [areas.data]);
   const proposals = canManage ? proposalsQ.data ?? [] : [];
@@ -705,6 +707,8 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
         x.name.localeCompare(y.name),
       );
   }, [all, search, type, show]);
+  // The map shows every area; the list beside it pages.
+  const paged = paginate(visible, page, perPage);
 
   const nothingYet = !areas.isLoading && !areas.isError && all.length === 0 && proposals.length === 0;
 
@@ -803,11 +807,11 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
                   className={cn(INPUT, 'pl-8')}
                   placeholder="Search name, barangay, notes"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                   aria-label="Search risk areas"
                 />
               </label>
-              <Select value={type} onValueChange={setType}>
+              <Select value={type} onValueChange={(v) => { setType(v); setPage(1); }}>
                 <SelectTrigger aria-label="Type" className="h-9 w-[160px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL}>All types</SelectItem>
@@ -820,7 +824,7 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
                     key={v}
                     type="button"
                     aria-pressed={show === v}
-                    onClick={() => setShow(v)}
+                    onClick={() => { setShow(v); setPage(1); }}
                     className={cn(
                       'rounded-lg px-2.5 py-1 text-xs font-semibold capitalize transition',
                       show === v ? 'bg-agap-green text-white' : 'text-agap-textMid hover:bg-agap-surface',
@@ -841,8 +845,9 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
                 {all.length === 0 ? 'No risk areas yet. Approve a proposal above or add one.' : 'No risk areas match these filters.'}
               </p>
             ) : (
+              <>
               <ul className="space-y-2.5">
-                {visible.map((a) => (
+                {paged.rows.map((a) => (
                   <AreaCard
                     key={a.id}
                     area={a}
@@ -854,6 +859,16 @@ export function RiskAreasTab({ canManage }: { canManage: boolean }): JSX.Element
                   />
                 ))}
               </ul>
+              <Pagination
+                page={paged.page}
+                totalPages={paged.totalPages}
+                total={visible.length}
+                perPage={perPage}
+                onPageChange={setPage}
+                onPerPageChange={(n) => { setPerPage(n); setPage(1); }}
+                noun={visible.length === 1 ? 'area' : 'areas'}
+              />
+              </>
             )}
           </div>
         </div>

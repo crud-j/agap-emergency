@@ -15,6 +15,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AdministrationService } from './administration.service';
 import { SystemHealthService } from './system-health.service';
+import { SmsActivityService } from './sms-activity.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -33,6 +34,7 @@ export class AdministrationController {
   constructor(
     private readonly administrationService: AdministrationService,
     private readonly systemHealth: SystemHealthService,
+    private readonly smsActivity: SmsActivityService,
   ) {}
 
   @Get('users')
@@ -135,9 +137,17 @@ export class AdministrationController {
   }
 
   @Get('config')
-  @ApiOperation({ summary: 'Get system configuration' })
-  async getConfig() {
-    return this.administrationService.getConfig();
+  @ApiOperation({ summary: 'System configuration, paginated (push-token and job rows are never listed)' })
+  async getConfig(
+    @Query('page') page?: string,
+    @Query('perPage') perPage?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.administrationService.getConfig({
+      ...(page !== undefined && { page: +page }),
+      ...(perPage !== undefined && { perPage: +perPage }),
+      ...(search && { search }),
+    });
   }
 
   @Put('config/:key')
@@ -156,5 +166,31 @@ export class AdministrationController {
   @ApiOperation({ summary: 'System health: database, Redis, queues and integrations (no secrets)' })
   async health() {
     return this.systemHealth.getHealth();
+  }
+
+  @Get('sms/summary')
+  @ApiOperation({ summary: 'Outbound SMS counts: last 24 h, 7 days, by kind and by day (no phone numbers)' })
+  async smsSummary() {
+    return this.smsActivity.summary();
+  }
+
+  @Get('sms')
+  @ApiOperation({ summary: 'Outbound SMS log, newest first (last 4 digits only, no message text)' })
+  async smsLog(
+    @Query('page') page?: string,
+    @Query('perPage') perPage?: string,
+    @Query('status') status?: string,
+    @Query('kind') kind?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.smsActivity.list({
+      ...(page !== undefined && { page: +page }),
+      ...(perPage !== undefined && { perPage: +perPage }),
+      ...(status && { status }),
+      ...(kind && { kind }),
+      ...(from && { from }),
+      ...(to && { to }),
+    });
   }
 }

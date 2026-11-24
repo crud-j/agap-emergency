@@ -35,6 +35,7 @@ export { Toast, ToastProvider, ToastViewport } from './toast';
 export { useToast } from './use-toast';
 export type { ToastVariant, ToastData } from './use-toast';
 
+export { Pagination, paginate, pageSlots, PAGE_SIZE_OPTIONS } from './pagination';
 export { Skeleton, SkeletonCard, SkeletonRow } from './skeleton';
 export { EmptyState } from './empty-state';
 export { EtaLabel } from './eta-label';

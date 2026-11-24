@@ -8,6 +8,14 @@ import { AuthService } from '../auth/auth.service';
 import { TrustedDeviceService } from '../auth/mfa/trusted-device.service';
 import { assertPasswordPolicy } from '../auth/password-policy';
 import * as crypto from 'crypto';
+import {
+  CONFIG_KEY_PATTERN,
+  HIDDEN_CONFIG_KEYS,
+  HIDDEN_CONFIG_PREFIXES,
+  KNOWN_CONFIG,
+  configValueProblem,
+  isHiddenConfigKey,
+} from './config-registry';
 
 @Injectable()
 export class AdministrationService {
@@ -315,13 +323,67 @@ export class AdministrationService {
     });
   }
 
-  async getConfig() {
-    return this.prisma.system_configurations.findMany({
-      where: { is_sensitive: false },
-    });
+  /**
+   * Settings for the Configuration page, paginated and searchable. Push-token rows and
+   * job bookkeeping share the table but are not settings, so they are never listed.
+   */
+  async getConfig(query: { page?: number; perPage?: number; search?: string } = {}) {
+    const page = Math.max(1, Math.floor(query.page ?? 1) || 1);
+    const perPage = Math.min(100, Math.max(1, Math.floor(query.perPage ?? 20) || 20));
+    const search = query.search?.trim();
+
+    const where: Prisma.system_configurationsWhereInput = {
+      is_sensitive: false,
+      AND: [
+        ...HIDDEN_CONFIG_PREFIXES.map((p) => ({ NOT: { config_key: { startsWith: p } } })),
+        { config_key: { notIn: HIDDEN_CONFIG_KEYS } },
+        ...(search
+          ? [{ OR: [
+              { config_key: { contains: search, mode: 'insensitive' as const } },
+              { description: { contains: search, mode: 'insensitive' as const } },
+            ] }]
+          : []),
+      ],
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.system_configurations.findMany({
+        where,
+        orderBy: { config_key: 'asc' },
+        skip: (page - 1) * perPage,
+        take: perPage,
+        include: { users: { select: { full_name: true, email: true } } },
+      }),
+      this.prisma.system_configurations.count({ where }),
+    ]);
+
+    return {
+      data: rows.map(({ users, ...row }) => {
+        const info = KNOWN_CONFIG[row.config_key];
+        return {
+          ...row,
+          updated_by_name: users?.full_name ?? users?.email ?? null,
+          label: info?.label ?? null,
+          value_type: info?.type ?? null,
+          min: info?.min ?? null,
+          max: info?.max ?? null,
+          unit: info?.unit ?? null,
+          read_by: info?.readBy ?? null,
+        };
+      }),
+      meta: { total, page, perPage, totalPages: Math.max(1, Math.ceil(total / perPage)) },
+    };
   }
 
   async upsertConfig(key: string, value: unknown, userId: string) {
+    if (!CONFIG_KEY_PATTERN.test(key) || isHiddenConfigKey(key)) {
+      throw new BadRequestException('This key cannot be changed from the Configuration page.');
+    }
+    const problem = configValueProblem(key, value);
+    if (problem) throw new BadRequestException(problem);
+    // Numbers typed as text are stored as numbers for known numeric keys.
+    if (KNOWN_CONFIG[key]?.type === 'number' && typeof value === 'string') value = Number(value);
+
     const before = await this.prisma.system_configurations.findUnique({ where: { config_key: key } });
     const saved = await this.prisma.system_configurations.upsert({
       where: { config_key: key },

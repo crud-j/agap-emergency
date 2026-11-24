@@ -6,6 +6,7 @@ import axios from 'axios';
 import { QUEUE_NAMES } from '@agap/shared';
 import { BARANGAY_FOLLOWUP_JOB, BarangayNotifyService } from '../../barangay-coordination/barangay-notify.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { recordSmsAttempt, smsKindForJob, type SmsLogEntry } from '../../notifications/sms/sms-log';
 
 export interface SmsJobData {
   phone: string;
@@ -54,7 +55,7 @@ export class SmsProcessor extends WorkerHost {
 
     this.logger.log(`Processing SMS job ${job.id} to ${job.data.phone}`);
     try {
-      await this.send(job.data);
+      await this.send(job.data, job);
       this.logger.log(`SMS delivered to ${job.data.phone} | incidentId=${job.data.incidentId ?? 'n/a'}`);
     } catch (err) {
       // Delivery is best-effort and must never fail the caller (OTP/incident).
@@ -96,7 +97,7 @@ export class SmsProcessor extends WorkerHost {
     this.logger.log(`Processing critical SMS job ${job.id} (attempt ${attempt}/${maxAttempts})`);
     let batchId: string | undefined;
     try {
-      batchId = await this.send(job.data);
+      batchId = await this.send(job.data, job);
     } catch (err) {
       // A missing key or device will not fix itself between retries.
       const final = err instanceof SmsNotConfiguredError || attempt >= maxAttempts;
@@ -166,7 +167,7 @@ export class SmsProcessor extends WorkerHost {
     const deliveryId = job.data.announcementDeliveryId!;
     let batchId: string | undefined;
     try {
-      batchId = await this.send(job.data);
+      batchId = await this.send(job.data, job);
     } catch (err) {
       this.logger.error(`Announcement SMS job ${job.id} failed: ${describe(err)}`);
       const reason =
@@ -250,19 +251,48 @@ export class SmsProcessor extends WorkerHost {
     return statuses.includes('sent') ? 'sent' : statuses[0];
   }
 
-  /** Returns the Textbee batch id, when the response carries one. */
-  private async send(data: SmsJobData): Promise<string | undefined> {
+  /**
+   * Returns the Textbee batch id, when the response carries one. Every attempt, accepted
+   * or not, is written to sms_log for the admin's SMS activity page (best effort).
+   */
+  private async send(data: SmsJobData, job: Job<SmsJobData>): Promise<string | undefined> {
     const message = data.message.length > 160 ? data.message.slice(0, 159) + '…' : data.message;
+    const started = Date.now();
+    const log = (entry: Pick<SmsLogEntry, 'status' | 'gatewayStatus' | 'error'>) =>
+      recordSmsAttempt(this.prisma, {
+        ...entry,
+        kind: smsKindForJob(job.name, data),
+        jobName: job.name,
+        phone: data.phone,
+        attempt: job.attemptsMade + 1,
+        chars: message.length,
+        durationMs: Date.now() - started,
+        incidentId: data.incidentId,
+      });
 
     const apiKey = this.config.get<string>('TEXTBEE_API_KEY');
     const deviceId = this.config.get<string>('TEXTBEE_DEVICE_ID');
-    if (!apiKey || !deviceId) throw new SmsNotConfiguredError();
+    if (!apiKey || !deviceId) {
+      await log({ status: 'NOT_CONFIGURED', error: 'SMS gateway not configured' });
+      throw new SmsNotConfiguredError();
+    }
 
-    const res = await axios.post(
-      `https://api.textbee.dev/api/v1/gateway/devices/${deviceId}/send-sms`,
-      { recipients: [data.phone], message },
-      { headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' }, timeout: 10000 },
-    );
+    let res;
+    try {
+      res = await axios.post(
+        `https://api.textbee.dev/api/v1/gateway/devices/${deviceId}/send-sms`,
+        { recipients: [data.phone], message },
+        { headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' }, timeout: 10000 },
+      );
+    } catch (err) {
+      await log({
+        status: 'FAILED',
+        gatewayStatus: axios.isAxiosError(err) ? err.response?.status : undefined,
+        error: describe(err),
+      });
+      throw err;
+    }
+    await log({ status: 'ACCEPTED' });
     const batchId = res?.data?.data?.smsBatchId;
     return typeof batchId === 'string' ? batchId : undefined;
   }

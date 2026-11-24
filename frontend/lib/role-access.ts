@@ -183,6 +183,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/audit', label: 'Audit Log', roles: [SYS_ADMIN] },
       { href: '/administration/security', label: 'Security Events', roles: [SYS_ADMIN] },
       { href: '/administration/integrations', label: 'Integrations', roles: [SYS_ADMIN] },
+      { href: '/administration/sms', label: 'SMS Activity', roles: [SYS_ADMIN] },
       { href: '/administration/config', label: 'Configuration', roles: [SYS_ADMIN] },
       { href: '/operations/sla-targets', label: 'Response Targets', roles: [SYS_ADMIN] },
     ],

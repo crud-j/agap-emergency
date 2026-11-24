@@ -1813,6 +1813,29 @@ model incident_barangay_notices {
 
 /// Append-only log of every SMS received from a barangay, applied or not. Application code
 /// only INSERTs. `provider_message_id` makes webhook retries and re-polls idempotent.
+/// One row per outbound SMS attempt (MOD-17, MOD-49). No message text (OTP codes) and
+/// only the recipient's last 4 digits. Pruned after SMS_LOG_RETENTION_DAYS.
+model sms_log {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  /// SmsLogKind: OPS_ALERT, BARANGAY_ALERT, AUTH, …
+  kind            String   @db.VarChar(30)
+  job_name        String   @db.VarChar(60)
+  recipient_last4 String?  @db.VarChar(4)
+  /// ACCEPTED (by the gateway, not proof of delivery), FAILED, NOT_CONFIGURED
+  status          String   @db.VarChar(20)
+  gateway_status  Int?     @db.SmallInt
+  error           String?  @db.VarChar(200)
+  attempt         Int      @default(1) @db.SmallInt
+  chars           Int      @db.SmallInt
+  duration_ms     Int?
+  incident_id     String?  @db.Uuid
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([created_at(sort: Desc)], map: "idx_sms_log_created")
+  @@index([status, created_at(sort: Desc)], map: "idx_sms_log_status_created")
+  @@index([kind, created_at(sort: Desc)], map: "idx_sms_log_kind_created")
+}
+
 model barangay_sms_inbound {
   id                  String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   provider_message_id String                     @unique(map: "uq_barangay_sms_inbound_provider_message") @db.VarChar(100)

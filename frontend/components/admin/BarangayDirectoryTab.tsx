@@ -47,6 +47,7 @@ function barangayIssue(b: DirectoryBarangay): { label: string; tone: 'red' | 'am
 export function BarangayDirectoryTab(): JSX.Element {
   const { data, isLoading, isError } = useBarangayDirectory();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState('');
 
   if (isLoading) {
     return (
@@ -60,6 +61,8 @@ export function BarangayDirectoryTab(): JSX.Element {
   }
 
   const selected = data.find((b) => b.id === selectedId) ?? data[0]!;
+  const q = filter.trim().toLowerCase();
+  const shown = q ? data.filter((b) => b.name.toLowerCase().includes(q)) : data;
 
   return (
     <div className="space-y-3">
@@ -70,8 +73,20 @@ export function BarangayDirectoryTab(): JSX.Element {
 
       <div className="grid gap-4 md:grid-cols-[220px_1fr]">
         {/* Barangays */}
-        <ul className="max-h-[560px] overflow-y-auto rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white shadow-card">
-          {data.map((b) => {
+        <div className="overflow-hidden rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white shadow-card">
+        <div className="border-b border-[rgba(168,181,193,0.20)] p-2">
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={`Search ${data.length} barangays…`}
+            aria-label="Search barangays"
+            className="h-8 w-full rounded-lg border border-agap-track bg-white px-2.5 text-sm text-agap-textMain placeholder:text-agap-textSub focus:outline-none focus:ring-2 focus:ring-agap-green"
+          />
+        </div>
+        <ul className="max-h-[520px] overflow-y-auto">
+          {shown.length === 0 && <li className="px-3 py-4 text-center text-xs text-agap-textSub">No barangay matches.</li>}
+          {shown.map((b) => {
             const issue = barangayIssue(b);
             return (
               <li key={b.id}>
@@ -90,6 +105,7 @@ export function BarangayDirectoryTab(): JSX.Element {
             );
           })}
         </ul>
+        </div>
 
         <BarangayContacts key={selected.id} barangay={selected} />
       </div>

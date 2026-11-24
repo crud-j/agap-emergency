@@ -18,6 +18,7 @@ import { EscalationProcessor } from './processors/escalation.processor';
 import { SlaMonitorProcessor } from './processors/sla-monitor.processor';
 import { AnalyticsProcessor } from './processors/analytics.processor';
 import { AnalyticsCronService } from './analytics-cron.service';
+import { SmsLogRetentionService } from './sms-log-retention.service';
 import { EtaRefreshProcessor } from './processors/eta-refresh.processor';
 import { AnnouncementPushProcessor } from './processors/announcement-push.processor';
 import { AiAssistModule } from '../ai-assist/ai-assist.module';
@@ -58,6 +59,7 @@ import { IdentityVerificationCleanupProcessor } from './processors/identity-veri
     SlaMonitorProcessor,
     AnalyticsProcessor,
     AnalyticsCronService,
+    SmsLogRetentionService,
     EtaRefreshProcessor,
     AnnouncementPushProcessor,
     AiAssistProcessor,

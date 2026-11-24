@@ -1,19 +1,19 @@
 'use client';
 
 import { useState, type JSX } from 'react';
-import { ShieldCheck, ChevronLeft, ChevronRight, Search, Lock } from 'lucide-react';
+import { ShieldCheck, Search, Lock } from 'lucide-react';
 import {
   Badge, DataTable,
   Dialog, DialogContent, DialogHeader, DialogTitle,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   Skeleton,
   type Column,
+  Pagination,
 } from '@/components/ui';
 import { useAuthUser, hasRole } from '@/lib/use-auth';
 import { titleCase } from '@/lib/incident-format';
 import { useAuditLog } from '@/features/audit/hooks';
 import type { AuditLogEntry, AuditLogParams } from '@/features/audit/api';
-import { cn } from '@/lib/utils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -177,6 +177,7 @@ export default function AuditPage(): JSX.Element {
   const authorized = hasRole(user, 'SUPERVISOR', 'SYSTEM_ADMINISTRATOR');
 
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(PER_PAGE);
   const [filterAction, setFilterAction] = useState('ALL');
   const [filterEntityType, setFilterEntityType] = useState('ALL');
   const [filterFrom, setFilterFrom] = useState('');
@@ -185,14 +186,14 @@ export default function AuditPage(): JSX.Element {
 
   const params: AuditLogParams = {
     page,
-    perPage: PER_PAGE,
+    perPage,
     ...(filterAction !== 'ALL' && { action: filterAction }),
     ...(filterEntityType !== 'ALL' && { entityType: filterEntityType }),
     ...(filterFrom && { from: new Date(filterFrom).toISOString() }),
     ...(filterTo && { to: new Date(filterTo + 'T23:59:59').toISOString() }),
   };
 
-  const { data, isLoading } = useAuditLog(params);
+  const { data, isLoading, isFetching } = useAuditLog(params);
   const rows: AuditLogEntry[] = data?.data ?? [];
 
   function resetFilters() {
@@ -430,39 +431,17 @@ export default function AuditPage(): JSX.Element {
         }
       />
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between pt-1">
-          <p className="text-xs text-agap-textSub">
-            Page {page} of {totalPages} · {rows.length} entries shown
-          </p>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className={cn(
-                'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
-                page === 1
-                  ? 'border-[rgba(168,181,193,0.20)] text-agap-textSub cursor-not-allowed bg-agap-surface'
-                  : 'border-[rgba(168,181,193,0.20)] text-agap-textMid hover:bg-agap-surface bg-white',
-              )}
-            >
-              <ChevronLeft size={13} /> Previous
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className={cn(
-                'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
-                page === totalPages
-                  ? 'border-[rgba(168,181,193,0.20)] text-agap-textSub cursor-not-allowed bg-agap-surface'
-                  : 'border-[rgba(168,181,193,0.20)] text-agap-textMid hover:bg-agap-surface bg-white',
-              )}
-            >
-              Next <ChevronRight size={13} />
-            </button>
-          </div>
-        </div>
+      {data && (
+        <Pagination
+          page={data.meta.page}
+          totalPages={totalPages}
+          total={totalCount}
+          perPage={perPage}
+          onPageChange={setPage}
+          onPerPageChange={(n) => { setPerPage(n); setPage(1); }}
+          noun="entries"
+          fetching={isFetching && !isLoading}
+        />
       )}
 
       {/* Read-only detail dialog */}

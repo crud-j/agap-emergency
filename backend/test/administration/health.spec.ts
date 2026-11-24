@@ -52,9 +52,10 @@ describe('SystemHealthService (Phase 5a)', () => {
     expect(health.queues[0]).toEqual(
       expect.objectContaining({ status: 'ok', waiting: 1, active: 0, failed: 0, delayed: 2 }),
     );
+    // This prisma mock has no sms_log / config tables: those metrics are null, not zero.
     expect(health.integrations).toEqual({
-      sms: { configured: true },
-      push: { configured: true },
+      sms: { configured: true, last24h: null, lastAcceptedAt: null, inbound24h: null },
+      push: { configured: true, registeredDevices: null },
       maps: { configured: true, tiles: 'mapbox', routing: 'osrm' },
     });
   });

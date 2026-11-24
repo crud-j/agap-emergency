@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type JSX } from 'react';
-import { ChevronLeft, ChevronRight, Eye, IdCard, ShieldCheck } from 'lucide-react';
+import { Eye, ShieldCheck } from 'lucide-react';
 import {
   ID_REVIEW_STATUSES,
   type IdRejectionReason,
@@ -12,6 +12,7 @@ import {
   Badge, Button, DataTable,
   Drawer, DrawerBody, DrawerContent, DrawerFooter, DrawerHeader, DrawerTitle,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Pagination,
   type BadgeVariant, type Column,
 } from '@/components/ui';
 import { ApiError } from '@/lib/api';
@@ -58,9 +59,10 @@ function errorText(err: unknown, fallback: string): string {
 export function IdReviewQueue(): JSX.Element {
   const [status, setStatus] = useState<IdReviewStatus>('PENDING_REVIEW');
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(PER_PAGE);
   const [selected, setSelected] = useState<IdReviewItem | null>(null);
 
-  const { data, isLoading, error } = useIdReviews({ status, page, perPage: PER_PAGE });
+  const { data, isLoading, isFetching, error } = useIdReviews({ status, page, perPage });
   const rows = data?.data ?? [];
   const total = data?.meta.total ?? 0;
   const totalPages = Math.max(1, data?.meta.totalPages ?? 1);
@@ -144,21 +146,18 @@ export function IdReviewQueue(): JSX.Element {
         />
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-        <p className="flex items-center gap-1.5 text-xs text-agap-textSub">
-          <IdCard size={12} /> {total} check{total === 1 ? '' : 's'} · page {page} of {totalPages}
-        </p>
-        {totalPages > 1 && (
-          <div className="flex items-center gap-1.5">
-            <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-              <ChevronLeft size={13} /> Previous
-            </Button>
-            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-              Next <ChevronRight size={13} />
-            </Button>
-          </div>
-        )}
-      </div>
+      {data && (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          perPage={perPage}
+          onPageChange={setPage}
+          onPerPageChange={(n) => { setPerPage(n); setPage(1); }}
+          noun={total === 1 ? 'check' : 'checks'}
+          fetching={isFetching && !isLoading}
+        />
+      )}
 
       {selected && (
         <IdReviewDetail key={selected.id} item={selected} onClose={() => setSelected(null)} />

@@ -21,7 +21,7 @@ import {
   Shield, Network, Zap, BarChart2, Layers,
   Megaphone, Settings, FileSearch, PanelLeftClose, PanelLeftOpen,
   Users, KeyRound, Landmark, Circle, History, Archive, ShieldAlert, Plug, Inbox, ShieldCheck, MapPinned, LogOut,
-  Fingerprint, IdCard, ChevronRight, Timer,
+  Fingerprint, IdCard, ChevronRight, Timer, MessageSquare,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -57,6 +57,7 @@ const ICONS: Record<string, LucideIcon> = {
   '/administration/config': Settings,
   '/administration/security': ShieldAlert,
   '/administration/integrations': Plug,
+  '/administration/sms': MessageSquare,
   '/audit': FileSearch,
   '/account/security': Fingerprint,
 };

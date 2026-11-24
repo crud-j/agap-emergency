@@ -152,7 +152,7 @@ describe('role-access', () => {
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
       'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Hospitals & Facilities',
       'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'ID Reviews', 'Risk Areas', 'Audit Log',
-      'Security Events', 'Integrations', 'Configuration', 'Response Targets',
+      'Security Events', 'Integrations', 'SMS Activity', 'Configuration', 'Response Targets',
       'Account Security',
     ]);
   });
