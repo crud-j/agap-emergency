@@ -17,6 +17,7 @@ import {
   Res,
   StreamableFile,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -29,6 +30,7 @@ import { IncidentHandoverService } from './incident-handover/incident-handover.s
 import { TransportService } from './transport/transport.service';
 import { ReporterPhotoService } from './reporter-photo/reporter-photo.service';
 import { IncidentCommandService } from './incident-command/incident-command.service';
+import { GuestFollowService } from './guest-follow/guest-follow.service';
 import { StartTransportDto } from './transport/dto/start-transport.dto';
 import { RecordArrivalDto } from './transport/dto/record-arrival.dto';
 import { UpdateTransportDto } from './transport/dto/update-transport.dto';
@@ -71,6 +73,7 @@ export class IncidentsController {
     private readonly rescueTripService: RescueTripService,
     private readonly reporterPhoto: ReporterPhotoService,
     private readonly command: IncidentCommandService,
+    @Optional() private readonly guestFollow?: GuestFollowService,
   ) {}
 
   /**
@@ -105,7 +108,12 @@ export class IncidentsController {
   @ApiResponse({ status: 429, description: 'Guest report limit reached (no account); call 911 / MDRRMO or sign in' })
   async create(@Body() dto: CreateIncidentDto, @Request() req: any) {
     const actorId = req.user?.id ?? undefined;
-    return this.incidentsService.create(dto, actorId, req.user?.role);
+    const incident = await this.incidentsService.create(dto, actorId, req.user?.role);
+    if (actorId || !this.guestFollow) return incident;
+    // A guest has no account to follow the report with: this phone gets a token for it
+    // (status and push updates, MOD-42). Null when not allowed; the report stands either way.
+    const token = await this.guestFollow.issue(incident.id);
+    return token ? { ...incident, guest_status_token: token } : incident;
   }
 
   @Get()

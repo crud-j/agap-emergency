@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { IncidentStatus, QUEUE_NAMES } from '@agap/shared';
+import { GUEST_REPORT_PUSH_TYPE, IncidentStatus, QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NotificationsService } from './notifications.service';
+import { GUEST_FINISHED_STATUSES, GUEST_FOLLOW_AFTER_END_MS } from '../incidents/guest-follow/guest-follow.constants';
 
 /** Android channel for incident updates; mobile creates it in push-registration.ts. */
 export const INCIDENT_UPDATES_CHANNEL = 'incident-updates';
+
+/** Guest phones told about one status change at most (5 per report, plus merged reports). */
+const GUEST_PUSH_LIMIT = 50;
 
 interface Message {
   type: string;
@@ -79,6 +83,36 @@ const REPORTER_MESSAGES: Partial<Record<IncidentStatus, Message>> = {
   },
 };
 
+/**
+ * A guest following their report (no account, MOD-42). The same steps, plus CANCELLED
+ * (staff may cancel a guest's report), minus account wording ("Verified Reporter",
+ * "Open AGAP for the estimated arrival": a guest's screen shows no ETA).
+ */
+const GUEST_MESSAGES: Partial<Record<IncidentStatus, Message>> = {
+  ...REPORTER_MESSAGES,
+  [IncidentStatus.EN_ROUTE]: {
+    type: 'INCIDENT_EN_ROUTE',
+    title: 'Responders on the way',
+    body: (ref) => `Responders are travelling to the scene for ${ref}.`,
+  },
+  [IncidentStatus.CLOSED]: {
+    type: 'INCIDENT_CLOSED',
+    title: 'Incident closed',
+    body: (ref) => `${ref} is now closed. Thank you for reporting through AGAP.`,
+  },
+  [IncidentStatus.CANCELLED]: {
+    type: 'INCIDENT_CANCELLED',
+    title: 'Report cancelled',
+    body: (ref) => `${ref} was cancelled. If you still need help, call 911 or the MDRRMO hotline.`,
+  },
+  [IncidentStatus.DUPLICATE]: {
+    type: 'INCIDENT_DUPLICATE',
+    title: 'Report merged',
+    body: (ref) =>
+      `${ref} matched another report of the same emergency. Responders are handling it there, and you will keep getting updates here.`,
+  },
+};
+
 // Responder progress the assigning dispatcher hears about. RESOLVED asks them to close.
 const DISPATCHER_MESSAGES: Partial<Record<IncidentStatus, { type: string; title: string; body: (unit: string, ref: string) => string }>> = {
   [IncidentStatus.EN_ROUTE]: {
@@ -128,6 +162,11 @@ export class IncidentStatusNotifier {
    * first, then a push so a closed app still hears about it.
    */
   async notifyReporter(incidentId: string, newStatus: IncidentStatus): Promise<void> {
+    await this.notifyAccountReporter(incidentId, newStatus);
+    await this.notifyGuestFollowers(incidentId, newStatus);
+  }
+
+  private async notifyAccountReporter(incidentId: string, newStatus: IncidentStatus): Promise<void> {
     const message = REPORTER_MESSAGES[newStatus];
     if (!message) return;
     try {
@@ -169,6 +208,64 @@ export class IncidentStatusNotifier {
     } catch (err) {
       this.logger.error(
         `Reporter ${newStatus} notification failed for incidentId=${incidentId}: ${String(err)}. Incident unaffected.`,
+      );
+    }
+  }
+
+  /**
+   * Push to guests following this report from their phones, and to guests whose
+   * reports were merged into it (they keep following the emergency, MOD-26). Each gets
+   * their own report's reference; never the other report's, nor who reported it.
+   * No feed row: a guest has no account. The device token stays in PostgreSQL; the
+   * job carries only the follower id.
+   */
+  private async notifyGuestFollowers(incidentId: string, newStatus: IncidentStatus): Promise<void> {
+    const message = GUEST_MESSAGES[newStatus];
+    if (!message) return;
+    try {
+      const now = new Date();
+      const followers = await this.prisma.guest_report_followers.findMany({
+        where: {
+          push_token: { not: null },
+          expires_at: { gt: now },
+          OR: [
+            { incident_id: incidentId },
+            { incident: { duplicate_of_id: incidentId } },
+            { incident: { duplicate_of: { duplicate_of_id: incidentId } } },
+          ],
+        },
+        select: { id: true, incident: { select: { public_reference: true } } },
+        take: GUEST_PUSH_LIMIT,
+      });
+      if (followers.length === 0) return;
+
+      for (const follower of followers) {
+        const publicReference = follower.incident.public_reference;
+        await this.notificationQueue.add(
+          'guest-status-push',
+          {
+            guestFollowerId: follower.id,
+            channel: 'PUSH',
+            title: message.title,
+            body: message.body(publicReference),
+            data: { type: GUEST_REPORT_PUSH_TYPE, status: newStatus, publicReference },
+            androidChannelId: INCIDENT_UPDATES_CHANNEL,
+          },
+          { jobId: `guest-status:${follower.id}:${newStatus}` },
+        );
+      }
+
+      // The report is over: keep the link (and the device token) one more day only.
+      if (GUEST_FINISHED_STATUSES.has(newStatus)) {
+        const until = new Date(now.getTime() + GUEST_FOLLOW_AFTER_END_MS);
+        await this.prisma.guest_report_followers.updateMany({
+          where: { id: { in: followers.map((f) => f.id) }, expires_at: { gt: until } },
+          data: { expires_at: until },
+        });
+      }
+    } catch (err) {
+      this.logger.error(
+        `Guest ${newStatus} notification failed for incidentId=${incidentId}: ${String(err)}. Incident unaffected.`,
       );
     }
   }

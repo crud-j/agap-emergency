@@ -352,7 +352,8 @@ Run everything from `mobile/`; [mobile/eas.json](../../mobile/eas.json) is the o
 Run all of these on the deployed system, not locally.
 
 **Emergency path**
-- [ ] A guest SOS from the APK creates an incident. It appears live on the web dispatch map without a reload.
+- [x] A guest SOS from the APK creates an incident. It appears live on the web dispatch map without a reload. *(2026-11-25: the pin appeared on Live Dispatch with no reload.)*
+- [ ] A guest follows their report (added 2026-11-25; needs the backend deploy **and** a new APK): after the guest SOS, the success screen shows a live status card and asks for notifications. Acknowledge → "Report received" push and the card says "Report accepted". Merge it into another report → "Report merged", then that report's dispatch/arrival pushes keep coming. False alert / Cancel → the matching push. Tapping a push opens "Your report"; the sign-in screen shows "Your report INC-…".
 - [x] The MDRRMO ops phone gets the `AGAP|INC-…` SMS. *(Received on the ops phone on 2026-11-24. On 2026-11-25 the admin SMS Activity page logged the ops alert as `Accepted` by Textbee. "Accepted" means the gateway took it, not that the phone confirmed delivery.)*
 - [ ] A signed-in citizen SOS works, and the citizen sees status changes live.
 - [ ] Dispatching from the web reaches the responder APK (push and live status). Responder location updates show on the map.

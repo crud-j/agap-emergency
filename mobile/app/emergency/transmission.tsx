@@ -1,6 +1,6 @@
 import React, { Component, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
   Animated, StatusBar, Easing, ActivityIndicator, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,6 +27,9 @@ import type { LatLngLite } from '@/src/components/tracking/live-tracking-map';
 import { useIncidentTracking } from '@/src/hooks/useIncidentTracking';
 import { useRouteLine } from '@/src/hooks/useRouteLine';
 import { useProfilePhotoUri } from '@/src/components/profile/profile-avatar';
+import { GuestReportStatusCard, guestReportStatusKey } from '@/src/components/guest-report/GuestReportStatusCard';
+import { enableGuestReportPush, saveGuestReport } from '@/src/services/guest-report/saved-guest-report';
+import { useQueryClient } from '@tanstack/react-query';
 
 type ResponderPoint = LatLngLite & { heading?: number };
 
@@ -256,7 +259,7 @@ function SimilarReportCard({ hint }: { hint: SimilarReportHint }) {
 }
 
 function SuccessView({
-  location, styleUrl, mapAvailable, isGuestReport, reference, onSignIn,
+  location, styleUrl, mapAvailable, isGuestReport, reference, onSignIn, guestToken,
   responder, routeGeometry, etaSeconds, citizenPhotoUri, priority, mediaState, similarReport,
 }: {
   location: LatLngLite | null;
@@ -265,6 +268,8 @@ function SuccessView({
   isGuestReport: boolean;
   reference: string | null;
   onSignIn: () => void;
+  /** A guest's follow token: the live status card replaces the static notice. */
+  guestToken: string | null;
   responder: (ResponderPoint & { updatedAt?: string }) | null;
   routeGeometry: Array<[number, number]> | null;
   etaSeconds: number | null;
@@ -284,7 +289,7 @@ function SuccessView({
   }, []);
 
   return (
-    <View style={styles.center}>
+    <ScrollView contentContainerStyle={styles.successScroll} showsVerticalScrollIndicator={false}>
       <Animated.View style={[styles.iconWrap, styles.iconWrapSuccess, { transform: [{ scale }], opacity }]}>
         <Ionicons name="checkmark-circle" size={48} color={colors.primary} />
       </Animated.View>
@@ -314,19 +319,23 @@ function SuccessView({
           </Text>
         </View>
       )}
-      <View style={[styles.infoCard, styles.successCard]}>
-        <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
-        <Text style={styles.infoCardText}>
-          Your report was received. A dispatcher must review it and arrange a response. Keep your phone nearby.
-        </Text>
-      </View>
+      {guestToken ? (
+        <GuestReportStatusCard token={guestToken} />
+      ) : (
+        <View style={[styles.infoCard, styles.successCard]}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
+          <Text style={styles.infoCardText}>
+            Your report was received. A dispatcher must review it and arrange a response. Keep your phone nearby.
+          </Text>
+        </View>
+      )}
       <MediaStatusCard state={mediaState} />
       {isGuestReport && (
         <TouchableOpacity style={styles.ghostBtn} onPress={onSignIn} accessibilityRole="button">
           <Text style={styles.ghostBtnText}>Sign in or create an account</Text>
         </TouchableOpacity>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -474,6 +483,8 @@ export default function TransmissionScreen() {
   const [incidentPriority, setIncidentPriority] = useState<string | null>(null);
   const [mediaState, setMediaState] = useState<MediaState>('none');
   const [similarReport, setSimilarReport] = useState<SimilarReportHint | null>(null);
+  const [guestToken, setGuestToken] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   /** The last failure was the connection, so SMS can get the report through. */
   const [smsAllowed, setSmsAllowed] = useState(false);
   const [smsOpenFailed, setSmsOpenFailed] = useState(false);
@@ -603,6 +614,17 @@ export default function TransmissionScreen() {
       setSimilarReport(result.similar_report ?? null);
       setTxState('success');
 
+      // A guest follows the report from this phone (MOD-42): keep the token, then ask
+      // once for notifications. Only after the report is saved, so it never delays it.
+      const followToken = !accessToken ? result.guest_status_token : undefined;
+      if (followToken) {
+        setGuestToken(followToken);
+        void saveGuestReport({ token: followToken, publicReference: result.public_reference });
+        void enableGuestReportPush(followToken, { requestPermission: true }).then(() =>
+          queryClient.invalidateQueries({ queryKey: guestReportStatusKey(followToken) }),
+        );
+      }
+
       // Media uploads run after the incident is persisted and never block it,
       // but their outcome is always shown — a failed upload must not be silent.
       const hasMedia = draft.photoUris.length > 0 || !!draft.videoUri;
@@ -687,6 +709,7 @@ export default function TransmissionScreen() {
             isGuestReport={draft.isGuestReport}
             reference={publicReference}
             onSignIn={() => router.replace('/auth/login')}
+            guestToken={guestToken}
             responder={responderPoint}
             routeGeometry={route.geometry ?? null}
             etaSeconds={live.etaSeconds}
@@ -727,6 +750,11 @@ const styles = StyleSheet.create({
 
   center: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 24, paddingVertical: 32,
+  },
+  // Same layout, but it can scroll: a guest's live status card adds height.
+  successScroll: {
+    flexGrow: 1, alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: 24, paddingVertical: 32,
   },
 

@@ -254,6 +254,7 @@ model Incident {
   incident_metrics             incident_metrics?
   incident_patients            incident_patients[]
   incident_reporters           IncidentReporter?
+  guest_followers              guest_report_followers[]
   incident_resolutions         incident_resolutions?
   duplicate_of                 Incident?                      @relation("incident_duplicates", fields: [duplicate_of_id], references: [id], onUpdate: NoAction, map: "fk_incident_duplicate_of")
   duplicates                   Incident[]                     @relation("incident_duplicates")
@@ -1811,8 +1812,22 @@ model incident_barangay_notices {
   @@index([barangay_id, created_at(sort: Desc)], map: "idx_incident_barangay_notices_barangay")
 }
 
-/// Append-only log of every SMS received from a barangay, applied or not. Application code
-/// only INSERTs. `provider_message_id` makes webhook retries and re-polls idempotent.
+/// A phone following its own guest report (MOD-42, Rule 14): no account, so the app holds a
+/// random token whose SHA-256 is stored here. Status words only; never who else reported.
+/// `push_token` is the device's FCM token, kept only until `expires_at` (pruned daily).
+model guest_report_followers {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  incident_id String   @db.Uuid
+  token_hash  String   @unique @db.Char(64)
+  push_token  String?  @db.VarChar(512)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  expires_at  DateTime @db.Timestamptz(6)
+  incident    Incident @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([incident_id], map: "idx_guest_report_followers_incident")
+  @@index([expires_at], map: "idx_guest_report_followers_expires")
+}
+
 /// One row per outbound SMS attempt (MOD-17, MOD-49). No message text (OTP codes) and
 /// only the recipient's last 4 digits. Pruned after SMS_LOG_RETENTION_DAYS.
 model sms_log {
@@ -1836,6 +1851,8 @@ model sms_log {
   @@index([kind, created_at(sort: Desc)], map: "idx_sms_log_kind_created")
 }
 
+/// Append-only log of every SMS received from a barangay, applied or not. Application code
+/// only INSERTs. `provider_message_id` makes webhook retries and re-polls idempotent.
 model barangay_sms_inbound {
   id                  String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   provider_message_id String                     @unique(map: "uq_barangay_sms_inbound_provider_message") @db.VarChar(100)

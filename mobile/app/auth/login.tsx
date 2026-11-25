@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { z } from 'zod';
 import {
   View,
@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { useAccessibilityStore } from '../../src/stores/accessibility.store';
@@ -32,6 +32,7 @@ import {
 } from '../../src/services/api/auth.api';
 import { getPasskey, isPasskeySupported, PasskeyError } from '../../src/services/passkey/passkey.service';
 import { homeRouteForRole } from '../../src/lib/role-routing';
+import { loadSavedGuestReport, type SavedGuestReport } from '../../src/services/guest-report/saved-guest-report';
 
 const phoneSchema = z.string().regex(/^(\+63|0)9\d{9}$/, 'Enter a valid Philippine mobile number.');
 const emailSchema = z.string().email('Enter a valid email address.');
@@ -99,9 +100,19 @@ export default function LoginScreen() {
   const [fieldError, setFieldError] = useState('');
   const [apiError, setApiError] = useState('');
 
+  // A report sent from this phone without an account, still followed (MOD-42).
+  const [guestReport, setGuestReport] = useState<SavedGuestReport | null>(null);
+
   useEffect(() => {
     loadFromStorage();
   }, []);
+
+  // Reloaded on every return here: "Stop following" on the status screen clears it.
+  useFocusEffect(
+    useCallback(() => {
+      void loadSavedGuestReport().then(setGuestReport);
+    }, []),
+  );
 
   async function handlePasswordLogin() {
     setFieldError('');
@@ -513,6 +524,23 @@ export default function LoginScreen() {
                 <Text style={styles.solidButtonText}>{t.login.guestReport}</Text>
               </LinearGradient>
             </TouchableOpacity>
+
+            {guestReport && (
+              <TouchableOpacity
+                style={styles.guestReportCard}
+                activeOpacity={0.8}
+                onPress={() => router.push('/emergency/guest-status' as never)}
+                accessibilityRole="button"
+                accessibilityLabel={`Your report ${guestReport.publicReference}. See its status.`}
+              >
+                <Ionicons name="pulse" size={20} color="#0D6053" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.guestReportTitle}>Your report {guestReport.publicReference}</Text>
+                  <Text style={styles.guestReportSub}>See its status</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#0D6053" />
+              </TouchableOpacity>
+            )}
           </View>
 
         </ScrollView>
@@ -532,6 +560,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
+
+  // ── Guest report being followed ──
+  guestReportCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    minHeight: 56,
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(13,96,83,0.25)',
+    backgroundColor: '#EEF7F4',
+  },
+  guestReportTitle: { fontSize: 14, fontWeight: '700', color: '#0D6053' },
+  guestReportSub: { fontSize: 12, fontWeight: '500', color: '#40536D', marginTop: 2 },
   
   // ── Tree Graphic ──
   treeBackground: {

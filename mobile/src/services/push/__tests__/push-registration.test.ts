@@ -4,7 +4,11 @@ import type * as Notifications from 'expo-notifications';
 jest.mock('expo-notifications', () => ({}));
 jest.mock('../../api/notifications.api', () => ({ registerFcmToken: jest.fn() }));
 
-import { assignmentIdFromNotification, incidentIdFromNotification } from '../push-registration';
+import {
+  assignmentIdFromNotification,
+  incidentIdFromNotification,
+  isGuestReportNotification,
+} from '../push-registration';
 
 const tap = (data: Record<string, unknown> | undefined) =>
   ({ notification: { request: { identifier: 'n-1', content: { data } } } }) as unknown as Notifications.NotificationResponse;
@@ -26,6 +30,22 @@ describe('assignmentIdFromNotification (AUTOMATION_NEEDS_PLAN C1)', () => {
   it('an assignment push carries no incident ID, so it never opens the citizen screen', () => {
     expect(incidentIdFromNotification(tap({ type: 'ASSIGNMENT', dispatchId: 'disp-1' }))).toBeNull();
     expect(incidentIdFromNotification(tap({ incidentId: 'inc-1' }))).toBe('inc-1');
+  });
+});
+
+describe('guest report pushes (MOD-42)', () => {
+  const guest = tap({ type: 'GUEST_REPORT_STATUS', status: 'DISPATCHED', publicReference: 'INC-2026-000200' });
+
+  it('are recognised, and open neither an incident nor an assignment (no account)', () => {
+    expect(isGuestReportNotification(guest)).toBe(true);
+    expect(incidentIdFromNotification(guest)).toBeNull();
+    expect(assignmentIdFromNotification(guest)).toBeNull();
+  });
+
+  it('other pushes are not guest pushes', () => {
+    expect(isGuestReportNotification(tap({ incidentId: 'inc-1', type: 'INCIDENT_DISPATCHED' }))).toBe(false);
+    expect(isGuestReportNotification(tap(undefined))).toBe(false);
+    expect(isGuestReportNotification(null)).toBe(false);
   });
 });
 

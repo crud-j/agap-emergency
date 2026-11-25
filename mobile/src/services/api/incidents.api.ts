@@ -25,6 +25,8 @@ export interface SubmittedIncident {
   public_reference: string;
   priority?: string;
   similar_report?: SimilarReportHint;
+  /** Guests only: lets this phone follow the report (status + push). Kept in Secure Store. */
+  guest_status_token?: string;
 }
 
 export async function submitIncident(

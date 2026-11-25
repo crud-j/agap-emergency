@@ -98,6 +98,8 @@ describe('IncidentStatusNotifier.notifyReporter', () => {
           incident_reporters: reporterUserId === null ? null : { user_id: reporterUserId },
         }),
       },
+      // No guest is following (guest pushes are covered in guest-follow.spec.ts).
+      guest_report_followers: { findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn() },
     };
     const notifications = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
     const queue = { add: jest.fn().mockResolvedValue({}) };

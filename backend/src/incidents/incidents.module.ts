@@ -15,6 +15,8 @@ import { TransportService } from './transport/transport.service';
 import { TransportRequestCacheService } from './transport/transport-request-cache.service';
 import { TransportLegModule } from './transport/transport-leg.module';
 import { ReporterPhotoService } from './reporter-photo/reporter-photo.service';
+import { GuestFollowService } from './guest-follow/guest-follow.service';
+import { GuestFollowController } from './guest-follow/guest-follow.controller';
 import { MediaModule } from '../media/media.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AuditModule } from '../audit/audit.module';
@@ -41,7 +43,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     TransportLegModule,
     GuestReportLimitModule,
   ],
-  controllers: [IncidentsController],
+  controllers: [IncidentsController, GuestFollowController],
   providers: [
     IncidentsService,
     IncidentCommandService,
@@ -56,6 +58,7 @@ import { QUEUE_NAMES } from '@agap/shared';
     TransportService,
     TransportRequestCacheService,
     ReporterPhotoService,
+    GuestFollowService,
   ],
   exports: [IncidentsService, IncidentCommandService, IncidentStatusService, TransportService, TransportLegModule],
 })

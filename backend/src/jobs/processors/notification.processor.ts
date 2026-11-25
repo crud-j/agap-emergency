@@ -11,6 +11,8 @@ import { ensureFirebaseApp } from '../../notifications/firebase-admin';
 
 export interface NotificationJobData {
   userId?: string;
+  /** A guest following their report (no account): the device token is read from that row. */
+  guestFollowerId?: string;
   phone?: string;
   channel: string;
   title?: string;
@@ -61,6 +63,7 @@ export class NotificationProcessor extends WorkerHost {
   }
 
   private async sendPush(data: NotificationJobData): Promise<void> {
+    if (data.guestFollowerId) return this.sendGuestPush(data, data.guestFollowerId);
     if (!data.userId) return;
     try {
       // FCM tokens stored in system_configurations with key `fcm_token:{userId}`
@@ -85,24 +88,59 @@ export class NotificationProcessor extends WorkerHost {
         return;
       }
 
-      await getMessaging().send({
-        token,
-        notification: {
-          body: data.body,
-          ...(data.title !== undefined && { title: data.title }),
-        },
-        data: data.data
-          ? Object.fromEntries(Object.entries(data.data).map(([k, v]) => [k, String(v)]))
-          : {},
-        ...(data.androidChannelId && {
-          android: { priority: 'high', notification: { channelId: data.androidChannelId } },
-        }),
-      });
+      await this.sendFcm(token, data);
 
       this.logger.log(`Push sent to userId=${data.userId}`);
     } catch (err) {
       this.logger.error(`Push failed for userId=${data.userId}: ${String(err)}`);
     }
+  }
+
+  /** Push to a guest's phone (MOD-42). Skipped once the link expired or push was turned off. */
+  private async sendGuestPush(data: NotificationJobData, followerId: string): Promise<void> {
+    try {
+      const follower = await this.prisma.guest_report_followers.findUnique({
+        where: { id: followerId },
+        select: { push_token: true, expires_at: true },
+      });
+      if (!follower?.push_token || follower.expires_at <= new Date()) {
+        this.logger.debug(`Guest follower ${followerId} has no live push token; PUSH skipped`);
+        return;
+      }
+      if (getApps().length === 0) {
+        this.logger.warn('Firebase not initialized — PUSH skipped');
+        return;
+      }
+      try {
+        await this.sendFcm(follower.push_token, data);
+        this.logger.log(`Push sent to guest follower ${followerId}`);
+      } catch (err) {
+        // The app was uninstalled or the token rotated: stop trying this device.
+        const code = (err as { code?: unknown })?.code;
+        if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
+          await this.prisma.guest_report_followers.update({ where: { id: followerId }, data: { push_token: null } });
+        }
+        throw err;
+      }
+    } catch (err) {
+      this.logger.error(`Push failed for guest follower ${followerId}: ${String(err)}`);
+    }
+  }
+
+  private async sendFcm(token: string, data: NotificationJobData): Promise<void> {
+    await getMessaging().send({
+      token,
+      notification: {
+        body: data.body,
+        ...(data.title !== undefined && { title: data.title }),
+      },
+      data: data.data
+        ? Object.fromEntries(Object.entries(data.data).map(([k, v]) => [k, String(v)]))
+        : {},
+      ...(data.androidChannelId && {
+        android: { priority: 'high', notification: { channelId: data.androidChannelId } },
+      }),
+    });
   }
 
   private async notifyEmergencyContacts(data: NotificationJobData): Promise<void> {

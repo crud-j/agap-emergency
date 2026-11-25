@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import { GUEST_REPORT_PUSH_TYPE } from '@agap/shared';
 import { registerFcmToken } from '../api/notifications.api';
 
 /**
@@ -10,13 +11,32 @@ export async function registerPushToken(
   accessToken: string,
   { requestPermission = true }: { requestPermission?: boolean } = {},
 ): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
+  try {
+    const deviceToken = await getDevicePushToken({ requestPermission });
+    if (!deviceToken) return false;
+    await registerFcmToken(accessToken, deviceToken);
+    return true;
+  } catch (error) {
+    console.warn('Unable to register push notification token', error);
+    return false;
+  }
+}
+
+/**
+ * This device's FCM token, after notification permission (asked for when
+ * `requestPermission`) and the Android channels. null when not allowed or unsupported.
+ * Shared by signed-in accounts and guests following a report.
+ */
+export async function getDevicePushToken(
+  { requestPermission = true }: { requestPermission?: boolean } = {},
+): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
   try {
     const current = await Notifications.getPermissionsAsync();
     const permissions = current.granted || !requestPermission
       ? current
       : await Notifications.requestPermissionsAsync();
-    if (!permissions.granted) return false;
+    if (!permissions.granted) return null;
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
@@ -37,13 +57,18 @@ export async function registerPushToken(
     }
 
     const deviceToken = await Notifications.getDevicePushTokenAsync();
-    if (typeof deviceToken.data !== 'string') return false;
-    await registerFcmToken(accessToken, deviceToken.data);
-    return true;
+    return typeof deviceToken.data === 'string' ? deviceToken.data : null;
   } catch (error) {
-    console.warn('Unable to register push notification token', error);
-    return false;
+    console.warn('Unable to read the push notification token', error);
+    return null;
   }
+}
+
+/** A tapped push about a guest report (no incident id: it opens the guest status screen). */
+export function isGuestReportNotification(
+  response: Notifications.NotificationResponse | null | undefined,
+): boolean {
+  return response?.notification.request.content.data?.type === GUEST_REPORT_PUSH_TYPE;
 }
 
 /** Dispatch a tapped assignment push points at (data.type 'ASSIGNMENT', data.dispatchId). */

@@ -14,6 +14,7 @@ import { OfflineBanner } from '../src/components/ui/OfflineBanner';
 import {
   assignmentIdFromNotification,
   incidentIdFromNotification,
+  isGuestReportNotification,
   registerPushToken,
 } from '../src/services/push/push-registration';
 import { useLiveIncidentRefresh } from '../src/hooks/useLiveIncidentRefresh';
@@ -120,7 +121,8 @@ function AuthGuard() {
 
   // A tapped push opens its assignment (responder) or incident. Held until the session
   // is loaded, and declared after the redirect above so a cold start lands home → target.
-  const [tapped, setTapped] = useState<{ pathname: string; id: string } | null>(null);
+  // A guest report push opens the guest status screen, which needs no session.
+  const [tapped, setTapped] = useState<{ pathname: string; id?: string; guest?: boolean } | null>(null);
   const handledResponses = useRef(new Set<string>());
 
   useEffect(() => {
@@ -128,6 +130,11 @@ function AuthGuard() {
     const take = (response: Notifications.NotificationResponse | null) => {
       const key = response?.notification.request.identifier;
       if (!key || handledResponses.current.has(key)) return;
+      if (isGuestReportNotification(response)) {
+        handledResponses.current.add(key);
+        setTapped({ pathname: '/emergency/guest-status', guest: true });
+        return;
+      }
       // Assignment first: its param is the dispatch ID, not an incident ID.
       const dispatchId = assignmentIdFromNotification(response);
       const incidentId = dispatchId ? null : incidentIdFromNotification(response);
@@ -145,8 +152,13 @@ function AuthGuard() {
   }, []);
 
   useEffect(() => {
-    if (!tapped || isLoading || !accessibilityLoaded || !isAuthenticated) return;
-    router.push({ pathname: tapped.pathname, params: { id: tapped.id } } as never);
+    if (!tapped || isLoading || !accessibilityLoaded) return;
+    if (tapped.guest) {
+      router.push(tapped.pathname as never);
+    } else {
+      if (!isAuthenticated) return;
+      router.push({ pathname: tapped.pathname, params: { id: tapped.id } } as never);
+    }
     setTapped(null);
   }, [tapped, isAuthenticated, isLoading, accessibilityLoaded]);
 
