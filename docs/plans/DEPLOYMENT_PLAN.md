@@ -343,7 +343,7 @@ Run everything from `mobile/`; [mobile/eas.json](../../mobile/eas.json) is the o
 **Done when:**
 - [x] The APK installs. *(2026-11-24; ID scan checked on the APK too.)*
 - [ ] Sign-in works over mobile data, not only Wi-Fi. *(Wi-Fi sign-in works against Railway, so the app does not depend on the laptop or LAN. Still to test on a phone that has load: it checks that the carrier can reach Railway's IPv4-only address. First open `https://agap-emergency-production.up.railway.app/v1/health` in Chrome on data.)*
-- [ ] Push permission is granted, and the device token registers.
+- [x] Push permission is granted, and the device token registers. *(2026-11-25: Health → Integrations showed registered devices ≥ 1 after the demo citizen signed in; a dispatcher's Acknowledge produced an "Incident updates" notification on the APK.)*
 
 ---
 
@@ -353,7 +353,7 @@ Run all of these on the deployed system, not locally.
 
 **Emergency path**
 - [ ] A guest SOS from the APK creates an incident. It appears live on the web dispatch map without a reload.
-- [ ] The MDRRMO ops phone gets the `AGAP|INC-…` SMS.
+- [x] The MDRRMO ops phone gets the `AGAP|INC-…` SMS. *(Received on the ops phone on 2026-11-24. On 2026-11-25 the admin SMS Activity page logged the ops alert as `Accepted` by Textbee. "Accepted" means the gateway took it, not that the phone confirmed delivery.)*
 - [ ] A signed-in citizen SOS works, and the citizen sees status changes live.
 - [ ] Dispatching from the web reaches the responder APK (push and live status). Responder location updates show on the map.
 - [ ] With mobile data off, "Send by SMS" creates the incident within about 30 s, and the reference is texted back. Turning data back on and resending gives the **same** incident, not a duplicate.
