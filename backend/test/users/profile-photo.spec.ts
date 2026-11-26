@@ -15,6 +15,7 @@ import {
 } from '../../src/users/profile-photo/profile-photo.service';
 import {
   DEFAULT_THRESHOLDS,
+  PHOTO_CHECK_PROMPTS,
   PhotoContentCheckService,
   flagProbability,
   issuesFor,
@@ -34,7 +35,7 @@ function file(buffer: Buffer, mimetype = 'image/jpeg'): Express.Multer.File {
 function makeService(
   user: Record<string, unknown> | null,
   updateCount = 1,
-  checkResult: PhotoCheckResult = { status: 'passed', scores: { SUNGLASSES: 0.1, UNDRESSED: 0.1 } },
+  checkResult: PhotoCheckResult = { status: 'passed', scores: { SUNGLASSES: 0.1, UNDRESSED: 0.1, HEADWEAR: 0.1 } },
 ) {
   const prisma = {
     user: {
@@ -158,12 +159,12 @@ describe('MOD-01 profile photo', () => {
     it('a flagged photo is refused with its reasons; nothing is stored and the window is not used', async () => {
       const { service, media, prisma, audit } = makeService(citizen, 1, {
         status: 'rejected',
-        issues: ['SUNGLASSES', 'UNDRESSED'],
-        scores: { SUNGLASSES: 0.9, UNDRESSED: 0.95 },
+        issues: ['SUNGLASSES', 'UNDRESSED', 'HEADWEAR'],
+        scores: { SUNGLASSES: 0.9, UNDRESSED: 0.95, HEADWEAR: 0.9 },
       });
       const error = await service.upload('user-1', file(await jpegBytes()), 'live-camera').catch((e) => e);
       expect(error).toBeInstanceOf(UnprocessableEntityException);
-      expect(error.getResponse()).toMatchObject({ code: 'PROFILE_PHOTO_REJECTED', issues: ['SUNGLASSES', 'UNDRESSED'] });
+      expect(error.getResponse()).toMatchObject({ code: 'PROFILE_PHOTO_REJECTED', issues: ['SUNGLASSES', 'UNDRESSED', 'HEADWEAR'] });
       expect(media.putPrivateObject).not.toHaveBeenCalled();
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
       expect(audit.log).not.toHaveBeenCalled();
@@ -262,9 +263,26 @@ describe('MOD-01 profile photo', () => {
     });
 
     it('flags only scores at or over their cut-off', () => {
-      expect(issuesFor({ SUNGLASSES: 0.78, UNDRESSED: 0.69 }, DEFAULT_THRESHOLDS)).toEqual(['SUNGLASSES']);
-      expect(issuesFor({ SUNGLASSES: 0.5, UNDRESSED: 0.95 }, DEFAULT_THRESHOLDS)).toEqual(['UNDRESSED']);
-      expect(issuesFor({ SUNGLASSES: 0.1, UNDRESSED: 0.1 }, DEFAULT_THRESHOLDS)).toEqual([]);
+      expect(issuesFor({ SUNGLASSES: 0.78, UNDRESSED: 0.69, HEADWEAR: 0.79 }, DEFAULT_THRESHOLDS)).toEqual(['SUNGLASSES']);
+      expect(issuesFor({ SUNGLASSES: 0.5, UNDRESSED: 0.95, HEADWEAR: 0.1 }, DEFAULT_THRESHOLDS)).toEqual(['UNDRESSED']);
+      expect(issuesFor({ SUNGLASSES: 0.1, UNDRESSED: 0.1, HEADWEAR: 0.1 }, DEFAULT_THRESHOLDS)).toEqual([]);
+      expect(issuesFor({ SUNGLASSES: 0.1, UNDRESSED: 0.1, HEADWEAR: 0.8 }, DEFAULT_THRESHOLDS)).toEqual(['HEADWEAR']);
+    });
+
+    it('caps and hats are flagged; religious head coverings are on the pass side', () => {
+      const { flag, pass } = PHOTO_CHECK_PROMPTS.HEADWEAR;
+      expect(flag.join(' ')).toMatch(/cap/);
+      expect(flag.join(' ')).toMatch(/hat/);
+      for (const covering of ['hijab', 'headscarf', 'turban']) {
+        expect(pass.some((p) => p.includes(covering))).toBe(true);
+        expect(flag.some((p) => p.includes(covering))).toBe(false);
+      }
+    });
+
+    it('PROFILE_PHOTO_HEADWEAR_THRESHOLD tunes the cap/hat cut-off', () => {
+      const config = { get: (key: string, fallback?: string) => (key === 'PROFILE_PHOTO_HEADWEAR_THRESHOLD' ? '0.9' : fallback) };
+      const checker = new PhotoContentCheckService(config as any);
+      expect((checker as any).thresholds.HEADWEAR).toBe(0.9);
     });
 
     it('PROFILE_PHOTO_CHECKS=off skips the check without loading the model', async () => {

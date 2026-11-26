@@ -1,9 +1,16 @@
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Alert, StatusBar, Linking } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  View, Text, StyleSheet, ScrollView, ActivityIndicator, Alert, StatusBar, Linking, TouchableOpacity,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuthStore } from '@/src/stores/auth.store';
+import { useTranslations } from '@/src/hooks/useAccessibility';
+import { getMe } from '@/src/services/api/users.api';
 import { ProfileAvatar } from '@/src/components/profile/profile-avatar';
+import { ChangePhotoModal } from '@/src/components/profile/change-photo-modal';
+import { photoLockedUntil } from '@/src/lib/profile-photo';
 import { useResponderSummary } from '@/src/hooks/useResponderSummary';
 import { AvailabilityControl } from '@/src/components/responder/availability-control';
 import {
@@ -20,8 +27,40 @@ const AVAILABILITY: Record<string, { label: string; color: string }> = {
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const t = useTranslations();
   const logout = useAuthStore((s) => s.logout);
+  const authUser = useAuthStore((s) => s.user);
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const updateUser = useAuthStore((s) => s.updateUser);
   const { data: summary, isLoading, isError, refetch } = useResponderSummary();
+
+  // ── Profile picture (MOD-01): same live selfie and checks as the citizen app ──
+  const [photoModal, setPhotoModal] = useState(false);
+  const lockedUntil = photoLockedUntil(authUser);
+
+  // Fresh photo fields on every visit: the photo may have changed on another device.
+  useFocusEffect(
+    useCallback(() => {
+      if (!accessToken) return;
+      let cancelled = false;
+      getMe()
+        .then((me) => {
+          if (cancelled) return;
+          void updateUser({
+            has_profile_photo: !!me.has_profile_photo,
+            profile_photo_updated_at: me.profile_photo_updated_at ?? null,
+            profile_photo_next_change_at: me.profile_photo_next_change_at ?? null,
+          });
+        })
+        .catch(() => { /* keep what we have */ });
+      return () => { cancelled = true; };
+    }, [accessToken, updateUser]),
+  );
+
+  function proceedToSelfie() {
+    setPhotoModal(false);
+    router.push('/profile/selfie' as never);
+  }
 
   function handleLogout() {
     Alert.alert(
@@ -97,6 +136,18 @@ export default function ProfileScreen() {
         {/* Identity card — same deep-green surface as the citizen profile */}
         <View style={styles.identityCard}>
           <ProfileAvatar style={styles.avatar} textStyle={styles.avatarText} initial={initials} />
+          <TouchableOpacity
+            style={styles.changePhotoBtn}
+            activeOpacity={0.7}
+            onPress={() => setPhotoModal(true)}
+            accessibilityRole="button"
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Text style={styles.changePhotoText}>
+              {authUser?.has_profile_photo ? t.profilePhoto.change : t.profilePhoto.add}
+            </Text>
+            <Ionicons name="create-outline" size={14} color="#9FDCC6" style={{ marginLeft: 5 }} />
+          </TouchableOpacity>
           <Text style={styles.name} numberOfLines={1}>{user.full_name ?? 'Responder'}</Text>
           <View style={styles.roleRow}>
             <View style={styles.roleBadge}>
@@ -156,10 +207,27 @@ export default function ProfileScreen() {
 
         {/* Account */}
         <SectionLabel title="Account" />
+        <ListGroup>
+          <ListRow
+            icon="finger-print-outline"
+            label={t.profile.passkeys}
+            sub={t.profile.passkeysSub}
+            last
+            onPress={() => router.push('/profile/passkeys' as never)}
+          />
+        </ListGroup>
+        <View style={styles.gap} />
         {signOutButton}
 
         <Text style={styles.footerNote}>AGAP Responder · Bocaue MDRRMO</Text>
       </ScrollView>
+
+      <ChangePhotoModal
+        visible={photoModal}
+        lockedUntil={lockedUntil}
+        onCancel={() => setPhotoModal(false)}
+        onProceed={proceedToSelfie}
+      />
     </SafeAreaView>
   );
 }
@@ -181,6 +249,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#E2F0EA', borderWidth: 3, borderColor: '#DDEFE8',
   },
   avatarText: { fontSize: 30, fontWeight: '800', color: colors.primary },
+  changePhotoBtn: {
+    flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 10, backgroundColor: 'rgba(221, 239, 232, 0.12)', borderWidth: 1, borderColor: 'rgba(159, 220, 198, 0.35)',
+  },
+  changePhotoText: { fontSize: 12.5, fontWeight: '800', color: '#9FDCC6' },
+  gap: { height: 12 },
   name: { fontSize: 23, fontWeight: '800', letterSpacing: -0.4, color: colors.white, marginBottom: 10 },
   roleRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
   roleBadge: {

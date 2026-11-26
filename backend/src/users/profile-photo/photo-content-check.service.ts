@@ -4,7 +4,8 @@ import { resolve } from 'path';
 import sharp from 'sharp';
 
 /**
- * MOD-01: on-server check of a profile selfie for sunglasses and missing clothing.
+ * MOD-01: on-server check of a profile selfie for sunglasses, missing clothing, and a
+ * cap or hat (religious head coverings pass).
  *
  * Runs an open model (OpenAI CLIP ViT-B/32, MIT licence, ONNX, quantized) on this
  * server through transformers.js. The photo is never sent to a third party and a check
@@ -18,7 +19,7 @@ import sharp from 'sharp';
  * tuned with PROFILE_PHOTO_*_THRESHOLD. It is a screen, not proof: the person can retake.
  */
 
-export type PhotoIssue = 'SUNGLASSES' | 'UNDRESSED';
+export type PhotoIssue = 'SUNGLASSES' | 'UNDRESSED' | 'HEADWEAR';
 
 interface PromptGroup {
   /** Descriptions that mean the photo has this issue. */
@@ -57,9 +58,33 @@ export const PHOTO_CHECK_PROMPTS: Record<PhotoIssue, PromptGroup> = {
       'a photo of a person wearing a dress',
     ],
   },
+  // Caps and hats only. Religious head coverings must pass: they are listed on the pass
+  // side so CLIP doesn't read a hijab, headscarf or turban as "a hat".
+  HEADWEAR: {
+    flag: [
+      'a photo of a person wearing a baseball cap',
+      'a photo of a person wearing a hat',
+      'a photo of a person wearing a cap on their head',
+      'a photo of a person wearing a cap pulled low over their eyes',
+    ],
+    pass: [
+      'a photo of a person with nothing on their head',
+      'a photo of a person with their hair visible',
+      'a photo of a bald person',
+      'a photo of a person wearing a hijab',
+      'a photo of a person wearing a headscarf',
+      'a photo of a person wearing a turban',
+      'a close-up photo of a face',
+    ],
+  },
 };
 
-export const DEFAULT_THRESHOLDS: Record<PhotoIssue, number> = { SUNGLASSES: 0.78, UNDRESSED: 0.7 };
+/**
+ * HEADWEAR (added 2026-11-26) starts at 0.80, so only a clear cap or hat is refused, until
+ * it is tuned on real selfies with scripts/photo-check-scores.ts. Override with
+ * PROFILE_PHOTO_HEADWEAR_THRESHOLD.
+ */
+export const DEFAULT_THRESHOLDS: Record<PhotoIssue, number> = { SUNGLASSES: 0.78, UNDRESSED: 0.7, HEADWEAR: 0.8 };
 
 const MODEL_ID = 'Xenova/clip-vit-base-patch32';
 /** CLIP's learned logit scale (exp(4.6052)). */
@@ -130,6 +155,7 @@ export class PhotoContentCheckService implements OnModuleInit {
     this.thresholds = {
       SUNGLASSES: threshold('PROFILE_PHOTO_SUNGLASSES_THRESHOLD', DEFAULT_THRESHOLDS.SUNGLASSES),
       UNDRESSED: threshold('PROFILE_PHOTO_UNDRESSED_THRESHOLD', DEFAULT_THRESHOLDS.UNDRESSED),
+      HEADWEAR: threshold('PROFILE_PHOTO_HEADWEAR_THRESHOLD', DEFAULT_THRESHOLDS.HEADWEAR),
     };
   }
 

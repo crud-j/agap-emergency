@@ -20,6 +20,7 @@ import {
 import { useLiveIncidentRefresh } from '../src/hooks/useLiveIncidentRefresh';
 import { AgapSplash } from '../src/components/splash/AgapSplash';
 import { loadDevRoute, saveDevRoute, type DevRoute } from '../src/lib/dev-route-restore';
+import { hasCompletedOnboarding, markOnboardingComplete } from '../src/lib/onboarding-status';
 
 // Wire React Native's AppState into TanStack Query's focus manager so
 // refetchOnWindowFocus works when the app comes back to the foreground.
@@ -67,9 +68,13 @@ function AuthGuard() {
   const devRoute = useRef<DevRoute | null>(null);
   const [devRouteLoaded, setDevRouteLoaded] = useState(!__DEV__);
 
+  // Onboarding shows once per install (null while the flag is being read).
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
+
   useEffect(() => {
     loadFromStorage();
     loadAccessibility();
+    void hasCompletedOnboarding().then(setOnboardingDone);
     if (__DEV__) {
       void loadDevRoute().then((route) => {
         devRoute.current = route;
@@ -84,8 +89,8 @@ function AuthGuard() {
   }, [segments, params, devRouteLoaded]);
 
   useEffect(() => {
-    // Wait until both SecureStore and accessibility prefs have been read.
-    if (isLoading || !accessibilityLoaded || !devRouteLoaded) return;
+    // Wait until the session, accessibility prefs and the onboarding flag have been read.
+    if (isLoading || !accessibilityLoaded || !devRouteLoaded || onboardingDone === null) return;
 
     // Typed routes declare segments as a non-empty tuple, but at the app root it
     // is [] at runtime — widen the type so this check isn't flagged as impossible.
@@ -103,6 +108,11 @@ function AuthGuard() {
     }
 
     if (isAuthenticated) {
+      // Someone who has signed in is past onboarding (covers installs from before the flag).
+      if (!onboardingDone) {
+        setOnboardingDone(true);
+        void markOnboardingComplete();
+      }
       // Authenticated users can still enter the emergency flow from home.
       // Only redirect away from auth/onboarding screens, not emergency routes.
       if (atRoot || inAuthOnly) {
@@ -110,14 +120,14 @@ function AuthGuard() {
       }
     } else {
       if (atRoot) {
-        // First-time or logged-out user at root → begin onboarding.
-        router.replace('/onboarding/first-onbrd');
+        // First launch → onboarding; every launch after it → sign-in.
+        router.replace(onboardingDone ? '/auth/login' : '/onboarding/first-onbrd');
       } else if (!inPublic) {
         // Unauthenticated user tried to access a protected route → login.
         router.replace('/auth/login');
       }
     }
-  }, [isAuthenticated, isLoading, accessibilityLoaded, devRouteLoaded, segments, user?.role]);
+  }, [isAuthenticated, isLoading, accessibilityLoaded, devRouteLoaded, onboardingDone, segments, user?.role]);
 
   // A tapped push opens its assignment (responder) or incident. Held until the session
   // is loaded, and declared after the redirect above so a cold start lands home → target.

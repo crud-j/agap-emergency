@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { useFinishOnboarding } from '../../src/hooks/useFinishOnboarding';
 import { Ionicons } from '@expo/vector-icons';
 import { OnboardProgressbar } from '../../src/components/ui/onbrd-progressbar';
 import { useAccessibilityStore } from '../../src/stores/accessibility.store';
@@ -88,6 +89,7 @@ const DISPLAY_TO_SIZE: Record<'Small' | 'Medium' | 'Large', TextSize> = {
 
 export default function OnboardingScreenFour() {
   const router = useRouter();
+  const finishOnboarding = useFinishOnboarding();
   const {
     loadFromStorage,
     setPreferences,
@@ -117,7 +119,7 @@ export default function OnboardingScreenFour() {
   }
 
   function handleContinue() {
-    router.push('/auth/login');
+    finishOnboarding();
   }
 
   return (
@@ -129,7 +131,7 @@ export default function OnboardingScreenFour() {
         <View style={styles.topBar}>
           <OnboardProgressbar currentStep={4} totalSteps={4} />
           <TouchableOpacity
-            onPress={() => router.push('/auth/login')}
+            onPress={finishOnboarding}
             accessibilityRole="button"
             accessibilityLabel="Skip onboarding"
             style={styles.skipButton}

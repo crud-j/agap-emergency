@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { useFinishOnboarding } from '../../src/hooks/useFinishOnboarding';
 import { OnboardProgressbar } from '../../src/components/ui/onbrd-progressbar';
 
 // SVG logo — imported as a React component via react-native-svg-transformer.
@@ -63,6 +64,7 @@ function ContinueButton({ onPress }: { onPress: () => void }) {
 
 export default function OnboardingScreenTwo() {
   const router = useRouter();
+  const finishOnboarding = useFinishOnboarding();
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -73,7 +75,7 @@ export default function OnboardingScreenTwo() {
         <View style={styles.topBar}>
           <OnboardProgressbar currentStep={2} totalSteps={4} />
           <TouchableOpacity
-            onPress={() => router.push('/auth/login')}
+            onPress={finishOnboarding}
             accessibilityRole="button"
             accessibilityLabel="Skip onboarding"
             style={styles.skipButton}

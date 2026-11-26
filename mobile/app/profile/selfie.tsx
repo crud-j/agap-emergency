@@ -8,6 +8,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { UserRole } from '@agap/shared';
 import { goBack } from '@/src/lib/navigation';
 import { useTranslations } from '@/src/hooks/useAccessibility';
 import { useAccessibilityStore } from '@/src/stores/accessibility.store';
@@ -39,6 +40,9 @@ export default function SelfieScreen() {
   const language = useAccessibilityStore((s) => s.language);
   const accessToken = useAuthStore((s) => s.accessToken);
   const updateUser = useAuthStore((s) => s.updateUser);
+  // Where "back" lands with no history: the responder or the citizen profile.
+  const role = useAuthStore((s) => s.user?.role);
+  const profileRoute = role === UserRole.RESPONDER ? '/responder/profile' : '/profile';
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -75,7 +79,7 @@ export default function SelfieScreen() {
       await updateUser(info);
       const date = info.profile_photo_next_change_at ? formatPhotoDate(info.profile_photo_next_change_at, language) : '';
       Alert.alert(t.savedTitle, date ? t.savedBody.replace('{date}', date) : undefined);
-      goBack('/profile');
+      goBack(profileRoute);
     } catch (err) {
       const body = err instanceof ApiError
         ? (err.body as { code?: string; nextChangeAt?: string; issues?: string[] } | undefined)
@@ -85,6 +89,7 @@ export default function SelfieScreen() {
         const reasons = [
           body.issues?.includes('SUNGLASSES') && `• ${t.reasonSunglasses}`,
           body.issues?.includes('UNDRESSED') && `• ${t.reasonUndressed}`,
+          body.issues?.includes('HEADWEAR') && `• ${t.reasonHeadwear}`,
         ].filter(Boolean).join('\n');
         Alert.alert(t.rejectedTitle, reasons || t.errorGeneric, [{ text: t.retake, onPress: retake }]);
         return;
@@ -97,7 +102,7 @@ export default function SelfieScreen() {
         // Changed from another device: show the real date and keep the profile in step.
         await updateUser({ profile_photo_next_change_at: body.nextChangeAt });
         Alert.alert(t.modalTitle, t.lockedBody.replace('{date}', formatPhotoDate(body.nextChangeAt, language)));
-        goBack('/profile');
+        goBack(profileRoute);
         return;
       }
       const message = err instanceof NetworkError
@@ -123,7 +128,7 @@ export default function SelfieScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
-          onPress={() => (phase === 'review' ? retake() : goBack('/profile'))}
+          onPress={() => (phase === 'review' ? retake() : goBack(profileRoute))}
           disabled={saving}
           accessibilityRole="button"
           accessibilityLabel={phase === 'review' ? t.retake : t.close}
