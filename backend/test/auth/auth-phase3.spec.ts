@@ -10,6 +10,12 @@ import { MfaService } from '../../src/auth/mfa/mfa.service';
 import { MfaStateStore } from '../../src/auth/mfa/mfa-state.store';
 import { MfaTokenService } from '../../src/auth/mfa/mfa-token.service';
 import { TotpService } from '../../src/auth/mfa/totp.service';
+
+// Backup codes and passwords are hashed with bcryptjs (pure JS) at the production cost
+// of 10: one regenerate() is 10 hashes, and some tests do ~30 hash/compare calls. In the
+// full parallel run that passes Jest's 5 s default on a busy machine or CI runner. A
+// longer limit for this file only, so a real hang elsewhere still fails fast.
+jest.setTimeout(30_000);
 import { TrustedDeviceService, describeUserAgent } from '../../src/auth/mfa/trusted-device.service';
 import { authContextFromRequest } from '../../src/auth/request-context';
 import { JwtStrategy } from '../../src/auth/strategies/jwt.strategy';
