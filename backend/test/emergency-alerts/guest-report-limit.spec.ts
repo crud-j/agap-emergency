@@ -17,10 +17,23 @@ import {
 
 // Nothing listens on port 1, so the service runs on its in-memory fallback — the
 // same path it takes in production while Redis is down.
-function makeService(env: Record<string, string> = {}) {
+function makeService(env: Record<string, string> = {}, prisma?: unknown) {
   const values: Record<string, string> = { REDIS_URL: 'redis://127.0.0.1:1', ...env };
   const config = { get: (key: string, fallback?: string) => values[key] ?? fallback } as unknown as ConfigService;
-  return new GuestReportLimitService(config);
+  return new GuestReportLimitService(config, prisma as any);
+}
+
+/** A stand-in incident table: id → status, reference, and what it was merged into. */
+type FakeIncident = { status: string; public_reference: string; duplicate_of_id?: string | null };
+function fakePrisma(rows: Record<string, FakeIncident>) {
+  return {
+    incident: {
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
+        const row = rows[where.id];
+        return row ? { duplicate_of_id: null, ...row } : null;
+      }),
+    },
+  };
 }
 
 const DEVICE_MAX = GUEST_REPORT_RULES.find((r) => r.scope === 'device')!.max;
@@ -143,6 +156,112 @@ describe('GuestReportLimitService', () => {
     expect(normalizeDeviceId('bad id with spaces')).toBeUndefined();
     expect(normalizeDeviceId(['device-aaaaaaaa'])).toBeUndefined();
     expect(normalizeDeviceId('k3j4h5g6f7d8s9a0q1w2e3r4')).toBe('k3j4h5g6f7d8s9a0q1w2e3r4');
+  });
+});
+
+describe('One open guest report per phone', () => {
+  const PHONE = 'phone-open-aaaa';
+  const OTHER = 'phone-open-bbbb';
+  let rows: Record<string, FakeIncident>;
+  let prisma: ReturnType<typeof fakePrisma>;
+  let service: GuestReportLimitService;
+
+  beforeEach(() => {
+    rows = { 'inc-1': { status: 'RECEIVED', public_reference: 'INC-2026-000401' } };
+    prisma = fakePrisma(rows);
+    service = makeService({}, prisma);
+  });
+  afterEach(async () => {
+    await service.onModuleDestroy();
+  });
+
+  async function firstReport() {
+    await service.reserve({ ip: '203.0.113.40', deviceId: PHONE }, 'o-1');
+    await service.rememberOpen(PHONE, 'inc-1');
+  }
+
+  it('refuses a second report while the first is open, naming it and the hotlines', async () => {
+    await firstReport();
+
+    const err = await service.reserve({ ip: '203.0.113.40', deviceId: PHONE }, 'o-2').catch((e) => e);
+    expect(err).toBeInstanceOf(GuestReportLimitExceeded);
+    expect(err.scope).toBe('open');
+    expect(err.getStatus()).toBe(429);
+    expect(err.retryAfterSeconds).toBe(0);
+    const body = err.getResponse() as Record<string, unknown>;
+    expect(body).toMatchObject({ code: 'GUEST_REPORT_OPEN', publicReference: 'INC-2026-000401' });
+    expect(String(body['message'])).toMatch(/INC-2026-000401.*911/);
+  });
+
+  it.each(['ACKNOWLEDGED', 'DISPATCHED', 'ON_SCENE', 'TRANSPORTING'])('still refuses at %s', async (status) => {
+    await firstReport();
+    rows['inc-1']!.status = status;
+    await expect(service.reserve({ deviceId: PHONE }, 'o-2')).rejects.toMatchObject({ scope: 'open' });
+  });
+
+  it.each(['RESOLVED', 'CLOSED', 'CANCELLED', 'FALSE_ALERT', 'UNABLE_TO_RESPOND', 'REFERRED'])(
+    'lets the phone report again once the first is %s',
+    async (status) => {
+      await firstReport();
+      rows['inc-1']!.status = status;
+      await expect(service.reserve({ deviceId: PHONE }, 'o-2')).resolves.toMatchObject({ repeat: false });
+    },
+  );
+
+  it('a report merged into another stays open while that one is', async () => {
+    await firstReport();
+    rows['inc-1'] = { status: 'DUPLICATE', public_reference: 'INC-2026-000401', duplicate_of_id: 'inc-2' };
+    rows['inc-2'] = { status: 'DISPATCHED', public_reference: 'INC-2026-000402' };
+
+    // The guest is told their own reference, not the other reporter's.
+    await expect(service.reserve({ deviceId: PHONE }, 'o-2')).rejects.toMatchObject({ openReference: 'INC-2026-000401' });
+
+    rows['inc-2']!.status = 'CLOSED';
+    await expect(service.reserve({ deviceId: PHONE }, 'o-3')).resolves.toBeDefined();
+  });
+
+  it('a retry of the same report (same idempotency key) is never refused', async () => {
+    await firstReport();
+    await expect(service.reserve({ deviceId: PHONE }, 'o-1')).resolves.toMatchObject({ repeat: true });
+  });
+
+  it('other phones, and signed-in reports (no device id), are not affected', async () => {
+    await firstReport();
+    await expect(service.reserve({ ip: '203.0.113.40', deviceId: OTHER }, 'p-1')).resolves.toBeDefined();
+    await expect(service.reserve({ ip: '203.0.113.41' }, 'p-2')).resolves.toBeDefined();
+  });
+
+  it('a database error lets the report through (an outage never blocks help)', async () => {
+    await firstReport();
+    prisma.incident.findUnique.mockRejectedValueOnce(new Error('db down'));
+    await expect(service.reserve({ deviceId: PHONE }, 'o-2')).resolves.toBeDefined();
+  });
+
+  it('a deleted incident frees the phone', async () => {
+    await firstReport();
+    delete rows['inc-1'];
+    await expect(service.reserve({ deviceId: PHONE }, 'o-2')).resolves.toBeDefined();
+  });
+
+  it('the interceptor remembers the new report and records the refusal with its reference', async () => {
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    const interceptor = new GuestReportLimitInterceptor(service, audit as any);
+    const req = (key: string) => ({ ip: '203.0.113.42', headers: { 'x-device-id': PHONE }, body: { idempotencyKey: key } });
+    const res = { setHeader: jest.fn() };
+    const ctx = (r: unknown) => ({ switchToHttp: () => ({ getRequest: () => r, getResponse: () => res }) }) as any;
+
+    await lastValueFrom(await interceptor.intercept(ctx(req('i-1')), { handle: () => of({ id: 'inc-1', public_reference: 'INC-2026-000401' }) }));
+    // rememberOpen is fire-and-forget; let it finish.
+    await new Promise((r) => setImmediate(r));
+
+    await expect(interceptor.intercept(ctx(req('i-2')), { handle: () => of({ id: 'never' }) })).rejects.toMatchObject({ scope: 'open' });
+    expect(res.setHeader).not.toHaveBeenCalled();
+    expect(audit.log).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: AuditAction.GUEST_REPORT_BLOCKED,
+        newValues: expect.objectContaining({ reason: 'LIMIT_OPEN', openReport: 'INC-2026-000401', device: deviceCode(PHONE) }),
+      }),
+    );
   });
 });
 

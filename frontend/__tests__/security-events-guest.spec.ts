@@ -17,6 +17,12 @@ describe('Security Events: guest report details', () => {
     );
   });
 
+  it('a refusal for an open report names that report', () => {
+    expect(guestDetailOf({ reason: 'LIMIT_OPEN', openReport: 'INC-2026-000061', device: 'ffff0000' })).toBe(
+      'Earlier report still open · INC-2026-000061 · Phone ffff0000',
+    );
+  });
+
   it('nothing known → a dash', () => {
     expect(guestDetailOf({})).toBe('—');
   });

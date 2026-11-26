@@ -1,7 +1,9 @@
-import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
+import { IncidentStatus } from '@agap/shared';
+import { PrismaService } from '../../common/prisma/prisma.service';
 
 /** Where a guest report came from. Either part may be missing. */
 export interface GuestSource {
@@ -19,6 +21,8 @@ export interface GuestSource {
 }
 
 export type GuestLimitScope = 'device' | 'ip' | 'phone' | 'spot';
+/** Why a guest report was refused: a counter, or `open` (this phone's last report is still open). */
+export type GuestBlockReason = GuestLimitScope | 'open';
 
 interface LimitRule {
   scope: GuestLimitScope;
@@ -35,8 +39,10 @@ interface LimitRule {
  * during a typhoon many real neighbours may report at once (Architectural Rule 14).
  */
 export const GUEST_REPORT_RULES: readonly LimitRule[] = [
+  // On top of these, a phone whose last guest report is still open can't send another
+  // (see openReportOf), so these only matter once reports get closed.
   { scope: 'device', windowSeconds: 10 * 60, max: 2 },
-  { scope: 'device', windowSeconds: 24 * 60 * 60, max: 6 },
+  { scope: 'device', windowSeconds: 24 * 60 * 60, max: 3 },
   { scope: 'ip', windowSeconds: 10 * 60, max: 20 },
   { scope: 'ip', windowSeconds: 24 * 60 * 60, max: 100 },
   // SMS reports: only an SOS text carries a phone. A SIM is harder to replace than an
@@ -64,6 +70,27 @@ export type GuestReportCounts = Partial<Record<GuestLimitScope, number>>;
 
 /** A retry of an already-admitted report (same idempotency key) is free for this long. */
 const ADMITTED_TTL_SECONDS = 24 * 60 * 60;
+/**
+ * How long a phone is tied to its last guest report. A report still open after this
+ * (forgotten in the queue) no longer blocks that phone; the daily device cap still applies.
+ */
+export const OPEN_REPORT_TTL_SECONDS = 24 * 60 * 60;
+/**
+ * Statuses after which a guest's report no longer blocks a new one: the response is
+ * over, or the report was refused. DUPLICATE is not one: the report it was merged into
+ * is checked instead. UNABLE_TO_RESPOND and REFERRED are included so a guest is never
+ * stuck while the Operations Center re-dispatches or hands off.
+ */
+export const GUEST_REPORT_ENDED_STATUSES: ReadonlySet<string> = new Set([
+  IncidentStatus.RESOLVED,
+  IncidentStatus.CLOSED,
+  IncidentStatus.CANCELLED,
+  IncidentStatus.FALSE_ALERT,
+  IncidentStatus.UNABLE_TO_RESPOND,
+  IncidentStatus.REFERRED,
+]);
+/** Merge chains followed upward when checking a DUPLICATE report. */
+const MAX_MERGE_DEPTH = 3;
 const KEY_PREFIX = 'guestlim:';
 /** A Redis call slower than this is treated as unavailable. */
 const CALL_TIMEOUT_MS = 250;
@@ -88,31 +115,51 @@ const NO_LEASE: GuestReportLease = { release: async () => undefined, repeat: tru
 
 export class GuestReportLimitExceeded extends HttpException {
   constructor(
+    /** Seconds until a counter frees up; 0 when it depends on the open report ending. */
     readonly retryAfterSeconds: number,
     /** Which limit was reached (recorded in Security Events). */
-    readonly scope: GuestLimitScope = 'device',
+    readonly scope: GuestBlockReason = 'device',
     /** That limit, for the security event. */
     readonly rule?: { windowSeconds: number; max: number },
+    /** For `open`: the reference of this phone's report that is still open. */
+    readonly openReference?: string,
   ) {
-    const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
-    const wait = minutes >= 120 ? `${Math.ceil(minutes / 60)} hours` : `${minutes} minute${minutes === 1 ? '' : 's'}`;
     super(
       {
         statusCode: HttpStatus.TOO_MANY_REQUESTS,
         error: 'Too Many Requests',
-        code: 'GUEST_REPORT_LIMIT',
+        code: scope === 'open' ? 'GUEST_REPORT_OPEN' : 'GUEST_REPORT_LIMIT',
         retryAfterSeconds,
-        message:
-          scope === 'spot'
-            ? 'This emergency was already reported several times from your connection at this place, and MDRRMO has it. ' +
-              'If this is a different emergency, call 911 or the Bocaue MDRRMO hotline now, or sign in to report right away.'
-            : 'Too many reports were sent from this phone without an account. ' +
-              'If this is an emergency, call 911 or the Bocaue MDRRMO hotline now. ' +
-              `You can send another report in about ${wait}, or sign in to report right away.`,
+        ...(openReference && { publicReference: openReference }),
+        message: limitMessage(scope, retryAfterSeconds, openReference),
       },
       HttpStatus.TOO_MANY_REQUESTS,
     );
   }
+}
+
+/** What the guest reads on the "Report Not Sent" screen. Always names the hotlines. */
+function limitMessage(scope: GuestBlockReason, retryAfterSeconds: number, openReference?: string): string {
+  if (scope === 'open') {
+    return (
+      `You already sent report ${openReference ?? 'from this phone'}, and MDRRMO is still handling it. ` +
+      'You can send a new report once it is closed. ' +
+      'If this is a different emergency, call 911 or the Bocaue MDRRMO hotline now, or sign in to report right away.'
+    );
+  }
+  if (scope === 'spot') {
+    return (
+      'This emergency was already reported several times from your connection at this place, and MDRRMO has it. ' +
+      'If this is a different emergency, call 911 or the Bocaue MDRRMO hotline now, or sign in to report right away.'
+    );
+  }
+  const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  const wait = minutes >= 120 ? `${Math.ceil(minutes / 60)} hours` : `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  return (
+    'Too many reports were sent from this phone without an account. ' +
+    'If this is an emergency, call 911 or the Bocaue MDRRMO hotline now. ' +
+    `You can send another report in about ${wait}, or sign in to report right away.`
+  );
 }
 
 /** Minimal counter store so Redis and the in-memory fallback share one code path. */
@@ -121,11 +168,13 @@ interface CounterStore {
   decr(key: string): Promise<void>;
   setFlag(key: string, ttlSeconds: number): Promise<void>;
   hasFlag(key: string): Promise<boolean>;
+  setText(key: string, text: string, ttlSeconds: number): Promise<void>;
+  getText(key: string): Promise<string | null>;
   del(key: string): Promise<void>;
 }
 
 class MemoryStore implements CounterStore {
-  private readonly entries = new Map<string, { value: number; expiresAt: number }>();
+  private readonly entries = new Map<string, { value: number; text?: string; expiresAt: number }>();
 
   private live(key: string, now = Date.now()) {
     const entry = this.entries.get(key);
@@ -163,6 +212,15 @@ class MemoryStore implements CounterStore {
     return this.live(key) !== undefined;
   }
 
+  async setText(key: string, text: string, ttlSeconds: number) {
+    this.prune();
+    this.entries.set(key, { value: 1, text, expiresAt: Date.now() + ttlSeconds * 1000 });
+  }
+
+  async getText(key: string) {
+    return this.live(key)?.text ?? null;
+  }
+
   async del(key: string) {
     this.entries.delete(key);
   }
@@ -184,7 +242,11 @@ export class GuestReportLimitService implements OnModuleDestroy {
   private readonly enabled: boolean;
   private redisWarningLogged = false;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    /** Reads the status of a phone's last report. Without it, the one-open-report rule is off. */
+    @Optional() private readonly prisma?: PrismaService,
+  ) {
     this.enabled = config.get<string>('GUEST_REPORT_LIMIT_DISABLED', 'false') !== 'true';
     this.redis = new Redis(config.get<string>('REDIS_URL', 'redis://localhost:6379'), {
       lazyConnect: true,
@@ -202,8 +264,9 @@ export class GuestReportLimitService implements OnModuleDestroy {
 
   /**
    * Count one guest report against every limit. Throws GuestReportLimitExceeded when
-   * any limit is already used up (nothing stays counted in that case). A retry with
-   * an idempotency key that was already admitted is not counted again.
+   * this phone's last guest report is still open, or when any limit is already used up
+   * (nothing stays counted in that case). A retry with an idempotency key that was
+   * already admitted is not counted again, and is never refused.
    */
   async reserve(source: GuestSource, idempotencyKey?: string): Promise<GuestReportLease> {
     // Off: nothing is counted, but the report is still a new one (and still recorded).
@@ -211,6 +274,15 @@ export class GuestReportLimitService implements OnModuleDestroy {
 
     const admittedKey = idempotencyKey ? `${KEY_PREFIX}admitted:${hash(idempotencyKey)}` : null;
     if (admittedKey && (await this.call((s) => s.hasFlag(admittedKey)))) return NO_LEASE;
+
+    // One open report per phone: the same emergency is already with MDRRMO.
+    if (source.deviceId) {
+      const open = await this.openReportOf(source.deviceId);
+      if (open) {
+        this.logger.warn('Guest report refused: this phone has a report that is still open');
+        throw new GuestReportLimitExceeded(0, 'open', undefined, open);
+      }
+    }
 
     const now = Math.floor(Date.now() / 1000);
     const taken: string[] = [];
@@ -264,6 +336,56 @@ export class GuestReportLimitService implements OnModuleDestroy {
     };
   }
 
+  /**
+   * Tie this phone to the report it just created, so the next guest report from it is
+   * refused while this one is open. Never throws: the report is already saved.
+   */
+  async rememberOpen(deviceId: string | undefined, incidentId: string | undefined): Promise<void> {
+    if (!this.enabled || !this.prisma || !deviceId || !incidentId) return;
+    try {
+      await this.call((s) => s.setText(openKey(deviceId), incidentId, OPEN_REPORT_TTL_SECONDS));
+    } catch (err) {
+      this.logger.warn(`Could not remember a guest's open report: ${(err as Error)?.message ?? err}`);
+    }
+  }
+
+  /**
+   * The public reference of this phone's last guest report if it is still open, else
+   * null. A report merged into another (DUPLICATE) counts as open while that one is.
+   * Any lookup failure lets the report through: an outage must never block help.
+   */
+  private async openReportOf(deviceId: string): Promise<string | null> {
+    if (!this.prisma) return null;
+    const key = openKey(deviceId);
+    try {
+      let id: string | null = await this.call((s) => s.getText(key));
+      if (!id) return null;
+      let reference: string | null = null;
+      for (let depth = 0; id && depth < MAX_MERGE_DEPTH; depth++) {
+        const row: { status: unknown; public_reference: string; duplicate_of_id: string | null } | null =
+          await this.prisma.incident.findUnique({
+            where: { id },
+            select: { status: true, public_reference: true, duplicate_of_id: true },
+          });
+        if (!row) break;
+        reference ??= row.public_reference;
+        const status = String(row.status);
+        if (status === IncidentStatus.DUPLICATE) {
+          id = row.duplicate_of_id;
+          continue;
+        }
+        if (!GUEST_REPORT_ENDED_STATUSES.has(status)) return reference;
+        break;
+      }
+      // Ended, merged into a report that ended, or gone: free the phone.
+      await this.call((s) => s.del(key));
+      return null;
+    } catch (err) {
+      this.logger.warn(`Open guest report check skipped: ${(err as Error)?.message ?? err}`);
+      return null;
+    }
+  }
+
   /** Run on Redis; on any Redis failure run the same operation in memory. */
   private async call<T>(op: (store: CounterStore) => Promise<T>): Promise<T> {
     if (this.redis.status === 'ready') {
@@ -290,6 +412,10 @@ export class GuestReportLimitService implements OnModuleDestroy {
       await this.redis.set(key, '1', 'EX', ttlSeconds);
     },
     hasFlag: async (key) => (await this.redis.exists(key)) === 1,
+    setText: async (key, text, ttlSeconds) => {
+      await this.redis.set(key, text, 'EX', ttlSeconds);
+    },
+    getText: async (key) => this.redis.get(key),
     del: async (key) => {
       await this.redis.del(key);
     },
@@ -307,6 +433,11 @@ export class GuestReportLimitService implements OnModuleDestroy {
 /** Raw IPs and device ids never reach Redis or the logs. */
 function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 32);
+}
+
+/** Redis key holding the incident id of a phone's last guest report. */
+function openKey(deviceId: string): string {
+  return `${KEY_PREFIX}open:${hash(`open:${deviceId}`)}`;
 }
 
 function withTimeout<T>(promise: Promise<T>): Promise<T> {

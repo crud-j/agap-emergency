@@ -58,6 +58,7 @@ const DETAIL_LABELS: Record<string, string> = {
   LIMIT_IP: 'Too many from one network',
   LIMIT_SPOT: 'Same place, same network',
   LIMIT_PHONE: 'Too many SMS from one number',
+  LIMIT_OPEN: 'Earlier report still open',
   ACCOUNT_LOCKED: 'Sign-in while locked',
   MFA_FAILED: 'Wrong verification code',
   SELF_SERVICE_RESET: 'Reset by the user',
@@ -95,6 +96,7 @@ export function guestDetailOf(v: Record<string, unknown>): string {
   const minutes = num(v['windowMinutes']);
   const parts = [
     label(v['reason']),
+    typeof v['openReport'] === 'string' ? v['openReport'] : null,
     limit !== null && minutes !== null ? `limit ${limit} per ${minutes} min` : null,
     typeof v['device'] === 'string' ? `Phone ${v['device']}` : null,
     place !== null && place > 1 ? `${place} from this network at this place in 10 min` : null,

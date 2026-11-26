@@ -81,7 +81,8 @@ export class GuestReportLimitInterceptor implements NestInterceptor {
       );
     } catch (err) {
       if (err instanceof GuestReportLimitExceeded) {
-        http.getResponse().setHeader?.('Retry-After', String(err.retryAfterSeconds));
+        // `open` has no fixed wait: it ends when the open report does.
+        if (err.retryAfterSeconds > 0) http.getResponse().setHeader?.('Retry-After', String(err.retryAfterSeconds));
         this.record({
           action: AuditAction.GUEST_REPORT_BLOCKED,
           moduleId: 'MOD-06',
@@ -92,6 +93,7 @@ export class GuestReportLimitInterceptor implements NestInterceptor {
             reason: `LIMIT_${err.scope.toUpperCase()}`,
             device,
             ...(err.rule && { limit: err.rule.max, windowMinutes: Math.round(err.rule.windowSeconds / 60) }),
+            ...(err.openReference && { openReport: err.openReference }),
             retryAfterSeconds: err.retryAfterSeconds,
           },
         });
@@ -101,9 +103,11 @@ export class GuestReportLimitInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap((result) => {
+        const created = createdIncident(result);
+        // This phone can't send another guest report while this one is open.
+        void this.limiter.rememberOpen(deviceId, created.id);
         // A retry of a report already counted (same idempotency key) is not a new report.
         if (lease.repeat) return;
-        const created = createdIncident(result);
         const sameSpot = lease.counts.spot ?? 0;
         this.record({
           action: sameSpot > 1 ? AuditAction.GUEST_REPORT_REPEAT : AuditAction.GUEST_REPORT,
