@@ -124,7 +124,22 @@ describe('GuestFollowService.status', () => {
       finished: false,
       pushEnabled: false,
       followUntil: '2026-12-01T00:00:00.000Z',
+      newReportBlock: { reason: 'open' },
     });
+  });
+
+  it('tells the phone when it can report again: at once after a close, 10 min after a false alert', async () => {
+    // own() reached its status at 07:55; NOW is 08:00.
+    const closed = build({ 'inc-guest': own(IncidentStatus.CLOSED) });
+    await expect(closed.service.status(TOKEN, NOW)).resolves.toMatchObject({ newReportBlock: null });
+
+    const falseAlert = build({ 'inc-guest': own(IncidentStatus.FALSE_ALERT) });
+    await expect(falseAlert.service.status(TOKEN, NOW)).resolves.toMatchObject({
+      newReportBlock: { reason: 'wait', until: '2026-11-25T08:05:00.000Z' },
+    });
+
+    const later = new Date('2026-11-25T08:06:00Z');
+    await expect(falseAlert.service.status(TOKEN, later)).resolves.toMatchObject({ newReportBlock: null });
   });
 
   it('after a merge, follows the main report with status words only (never its reference)', async () => {
@@ -149,6 +164,7 @@ describe('GuestFollowService.status', () => {
       effectiveStatus: 'EN_ROUTE',
       updatedAt: '2026-11-25T07:58:00.000Z',
       finished: false,
+      newReportBlock: { reason: 'open' },
     });
     expect(JSON.stringify(status)).not.toContain('INC-2026-000150');
   });

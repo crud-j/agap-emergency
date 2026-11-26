@@ -29,6 +29,12 @@ describe('Security Events: guest report details', () => {
     );
   });
 
+  it('a refusal after a false alert names the report and the minutes left', () => {
+    expect(
+      guestDetailOf({ reason: 'LIMIT_WAIT', openReport: 'INC-2026-000063', retryAfterSeconds: 412, device: 'ffff0000' }),
+    ).toBe('Wait after a false alert · INC-2026-000063 · 7 min left · Phone ffff0000');
+  });
+
   it('nothing known → a dash', () => {
     expect(guestDetailOf({})).toBe('—');
   });

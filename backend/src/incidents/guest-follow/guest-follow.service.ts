@@ -1,7 +1,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { createHash, randomBytes } from 'crypto';
-import { IncidentStatus, type GuestReportStatus } from '@agap/shared';
+import { IncidentStatus, guestNewReportGate, type GuestReportStatus } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   GUEST_FINISHED_STATUSES,
@@ -94,19 +94,24 @@ export class GuestFollowService {
     const merged = String(own.status) === IncidentStatus.DUPLICATE;
     const current = merged ? await this.mergedInto(own.duplicate_of_id) : null;
     const effectiveStatus = current?.status ?? String(own.status);
+    const updatedAt = current ? new Date(current.updatedAt) : ownUpdatedAt;
+    // Same rule as the refusal on POST /v1/incidents (GuestReportLimitService).
+    const gate = guestNewReportGate(effectiveStatus, updatedAt, now);
 
     return {
       publicReference: own.public_reference,
       category: String(own.category),
       status: String(own.status),
       submittedAt: own.submitted_at.toISOString(),
-      updatedAt: (current ? new Date(current.updatedAt) : ownUpdatedAt).toISOString(),
+      updatedAt: updatedAt.toISOString(),
       merged,
       current,
       effectiveStatus,
       finished: GUEST_FINISHED_STATUSES.has(effectiveStatus),
       pushEnabled: !!follower.push_token,
       followUntil: follower.expires_at.toISOString(),
+      newReportBlock:
+        gate?.reason === 'wait' ? { reason: 'wait', until: gate.until.toISOString() } : gate ? { reason: 'open' } : null,
     };
   }
 

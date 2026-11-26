@@ -26,7 +26,7 @@ import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import type { Language } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { register, geoCheck, IdVerificationError } from '../../src/services/api/auth.api';
-import { useIncidentStore } from '../../src/stores/incident.store';
+import { useGuestReportEntry } from '../../src/hooks/useGuestReportEntry';
 import { DEFAULT_ID_DOCUMENT_TYPE, IdVerificationErrorCode, isCoordinateInBocaue, type IdDocumentType, type IdScanResponse } from '@agap/shared';
 import IdScanStep, { type IdStep } from '../../src/components/registration/IdScanStep';
 import NameFields, { EMPTY_NAME, type NameValues } from '../../src/components/registration/NameFields';
@@ -116,7 +116,8 @@ function AgapLogo() {
 
 export default function RegistrationScreen() {
   const router = useRouter();
-  const beginGuestReport = useIncidentStore((state) => state.beginGuestReport);
+  // No account needed to get help (Rule 14); an open guest report is opened instead.
+  const guestEntry = useGuestReportEntry();
   const { loadFromStorage, setPreferences, language } = useAccessibilityStore();
   const t = useTranslations();
 
@@ -335,8 +336,7 @@ export default function RegistrationScreen() {
   // ── ID handlers ─────────────────────────────────────────────────────────────
 
   function reportEmergencyAsGuest() {
-    beginGuestReport();
-    router.push('/emergency/location');
+    void guestEntry.start();
   }
 
   function handleIdVerified(result: IdScanResponse) {
@@ -954,11 +954,10 @@ export default function RegistrationScreen() {
             <TouchableOpacity
               activeOpacity={0.85}
               style={styles.emergencyButtonContainer}
-              onPress={() => {
-                beginGuestReport();
-                router.push('/emergency/location');
-              }}
+              onPress={reportEmergencyAsGuest}
+              disabled={guestEntry.checking}
               accessibilityRole="button"
+              accessibilityState={{ busy: guestEntry.checking }}
             >
               <LinearGradient
                 colors={['rgba(255,255,255,0.35)', 'rgba(255,255,255,0)', 'rgba(0,0,0,0.05)']}
@@ -967,7 +966,9 @@ export default function RegistrationScreen() {
                 end={{ x: 0.5, y: 1 }}
                 style={styles.gradientOverlay}
               >
-                <Ionicons name="information-circle" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                {guestEntry.checking
+                  ? <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 8 }} />
+                  : <Ionicons name="information-circle" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />}
                 <Text style={styles.solidButtonText}>{t.registration.emergencyBtn}</Text>
               </LinearGradient>
             </TouchableOpacity>

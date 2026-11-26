@@ -99,3 +99,15 @@ export function guestStatusText(status: string): GuestStatusText {
 
 export const GUEST_MERGED_NOTE =
   'Your report was merged with another report of the same emergency. You will keep seeing its progress here.';
+
+/** Whole seconds from now until an ISO time; 0 once it has passed (or if unreadable). */
+export function secondsUntil(iso: string, now: number = Date.now()): number {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? Math.max(0, Math.ceil((t - now) / 1000)) : 0;
+}
+
+/** A countdown as m:ss, e.g. 9:05. */
+export function formatCountdown(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}

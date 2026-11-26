@@ -28,7 +28,9 @@ import { useIncidentTracking } from '@/src/hooks/useIncidentTracking';
 import { useRouteLine } from '@/src/hooks/useRouteLine';
 import { useProfilePhotoUri } from '@/src/components/profile/profile-avatar';
 import { GuestReportStatusCard, guestReportStatusKey } from '@/src/components/guest-report/GuestReportStatusCard';
-import { enableGuestReportPush, saveGuestReport } from '@/src/services/guest-report/saved-guest-report';
+import {
+  enableGuestReportPush, loadSavedGuestReport, saveGuestReport,
+} from '@/src/services/guest-report/saved-guest-report';
 import { useQueryClient } from '@tanstack/react-query';
 
 type ResponderPoint = LatLngLite & { heading?: number };
@@ -342,7 +344,7 @@ function SuccessView({
 // ─── Failed ───────────────────────────────────────────────────────────────────
 
 function FailedView({
-  error, limited, onRetry, onHome, onSignIn, onSendSms,
+  error, limited, onRetry, onHome, onSignIn, onSendSms, onSeeReport,
 }: {
   error: string | null;
   /** The backend refused a guest report because this phone/network sent too many. */
@@ -352,6 +354,8 @@ function FailedView({
   onSignIn: () => void;
   /** Set when the failure was the connection and an AGAP SMS number is configured. */
   onSendSms?: (() => void) | undefined;
+  /** Set when this phone follows an earlier guest report: open it (status, countdown). */
+  onSeeReport?: (() => void) | undefined;
 }) {
   if (limited) {
     return (
@@ -364,6 +368,11 @@ function FailedView({
           {error ?? 'Too many reports were sent from this phone without an account.'}
         </Text>
 
+        {onSeeReport && (
+          <TouchableOpacity style={styles.primaryBtn} onPress={onSeeReport} accessibilityRole="button">
+            <Text style={styles.primaryBtnText}>See your report</Text>
+          </TouchableOpacity>
+        )}
         <HotlineButtons />
         <TouchableOpacity style={styles.ghostBtn} onPress={onSignIn} accessibilityRole="button">
           <Text style={styles.ghostBtnText}>Sign in to report</Text>
@@ -478,6 +487,8 @@ export default function TransmissionScreen() {
   const [txState, setTxState] = useState<TransmissionState>('submitting');
   const [error, setError] = useState<string | null>(null);
   const [limited, setLimited] = useState(false);
+  /** A refused guest report, and this phone follows an earlier one: offer to open it. */
+  const [canFollowEarlier, setCanFollowEarlier] = useState(false);
   const [publicReference, setPublicReference] = useState<string | null>(null);
   const [incidentId, setIncidentId] = useState<string | null>(null);
   const [incidentPriority, setIncidentPriority] = useState<string | null>(null);
@@ -678,7 +689,9 @@ export default function TransmissionScreen() {
     } catch (err) {
       // 429 on a guest report: the per-phone / per-network cap was reached. Retrying
       // would hit it again, so the screen offers the hotlines and sign-in instead.
-      setLimited(err instanceof ApiError && err.status === 429);
+      const refused = err instanceof ApiError && err.status === 429;
+      setLimited(refused);
+      if (refused) void loadSavedGuestReport().then((saved) => setCanFollowEarlier(!!saved));
       // A connection failure can go by SMS instead; a refusal would be refused there too.
       setSmsAllowed(smsCanHelp(err));
       // Never hold an emergency for later delivery — tell the reporter now so
@@ -727,6 +740,7 @@ export default function TransmissionScreen() {
             onHome={() => router.replace('/home' as any)}
             onSignIn={() => router.replace('/auth/login')}
             onSendSms={canSms && smsAllowed && !limited ? sendBySms : undefined}
+            onSeeReport={limited && canFollowEarlier ? () => router.replace('/emergency/guest-status' as never) : undefined}
           />
         )}
         {txState === 'smsOpened' && (

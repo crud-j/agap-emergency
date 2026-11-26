@@ -6,6 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { GuestReportStatusCard } from '@/src/components/guest-report/GuestReportStatusCard';
+import { GuestNewReportPanel } from '@/src/components/guest-report/GuestNewReportPanel';
+import { useIncidentStore } from '@/src/stores/incident.store';
 import {
   clearSavedGuestReport, loadSavedGuestReport, type SavedGuestReport,
 } from '@/src/services/guest-report/saved-guest-report';
@@ -19,12 +21,14 @@ function callNumber(number: string) {
 }
 
 /**
- * The guest report this phone follows (no account, MOD-42). Opened from a status push
- * or from the sign-in screen. Hotlines stay one tap away (Rule 9).
+ * The guest report this phone follows (no account, MOD-42). Opened from a status push,
+ * from the sign-in screen, or instead of a new report while this one is open (or in the
+ * wait after a false alert). Hotlines stay one tap away (Rule 9).
  */
 export default function GuestStatusScreen() {
   const router = useRouter();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const beginGuestReport = useIncidentStore((s) => s.beginGuestReport);
   const [saved, setSaved] = useState<SavedGuestReport | null | undefined>(undefined);
 
   useEffect(() => {
@@ -81,6 +85,14 @@ export default function GuestStatusScreen() {
 
           {saved && (
             <>
+              <GuestNewReportPanel
+                token={saved.token}
+                onReport={() => {
+                  beginGuestReport();
+                  router.push('/emergency/location');
+                }}
+                onSignIn={() => router.replace('/auth/login' as never)}
+              />
               <Text style={styles.reference}>Report reference: {saved.publicReference}</Text>
               <GuestReportStatusCard token={saved.token} onExpired={() => void clearSavedGuestReport()} />
               <Text style={styles.hint}>

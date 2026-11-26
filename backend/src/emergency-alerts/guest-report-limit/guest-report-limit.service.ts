@@ -2,7 +2,7 @@ import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy, Optiona
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
-import { IncidentStatus } from '@agap/shared';
+import { GUEST_REPORT_ENDED_STATUSES, IncidentStatus, guestNewReportGate } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 /** Where a guest report came from. Either part may be missing. */
@@ -21,8 +21,11 @@ export interface GuestSource {
 }
 
 export type GuestLimitScope = 'device' | 'ip' | 'phone' | 'spot';
-/** Why a guest report was refused: a counter, or `open` (this phone's last report is still open). */
-export type GuestBlockReason = GuestLimitScope | 'open';
+/**
+ * Why a guest report was refused: a counter, `open` (this phone's last report is still
+ * open), or `wait` (its last report was marked a false alert a few minutes ago).
+ */
+export type GuestBlockReason = GuestLimitScope | 'open' | 'wait';
 
 interface LimitRule {
   scope: GuestLimitScope;
@@ -75,20 +78,13 @@ const ADMITTED_TTL_SECONDS = 24 * 60 * 60;
  * (forgotten in the queue) no longer blocks that phone; the daily device cap still applies.
  */
 export const OPEN_REPORT_TTL_SECONDS = 24 * 60 * 60;
-/**
- * Statuses after which a guest's report no longer blocks a new one: the response is
- * over, or the report was refused. DUPLICATE is not one: the report it was merged into
- * is checked instead. UNABLE_TO_RESPOND and REFERRED are included so a guest is never
- * stuck while the Operations Center re-dispatches or hands off.
- */
-export const GUEST_REPORT_ENDED_STATUSES: ReadonlySet<string> = new Set([
-  IncidentStatus.RESOLVED,
-  IncidentStatus.CLOSED,
-  IncidentStatus.CANCELLED,
-  IncidentStatus.FALSE_ALERT,
-  IncidentStatus.UNABLE_TO_RESPOND,
-  IncidentStatus.REFERRED,
-]);
+/** Shared with the guest status screen, so the app and this refusal always agree. */
+export { GUEST_REPORT_ENDED_STATUSES };
+
+/** This phone's last guest report, when it still holds back a new one. */
+type PhoneBlock =
+  | { reason: 'open'; reference: string }
+  | { reason: 'wait'; reference: string; retryAfterSeconds: number };
 /** Merge chains followed upward when checking a DUPLICATE report. */
 const MAX_MERGE_DEPTH = 3;
 const KEY_PREFIX = 'guestlim:';
@@ -121,14 +117,14 @@ export class GuestReportLimitExceeded extends HttpException {
     readonly scope: GuestBlockReason = 'device',
     /** That limit, for the security event. */
     readonly rule?: { windowSeconds: number; max: number },
-    /** For `open`: the reference of this phone's report that is still open. */
+    /** For `open` / `wait`: the reference of this phone's last report. */
     readonly openReference?: string,
   ) {
     super(
       {
         statusCode: HttpStatus.TOO_MANY_REQUESTS,
         error: 'Too Many Requests',
-        code: scope === 'open' ? 'GUEST_REPORT_OPEN' : 'GUEST_REPORT_LIMIT',
+        code: scope === 'open' ? 'GUEST_REPORT_OPEN' : scope === 'wait' ? 'GUEST_REPORT_WAIT' : 'GUEST_REPORT_LIMIT',
         retryAfterSeconds,
         ...(openReference && { publicReference: openReference }),
         message: limitMessage(scope, retryAfterSeconds, openReference),
@@ -155,6 +151,13 @@ function limitMessage(scope: GuestBlockReason, retryAfterSeconds: number, openRe
   }
   const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
   const wait = minutes >= 120 ? `${Math.ceil(minutes / 60)} hours` : `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  if (scope === 'wait') {
+    return (
+      `Your last report ${openReference ?? 'from this phone'} was marked a false alert by MDRRMO. ` +
+      `You can send a new report in about ${wait}. ` +
+      'If this is an emergency, call 911 or the Bocaue MDRRMO hotline now, or sign in to report right away.'
+    );
+  }
   return (
     'Too many reports were sent from this phone without an account. ' +
     'If this is an emergency, call 911 or the Bocaue MDRRMO hotline now. ' +
@@ -275,12 +278,17 @@ export class GuestReportLimitService implements OnModuleDestroy {
     const admittedKey = idempotencyKey ? `${KEY_PREFIX}admitted:${hash(idempotencyKey)}` : null;
     if (admittedKey && (await this.call((s) => s.hasFlag(admittedKey)))) return NO_LEASE;
 
-    // One open report per phone: the same emergency is already with MDRRMO.
+    // One open report per phone (the same emergency is already with MDRRMO), and a short
+    // wait after one was marked a false alert.
     if (source.deviceId) {
-      const open = await this.openReportOf(source.deviceId);
-      if (open) {
+      const block = await this.blockOf(source.deviceId);
+      if (block?.reason === 'open') {
         this.logger.warn('Guest report refused: this phone has a report that is still open');
-        throw new GuestReportLimitExceeded(0, 'open', undefined, open);
+        throw new GuestReportLimitExceeded(0, 'open', undefined, block.reference);
+      }
+      if (block?.reason === 'wait') {
+        this.logger.warn('Guest report refused: this phone\'s last report was a false alert a few minutes ago');
+        throw new GuestReportLimitExceeded(block.retryAfterSeconds, 'wait', undefined, block.reference);
       }
     }
 
@@ -350,11 +358,13 @@ export class GuestReportLimitService implements OnModuleDestroy {
   }
 
   /**
-   * The public reference of this phone's last guest report if it is still open, else
-   * null. A report merged into another (DUPLICATE) counts as open while that one is.
-   * Any lookup failure lets the report through: an outage must never block help.
+   * This phone's last guest report, if it still holds back a new one: open (a report
+   * merged into another counts as open while that one is), or marked a false alert
+   * less than GUEST_FALSE_ALERT_WAIT_SECONDS ago. The guest's own reference is named,
+   * never the other reporter's. Any lookup failure lets the report through: an outage
+   * must never block help.
    */
-  private async openReportOf(deviceId: string): Promise<string | null> {
+  private async blockOf(deviceId: string, now = new Date()): Promise<PhoneBlock | null> {
     if (!this.prisma) return null;
     const key = openKey(deviceId);
     try {
@@ -362,11 +372,23 @@ export class GuestReportLimitService implements OnModuleDestroy {
       if (!id) return null;
       let reference: string | null = null;
       for (let depth = 0; id && depth < MAX_MERGE_DEPTH; depth++) {
-        const row: { status: unknown; public_reference: string; duplicate_of_id: string | null } | null =
-          await this.prisma.incident.findUnique({
-            where: { id },
-            select: { status: true, public_reference: true, duplicate_of_id: true },
-          });
+        const row: {
+          status: unknown;
+          public_reference: string;
+          duplicate_of_id: string | null;
+          submitted_at: Date;
+          incident_events: { occurred_at: Date }[];
+        } | null = await this.prisma.incident.findUnique({
+          where: { id },
+          select: {
+            status: true,
+            public_reference: true,
+            duplicate_of_id: true,
+            submitted_at: true,
+            // When the current status was reached: same source as the guest status screen.
+            incident_events: { select: { occurred_at: true }, orderBy: { occurred_at: 'desc' }, take: 1 },
+          },
+        });
         if (!row) break;
         reference ??= row.public_reference;
         const status = String(row.status);
@@ -374,10 +396,15 @@ export class GuestReportLimitService implements OnModuleDestroy {
           id = row.duplicate_of_id;
           continue;
         }
-        if (!GUEST_REPORT_ENDED_STATUSES.has(status)) return reference;
+        const gate = guestNewReportGate(status, row.incident_events?.[0]?.occurred_at ?? row.submitted_at, now);
+        if (gate?.reason === 'open') return { reason: 'open', reference };
+        if (gate?.reason === 'wait') {
+          const retryAfterSeconds = Math.max(1, Math.ceil((gate.until.getTime() - now.getTime()) / 1000));
+          return { reason: 'wait', reference, retryAfterSeconds };
+        }
         break;
       }
-      // Ended, merged into a report that ended, or gone: free the phone.
+      // Ended (and any wait is over), merged into a report that ended, or gone: free the phone.
       await this.call((s) => s.del(key));
       return null;
     } catch (err) {

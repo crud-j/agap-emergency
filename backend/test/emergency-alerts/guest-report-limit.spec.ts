@@ -1,6 +1,6 @@
 import { lastValueFrom, of, throwError } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
-import { UserRole } from '@agap/shared';
+import { GUEST_FALSE_ALERT_WAIT_SECONDS, UserRole, guestNewReportGate } from '@agap/shared';
 import { AuditAction } from '@agap/shared';
 import {
   GUEST_REPORT_RULES,
@@ -23,18 +23,29 @@ function makeService(env: Record<string, string> = {}, prisma?: unknown) {
   return new GuestReportLimitService(config, prisma as any);
 }
 
-/** A stand-in incident table: id → status, reference, and what it was merged into. */
-type FakeIncident = { status: string; public_reference: string; duplicate_of_id?: string | null };
+/**
+ * A stand-in incident table: id → status, reference, what it was merged into, and when
+ * the status was reached (`changed_at`, default: now).
+ */
+type FakeIncident = { status: string; public_reference: string; duplicate_of_id?: string | null; changed_at?: Date };
 function fakePrisma(rows: Record<string, FakeIncident>) {
   return {
     incident: {
       findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
         const row = rows[where.id];
-        return row ? { duplicate_of_id: null, ...row } : null;
+        if (!row) return null;
+        const { changed_at, ...rest } = row;
+        return {
+          duplicate_of_id: null,
+          submitted_at: new Date('2026-01-01T00:00:00Z'),
+          incident_events: [{ occurred_at: changed_at ?? new Date() }],
+          ...rest,
+        };
       }),
     },
   };
 }
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
 
 const DEVICE_MAX = GUEST_REPORT_RULES.find((r) => r.scope === 'device')!.max;
 const IP_MAX = GUEST_REPORT_RULES.find((r) => r.scope === 'ip')!.max;
@@ -199,14 +210,46 @@ describe('One open guest report per phone', () => {
     await expect(service.reserve({ deviceId: PHONE }, 'o-2')).rejects.toMatchObject({ scope: 'open' });
   });
 
-  it.each(['RESOLVED', 'CLOSED', 'CANCELLED', 'FALSE_ALERT', 'UNABLE_TO_RESPOND', 'REFERRED'])(
-    'lets the phone report again once the first is %s',
+  it.each(['RESOLVED', 'CLOSED', 'CANCELLED', 'UNABLE_TO_RESPOND', 'REFERRED'])(
+    'lets the phone report again at once when the first is %s (no wait)',
     async (status) => {
       await firstReport();
       rows['inc-1']!.status = status;
       await expect(service.reserve({ deviceId: PHONE }, 'o-2')).resolves.toMatchObject({ repeat: false });
     },
   );
+
+  it('after a false alert the phone waits 10 minutes, told how long and the hotlines', async () => {
+    await firstReport();
+    rows['inc-1'] = { status: 'FALSE_ALERT', public_reference: 'INC-2026-000401', changed_at: minutesAgo(3) };
+
+    const err = await service.reserve({ deviceId: PHONE }, 'o-2').catch((e) => e);
+    expect(err).toBeInstanceOf(GuestReportLimitExceeded);
+    expect(err.scope).toBe('wait');
+    expect(err.getStatus()).toBe(429);
+    // 7 minutes left, give or take the test's own runtime.
+    expect(err.retryAfterSeconds).toBeGreaterThan(6 * 60);
+    expect(err.retryAfterSeconds).toBeLessThanOrEqual(7 * 60);
+    const body = err.getResponse() as Record<string, unknown>;
+    expect(body).toMatchObject({ code: 'GUEST_REPORT_WAIT', publicReference: 'INC-2026-000401' });
+    expect(String(body['message'])).toMatch(/INC-2026-000401.*false alert.*7 minutes.*911/);
+  });
+
+  it('once the 10 minutes after a false alert are over, the phone can report again', async () => {
+    await firstReport();
+    rows['inc-1'] = { status: 'FALSE_ALERT', public_reference: 'INC-2026-000401', changed_at: minutesAgo(11) };
+    await expect(service.reserve({ deviceId: PHONE }, 'o-2')).resolves.toMatchObject({ repeat: false });
+  });
+
+  it('a report merged into one marked a false alert waits too, naming the guest\'s own reference', async () => {
+    await firstReport();
+    rows['inc-1'] = { status: 'DUPLICATE', public_reference: 'INC-2026-000401', duplicate_of_id: 'inc-2' };
+    rows['inc-2'] = { status: 'FALSE_ALERT', public_reference: 'INC-2026-000402', changed_at: minutesAgo(1) };
+    await expect(service.reserve({ deviceId: PHONE }, 'o-2')).rejects.toMatchObject({
+      scope: 'wait',
+      openReference: 'INC-2026-000401',
+    });
+  });
 
   it('a report merged into another stays open while that one is', async () => {
     await firstReport();
@@ -262,6 +305,36 @@ describe('One open guest report per phone', () => {
         newValues: expect.objectContaining({ reason: 'LIMIT_OPEN', openReport: 'INC-2026-000401', device: deviceCode(PHONE) }),
       }),
     );
+
+    // Marked a false alert a minute ago: refused with a Retry-After and recorded as a wait.
+    rows['inc-1'] = { status: 'FALSE_ALERT', public_reference: 'INC-2026-000401', changed_at: minutesAgo(1) };
+    await expect(interceptor.intercept(ctx(req('i-3')), { handle: () => of({ id: 'never' }) })).rejects.toMatchObject({ scope: 'wait' });
+    expect(res.setHeader).toHaveBeenCalledWith('Retry-After', expect.stringMatching(/^\d+$/));
+    expect(audit.log).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: AuditAction.GUEST_REPORT_BLOCKED,
+        newValues: expect.objectContaining({ reason: 'LIMIT_WAIT', openReport: 'INC-2026-000401' }),
+      }),
+    );
+  });
+});
+
+describe('guestNewReportGate (shared with the guest status screen)', () => {
+  const now = new Date('2026-11-26T12:00:00Z');
+  const ago = (m: number) => new Date(now.getTime() - m * 60_000);
+
+  it.each(['RECEIVED', 'ACKNOWLEDGED', 'DISPATCHED', 'ON_SCENE', 'TRANSPORTING', 'ASSISTING'])('%s is open', (status) => {
+    expect(guestNewReportGate(status, ago(60), now)).toEqual({ reason: 'open' });
+  });
+
+  it.each(['RESOLVED', 'CLOSED', 'CANCELLED', 'UNABLE_TO_RESPOND', 'REFERRED'])('%s frees the phone at once', (status) => {
+    expect(guestNewReportGate(status, ago(0), now)).toBeNull();
+  });
+
+  it('FALSE_ALERT waits GUEST_FALSE_ALERT_WAIT_SECONDS from when it was marked', () => {
+    expect(GUEST_FALSE_ALERT_WAIT_SECONDS).toBe(600);
+    expect(guestNewReportGate('FALSE_ALERT', ago(4), now)).toEqual({ reason: 'wait', until: new Date('2026-11-26T12:06:00Z') });
+    expect(guestNewReportGate('FALSE_ALERT', ago(10), now)).toBeNull();
   });
 });
 

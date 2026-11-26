@@ -13,6 +13,17 @@ const POLL_MS = 15_000;
 
 export const guestReportStatusKey = (token: string) => ['guest-report-status', token] as const;
 
+/** The guest report's status, polled while open. One cache for the card and the screen. */
+export function useGuestReportStatus(token: string) {
+  return useQuery({
+    queryKey: guestReportStatusKey(token),
+    queryFn: () => fetchGuestReportStatus(token),
+    refetchInterval: (q) => (q.state.data?.finished || isExpired(q.state.error) ? false : POLL_MS),
+    retry: (count, err) => !isExpired(err) && count < 2,
+    staleTime: 5_000,
+  });
+}
+
 function timeOf(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -34,13 +45,7 @@ export function GuestReportStatusCard({ token, onExpired }: { token: string; onE
   const [enabling, setEnabling] = useState(false);
   const [pushRefused, setPushRefused] = useState(false);
 
-  const query = useQuery({
-    queryKey: guestReportStatusKey(token),
-    queryFn: () => fetchGuestReportStatus(token),
-    refetchInterval: (q) => (q.state.data?.finished || isExpired(q.state.error) ? false : POLL_MS),
-    retry: (count, err) => !isExpired(err) && count < 2,
-    staleTime: 5_000,
-  });
+  const query = useGuestReportStatus(token);
   const expired = isExpired(query.error);
 
   useEffect(() => {

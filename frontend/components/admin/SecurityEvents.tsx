@@ -59,6 +59,7 @@ const DETAIL_LABELS: Record<string, string> = {
   LIMIT_SPOT: 'Same place, same network',
   LIMIT_PHONE: 'Too many SMS from one number',
   LIMIT_OPEN: 'Earlier report still open',
+  LIMIT_WAIT: 'Wait after a false alert',
   ACCOUNT_LOCKED: 'Sign-in while locked',
   MFA_FAILED: 'Wrong verification code',
   SELF_SERVICE_RESET: 'Reset by the user',
@@ -94,9 +95,11 @@ export function guestDetailOf(v: Record<string, unknown>): string {
   const network = num(v['networkReports10m']);
   const limit = num(v['limit']);
   const minutes = num(v['windowMinutes']);
+  const retryAfter = num(v['retryAfterSeconds']);
   const parts = [
     label(v['reason']),
     typeof v['openReport'] === 'string' ? v['openReport'] : null,
+    v['reason'] === 'LIMIT_WAIT' && retryAfter !== null ? `${Math.max(1, Math.ceil(retryAfter / 60))} min left` : null,
     limit !== null && minutes !== null ? `limit ${limit} per ${minutes === 1440 ? 'day' : `${minutes} min`}` : null,
     typeof v['device'] === 'string' ? `Phone ${v['device']}` : null,
     place !== null && place > 1 ? `${place} from this network at this place in 10 min` : null,

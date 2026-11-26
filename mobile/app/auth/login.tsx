@@ -23,7 +23,7 @@ import { useAccessibilityStore } from '../../src/stores/accessibility.store';
 import type { Language } from '../../src/stores/accessibility.store';
 import { useTranslations } from '../../src/hooks/useAccessibility';
 import { useAuthStore } from '../../src/stores/auth.store';
-import { useIncidentStore } from '../../src/stores/incident.store';
+import { useGuestReportEntry } from '../../src/hooks/useGuestReportEntry';
 import {
   loginWithPassword,
   loginWithPhone,
@@ -68,14 +68,9 @@ function AgapLogo() {
 
 export default function LoginScreen() {
   const router = useRouter();
-  const beginGuestReport = useIncidentStore((state) => state.beginGuestReport);
-
   // Same guest flow as the registration screen: no account needed to get help
-  // (Rule 14). The backend caps guest reports per phone and per network.
-  function reportEmergencyAsGuest() {
-    beginGuestReport();
-    router.push('/emergency/location');
-  }
+  // (Rule 14). A phone whose last guest report is still open is taken to that report.
+  const guestEntry = useGuestReportEntry();
   const { loadFromStorage, setPreferences, language } = useAccessibilityStore();
   const t = useTranslations();
 
@@ -508,9 +503,11 @@ export default function LoginScreen() {
             <TouchableOpacity
               activeOpacity={0.85}
               style={styles.emergencyButtonContainer}
-              onPress={reportEmergencyAsGuest}
+              onPress={() => void guestEntry.start()}
+              disabled={guestEntry.checking}
               accessibilityRole="button"
               accessibilityLabel={t.login.guestReport}
+              accessibilityState={{ busy: guestEntry.checking }}
             >
               <LinearGradient
                 // White highlight overlaid on red base background
@@ -520,7 +517,9 @@ export default function LoginScreen() {
                 end={{ x: 0.5, y: 1 }}
                 style={styles.gradientOverlay}
               >
-                <Ionicons name="information-circle" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                {guestEntry.checking
+                  ? <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 8 }} />
+                  : <Ionicons name="information-circle" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />}
                 <Text style={styles.solidButtonText}>{t.login.guestReport}</Text>
               </LinearGradient>
             </TouchableOpacity>
