@@ -24,8 +24,10 @@ import { assertCrewFree } from './crew-assignment';
 import {
   ASSIGNMENT_PUSH_JOB,
   ASSIGNMENT_PUSH_OPTS,
+  ASSIGNMENT_REMINDER_JOB,
   assignmentPush,
   assignmentPushJobId,
+  assignmentReminderJob,
 } from './assignment-push';
 import {
   ACTIVE_RESPONSE_INCIDENT_STATUSES,
@@ -693,7 +695,12 @@ export class DispatchService {
     return crew;
   }
 
-  /** One PUSH job per crew member on the notifications queue (NotificationProcessor.sendPush). */
+  /**
+   * One PUSH job per crew member on the notifications queue (NotificationProcessor.sendPush).
+   * A new assignment also starts its reminder chain: the phone buzzes again every 30 s
+   * until the dispatch is answered (assignment-reminder.ts). A failed chain never
+   * affects the dispatch or the first push.
+   */
   private async queueAssignmentPushes(
     jobs: Array<{ data: ReturnType<typeof assignmentPush>; jobId: string }>,
   ): Promise<void> {
@@ -701,6 +708,20 @@ export class DispatchService {
       jobs.map((j) =>
         this.notificationQueue.add(ASSIGNMENT_PUSH_JOB, j.data, { ...ASSIGNMENT_PUSH_OPTS, jobId: j.jobId }),
       ),
+    );
+    const chain = Date.now();
+    await Promise.allSettled(
+      jobs
+        .filter((j) => j.data.data?.['type'] === 'ASSIGNMENT' && j.data.userId)
+        .map((j) => {
+          const reminder = assignmentReminderJob(String(j.data.data?.['dispatchId']), j.data.userId!, 1, chain);
+          return this.notificationQueue.add(ASSIGNMENT_REMINDER_JOB, reminder.data, {
+            jobId: reminder.jobId,
+            delay: reminder.delay,
+            removeOnComplete: true,
+            removeOnFail: 100,
+          });
+        }),
     );
   }
 

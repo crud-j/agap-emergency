@@ -1,6 +1,8 @@
 import { DispatchService } from '../../src/dispatch/dispatch.service';
 import {
   ASSIGNMENTS_CHANNEL,
+  ASSIGNMENT_ALARM_CHANNEL,
+  ASSIGNMENT_REMINDER_JOB,
   ASSIGNMENT_PUSH_JOB,
   assignmentPush,
   assignmentPushJobId,
@@ -98,9 +100,10 @@ describe('assignmentPush (message builder)', () => {
       channel: 'PUSH',
       userId: 'resp-a',
       title: 'New assignment',
-      body: 'ROAD ACCIDENT · INC-2026-001234. Open AGAP to accept.',
+      body: 'ROAD ACCIDENT · INC-2026-001234. Open AGAP to accept or decline.',
       data: { type: 'ASSIGNMENT', dispatchId: 'disp-1' },
-      androidChannelId: ASSIGNMENTS_CHANNEL,
+      androidChannelId: ASSIGNMENT_ALARM_CHANNEL,
+      androidTag: 'assignment-disp-1',
     });
   });
 
@@ -130,12 +133,30 @@ describe('DispatchService responder pushes', () => {
     expect(pushes.map((c: any[]) => c[1].userId).sort()).toEqual(['resp-a', 'resp-b']);
     for (const [, data, opts] of pushes) {
       expect(opts).toMatchObject({ jobId: `assign-disp-1-${data.userId}`, attempts: 3, backoff: { type: 'exponential', delay: 5000 } });
-      expect(data).toMatchObject({ title: 'New assignment', data: { type: 'ASSIGNMENT', dispatchId: 'disp-1' }, androidChannelId: 'assignments' });
+      expect(data).toMatchObject({ title: 'New assignment', data: { type: 'ASSIGNMENT', dispatchId: 'disp-1' }, androidChannelId: 'assignments-alarm', androidTag: 'assignment-disp-1' });
       expect(data.body).toContain('INC-2026-001234');
       for (const p of PRIVATE) expect(JSON.stringify(data)).not.toContain(p);
     }
     // The crew comes from the stored dispatch_crew rows, not the request.
     expect(b.prisma.dispatch_crew.findMany).toHaveBeenCalledWith({ where: { dispatch_id: 'disp-1' }, select: { user_id: true } });
+  });
+
+  it('create: starts one reminder chain per crew member, first check 30 s later', async () => {
+    const b = build();
+    await b.service.create(dto as any, 'dispatcher-1');
+
+    const reminders = b.queue.add.mock.calls.filter((c: any[]) => c[0] === ASSIGNMENT_REMINDER_JOB);
+    expect(reminders).toHaveLength(2);
+    for (const [, data, opts] of reminders) {
+      expect(data).toMatchObject({ channel: 'ASSIGNMENT_REMINDER', data: { dispatchId: 'disp-1', attempt: 1 } });
+      expect(opts.delay).toBe(30_000);
+      expect(opts.jobId).toMatch(new RegExp(`^assign-remind-disp-1-${data.userId}-\\d+-1$`));
+    }
+  });
+
+  it('a cancellation push replaces the alarm on the normal channel, with no reminders', () => {
+    const job = assignmentPush('ASSIGNMENT_CANCELLED', INCIDENT, 'disp-1', 'resp-a');
+    expect(job).toMatchObject({ androidChannelId: ASSIGNMENTS_CHANNEL, androidTag: 'assignment-disp-1' });
   });
 
   it('create: no crew → no push', async () => {

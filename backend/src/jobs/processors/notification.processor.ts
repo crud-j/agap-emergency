@@ -1,5 +1,5 @@
 import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Queue } from 'bullmq';
 import { getApps } from 'firebase-admin/app';
@@ -8,6 +8,8 @@ import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { tokenFromConfig } from '../../notifications/push-token';
 import { ensureFirebaseApp } from '../../notifications/firebase-admin';
+import { RealtimeService } from '../../realtime/realtime.service';
+import { runAssignmentReminder } from '../assignment-reminder';
 
 export interface NotificationJobData {
   userId?: string;
@@ -20,6 +22,8 @@ export interface NotificationJobData {
   data?: Record<string, unknown>;
   /** Android notification channel; omitted → the app's `default` channel. */
   androidChannelId?: string;
+  /** Android tag: a later push with the same tag replaces this one in the shade (and alerts again). */
+  androidTag?: string;
 }
 
 @Processor(QUEUE_NAMES.NOTIFICATIONS)
@@ -30,6 +34,9 @@ export class NotificationProcessor extends WorkerHost {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     @InjectQueue(QUEUE_NAMES.SMS) private readonly smsQueue: Queue,
+    /** For assignment reminders: the next check goes on this same queue. */
+    @Optional() @InjectQueue(QUEUE_NAMES.NOTIFICATIONS) private readonly notificationQueue?: Queue,
+    @Optional() private readonly realtime?: RealtimeService,
   ) {
     super();
     ensureFirebaseApp(config, this.logger);
@@ -53,6 +60,18 @@ export class NotificationProcessor extends WorkerHost {
           break;
         case 'EMERGENCY_CONTACTS':
           await this.notifyEmergencyContacts(job.data);
+          break;
+        case 'ASSIGNMENT_REMINDER':
+          await runAssignmentReminder(
+            {
+              prisma: this.prisma,
+              queue: this.notificationQueue,
+              realtime: this.realtime,
+              push: (data) => this.sendPush(data),
+              logger: this.logger,
+            },
+            { userId: job.data.userId, ...job.data.data },
+          );
           break;
         default:
           this.logger.warn(`Unknown channel: ${job.data.channel}`);
@@ -137,8 +156,14 @@ export class NotificationProcessor extends WorkerHost {
       data: data.data
         ? Object.fromEntries(Object.entries(data.data).map(([k, v]) => [k, String(v)]))
         : {},
-      ...(data.androidChannelId && {
-        android: { priority: 'high', notification: { channelId: data.androidChannelId } },
+      ...((data.androidChannelId || data.androidTag) && {
+        android: {
+          priority: 'high',
+          notification: {
+            ...(data.androidChannelId && { channelId: data.androidChannelId }),
+            ...(data.androidTag && { tag: data.androidTag }),
+          },
+        },
       }),
     });
   }

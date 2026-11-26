@@ -361,6 +361,7 @@ Run all of these on the deployed system, not locally.
 - [x] The MDRRMO ops phone gets the `AGAP|INC-…` SMS. *(Received on the ops phone on 2026-11-24. On 2026-11-25 the admin SMS Activity page logged the ops alert as `Accepted` by Textbee. "Accepted" means the gateway took it, not that the phone confirmed delivery.)*
 - [ ] A signed-in citizen SOS works, and the citizen sees status changes live.
 - [ ] Dispatching from the web reaches the responder APK (push and live status). Responder location updates show on the map.
+- [ ] Unanswered assignment keeps buzzing (added 2026-11-27; **needs a new preview APK** for the alarm channel and in-app alarm). Responder signs in, closes AGAP, opens another app. Dispatch to them: the phone rings and vibrates (alarm sound) with "New assignment", then again every 30 s ("still waiting"), replacing the same notification. Accept → it stops. Leave one unanswered for 3 min → Escalations shows "No answer to assignment — INC-…: … has not accepted or declined in 3 min". With AGAP open: a red full-screen "New assignment" vibrates until "Open assignment". Set Settings → Apps → AGAP → Battery → **Unrestricted** on every responder phone first.
 - [ ] With mobile data off, "Send by SMS" creates the incident within about 30 s, and the reference is texted back. Turning data back on and resending gives the **same** incident, not a duplicate.
 
 **Web console**

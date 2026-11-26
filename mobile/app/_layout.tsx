@@ -11,6 +11,7 @@ import { useAccessibilityStore } from '../src/stores/accessibility.store';
 import { queryClient } from '../src/lib/query-client';
 import { homeRouteForRole } from '../src/lib/role-routing';
 import { OfflineBanner } from '../src/components/ui/OfflineBanner';
+import { AssignmentAlarm } from '../src/components/responder/assignment-alarm';
 import {
   assignmentIdFromNotification,
   incidentIdFromNotification,
@@ -31,15 +32,20 @@ focusManager.setEventListener((handleFocus) => {
   return () => sub.remove();
 });
 
-// Show pushes while the app is open too; iOS shows nothing otherwise.
+// Show pushes while the app is open too; iOS shows nothing otherwise. A new assignment
+// is the exception: the full-screen AssignmentAlarm rings instead of a banner on top.
 if (Platform.OS !== 'web') {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    handleNotification: async (notification) => {
+      const assignment = notification.request.content.data?.type === 'ASSIGNMENT';
+      if (assignment) void queryClient.invalidateQueries({ queryKey: ['responder-assignments'] });
+      return {
+        shouldShowBanner: !assignment,
+        shouldShowList: true,
+        shouldPlaySound: !assignment,
+        shouldSetBadge: false,
+      };
+    },
   });
 }
 
@@ -214,6 +220,8 @@ export default function RootLayout() {
           </Stack>
           {/* Global offline indicator — position:absolute overlay, never blocks taps */}
           <OfflineBanner />
+          {/* Responders: a new assignment rings full screen until opened (MOD-32) */}
+          <AssignmentAlarm />
           <LaunchSplash />
         </QueryClientProvider>
       </SafeAreaProvider>

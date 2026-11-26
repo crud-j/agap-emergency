@@ -54,6 +54,24 @@ export async function getDevicePushToken(
         name: 'Responder assignments',
         importance: Notifications.AndroidImportance.MAX,
       });
+      // Must match ASSIGNMENT_ALARM_CHANNEL in backend dispatch/assignment-push.ts. A new,
+      // unanswered assignment: long vibration and the alarm sound stream (heard over other
+      // apps, at alarm volume), on the lock screen, through Do Not Disturb where the phone
+      // allows it. The server repeats it every 30 s until the crew answers. Android fixes a
+      // channel's sound and vibration when it is created, hence a new id.
+      await Notifications.setNotificationChannelAsync('assignments-alarm', {
+        name: 'New assignments (alarm)',
+        description: 'Rings and vibrates for a new assignment until you accept or decline it.',
+        importance: Notifications.AndroidImportance.MAX,
+        enableVibrate: true,
+        vibrationPattern: [0, 1000, 400, 1000, 400, 1000, 400, 1000],
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        bypassDnd: true,
+        audioAttributes: {
+          usage: Notifications.AndroidAudioUsage.ALARM,
+          contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+        },
+      });
     }
 
     const deviceToken = await Notifications.getDevicePushTokenAsync();
