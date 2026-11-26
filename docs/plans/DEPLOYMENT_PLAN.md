@@ -226,7 +226,7 @@ Generate each key separately with:
 | `AI_ASSIST_ENABLED` | `false` unless a paid key and DPO sign-off exist |
 | `PROFILE_PHOTO_CHECKS` | from Phase 0 |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | only the seed reads these (3.3, on the laptop); Railway does not need them. Never the dev default |
-| `TRUST_PROXY` | leave the default for now; decide in Phase 6 |
+| `TRUST_PROXY` | `loopback, linklocal, uniquelocal, 100.64.0.0/10` (set 2026-11-26, see Phase 6 "Client IP"). The default records Railway's proxy (`100.64.x.x`) for every client |
 
 Leave `PUBLIC_STORAGE_URL` unset. Nothing reads it for display.
 
@@ -378,10 +378,16 @@ Per-IP limits use `req.ip`:
 - guest SOS: 20 per 10 minutes per IP
 - guest SOS, same network and same place (~200 m): 3 per 10 minutes (added 2026-11-25)
 
-They only work if `req.ip` is the real client address. **Easiest check (since 2026-11-25):** send a guest SOS from the APK, then open System Administration → Security Events → "Guest report" and read the IP column. A public address (the phone's carrier) means it works. An address starting with `10.`, `100.`, `172.` or `192.168.` is Railway's proxy: set `TRUST_PROXY=1` **before** any pilot, or every guest in Bocaue shares one limit. You can also compare against the IPs of two different phones and of the web.
-- **If the APK requests all show one address** (Railway's proxy), guest SOS from different people shares one limit. That would break Rule 14. Set `TRUST_PROXY=1` so `req.ip` comes from Railway's `X-Forwarded-For`.
+They only work if `req.ip` is the real client address. **Easiest check (since 2026-11-25):** send a guest SOS from the APK, then open System Administration → Security Events → "Guest report" and read the IP column. A public address (the phone's carrier) means it works. An address starting with `10.`, `100.`, `172.` or `192.168.` is Railway's proxy: fix `TRUST_PROXY` **before** any pilot, or every guest in Bocaue shares one limit (done 2026-11-26, see Result below). You can also compare against the IPs of two different phones and of the web.
+- **If the APK requests all show one address** (Railway's proxy), guest SOS from different people shares one limit. That would break Rule 14. Trust Railway's proxy range so `req.ip` comes from Railway's `X-Forwarded-For`.
 - **Web logins** reach the backend through Vercel, so with `TRUST_PROXY=1` they still share Vercel's addresses. `TRUST_PROXY=2` fixes the web path, but then an APK client could fake its address and dodge the guest limit. For a demo, `1` is the safer choice. If many staff sign in at once, stagger the sign-ins.
 - If guest reports are ever blocked during a real event, `GUEST_REPORT_LIMIT_DISABLED=true` is the emergency switch.
+
+**Result (2026-11-26):**
+- [x] **App path fixed.** With the default, a guest SOS from the APK was recorded as `100.64.0.19` (INC-2026-000059, 11:08). Railway's proxy connects from `100.64.0.0/10`, a range the default does not trust. After setting `TRUST_PROXY=loopback, linklocal, uniquelocal, 100.64.0.0/10`, the same phone (Security Events code `0bfa0f12`) was recorded as its public address `152.233.15.123` (INC-2026-000060, 11:56). Guest limits now apply per network, not town-wide.
+  - Why this and not `1`: Express takes the right-most address it does not trust. Railway's hop adds the real client address last, so a client that fakes `X-Forwarded-For` still ends at its real IP.
+  - Undo: delete the variable and redeploy.
+- [ ] Web path: check the IP on a deliberate wrong-password **Login Failed** row (Security Events lists failed sign-ins only). A public address means web sign-ins are per user too. `100.64.x.x` means they still share one login limit, so stagger staff sign-ins at a demo.
 
 **Done when:** every box above is ticked, and `TRUST_PROXY` is set and recorded here.
 
