@@ -97,7 +97,7 @@ export function guestDetailOf(v: Record<string, unknown>): string {
   const parts = [
     label(v['reason']),
     typeof v['openReport'] === 'string' ? v['openReport'] : null,
-    limit !== null && minutes !== null ? `limit ${limit} per ${minutes} min` : null,
+    limit !== null && minutes !== null ? `limit ${limit} per ${minutes === 1440 ? 'day' : `${minutes} min`}` : null,
     typeof v['device'] === 'string' ? `Phone ${v['device']}` : null,
     place !== null && place > 1 ? `${place} from this network at this place in 10 min` : null,
     network !== null && network > 1 ? `${network} from this network in 10 min` : null,

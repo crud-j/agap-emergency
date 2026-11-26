@@ -17,6 +17,12 @@ describe('Security Events: guest report details', () => {
     );
   });
 
+  it('a daily limit reads "per day"', () => {
+    expect(guestDetailOf({ reason: 'LIMIT_DEVICE', limit: 3, windowMinutes: 1440, device: '0bfa0f12' })).toBe(
+      'Too many from one phone · limit 3 per day · Phone 0bfa0f12',
+    );
+  });
+
   it('a refusal for an open report names that report', () => {
     expect(guestDetailOf({ reason: 'LIMIT_OPEN', openReport: 'INC-2026-000061', device: 'ffff0000' })).toBe(
       'Earlier report still open · INC-2026-000061 · Phone ffff0000',
