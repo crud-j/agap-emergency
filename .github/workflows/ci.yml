@@ -26,6 +26,11 @@ jobs:
       - name: Typecheck shared
         run: pnpm --filter @agap/shared typecheck
 
+      # Backend and frontend import @agap/shared from shared/dist (gitignored), as the
+      # backend Dockerfile does: build it first or every import is "Cannot find module".
+      - name: Build shared
+        run: pnpm --filter @agap/shared build
+
       - name: Typecheck backend
         run: pnpm --filter @agap/backend typecheck
 
@@ -71,6 +76,9 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @agap/shared build
 
       - name: Generate Prisma client
         run: pnpm --filter @agap/backend db:generate
