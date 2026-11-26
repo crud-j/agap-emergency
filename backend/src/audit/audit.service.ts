@@ -87,6 +87,8 @@ export class AuditService {
     entityId?: string;
     from?: string;
     to?: string;
+    /** Exact client IP (validated by the controller). */
+    ip?: string;
   }) {
     const page = filters.page ?? 1;
     const perPage = Math.min(filters.perPage ?? 50, 200);
@@ -101,6 +103,7 @@ export class AuditService {
     // Writers differ in case ('Incident' / 'incident'); one filter matches both.
     if (filters.entityType) where.entity_type = { equals: filters.entityType, mode: 'insensitive' };
     if (filters.entityId) where.entity_id = filters.entityId;
+    if (filters.ip) where.ip_address = filters.ip;
     if (filters.from || filters.to) {
       where.occurred_at = {
         ...(filters.from && { gte: new Date(filters.from) }),

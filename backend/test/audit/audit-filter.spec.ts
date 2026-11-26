@@ -30,6 +30,21 @@ describe('AuditService.findAll filters (Phase 5a)', () => {
     expect(whereOf()).toEqual({ action: { in: ['LOGIN_FAILED', 'ACCOUNT_LOCKED', 'ACCOUNT_UNLOCKED'] } });
   });
 
+  it('filters by exact client IP (Security Events "show only this IP")', async () => {
+    await service.findAll({ action: 'GUEST_REPORT,GUEST_REPORT_REPEAT', ip: '203.0.113.30' });
+    expect(whereOf()).toEqual({ action: { in: ['GUEST_REPORT', 'GUEST_REPORT_REPEAT'] }, ip_address: '203.0.113.30' });
+  });
+
+  it('the controller refuses a malformed IP before it reaches the INET column', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { AuditController } = require('../../src/audit/audit.controller');
+    const controller = new AuditController(service);
+    await expect(controller.findAll(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, '1.2.3'))
+      .rejects.toThrow('ip must be an IPv4 or IPv6 address');
+    await controller.findAll(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, '2001:db8::1');
+    expect(whereOf()).toEqual({ ip_address: '2001:db8::1' });
+  });
+
   it('no action means no action filter', async () => {
     await service.findAll({});
     expect(whereOf()).toEqual({});

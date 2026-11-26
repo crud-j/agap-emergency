@@ -13,7 +13,7 @@ import { useAuditLog } from '@/features/audit/hooks';
 import type { AuditLogEntry, AuditLogParams } from '@/features/audit/api';
 import { titleCase } from '@/lib/incident-format';
 
-/** Account-security actions in `audit_action` (no schema change needed). */
+/** Security actions in `audit_action`: account security, then guest reports (Rule 14 abuse watch). */
 const SECURITY_ACTIONS = [
   'LOGIN_FAILED',
   'ACCOUNT_LOCKED',
@@ -22,7 +22,22 @@ const SECURITY_ACTIONS = [
   'MFA_CHANGE',
   'SESSION_REVOKED',
   'PERMISSION_DENIED',
+  'GUEST_REPORT',
+  'GUEST_REPORT_REPEAT',
+  'GUEST_REPORT_BLOCKED',
 ] as const;
+
+const GUEST_ACTIONS = new Set<string>(['GUEST_REPORT', 'GUEST_REPORT_REPEAT', 'GUEST_REPORT_BLOCKED']);
+
+const ACTION_LABELS: Record<string, string> = {
+  GUEST_REPORT: 'Guest report',
+  GUEST_REPORT_REPEAT: 'Guest report (repeat)',
+  GUEST_REPORT_BLOCKED: 'Guest report blocked',
+};
+
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? titleCase(action);
+}
 
 const ACTION_VARIANT: Record<string, BadgeVariant> = {
   LOGIN_FAILED: 'amber',
@@ -32,10 +47,17 @@ const ACTION_VARIANT: Record<string, BadgeVariant> = {
   PASSWORD_CHANGE: 'blue',
   MFA_CHANGE: 'blue',
   SESSION_REVOKED: 'muted',
+  GUEST_REPORT: 'muted',
+  GUEST_REPORT_REPEAT: 'amber',
+  GUEST_REPORT_BLOCKED: 'red',
 };
 
-/** Reason codes written by auth.service, mfa.service and administration.service. */
+/** Reason codes written by auth.service, mfa.service, administration.service and the guest limit. */
 const DETAIL_LABELS: Record<string, string> = {
+  LIMIT_DEVICE: 'Too many from one phone',
+  LIMIT_IP: 'Too many from one network',
+  LIMIT_SPOT: 'Same place, same network',
+  LIMIT_PHONE: 'Too many SMS from one number',
   ACCOUNT_LOCKED: 'Sign-in while locked',
   MFA_FAILED: 'Wrong verification code',
   SELF_SERVICE_RESET: 'Reset by the user',
@@ -60,9 +82,31 @@ function label(code: unknown): string | null {
   return DETAIL_LABELS[code] ?? titleCase(code);
 }
 
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
+ * Guest report details: which phone (a short code, not the device id), how many reports
+ * this network sent in 10 minutes, and for a refusal, which limit.
+ */
+export function guestDetailOf(v: Record<string, unknown>): string {
+  const place = num(v['samePlaceReports10m']);
+  const network = num(v['networkReports10m']);
+  const limit = num(v['limit']);
+  const minutes = num(v['windowMinutes']);
+  const parts = [
+    label(v['reason']),
+    limit !== null && minutes !== null ? `limit ${limit} per ${minutes} min` : null,
+    typeof v['device'] === 'string' ? `Phone ${v['device']}` : null,
+    place !== null && place > 1 ? `${place} from this network at this place in 10 min` : null,
+    network !== null && network > 1 ? `${network} from this network in 10 min` : null,
+  ].filter((p): p is string => Boolean(p));
+  return parts.join(' · ') || '—';
+}
+
 /** Short, non-sensitive summary of `new_values` (reason, method, lock duration). */
 function detailOf(entry: AuditLogEntry): string {
   const v = entry.new_values ?? {};
+  if (GUEST_ACTIONS.has(entry.action)) return guestDetailOf(v);
   const parts = [
     label(v['reason']),
     label(v['method'] ?? v['change']),
@@ -82,7 +126,7 @@ interface AccountFilter {
 
 /**
  * Security Events (MOD-46/49): failed sign-ins, lockouts, password and MFA changes,
- * revoked sessions and denied permissions, read from GET /audit.
+ * revoked sessions, denied permissions, and guest reports (with IP), read from GET /audit.
  */
 export function SecurityEvents(): JSX.Element {
   const [page, setPage] = useState(1);
@@ -91,6 +135,7 @@ export function SecurityEvents(): JSX.Element {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [account, setAccount] = useState<AccountFilter | null>(null);
+  const [ip, setIp] = useState<string | null>(null);
 
   const params: AuditLogParams = {
     page,
@@ -99,19 +144,21 @@ export function SecurityEvents(): JSX.Element {
     ...(from && { from: new Date(from).toISOString() }),
     ...(to && { to: new Date(to + 'T23:59:59').toISOString() }),
     ...(account && { entityId: account.id }),
+    ...(ip && { ip }),
   };
 
   const { data, isLoading, isError, isFetching } = useAuditLog(params);
   const rows = data?.data ?? [];
   const total = data?.meta.total ?? 0;
   const totalPages = Math.max(1, data?.meta.totalPages ?? 1);
-  const hasFilters = action !== 'ALL' || from !== '' || to !== '' || account !== null;
+  const hasFilters = action !== 'ALL' || from !== '' || to !== '' || account !== null || ip !== null;
 
   function resetFilters() {
     setAction('ALL');
     setFrom('');
     setTo('');
     setAccount(null);
+    setIp(null);
     setPage(1);
   }
 
@@ -124,12 +171,21 @@ export function SecurityEvents(): JSX.Element {
     {
       key: 'action',
       header: 'Event',
-      accessor: (row) => <Badge variant={ACTION_VARIANT[row.action] ?? 'default'}>{titleCase(row.action)}</Badge>,
+      accessor: (row) => <Badge variant={ACTION_VARIANT[row.action] ?? 'default'}>{actionLabel(row.action)}</Badge>,
     },
     {
       key: 'account',
       header: 'Account',
       accessor: (row) => {
+        if (GUEST_ACTIONS.has(row.action)) {
+          const ref = row.new_values?.['publicReference'];
+          return (
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-agap-textMain">Guest (no account)</p>
+              {typeof ref === 'string' && <p className="text-[11px] text-agap-textSub">{ref}</p>}
+            </div>
+          );
+        }
         const u = row.entity_user;
         if (!u) {
           return (
@@ -182,7 +238,26 @@ export function SecurityEvents(): JSX.Element {
     {
       key: 'ip',
       header: 'IP address',
-      accessor: (row) => <code className="text-[11px] text-agap-textSub">{row.ip_address ?? '—'}</code>,
+      accessor: (row) => {
+        if (!row.ip_address) return <code className="text-[11px] text-agap-textSub">—</code>;
+        const address = row.ip_address;
+        return (
+          <div className="flex items-center gap-1.5">
+            <code className="text-[11px] text-agap-textSub">{address}</code>
+            {ip !== address && (
+              <button
+                type="button"
+                onClick={() => { setIp(address); setPage(1); }}
+                title={`Show only ${address}`}
+                aria-label={`Show only events from IP ${address}`}
+                className="shrink-0 rounded-lg p-1 text-agap-textSub transition-colors hover:bg-agap-surface hover:text-agap-textMain"
+              >
+                <Filter size={12} />
+              </button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -196,7 +271,7 @@ export function SecurityEvents(): JSX.Element {
               <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All security events" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">All security events</SelectItem>
-                {SECURITY_ACTIONS.map((a) => <SelectItem key={a} value={a}>{titleCase(a)}</SelectItem>)}
+                {SECURITY_ACTIONS.map((a) => <SelectItem key={a} value={a}>{actionLabel(a)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -212,14 +287,24 @@ export function SecurityEvents(): JSX.Element {
 
         {hasFilters && (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            {account ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-agap-greenSoft px-3 py-1 text-xs font-semibold text-agap-green">
-                Account: {account.name}
-                <button type="button" onClick={() => { setAccount(null); setPage(1); }} aria-label="Clear account filter">
-                  <X size={12} />
-                </button>
-              </span>
-            ) : <span />}
+            <div className="flex flex-wrap items-center gap-2">
+              {account && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-agap-greenSoft px-3 py-1 text-xs font-semibold text-agap-green">
+                  Account: {account.name}
+                  <button type="button" onClick={() => { setAccount(null); setPage(1); }} aria-label="Clear account filter">
+                    <X size={12} />
+                  </button>
+                </span>
+              )}
+              {ip && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-agap-greenSoft px-3 py-1 text-xs font-semibold text-agap-green">
+                  IP: {ip}
+                  <button type="button" onClick={() => { setIp(null); setPage(1); }} aria-label="Clear IP filter">
+                    <X size={12} />
+                  </button>
+                </span>
+              )}
+            </div>
             <button type="button" onClick={resetFilters} className="text-xs font-semibold text-agap-green hover:underline">
               Clear filters
             </button>
@@ -236,7 +321,7 @@ export function SecurityEvents(): JSX.Element {
           getRowKey={(row) => row.id}
           loading={isLoading}
           emptyTitle="No security events"
-          emptyDescription={hasFilters ? 'Nothing matches these filters.' : 'Failed sign-ins, lockouts and account changes will appear here.'}
+          emptyDescription={hasFilters ? 'Nothing matches these filters.' : 'Failed sign-ins, lockouts, account changes and guest reports will appear here.'}
         />
       )}
 

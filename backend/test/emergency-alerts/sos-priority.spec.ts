@@ -42,7 +42,50 @@ describe('EmergencyAlertsService.createFromSos — priority', () => {
     [IncidentType.DEBRIS, IncidentPriority.MEDIUM],
   ])('stores the %s category default (%s)', async (incidentType, expected) => {
     const { service, tx } = setup();
-    await service.createFromSos({ incidentType, clientEventId: `evt-${incidentType}` }, 'SOS_BUTTON');
+    await service.createFromSos({ incidentType, clientEventId: `evt-${incidentType}` }, 'SOS_BUTTON', 'citizen-1');
     expect(tx.incident.create.mock.calls[0][0].data.priority).toBe(expected);
+  });
+
+  describe('guests (no account) need GPS inside Bocaue, as on POST /incidents', () => {
+    it.each([
+      ['no GPS', {}],
+      ['GPS outside Bocaue (Manila)', { latitude: 14.5995, longitude: 120.9842 }],
+    ])('refuses %s', async (_label, gps) => {
+      const { service, tx } = setup();
+      await expect(
+        service.createFromSos({ incidentType: IncidentType.FIRE, clientEventId: 'evt-g', ...gps }, 'SOS_BUTTON'),
+      ).rejects.toThrow('within Bocaue');
+      expect(tx.incident.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts GPS inside Bocaue', async () => {
+      const { service, tx } = setup();
+      await service.createFromSos(
+        { incidentType: IncidentType.FIRE, clientEventId: 'evt-ok', latitude: 14.7963, longitude: 120.9272 },
+        'SOS_BUTTON',
+      );
+      expect(tx.incident.create).toHaveBeenCalled();
+    });
+
+    it('a signed-in citizen without GPS is not blocked (GPS never blocks a report)', async () => {
+      const { service, tx } = setup();
+      await service.createFromSos({ incidentType: IncidentType.FIRE, clientEventId: 'evt-c' }, 'SOS_BUTTON', 'citizen-1');
+      expect(tx.incident.create).toHaveBeenCalled();
+    });
+  });
+});
+
+describe('removed routes (2026-11-25)', () => {
+  it('the alert controller no longer has cancel or status (anyone with an id could cancel or read the reporter)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { EmergencyAlertsController } = require('../../src/emergency-alerts/emergency-alerts.controller');
+    const methods = Object.getOwnPropertyNames(EmergencyAlertsController.prototype);
+    expect(methods).toEqual(expect.arrayContaining(['sos', 'shake']));
+    expect(methods).not.toContain('cancel');
+    expect(methods).not.toContain('status');
+    expect(Object.getOwnPropertyNames(EmergencyAlertsService.prototype)).not.toEqual(
+      expect.arrayContaining(['cancel']),
+    );
+    expect(Object.getOwnPropertyNames(EmergencyAlertsService.prototype)).not.toContain('getStatus');
   });
 });

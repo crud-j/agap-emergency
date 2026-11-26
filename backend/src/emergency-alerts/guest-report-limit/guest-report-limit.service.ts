@@ -11,10 +11,17 @@ export interface GuestSource {
   deviceId?: string | undefined;
   /** E.164 sender of a citizen SOS by SMS (MOD-17/19). A real SIM, so the limits are per number. */
   phone?: string | undefined;
+  /**
+   * Network + place: the IP and a ~200 m grid cell of the report's GPS (see spotKey).
+   * Catches one person sending the same emergency from several phones.
+   */
+  spot?: string | undefined;
 }
 
+export type GuestLimitScope = 'device' | 'ip' | 'phone' | 'spot';
+
 interface LimitRule {
-  scope: 'device' | 'ip' | 'phone';
+  scope: GuestLimitScope;
   windowSeconds: number;
   max: number;
 }
@@ -36,7 +43,24 @@ export const GUEST_REPORT_RULES: readonly LimitRule[] = [
   // install id, but a neighbour may text for several households in a flood.
   { scope: 'phone', windowSeconds: 10 * 60, max: 3 },
   { scope: 'phone', windowSeconds: 24 * 60 * 60, max: 10 },
+  // Same network, same place: several phones on one connection reporting one spot.
+  // MDRRMO already has that emergency by the third; a fourth adds nothing but noise.
+  // Other networks (other neighbours) are not affected.
+  { scope: 'spot', windowSeconds: 10 * 60, max: 3 },
 ];
+
+/** Grid size for `spot`: 0.002° ≈ 220 m north–south, ≈ 215 m east–west in Bocaue. */
+const SPOT_CELL_DEGREES = 0.002;
+
+/** The `spot` value for a report: its IP and GPS grid cell. Undefined without both. */
+export function spotKey(ip: string | undefined, lat: unknown, lng: unknown): string | undefined {
+  if (!ip || typeof lat !== 'number' || typeof lng !== 'number') return undefined;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
+  return `${ip}|${Math.round(lat / SPOT_CELL_DEGREES)}|${Math.round(lng / SPOT_CELL_DEGREES)}`;
+}
+
+/** Reports counted in the current 10-minute window, per scope (after this one). */
+export type GuestReportCounts = Partial<Record<GuestLimitScope, number>>;
 
 /** A retry of an already-admitted report (same idempotency key) is free for this long. */
 const ADMITTED_TTL_SECONDS = 24 * 60 * 60;
@@ -54,12 +78,22 @@ export function normalizeDeviceId(raw: unknown): string | undefined {
 /** Hold on the counters taken for one report. Released if the report is not created. */
 export interface GuestReportLease {
   release(): Promise<void>;
+  /** A retry of an already-counted report (same idempotency key), or limits are off. */
+  readonly repeat: boolean;
+  /** Reports in the shortest window per scope, this one included. */
+  readonly counts: GuestReportCounts;
 }
 
-const NO_LEASE: GuestReportLease = { release: async () => undefined };
+const NO_LEASE: GuestReportLease = { release: async () => undefined, repeat: true, counts: {} };
 
 export class GuestReportLimitExceeded extends HttpException {
-  constructor(readonly retryAfterSeconds: number) {
+  constructor(
+    readonly retryAfterSeconds: number,
+    /** Which limit was reached (recorded in Security Events). */
+    readonly scope: GuestLimitScope = 'device',
+    /** That limit, for the security event. */
+    readonly rule?: { windowSeconds: number; max: number },
+  ) {
     const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
     const wait = minutes >= 120 ? `${Math.ceil(minutes / 60)} hours` : `${minutes} minute${minutes === 1 ? '' : 's'}`;
     super(
@@ -69,9 +103,12 @@ export class GuestReportLimitExceeded extends HttpException {
         code: 'GUEST_REPORT_LIMIT',
         retryAfterSeconds,
         message:
-          'Too many reports were sent from this phone without an account. ' +
-          'If this is an emergency, call 911 or the Bocaue MDRRMO hotline now. ' +
-          `You can send another report in about ${wait}, or sign in to report right away.`,
+          scope === 'spot'
+            ? 'This emergency was already reported several times from your connection at this place, and MDRRMO has it. ' +
+              'If this is a different emergency, call 911 or the Bocaue MDRRMO hotline now, or sign in to report right away.'
+            : 'Too many reports were sent from this phone without an account. ' +
+              'If this is an emergency, call 911 or the Bocaue MDRRMO hotline now. ' +
+              `You can send another report in about ${wait}, or sign in to report right away.`,
       },
       HttpStatus.TOO_MANY_REQUESTS,
     );
@@ -169,13 +206,15 @@ export class GuestReportLimitService implements OnModuleDestroy {
    * an idempotency key that was already admitted is not counted again.
    */
   async reserve(source: GuestSource, idempotencyKey?: string): Promise<GuestReportLease> {
-    if (!this.enabled) return NO_LEASE;
+    // Off: nothing is counted, but the report is still a new one (and still recorded).
+    if (!this.enabled) return { ...NO_LEASE, repeat: false };
 
     const admittedKey = idempotencyKey ? `${KEY_PREFIX}admitted:${hash(idempotencyKey)}` : null;
     if (admittedKey && (await this.call((s) => s.hasFlag(admittedKey)))) return NO_LEASE;
 
     const now = Math.floor(Date.now() / 1000);
     const taken: string[] = [];
+    const counts: GuestReportCounts = {};
     let retryAfter = 0;
     let hitRule: LimitRule | null = null;
 
@@ -186,6 +225,8 @@ export class GuestReportLimitService implements OnModuleDestroy {
       const key = `${KEY_PREFIX}${rule.scope}:${hash(`${rule.scope}:${value}`)}:${rule.windowSeconds}:${bucket}`;
       const count = await this.call((s) => s.incr(key, rule.windowSeconds));
       taken.push(key);
+      // Rules are listed shortest window first, so the first count per scope is the 10-minute one.
+      if (counts[rule.scope] === undefined) counts[rule.scope] = count;
       if (count > rule.max) {
         const wait = (bucket + 1) * rule.windowSeconds - now;
         if (wait > retryAfter) {
@@ -200,13 +241,18 @@ export class GuestReportLimitService implements OnModuleDestroy {
       this.logger.warn(
         `Guest report blocked by ${hitRule.scope} limit (${hitRule.max} per ${hitRule.windowSeconds}s)`,
       );
-      throw new GuestReportLimitExceeded(retryAfter);
+      throw new GuestReportLimitExceeded(retryAfter, hitRule.scope, {
+        windowSeconds: hitRule.windowSeconds,
+        max: hitRule.max,
+      });
     }
 
     if (admittedKey) await this.call((s) => s.setFlag(admittedKey, ADMITTED_TTL_SECONDS));
 
     let released = false;
     return {
+      repeat: false,
+      counts,
       release: async () => {
         if (released) return;
         released = true;

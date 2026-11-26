@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Param,
@@ -6,6 +7,7 @@ import {
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { isIP } from 'net';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuditService } from './audit.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -32,8 +34,12 @@ export class AuditController {
     @Query('entityId', new ParseUUIDPipe({ optional: true })) entityId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('ip') ip?: string,
   ) {
+    // The column is INET: a malformed value would be a database error, so refuse it here.
+    if (ip && !isIP(ip)) throw new BadRequestException('ip must be an IPv4 or IPv6 address');
     return this.auditService.findAll({
+      ...(ip && { ip }),
       ...(page !== undefined && { page: +page }),
       ...(perPage !== undefined && { perPage: +perPage }),
       ...(action && { action }),

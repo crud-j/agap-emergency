@@ -2,7 +2,6 @@ import {
   BadRequestException,
   Injectable,
   Logger,
-  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -12,7 +11,7 @@ import { SosAlertDto } from './dto/sos-alert.dto';
 import { RealtimeService } from '../realtime/realtime.service';
 import { BarangayNotifyService } from '../barangay-coordination/barangay-notify.service';
 import { OpsAlertService } from './ops-alert.service';
-import { IncidentStatus, QUEUE_NAMES, recommendIntakePriority } from '@agap/shared';
+import { IncidentStatus, QUEUE_NAMES, isCoordinateInBocaue, recommendIntakePriority } from '@agap/shared';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -32,6 +31,17 @@ export class EmergencyAlertsService {
     triggerMethod: 'SOS_BUTTON' | 'SHAKE_GESTURE',
     userId?: string,
   ) {
+    // Same rule as POST /incidents for an app guest (anti-abuse): GPS inside Bocaue.
+    // Without it this route was a way around that check.
+    if (
+      !userId &&
+      (dto.latitude === undefined || dto.longitude === undefined || !isCoordinateInBocaue(dto.latitude, dto.longitude))
+    ) {
+      throw new BadRequestException(
+        'Guest emergency reports require GPS coordinates within Bocaue Municipality, Bulacan.',
+      );
+    }
+
     const clientEventId = dto.clientEventId ?? crypto.randomUUID();
 
     // Idempotency: same client event id → same incident, never a duplicate.
@@ -173,55 +183,6 @@ export class EmergencyAlertsService {
 
     this.logger.log(`SOS incident created: ${incident.public_reference}`);
     return { incident, duplicate: false };
-  }
-
-  async cancel(incidentId: string, _userId?: string) {
-    const trigger = await this.prisma.alert_triggers.findFirst({
-      where: { incident_id: incidentId },
-      orderBy: { triggered_at: 'desc' },
-    });
-    if (!trigger) throw new NotFoundException('No alert trigger found for incident');
-
-    if (trigger.cancel_deadline_at && trigger.cancel_deadline_at < new Date()) {
-      throw new BadRequestException('Cancellation window has expired');
-    }
-
-    const [, incident] = await this.prisma.$transaction([
-      this.prisma.alert_triggers.update({
-        where: { id: trigger.id },
-        data: {
-          was_cancelled: true,
-          cancelled_at: new Date(),
-          cancellation_reason: 'ACCIDENTAL_TRIGGER',
-        },
-      }),
-      this.prisma.incident.update({
-        where: { id: incidentId },
-        data: { status: IncidentStatus.CANCELLED as any },
-      }),
-    ]);
-
-    await this.prisma.incidentEvent.create({
-      data: {
-        incident_id: incidentId,
-        to_status: IncidentStatus.CANCELLED as any,
-        notes: 'Cancelled by reporter within grace window',
-      },
-    });
-
-    // Frees the barangay short code; a still-queued barangay SMS is then skipped.
-    void this.barangayNotify?.closeNoticesForIncident(incidentId);
-
-    return incident;
-  }
-
-  async getStatus(incidentId: string) {
-    const incident = await this.prisma.incident.findUnique({
-      where: { id: incidentId },
-      include: { incident_locations: true, incident_reporters: true },
-    });
-    if (!incident) throw new NotFoundException('Incident not found');
-    return incident;
   }
 
   private async generateReference(): Promise<string> {

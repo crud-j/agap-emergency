@@ -1,13 +1,10 @@
 import {
   Controller,
   Post,
-  Get,
-  Param,
   Body,
   UseGuards,
   UseInterceptors,
   Request,
-  ParseUUIDPipe,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -47,17 +44,8 @@ export class EmergencyAlertsController {
     return this.emergencyAlertsService.createFromSos(dto, 'SHAKE_GESTURE', req.user?.id);
   }
 
-  @Post(':id/cancel')
-  @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Cancel an alert within the grace window' })
-  async cancel(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
-    return this.emergencyAlertsService.cancel(id, req.user?.id);
-  }
-
-  @Get(':id/status')
-  @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Get alert/incident status' })
-  async status(@Param('id', ParseUUIDPipe) id: string) {
-    return this.emergencyAlertsService.getStatus(id);
-  }
+  // Removed 2026-11-25: `POST :id/cancel` and `GET :id/status`. Nothing called them, and
+  // anyone holding an incident id could cancel it, or read the reporter's name and phone.
+  // Cancel: PATCH /v1/false-alerts/:id/cancel (ownership checked). Status: the reporter's
+  // GET /v1/incidents/:id/timeline, or a guest's GET /v1/guest-reports/status.
 }

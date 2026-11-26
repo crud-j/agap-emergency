@@ -30,6 +30,8 @@ export interface AuditLogParams {
   actorId?: string;
   from?: string;
   to?: string;
+  /** Exact client IP (Security Events "show only this IP"). */
+  ip?: string;
   page?: number;
   perPage?: number;
 }
@@ -44,6 +46,7 @@ export function fetchAuditLog(params?: AuditLogParams): Promise<PaginatedResult<
   if (params?.actorId)    qs.set('actorId', params.actorId);
   if (params?.from)       qs.set('from', params.from);
   if (params?.to)         qs.set('to', params.to);
+  if (params?.ip)         qs.set('ip', params.ip);
   if (params?.page)       qs.set('page', String(params.page));
   if (params?.perPage)    qs.set('perPage', String(params.perPage));
   return api.get(`/audit?${qs}`, getToken());

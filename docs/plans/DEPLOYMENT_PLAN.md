@@ -376,8 +376,9 @@ Run all of these on the deployed system, not locally.
 Per-IP limits use `req.ip`:
 - login: 5 per minute
 - guest SOS: 20 per 10 minutes per IP
+- guest SOS, same network and same place (~200 m): 3 per 10 minutes (added 2026-11-25)
 
-They only work if `req.ip` is the real client address. To check, make requests from two different phones and from the web, then compare the IPs recorded in the audit log.
+They only work if `req.ip` is the real client address. **Easiest check (since 2026-11-25):** send a guest SOS from the APK, then open System Administration → Security Events → "Guest report" and read the IP column. A public address (the phone's carrier) means it works. An address starting with `10.`, `100.`, `172.` or `192.168.` is Railway's proxy: set `TRUST_PROXY=1` **before** any pilot, or every guest in Bocaue shares one limit. You can also compare against the IPs of two different phones and of the web.
 - **If the APK requests all show one address** (Railway's proxy), guest SOS from different people shares one limit. That would break Rule 14. Set `TRUST_PROXY=1` so `req.ip` comes from Railway's `X-Forwarded-For`.
 - **Web logins** reach the backend through Vercel, so with `TRUST_PROXY=1` they still share Vercel's addresses. `TRUST_PROXY=2` fixes the web path, but then an APK client could fake its address and dodge the guest limit. For a demo, `1` is the safer choice. If many staff sign in at once, stagger the sign-ins.
 - If guest reports are ever blocked during a real event, `GUEST_REPORT_LIMIT_DISABLED=true` is the emergency switch.

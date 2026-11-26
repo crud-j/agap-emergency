@@ -1,14 +1,17 @@
 import { lastValueFrom, of, throwError } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@agap/shared';
+import { AuditAction } from '@agap/shared';
 import {
   GUEST_REPORT_RULES,
   GuestReportLimitExceeded,
   GuestReportLimitService,
   normalizeDeviceId,
+  spotKey,
 } from '../../src/emergency-alerts/guest-report-limit/guest-report-limit.service';
 import {
   GuestReportLimitInterceptor,
+  deviceCode,
   isGuestRequest,
 } from '../../src/emergency-alerts/guest-report-limit/guest-report-limit.interceptor';
 
@@ -92,6 +95,48 @@ describe('GuestReportLimitService', () => {
     await off.onModuleDestroy();
   });
 
+  it('one network reporting the same place from many phones is capped at 3 per 10 minutes', async () => {
+    const spotMax = GUEST_REPORT_RULES.find((r) => r.scope === 'spot')!.max;
+    const ip = '203.0.113.20';
+    const spot = spotKey(ip, 14.7963, 120.9272);
+    for (let i = 0; i < spotMax; i++) {
+      await service.reserve({ ip, deviceId: `phone-number-${i}`, spot }, `s-${i}`);
+    }
+
+    const blocked = await service.reserve({ ip, deviceId: 'phone-number-x', spot }, 's-x').catch((e) => e);
+    expect(blocked).toBeInstanceOf(GuestReportLimitExceeded);
+    expect(blocked.scope).toBe('spot');
+    expect(blocked.rule).toEqual({ windowSeconds: 600, max: spotMax });
+    expect(JSON.stringify(blocked.getResponse())).toMatch(/already reported.*911/);
+
+    // Another place on the same network, and the same place from another network, still go through.
+    await expect(service.reserve({ ip, deviceId: 'phone-number-y', spot: spotKey(ip, 14.81, 120.94) }, 's-y')).resolves.toBeDefined();
+    await expect(
+      service.reserve({ ip: '198.51.100.4', deviceId: 'phone-number-z', spot: spotKey('198.51.100.4', 14.7963, 120.9272) }, 's-z'),
+    ).resolves.toBeDefined();
+  });
+
+  it('returns the 10-minute counts, and marks a retry of the same report as a repeat', async () => {
+    const ip = '203.0.113.21';
+    const spot = spotKey(ip, 14.7963, 120.9272);
+    const first = await service.reserve({ ip, deviceId: 'phone-aaaaaaaa', spot }, 'c-1');
+    const second = await service.reserve({ ip, deviceId: 'phone-bbbbbbbb', spot }, 'c-2');
+    expect(first).toMatchObject({ repeat: false, counts: { device: 1, ip: 1, spot: 1 } });
+    expect(second).toMatchObject({ repeat: false, counts: { device: 1, ip: 2, spot: 2 } });
+
+    await expect(service.reserve({ ip, deviceId: 'phone-bbbbbbbb', spot }, 'c-2')).resolves.toMatchObject({ repeat: true });
+  });
+
+  it('spotKey: ~200 m cells per network; nothing without an IP or GPS', () => {
+    const ip = '203.0.113.22';
+    expect(spotKey(ip, 14.79630, 120.92720)).toBe(spotKey(ip, 14.79650, 120.92740)); // ~30 m apart
+    expect(spotKey(ip, 14.79630, 120.92720)).not.toBe(spotKey(ip, 14.80130, 120.92720)); // ~550 m apart
+    expect(spotKey(ip, 14.7963, 120.9272)).not.toBe(spotKey('198.51.100.1', 14.7963, 120.9272));
+    expect(spotKey(undefined, 14.7963, 120.9272)).toBeUndefined();
+    expect(spotKey(ip, undefined, 120.9272)).toBeUndefined();
+    expect(spotKey(ip, '14.79' as unknown, 120.9272)).toBeUndefined();
+  });
+
   it('ignores malformed device ids', () => {
     expect(normalizeDeviceId('abc')).toBeUndefined();
     expect(normalizeDeviceId('x'.repeat(65))).toBeUndefined();
@@ -149,5 +194,123 @@ describe('GuestReportLimitInterceptor', () => {
       GuestReportLimitExceeded,
     );
     expect(res.setHeader).toHaveBeenCalledWith('Retry-After', '300');
+  });
+});
+
+describe('Guest reports in Security Events (IP + device code)', () => {
+  const BOCAUE = { lat: 14.7963, lng: 120.9272 };
+
+  function context(req: Record<string, unknown>) {
+    const res = { setHeader: jest.fn() };
+    return { switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }) } as any;
+  }
+  const guestReq = (ip: string, device: string, key: string, body: Record<string, unknown> = BOCAUE) => ({
+    ip,
+    headers: { 'x-device-id': device, 'user-agent': 'okhttp/4.12.0' },
+    body: { idempotencyKey: key, ...body },
+  });
+
+  let service: GuestReportLimitService;
+  beforeEach(() => {
+    service = makeService();
+  });
+  afterEach(async () => {
+    await service.onModuleDestroy();
+  });
+
+  async function send(interceptor: GuestReportLimitInterceptor, req: Record<string, unknown>, result: unknown) {
+    return lastValueFrom(await interceptor.intercept(context(req), { handle: () => of(result) }));
+  }
+
+  it('two phones on one network reporting the same place: the second is a repeat, both with the IP', async () => {
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    const interceptor = new GuestReportLimitInterceptor(service, audit as any);
+
+    await send(interceptor, guestReq('203.0.113.30', 'phone-one-aaaa', 'k-1'), { id: 'inc-1', public_reference: 'INC-2026-000301' });
+    await send(interceptor, guestReq('203.0.113.30', 'phone-two-bbbb', 'k-2'), { id: 'inc-2', public_reference: 'INC-2026-000302' });
+
+    const [first, second] = audit.log.mock.calls.map((c) => c[0]);
+    expect(first).toMatchObject({
+      action: AuditAction.GUEST_REPORT,
+      ipAddress: '203.0.113.30',
+      userAgent: 'okhttp/4.12.0',
+      entityType: 'incident',
+      entityId: 'inc-1',
+      incidentId: 'inc-1',
+      newValues: { publicReference: 'INC-2026-000301', device: deviceCode('phone-one-aaaa'), networkReports10m: 1, samePlaceReports10m: 1 },
+    });
+    expect(second).toMatchObject({
+      action: AuditAction.GUEST_REPORT_REPEAT,
+      ipAddress: '203.0.113.30',
+      newValues: { publicReference: 'INC-2026-000302', device: deviceCode('phone-two-bbbb'), networkReports10m: 2, samePlaceReports10m: 2 },
+    });
+    expect(first.newValues.device).not.toBe(second.newValues.device);
+  });
+
+  it('records the refusal with the IP and which limit', async () => {
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    const interceptor = new GuestReportLimitInterceptor(service, audit as any);
+    const spotMax = GUEST_REPORT_RULES.find((r) => r.scope === 'spot')!.max;
+    for (let i = 0; i < spotMax; i++) {
+      await send(interceptor, guestReq('203.0.113.31', `phone-${i}-cccc`, `b-${i}`), { id: `inc-${i}` });
+    }
+
+    await expect(
+      interceptor.intercept(context(guestReq('203.0.113.31', 'phone-x-dddd', 'b-x')), { handle: () => of({ id: 'never' }) }),
+    ).rejects.toBeInstanceOf(GuestReportLimitExceeded);
+
+    expect(audit.log).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: AuditAction.GUEST_REPORT_BLOCKED,
+        ipAddress: '203.0.113.31',
+        newValues: expect.objectContaining({ reason: 'LIMIT_SPOT', device: deviceCode('phone-x-dddd'), limit: spotMax, windowMinutes: 10 }),
+      }),
+    );
+  });
+
+  it('reads the SOS/shake response shape and their latitude/longitude fields', async () => {
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    const interceptor = new GuestReportLimitInterceptor(service, audit as any);
+
+    await send(
+      interceptor,
+      { ip: '203.0.113.32', headers: { 'x-device-id': 'phone-sos-eeee' }, body: { clientEventId: 'e-1', latitude: 14.7963, longitude: 120.9272 } },
+      { incident: { id: 'inc-9', public_reference: 'INC-2026-000309' }, duplicate: false },
+    );
+
+    expect(audit.log.mock.calls[0][0]).toMatchObject({
+      incidentId: 'inc-9',
+      newValues: { publicReference: 'INC-2026-000309', samePlaceReports10m: 1 },
+    });
+  });
+
+  it('a retry of the same report (same idempotency key) is not recorded twice', async () => {
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    const interceptor = new GuestReportLimitInterceptor(service, audit as any);
+
+    await send(interceptor, guestReq('203.0.113.33', 'phone-ffff-ffff', 'same'), { id: 'inc-1' });
+    await send(interceptor, guestReq('203.0.113.33', 'phone-ffff-ffff', 'same'), { id: 'inc-1' });
+
+    expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+
+  it('never records signed-in citizens here, nor a raw device id, nor a malformed IP', async () => {
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    const interceptor = new GuestReportLimitInterceptor(service, audit as any);
+
+    await send(interceptor, { user: { id: 'u1', role: 'CITIZEN' }, body: BOCAUE }, { id: 'inc-1' });
+    expect(audit.log).not.toHaveBeenCalled();
+
+    await send(interceptor, guestReq('not-an-ip', 'phone-gggg-gggg', 'g-1'), { id: 'inc-2' });
+    const entry = audit.log.mock.calls[0][0];
+    expect(entry.ipAddress).toBeUndefined();
+    expect(JSON.stringify(entry)).not.toContain('phone-gggg-gggg');
+  });
+
+  it('an audit failure never fails the report', async () => {
+    const audit = { log: jest.fn().mockRejectedValue(new Error('db down')) };
+    const interceptor = new GuestReportLimitInterceptor(service, audit as any);
+
+    await expect(send(interceptor, guestReq('203.0.113.34', 'phone-hhhh-hhhh', 'h-1'), { id: 'inc-1' })).resolves.toEqual({ id: 'inc-1' });
   });
 });

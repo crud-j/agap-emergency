@@ -35,4 +35,10 @@ export enum AuditAction {
   ID_CARD_LOOKUP = 'ID_CARD_LOOKUP',
   /** MOD-48: a claim on a PhilHealth ID ended and its card data was erased. Details: the reason code only. */
   IDENTITY_VERIFICATION_RELEASED = 'IDENTITY_VERIFICATION_RELEASED',
+  /** Rule 14 abuse watch: a report sent without an account. IP + a short device code. */
+  GUEST_REPORT = 'GUEST_REPORT',
+  /** A guest report from a network that already reported this place in the last 10 minutes. */
+  GUEST_REPORT_REPEAT = 'GUEST_REPORT_REPEAT',
+  /** A guest report refused by a limit (which one is in the details). */
+  GUEST_REPORT_BLOCKED = 'GUEST_REPORT_BLOCKED',
 }
