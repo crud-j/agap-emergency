@@ -1,4 +1,6 @@
-import { ALL_NAV_GROUPS, ROLE, canOpen, landingForRole, navForRole, showsSidebar } from '@/lib/role-access';
+import {
+  ACCESS_PAGES, ACCESS_ROLES, ALL_NAV_GROUPS, ROLE, canOpen, landingForRole, navForRole, showsSidebar,
+} from '@/lib/role-access';
 
 const CONSOLE_ROLES = Object.values(ROLE);
 
@@ -150,11 +152,46 @@ describe('role-access', () => {
       'Account Security',
     ]);
     expect(labels(ROLE.SYS_ADMIN)).toEqual([
-      'Dashboard', 'Organizations', 'Fleet & Units', 'Requests', 'Hospitals & Facilities',
-      'Users & Accounts', 'Roles & Permissions', 'Barangay Directory', 'ID Reviews', 'Risk Areas', 'Audit Log',
-      'Security Events', 'Integrations', 'SMS Activity', 'Configuration', 'Response Targets',
+      'Dashboard',
+      'Users & Accounts', 'ID Reviews',
+      'Organizations', 'Hospitals & Facilities', 'Fleet & Units', 'Barangay Directory',
+      'Logs', 'Settings',
       'Account Security',
     ]);
+    expect(navForRole(ROLE.SYS_ADMIN).map((g) => g.label)).toEqual([
+      'Overview', 'People', 'Reference Data', 'System', 'Account',
+    ]);
+  });
+
+  it("the System Administrator's merged and hidden pages still open (old links redirect or stay reachable)", () => {
+    for (const path of [
+      '/administration/logs', '/administration/settings',
+      // Old addresses: redirect to a tab of Logs / Settings, or to the dashboard.
+      '/administration/security', '/administration/sms', '/administration/config',
+      '/administration/permissions', '/administration/integrations', '/audit',
+      // Out of the sidebar, still reachable.
+      '/administration/risk-areas', '/resources/requests', '/operations/sla-targets',
+    ]) {
+      expect({ path, open: canOpen(ROLE.SYS_ADMIN, path) }).toEqual({ path, open: true });
+    }
+    // Logs and Settings are the System Administrator's own.
+    for (const role of CONSOLE_ROLES.filter((r) => r !== ROLE.SYS_ADMIN)) {
+      expect(canOpen(role, '/administration/logs')).toBe(false);
+      expect(canOpen(role, '/administration/settings')).toBe(false);
+    }
+  });
+
+  it('the page access table lists every sidebar link, once', () => {
+    const listed = ACCESS_PAGES.flatMap((a) => a.pages.map((p) => p.href));
+    expect(new Set(listed).size).toBe(listed.length);
+    for (const href of new Set(ALL_NAV_GROUPS.flatMap((g) => g.items.map((i) => i.href)))) {
+      expect({ href, listed: listed.includes(href) }).toEqual({ href, listed: true });
+    }
+    // Every page in the table opens for at least one console role (no dead rows).
+    for (const href of listed) {
+      expect({ href, someone: ACCESS_ROLES.some(({ role }) => canOpen(role, href)) }).toEqual({ href, someone: true });
+    }
+    expect(ACCESS_ROLES.map((r) => r.role).sort()).toEqual([...CONSOLE_ROLES].sort());
   });
 
   it("the Supervisor's sidebar shows oversight up front and folds the rest", () => {

@@ -126,8 +126,11 @@ export interface NavGroup {
   opensDuringMajorIncident?: boolean;
 }
 
-/** Roles that use NAV_GROUPS: every console role except the Supervisor (SUPERVISOR_NAV_GROUPS). */
-const NAV_ROLES = [DISPATCHER, ORG_ADMIN, PUBLISHER, SYS_ADMIN];
+/**
+ * Roles that use NAV_GROUPS. The Supervisor (SUPERVISOR_NAV_GROUPS) and the System
+ * Administrator (ADMIN_NAV_GROUPS) have their own sidebars.
+ */
+const NAV_ROLES = [DISPATCHER, ORG_ADMIN, PUBLISHER];
 
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -150,10 +153,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Resources',
     items: [
-      { href: '/organizations', label: 'Organizations', roles: [ORG_ADMIN, SYS_ADMIN] },
-      { href: '/operations/fleet', label: 'Fleet & Units', roles: [DISPATCHER, ORG_ADMIN, SYS_ADMIN] },
-      { href: '/resources/requests', label: 'Requests', roles: [ORG_ADMIN, SYS_ADMIN] },
-      { href: '/hospitals', label: 'Hospitals & Facilities', roles: [HOSPITAL_USER, DISPATCHER, ORG_ADMIN, SYS_ADMIN] },
+      { href: '/organizations', label: 'Organizations', roles: [ORG_ADMIN] },
+      { href: '/operations/fleet', label: 'Fleet & Units', roles: [DISPATCHER, ORG_ADMIN] },
+      { href: '/resources/requests', label: 'Requests', roles: [ORG_ADMIN] },
+      { href: '/hospitals', label: 'Hospitals & Facilities', roles: [HOSPITAL_USER, DISPATCHER, ORG_ADMIN] },
     ],
   },
   {
@@ -172,20 +175,9 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Administration',
     items: [
-      { href: '/administration/users', label: 'Users & Accounts', roles: [SYS_ADMIN] },
-      { href: '/administration/permissions', label: 'Roles & Permissions', roles: [SYS_ADMIN] },
-      { href: '/administration/barangays', label: 'Barangay Directory', roles: [ORG_ADMIN, SYS_ADMIN] },
+      { href: '/administration/barangays', label: 'Barangay Directory', roles: [ORG_ADMIN] },
       // Reviewers: System Administrator and MDRRMO Org Administrators (Part B Q1).
-      { href: '/administration/id-reviews', label: 'ID Reviews', roles: [ORG_ADMIN, SYS_ADMIN], orgAdminOrgTypes: ['MDRRMO'] },
-      // MOD-51: read-only list for support. Supervisors manage risk areas on the Risk Map;
-      // the System Administrator has no Risk Map (Phase 5b).
-      { href: '/administration/risk-areas', label: 'Risk Areas', roles: [SYS_ADMIN] },
-      { href: '/audit', label: 'Audit Log', roles: [SYS_ADMIN] },
-      { href: '/administration/security', label: 'Security Events', roles: [SYS_ADMIN] },
-      { href: '/administration/integrations', label: 'Integrations', roles: [SYS_ADMIN] },
-      { href: '/administration/sms', label: 'SMS Activity', roles: [SYS_ADMIN] },
-      { href: '/administration/config', label: 'Configuration', roles: [SYS_ADMIN] },
-      { href: '/operations/sla-targets', label: 'Response Targets', roles: [SYS_ADMIN] },
+      { href: '/administration/id-reviews', label: 'ID Reviews', roles: [ORG_ADMIN], orgAdminOrgTypes: ['MDRRMO'] },
     ],
   },
   {
@@ -266,8 +258,134 @@ export const SUPERVISOR_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+const A = [SYS_ADMIN];
+
+/**
+ * The System Administrator's sidebar: ten links in five groups. Related pages share one
+ * link with tabs (Logs: activity, security events, SMS; Settings: configuration, response
+ * targets, page access). The old addresses still open and redirect to the right tab.
+ * Read-only operational lists (mutual-aid requests, risk areas) are not linked here;
+ * their routes stay open to this role (ROUTE_ROLES is unchanged).
+ */
+export const ADMIN_NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Overview',
+    items: [
+      { href: '/dashboard', label: 'Dashboard', roles: A, exact: true },
+    ],
+  },
+  {
+    label: 'People',
+    items: [
+      { href: '/administration/users', label: 'Users & Accounts', roles: A },
+      { href: '/administration/id-reviews', label: 'ID Reviews', roles: A },
+    ],
+  },
+  {
+    label: 'Reference Data',
+    items: [
+      { href: '/organizations', label: 'Organizations', roles: A },
+      { href: '/hospitals', label: 'Hospitals & Facilities', roles: A },
+      { href: '/operations/fleet', label: 'Fleet & Units', roles: A },
+      { href: '/administration/barangays', label: 'Barangay Directory', roles: A },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { href: '/administration/logs', label: 'Logs', roles: A },
+      { href: '/administration/settings', label: 'Settings', roles: A },
+    ],
+  },
+  {
+    label: 'Account',
+    items: [
+      { href: '/account/security', label: 'Account Security', roles: A },
+    ],
+  },
+];
+
 /** Every sidebar definition, for checks that must cover all of them. */
-export const ALL_NAV_GROUPS: NavGroup[] = [...NAV_GROUPS, ...SUPERVISOR_NAV_GROUPS];
+export const ALL_NAV_GROUPS: NavGroup[] = [...NAV_GROUPS, ...SUPERVISOR_NAV_GROUPS, ...ADMIN_NAV_GROUPS];
+
+// ─── Page access table (MOD-47, read-only) ──────────────────────────────────────
+
+/** The web console roles, in the order the access table shows them. */
+export const ACCESS_ROLES: readonly { role: string; label: string }[] = [
+  { role: DISPATCHER, label: 'Dispatcher' },
+  { role: SUPERVISOR, label: 'Supervisor' },
+  { role: HOSPITAL_USER, label: 'Hospital User' },
+  { role: ORG_ADMIN, label: 'Org Admin' },
+  { role: PUBLISHER, label: 'Publisher' },
+  { role: SYS_ADMIN, label: 'System Admin' },
+];
+
+/** Every console page a person can open, grouped by area. Each sidebar link appears here (tested). */
+export const ACCESS_PAGES: readonly { area: string; pages: readonly { href: string; label: string }[] }[] = [
+  {
+    area: 'Operations',
+    pages: [
+      { href: '/dashboard', label: 'Dashboard' },
+      { href: '/operations/incidents', label: 'Incident Queue' },
+      { href: '/operations/triage', label: 'Triage' },
+      { href: '/operations/dispatch', label: 'Live Dispatch' },
+      { href: '/operations/risk', label: 'Risk Map' },
+      { href: '/operations/history', label: 'Incident History' },
+    ],
+  },
+  {
+    area: 'Oversight',
+    pages: [
+      { href: '/operations/escalations', label: 'Escalations' },
+      { href: '/operations/approvals', label: 'Advisory Approvals' },
+      { href: '/operations/sla-targets', label: 'Response Targets' },
+      { href: '/analytics', label: 'Analytics' },
+      { href: '/audit', label: 'Activity Log' },
+    ],
+  },
+  {
+    area: 'Major Incident',
+    pages: [
+      { href: '/operations/command', label: 'Command / ICS' },
+      { href: '/operations/multi-agency', label: 'Multi-Agency' },
+      { href: '/operations/surge', label: 'Surge Mode' },
+    ],
+  },
+  {
+    area: 'Resources',
+    pages: [
+      { href: '/organizations', label: 'Organizations' },
+      { href: '/operations/fleet', label: 'Fleet & Units' },
+      { href: '/resources/requests', label: 'Mutual-Aid Requests' },
+      { href: '/hospitals', label: 'Hospitals & Facilities' },
+    ],
+  },
+  {
+    area: 'Broadcast',
+    pages: [
+      { href: '/announcements', label: 'Announcements' },
+      { href: '/announcements/compose', label: 'Compose Announcement' },
+      { href: '/announcements/history', label: 'Publication History' },
+    ],
+  },
+  {
+    area: 'Administration',
+    pages: [
+      { href: '/administration/users', label: 'Users & Accounts' },
+      { href: '/administration/id-reviews', label: 'ID Reviews' },
+      { href: '/administration/barangays', label: 'Barangay Directory' },
+      { href: '/administration/risk-areas', label: 'Risk Areas (list)' },
+      { href: '/administration/logs', label: 'Logs' },
+      { href: '/administration/settings', label: 'Settings' },
+    ],
+  },
+  {
+    area: 'Account',
+    pages: [
+      { href: '/account/security', label: 'Account Security' },
+    ],
+  },
+];
 
 function showsLink(item: NavLink, role: string, orgType: string | undefined): boolean {
   if (!item.roles.includes(role)) return false;
@@ -278,7 +396,7 @@ function showsLink(item: NavLink, role: string, orgType: string | undefined): bo
 /** The sidebar for one role (and, for Org Administrators, their organization type): groups with at least one visible link. */
 export function navForRole(role: string | undefined, orgType?: string): NavGroup[] {
   if (!role) return [];
-  const source = role === SUPERVISOR ? SUPERVISOR_NAV_GROUPS : NAV_GROUPS;
+  const source = role === SUPERVISOR ? SUPERVISOR_NAV_GROUPS : role === SYS_ADMIN ? ADMIN_NAV_GROUPS : NAV_GROUPS;
   return source
     .map((group) => ({ ...group, items: group.items.filter((item) => showsLink(item, role, orgType)) }))
     .filter((group) => group.items.length > 0);

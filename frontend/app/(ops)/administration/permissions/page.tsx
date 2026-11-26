@@ -1,10 +1,6 @@
-import type { JSX } from 'react';
-import { AdminPage, PermissionsTab } from '@/components/admin/AdminSections';
+import { redirect } from 'next/navigation';
 
-export default function AdminPermissionsPage(): JSX.Element {
-  return (
-    <AdminPage title="Roles & Permissions" description="MOD-47 · Permission catalog per role">
-      <PermissionsTab />
-    </AdminPage>
-  );
+/** Roles & Permissions became the read-only Page access tab of Settings. */
+export default function Redirect(): never {
+  redirect('/administration/settings?tab=access');
 }

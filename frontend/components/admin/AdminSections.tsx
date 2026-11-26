@@ -4,7 +4,7 @@ import { useState, type JSX, type ReactNode } from 'react';
 import {
   Search,
   UserCheck, UserX, Trash2, Edit, XCircle,
-  Settings, KeyRound, Plus, Info, CheckCircle2,
+  Settings, CheckCircle2, Info,
 } from 'lucide-react';
 import {
   Button, Badge, DataTable,
@@ -24,12 +24,6 @@ import {
   useUpsertConfig,
 } from '@/features/admin/hooks';
 import type { AdminUser, AdminUserListParams, SystemConfigEntry } from '@/features/admin/api';
-import {
-  usePermissions,
-  useRolePermissions,
-  useGrantPermission,
-  useRevokePermission,
-} from '@/features/admin/permissions-hooks';
 import { cn } from '@/lib/utils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -632,144 +626,53 @@ export function ConfigTab(): JSX.Element {
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
-// ─── Roles & Permissions Tab (MOD-47) ──────────────────────────────────────────
-
-export function PermissionsTab(): JSX.Element {
-  const [role, setRole] = useState<string>('DISPATCHER');
-
-  const { data: allPermissions, isLoading: permsLoading } = usePermissions();
-  const { data: rolePerms, isLoading: roleLoading } = useRolePermissions(role);
-  const grant = useGrantPermission();
-  const revoke = useRevokePermission();
-
-  // Set of permission IDs currently granted to the selected role.
-  const grantedIds = new Set((rolePerms ?? []).map((rp) => rp.permission_id));
-
-  // Group the catalog by module for a scannable matrix.
-  const grouped = (() => {
-    const map = new Map<string, typeof allPermissions>();
-    for (const p of allPermissions ?? []) {
-      const key = p.module_id ?? 'GENERAL';
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(p);
-    }
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
-  })();
-
-  function toggle(permissionId: string, granted: boolean) {
-    if (granted) revoke.mutate({ role, permissionId });
-    else grant.mutate({ role, permissionId });
-  }
-
-  const busyId =
-    (grant.isPending && grant.variables?.permissionId) ||
-    (revoke.isPending && revoke.variables?.permissionId) ||
-    null;
-
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold text-agap-textMain flex items-center gap-2">
-            <KeyRound size={18} className="text-agap-green" /> Role Permissions
-          </h2>
-          <p className="text-sm text-agap-textSub mt-0.5">
-            Grant or revoke capabilities for a role in the reference list.
-          </p>
-        </div>
-        <div className="w-56">
-          <Select value={role} onValueChange={setRole}>
-            <SelectTrigger className="w-full"><SelectValue placeholder="Select role" /></SelectTrigger>
-            <SelectContent>
-              {USER_ROLES.map((r) => (
-                <SelectItem key={r} value={r}>{titleCase(r)}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="flex items-start gap-2.5 rounded-xl border border-[rgba(37,99,235,0.18)] bg-agap-infoSoft px-4 py-3 text-sm text-agap-info">
-        <Info size={16} className="mt-0.5 shrink-0" />
-        <p>
-          <span className="font-semibold">Reference list.</span> Access is enforced by each endpoint&apos;s role rules,
-          not by this table.
-        </p>
-      </div>
-
-      {(grant.isError || revoke.isError) && (
-        <p className="rounded-xl bg-agap-dangerSoft px-4 py-2 text-sm text-agap-danger">
-          {((grant.error ?? revoke.error) as Error)?.message ?? 'Could not update permission.'}
-        </p>
-      )}
-
-      {permsLoading || roleLoading ? (
-        <div className="space-y-3">
-          <Skeleton className="h-28 rounded-2xl" />
-          <Skeleton className="h-28 rounded-2xl" />
-        </div>
-      ) : grouped.length === 0 ? (
-        <EmptyState icon={KeyRound} title="No permissions defined" description="The permission catalog is empty." />
-      ) : (
-        <div className="space-y-4">
-          {grouped.map(([moduleId, perms]) => (
-            <div key={moduleId} className="rounded-2xl border border-[rgba(168,181,193,0.20)] bg-white shadow-card overflow-hidden">
-              <div className="bg-agap-surface px-4 py-2.5 border-b border-[rgba(168,181,193,0.20)]">
-                <span className="text-xs font-bold uppercase tracking-wide text-agap-textSub">{moduleId}</span>
-              </div>
-              <ul className="divide-y divide-[rgba(168,181,193,0.14)]">
-                {(perms ?? []).map((p) => {
-                  const granted = grantedIds.has(p.id);
-                  const busy = busyId === p.id;
-                  return (
-                    <li key={p.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="font-medium text-agap-textMain font-mono text-sm truncate">{p.name}</p>
-                        {p.description && <p className="text-xs text-agap-textSub truncate">{p.description}</p>}
-                      </div>
-                      <Button
-                        variant={granted ? 'secondary' : 'primary'}
-                        size="sm"
-                        loading={busy}
-                        onClick={() => toggle(p.id, granted)}
-                      >
-                        {granted ? (
-                          <><XCircle size={13} className="mr-1" /> Revoke</>
-                        ) : (
-                          <><Plus size={13} className="mr-1" /> Grant</>
-                        )}
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
 // ─── Page frame ───────────────────────────────────────────────────────────────
 
-/** Header shared by the /administration/<section> pages (MOD-49). */
+/**
+ * Header shared by the System Administrator pages (MOD-49): an icon tile, a plain-language
+ * title and one sentence on what the page is for. The module reference sits in a small
+ * chip so it stays traceable without crowding the sentence.
+ */
 export function AdminPage({
-  title, description, children,
+  title, description, icon, module, actions, children,
 }: {
   title: string;
   description: string;
+  /**
+   * An icon element, e.g. `<UsersRound />`. An element (not the component) so server-component
+   * pages can pass it; the tile sets its size and colour.
+   */
+  icon?: ReactNode;
+  module?: string | undefined;
+  actions?: ReactNode;
   children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-agap-textMain tracking-tight">{title}</h1>
-        <p className="text-sm text-agap-textSub mt-0.5">{description}</p>
-      </div>
+    <div className="mx-auto w-full max-w-[1400px] space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <div className="flex min-w-0 items-start gap-3.5">
+          {icon && (
+            <span
+              aria-hidden="true"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-agap-greenSoft text-agap-green ring-1 ring-inset ring-agap-green/10 [&>svg]:h-[21px] [&>svg]:w-[21px]"
+            >
+              {icon}
+            </span>
+          )}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-[22px] font-bold leading-tight tracking-tight text-agap-textMain">{title}</h1>
+              {module && (
+                <span className="rounded-md bg-agap-surface px-1.5 py-0.5 font-mono text-[10.5px] font-semibold text-agap-textSub">
+                  {module}
+                </span>
+              )}
+            </div>
+            <p className="mt-1 max-w-2xl text-[13.5px] leading-relaxed text-agap-textSub">{description}</p>
+          </div>
+        </div>
+        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      </header>
       {children}
     </div>
   );

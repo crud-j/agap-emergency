@@ -1,4 +1,5 @@
 import type { JSX } from 'react';
+import { UsersRound } from 'lucide-react';
 import { AdminPage, UsersTab } from '@/components/admin/AdminSections';
 
 export default function AdminUsersPage({
@@ -9,7 +10,12 @@ export default function AdminUsersPage({
   // Security Events links here with ?search=<name>.
   const search = typeof searchParams.search === 'string' ? searchParams.search : '';
   return (
-    <AdminPage title="Users & Accounts" description="MOD-49 · Create, activate, deactivate and review accounts">
+    <AdminPage
+      title="Users & Accounts"
+      icon={<UsersRound />}
+      module="MOD-49"
+      description="Every staff and citizen account. Change a role, or turn an account off when someone leaves."
+    >
       <UsersTab key={search} initialSearch={search} />
     </AdminPage>
   );

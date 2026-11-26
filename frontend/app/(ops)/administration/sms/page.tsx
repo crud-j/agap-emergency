@@ -1,11 +1,6 @@
-import type { JSX } from 'react';
-import { AdminPage } from '@/components/admin/AdminSections';
-import { SmsActivity } from '@/components/admin/SmsActivity';
+import { redirect } from 'next/navigation';
 
-export default function AdminSmsPage(): JSX.Element {
-  return (
-    <AdminPage title="SMS Activity" description="MOD-17 · Every outbound SMS through the Textbee gateway, from the server's SMS log">
-      <SmsActivity />
-    </AdminPage>
-  );
+/** SMS Activity is now a tab of Logs. */
+export default function Redirect(): never {
+  redirect('/administration/logs?tab=sms');
 }

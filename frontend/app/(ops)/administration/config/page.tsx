@@ -1,10 +1,6 @@
-import type { JSX } from 'react';
-import { AdminPage, ConfigTab } from '@/components/admin/AdminSections';
+import { redirect } from 'next/navigation';
 
-export default function AdminConfigPage(): JSX.Element {
-  return (
-    <AdminPage title="Configuration" description="MOD-49 · System configuration entries">
-      <ConfigTab />
-    </AdminPage>
-  );
+/** Configuration is now the first tab of Settings. */
+export default function Redirect(): never {
+  redirect('/administration/settings');
 }

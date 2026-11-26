@@ -20,6 +20,8 @@ out/
 
 # Logs
 logs/
+# ...but not the System Administrator's Logs page route (Next.js app folder).
+!frontend/app/(ops)/administration/logs/
 *.log
 npm-debug.log*
 pnpm-debug.log*

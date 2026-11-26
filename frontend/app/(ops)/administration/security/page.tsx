@@ -1,11 +1,6 @@
-import type { JSX } from 'react';
-import { AdminPage } from '@/components/admin/AdminSections';
-import { SecurityEvents } from '@/components/admin/SecurityEvents';
+import { redirect } from 'next/navigation';
 
-export default function AdminSecurityPage(): JSX.Element {
-  return (
-    <AdminPage title="Security Events" description="MOD-46 · Failed sign-ins, lockouts and account security changes">
-      <SecurityEvents />
-    </AdminPage>
-  );
+/** Security Events is now a tab of Logs. */
+export default function Redirect(): never {
+  redirect('/administration/logs?tab=security');
 }

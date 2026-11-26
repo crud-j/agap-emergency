@@ -269,7 +269,7 @@ export function HealthTab(): JSX.Element {
           icon={MessageSquare}
           state={smsState}
           footer={
-            <Link href="/administration/sms" className="inline-flex items-center gap-1 text-xs font-semibold text-agap-green hover:text-agap-green/80">
+            <Link href="/administration/logs?tab=sms" className="inline-flex items-center gap-1 text-xs font-semibold text-agap-green hover:text-agap-green/80">
               SMS activity <ArrowRight size={12} />
             </Link>
           }
@@ -285,6 +285,8 @@ export function HealthTab(): JSX.Element {
           )}
         </ServiceCard>
       </div>
+
+      <MoreIntegrations data={data} />
 
       {queues.length > 0 && <QueueTable queues={queues} />}
 
@@ -352,125 +354,60 @@ function QueueTable({ queues }: { queues: QueueHealth[] }): JSX.Element {
   );
 }
 
-// ─── Integrations ────────────────────────────────────────────────────────────
+// ─── Push and maps ───────────────────────────────────────────────────────────
 
-interface IntegrationRow {
-  key: string;
-  name: string;
-  purpose: string;
-  icon: typeof Database;
-  configured: boolean;
-  facts: string[];
-  problem?: string | undefined;
-  link?: { href: string; label: string } | undefined;
-}
-
-/** One row per external integration: configured or not, plus what the server measured. */
-export function IntegrationsList(): JSX.Element {
-  const { data, isLoading } = useSystemHealth();
-
-  if (isLoading) {
-    return (
-      <div className="space-y-3">
-        {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-20 rounded-2xl" />)}
-      </div>
-    );
-  }
-
-  if (!data?.integrations) {
-    return <EmptyState title="Integrations unavailable" description="Could not reach the health endpoint." />;
-  }
-
-  const { sms, push, maps } = data.integrations;
-  const storage = data.details?.storage;
-  const rows: IntegrationRow[] = [
-    {
-      key: 'sms',
-      name: 'SMS gateway (Textbee)',
-      purpose: 'Ops alert SMS, barangay alerts, citizen SOS replies, OTP codes',
-      icon: MessageSquare,
-      configured: sms.configured,
-      facts: [
-        sms.last24h ? `${fmtNumber(sms.last24h.accepted)} accepted, ${fmtNumber(sms.last24h.failed + sms.last24h.notConfigured)} failed in 24 h` : 'SMS log unavailable',
-        `Last accepted ${fmtRelative(sms.lastAcceptedAt)}`,
-      ],
-      problem: sms.lastFailure ? `Last failure ${fmtRelative(sms.lastFailure.at)}: ${sms.lastFailure.reason}` : undefined,
-      link: { href: '/administration/sms', label: 'SMS activity' },
-    },
+/**
+ * The two integrations the service cards don't cover (formerly the Integrations page).
+ * Configured or not, plus what the server measured. Keys and device ids are never shown.
+ */
+function MoreIntegrations({ data }: { data: SystemHealth }): JSX.Element {
+  const { push, maps } = data.integrations;
+  const devices = push.registeredDevices;
+  const rows = [
     {
       key: 'push',
-      name: 'Push notifications (Firebase)',
-      purpose: 'Reporter status updates, responder assignments, announcements',
+      name: 'Push notifications',
+      provider: 'Firebase',
+      purpose: 'Status updates to reporters, assignments to responders, announcements',
       icon: BellRing,
       configured: push.configured,
-      facts: [push.registeredDevices === null || push.registeredDevices === undefined ? 'Device count unavailable' : `${fmtNumber(push.registeredDevices)} registered device${push.registeredDevices === 1 ? '' : 's'}`],
-    },
-    {
-      key: 'storage',
-      name: `Object storage${storage ? ` (${storage.provider})` : ''}`,
-      purpose: 'Incident photos and videos, ID scans, profile photos',
-      icon: HardDrive,
-      configured: storage?.configured ?? false,
-      facts: storage
-        ? [
-            storage.latencyMs === null ? 'Bucket did not answer' : `Bucket answered in ${storage.latencyMs} ms`,
-            `Local disk fallback ${storage.localFallback ? 'on' : 'off'}`,
-          ]
-        : ['Not reported by this server version'],
-      problem: data.storage === 'error' && storage?.configured ? 'The bucket is not responding.' : undefined,
+      fact: devices === null || devices === undefined ? 'Device count unavailable' : `${fmtNumber(devices)} registered device${devices === 1 ? '' : 's'}`,
     },
     {
       key: 'maps',
       name: 'Maps',
-      purpose: 'Map tiles, geocoding, routing and ETA',
+      provider: maps.tiles === 'maplibre' ? 'OpenStreetMap' : 'Mapbox',
+      purpose: 'Map tiles, addresses, routes and estimated arrival times',
       icon: MapIcon,
       configured: maps.configured,
-      facts: [`Tiles: ${maps.tiles === 'maplibre' ? 'OpenStreetMap' : 'Mapbox'}`, `Routing: ${maps.routing === 'mapbox' ? 'Mapbox (traffic)' : 'OSRM'}`],
+      fact: `Routing by ${maps.routing === 'mapbox' ? 'Mapbox (with traffic)' : 'OSRM'}`,
     },
   ];
 
   return (
-    <div className="space-y-4">
-      <ul className="overflow-hidden rounded-2xl border border-agap-track/60 bg-white shadow-card">
-        {rows.map((row) => {
-          const Icon = row.icon;
-          return (
-            <li key={row.key} className="flex flex-col gap-3 border-b border-agap-track/30 px-5 py-4 last:border-0 sm:flex-row sm:items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-agap-surface">
-                  <Icon size={18} className="text-agap-textMid" />
-                </div>
-                <div className="min-w-0">
-                  <p className="font-semibold text-agap-textMain">{row.name}</p>
-                  <p className="text-xs text-agap-textSub">{row.purpose}</p>
-                  <p className="mt-0.5 text-xs text-agap-textMid">{row.facts.join(' · ')}</p>
-                </div>
-              </div>
-              <div className="flex flex-col items-start gap-1 sm:items-end">
-                <Badge variant={row.configured ? 'green' : 'red'}>{row.configured ? 'Configured' : 'Not configured'}</Badge>
-                {row.problem && <p className="max-w-xs text-xs text-agap-danger sm:text-right">{row.problem}</p>}
-                {row.link && (
-                  <Link href={row.link.href} className="inline-flex items-center gap-1 text-xs font-semibold text-agap-green hover:text-agap-green/80">
-                    {row.link.label} <ArrowRight size={12} />
-                  </Link>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="space-y-1 text-xs text-agap-textSub">
-        <p>
-          &ldquo;Configured&rdquo; means the server has the required settings. The counts come from the server&apos;s own
-          records: the SMS log, registered devices, and a live request to the bucket.
-        </p>
-        <p>
-          &ldquo;Accepted&rdquo; means Textbee took the SMS; delivery still depends on the gateway phone&apos;s load and
-          signal. Keys, device IDs and phone numbers are never shown here.
-        </p>
-        <p>Checked {fmtDateTime(data.timestamp)}.</p>
-      </div>
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {rows.map(({ key, name, provider, purpose, icon: Icon, configured, fact }) => (
+        <section key={key} aria-label={name} className="flex items-start gap-3 rounded-2xl border border-agap-track/60 bg-white p-4 shadow-card">
+          <div className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
+            configured ? 'bg-agap-greenSoft text-agap-green' : 'bg-agap-surface text-agap-textSub',
+          )}>
+            <Icon size={19} aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h3 className="text-sm font-bold text-agap-textMain">{name}</h3>
+              <span className="text-xs text-agap-textSub">{provider}</span>
+            </div>
+            <p className="mt-0.5 text-xs text-agap-textSub">{purpose}</p>
+            <p className="mt-2 text-[13px] font-semibold text-agap-textMain">{fact}</p>
+          </div>
+          <Badge variant={configured ? 'green' : 'muted'} className="shrink-0">
+            {configured ? <CheckCircle2 size={12} /> : <MinusCircle size={12} />}
+            {configured ? 'Configured' : 'Not configured'}
+          </Badge>
+        </section>
+      ))}
     </div>
   );
 }

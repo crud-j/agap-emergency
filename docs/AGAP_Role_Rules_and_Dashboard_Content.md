@@ -40,8 +40,10 @@
 | Announcements | `/announcements` | Filters: All · Advisories · Drafts · Pending approval |
 | Publication History | `/announcements/history` | New (plan Phase 2) |
 | Approvals | `/operations/approvals` | New (plan Phase 7) |
-| Users & Accounts, Roles & Permissions, Barangay Directory, Integrations, Security Events, Configuration | `/administration/<section>` | The administration tabs become routes, so the sidebar is the only navigation |
-| Risk Areas | `/administration/risk-areas` | System Administrator, read-only (support). Supervisors manage risk areas on the Risk Map |
+| Users & Accounts, ID Reviews, Barangay Directory | `/administration/<section>` | |
+| Logs | `/administration/logs` | System Administrator. Tabs (`?tab=`): Activity (audit trail) · Security events · SMS. `/administration/security` and `/administration/sms` redirect here (2026-11-26) |
+| Settings | `/administration/settings` | System Administrator. Tabs: Configuration · Response targets · Page access (read-only). `/administration/config` and `/administration/permissions` redirect here (2026-11-26) |
+| Risk Areas | `/administration/risk-areas` | System Administrator, read-only (support), not in the sidebar. Supervisors manage risk areas on the Risk Map |
 | Organizations | `/organizations` | |
 | Requests | `/resources/requests` | Org Administrator (plan Phase 6) |
 
@@ -229,21 +231,19 @@ The oversight items in the mockup ("Dispatch Oversight", "Resource Coverage", "P
 Keep AGAP healthy, secure and correctly configured. Supports operations but is **not** an emergency dispatcher.
 
 ### Dashboard content
-- **System health:** API, database, Redis, background queues. Health lives on the Dashboard; there is no separate System Health link.
-- **Counts:** users, active units, hospitals and facilities.
-- **Recent users, recent administrative activity, security summary.**
-- Not shown until a backend source exists: uptime percentage, API request volume, storage usage.
+- **At a glance:** IDs waiting for review (amber when any wait), accounts, response units, hospitals and facilities. Each tile opens its page.
+- **System health:** database, Redis, object storage, SMS gateway, push notifications, maps, background queues. Health and integrations live on the Dashboard; there is no separate System Health or Integrations link.
+- **Newest accounts.**
+- Not shown until a backend source exists: uptime percentage, API request volume.
 
 ### Pages
-- **Integrations:** Textbee SMS gateway, push notifications, map service.
 - **Users and accounts:** create, activate, deactivate, unlock, reset MFA, temporary passwords, revoke sessions.
-- **Roles and permissions.**
-- **Organizations, resource registry, hospitals and facilities.**
+- **ID reviews:** PhilHealth and National IDs sent at registration.
+- **Organizations, hospitals and facilities, fleet registry.**
 - **Barangay directory.**
-- **Risk Areas:** read-only list for support. Risk areas are an MDRRMO operations decision, so Supervisors manage them.
-- **Security events:** failed logins, lockouts, password and MFA changes, revoked sessions, permission denials.
-- **Audit viewer:** search the audit log; never edit it.
-- **Configuration:** one page for all `system_configurations` keys (the mockup's "Incident Configuration" and "System Settings" are the same table).
+- **Logs** (tabs): **Activity** (search the audit log; never edit it) · **Security events** (failed logins, lockouts, password and MFA changes, revoked sessions, permission denials, guest reports with IP) · **SMS** (every outbound text).
+- **Settings** (tabs): **Configuration** (all `system_configurations` keys) · **Response targets** (MOD-41) · **Page access** (read-only table of which role opens which page, built from the console's route rules; MOD-47). It replaced the Grant/Revoke "Roles & Permissions" page, whose grants no endpoint read.
+- **Out of the sidebar, still reachable:** Risk Areas (read-only list; Supervisors manage them) and mutual-aid Requests (read-only for this role).
 - Role names shown anywhere are the real ones (Dispatcher, Supervisor, Announcements Publisher…), never "Incident Commander" or "Municipal Executive".
 
 ### Rules
@@ -254,9 +254,9 @@ Keep AGAP healthy, secure and correctly configured. Supports operations but is *
 - Cannot alter or delete audit records. Sensitive changes are audited.
 
 ### Sidebar
-Dashboard · Users & Accounts · Roles & Permissions · Organizations · Fleet & Units · Hospitals & Facilities · Barangay Directory · Integrations · Security Events · Audit Log · Configuration
+**Overview:** Dashboard · **People:** Users & Accounts · ID Reviews · **Reference Data:** Organizations · Hospitals & Facilities · Fleet & Units · Barangay Directory · **System:** Logs · Settings · **Account:** Account Security
 
-**Not in the sidebar:** System Health (on the Dashboard), Reports or Analytics (operational data; separation of duties), operational pages.
+Ten links (was seventeen, 2026-11-26). **Not in the sidebar:** System Health and Integrations (on the Dashboard), Reports or Analytics (operational data; separation of duties), operational pages, Risk Areas and Requests (read-only, still reachable).
 
 ---
 
