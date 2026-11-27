@@ -15,6 +15,10 @@ const SHELL_TABS = new Set([
   '/responder/profile',
 ]);
 
+// A screen opened straight from a notification (e.g. an assignment) gets Home under it,
+// so Back goes to Home instead of closing AGAP.
+export const unstable_settings = { initialRouteName: 'home' };
+
 export default function ResponderLayout() {
   const router = useRouter();
   const pathname = usePathname();

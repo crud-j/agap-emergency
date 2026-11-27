@@ -14,6 +14,14 @@ describe('in-app assignment alarm (MOD-32)', () => {
     expect(alarmOffer(offers, '/responder/assignment/disp-1')).toBeNull();
   });
 
+  it('does not pull the responder off one waiting offer to another', () => {
+    expect(alarmOffer(offers, '/responder/assignment/disp-2')).toBeNull();
+  });
+
+  it('still rings over an accepted mission\'s screen when a new offer arrives', () => {
+    expect(alarmOffer(offers, '/responder/assignment/disp-9')).toEqual({ id: 'disp-1' });
+  });
+
   it('nothing waiting → nothing rings', () => {
     expect(alarmOffer([], '/responder/home')).toBeNull();
   });

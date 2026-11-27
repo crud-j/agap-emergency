@@ -3,7 +3,7 @@ import { Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Queue } from 'bullmq';
 import { getApps } from 'firebase-admin/app';
-import { getMessaging } from 'firebase-admin/messaging';
+import { getMessaging, type Message } from 'firebase-admin/messaging';
 import { QUEUE_NAMES } from '@agap/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { tokenFromConfig } from '../../notifications/push-token';
@@ -24,6 +24,60 @@ export interface NotificationJobData {
   androidChannelId?: string;
   /** Android tag: a later push with the same tag replaces this one in the shade (and alerts again). */
   androidTag?: string;
+  /**
+   * Send as a data-only FCM message (no `notification` block), so the app's code runs
+   * even when it is closed: a new assignment rings until answered (mobile
+   * assignment-ring-task.ts). The app still shows it like a normal push without that code.
+   */
+  androidDataOnly?: boolean;
+  /** How long FCM keeps trying to deliver it, in ms (FCM default: 4 weeks). */
+  androidTtlMs?: number;
+}
+
+/**
+ * The FCM message for one push. A data-only message carries its text in `data`: `title`,
+ * `message` (expo-notifications reads these and shows the push itself when the app is in
+ * the background), `channelId` and `tag` (the shade entry that later pushes replace).
+ * Never put a `body` key in `data`: expo-notifications parses it as JSON.
+ */
+export function buildFcmMessage(token: string, data: NotificationJobData): Message {
+  const payload: Record<string, string> = data.data
+    ? Object.fromEntries(Object.entries(data.data).map(([k, v]) => [k, String(v)]))
+    : {};
+  const android = {
+    ...(data.androidTtlMs !== undefined && { ttl: data.androidTtlMs }),
+  };
+  if (data.androidDataOnly) {
+    return {
+      token,
+      data: {
+        ...payload,
+        ...(data.title !== undefined && { title: data.title }),
+        message: data.body,
+        ...(data.androidChannelId && { channelId: data.androidChannelId }),
+        ...(data.androidTag && { tag: data.androidTag }),
+      },
+      android: { ...android, priority: 'high' },
+    };
+  }
+  return {
+    token,
+    notification: {
+      body: data.body,
+      ...(data.title !== undefined && { title: data.title }),
+    },
+    data: payload,
+    ...((data.androidChannelId || data.androidTag || data.androidTtlMs !== undefined) && {
+      android: {
+        ...android,
+        priority: 'high',
+        notification: {
+          ...(data.androidChannelId && { channelId: data.androidChannelId }),
+          ...(data.androidTag && { tag: data.androidTag }),
+        },
+      },
+    }),
+  };
 }
 
 @Processor(QUEUE_NAMES.NOTIFICATIONS)
@@ -147,25 +201,7 @@ export class NotificationProcessor extends WorkerHost {
   }
 
   private async sendFcm(token: string, data: NotificationJobData): Promise<void> {
-    await getMessaging().send({
-      token,
-      notification: {
-        body: data.body,
-        ...(data.title !== undefined && { title: data.title }),
-      },
-      data: data.data
-        ? Object.fromEntries(Object.entries(data.data).map(([k, v]) => [k, String(v)]))
-        : {},
-      ...((data.androidChannelId || data.androidTag) && {
-        android: {
-          priority: 'high',
-          notification: {
-            ...(data.androidChannelId && { channelId: data.androidChannelId }),
-            ...(data.androidTag && { tag: data.androidTag }),
-          },
-        },
-      }),
-    });
+    await getMessaging().send(buildFcmMessage(token, data));
   }
 
   private async notifyEmergencyContacts(data: NotificationJobData): Promise<void> {

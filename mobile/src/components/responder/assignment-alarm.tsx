@@ -7,21 +7,34 @@ import { UserRole } from '@agap/shared';
 import { useAuthStore } from '@/src/stores/auth.store';
 import { useResponderAssignments } from '@/src/hooks/useResponderAssignments';
 import { colors, radius } from '@/src/theme/tokens';
+import { assignmentNotificationTag, assignmentPath, openAssignment } from '@/src/lib/assignment-navigation';
+import { stopRinging } from '@/modules/agap-alarm';
 
 /** Vibrate 1 s, pause 0.6 s, repeat: while an assignment waits and AGAP is on screen. */
 export const ALARM_PATTERN = [0, 1000, 600];
 
-/** Which unanswered offer to raise, or null: none, or the responder is already on its screen. */
+/**
+ * How long the screen must stay put before the alarm covers it. Opening AGAP from a
+ * tapped assignment push passes through Home first; without this the alarm would flash
+ * over Home before the assignment screen opens.
+ */
+export const ALARM_SETTLE_MS = 900;
+
+/**
+ * Which unanswered offer to raise, or null: none, or the responder is already on an
+ * offer's screen (then the alarm waits rather than pulling them to another one).
+ */
 export function alarmOffer<T extends { id: string }>(pendingOffers: T[], pathname: string): T | null {
-  const offer = pendingOffers[0];
-  if (!offer) return null;
-  return pathname === `/responder/assignment/${offer.id}` ? null : offer;
+  if (pendingOffers.some((o) => pathname === assignmentPath(o.id))) return null;
+  return pendingOffers[0] ?? null;
 }
 
 /**
  * MOD-32: a new assignment can't be missed while AGAP is open. Full screen, vibrating,
  * until the responder opens it (its screen has Accept / Decline). With AGAP closed, the
- * server's repeated push does this job (assignment-reminder.ts). Responders only.
+ * ringing notification does this job (assignment-ring-task.ts, repeated by the server
+ * every 30 s). Opening AGAP silences that notification: this alarm takes over.
+ * Responders only.
  */
 export function AssignmentAlarm() {
   const role = useAuthStore((s) => s.user?.role);
@@ -34,21 +47,37 @@ function ResponderAssignmentAlarm() {
   const { pendingOffers } = useResponderAssignments();
   const offer = alarmOffer(pendingOffers, pathname);
   const [active, setActive] = useState(AppState.currentState === 'active');
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => setActive(s === 'active'));
     return () => sub.remove();
   }, []);
 
-  // Only while on screen: in the background the server's pushes take over.
-  const ringing = !!offer && active;
+  // Wait until navigation stops moving (see ALARM_SETTLE_MS).
+  useEffect(() => {
+    setSettled(false);
+    const timer = setTimeout(() => setSettled(true), ALARM_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [pathname]);
+
+  // AGAP is on screen: the ringing notifications stop, the in-app alarm takes over.
+  const pendingKey = pendingOffers.map((o) => o.id).join(',');
+  useEffect(() => {
+    if (!active) return;
+    for (const o of pendingOffers) stopRinging(assignmentNotificationTag(o.id));
+  }, [active, pendingKey]);
+
+  const shown = !!offer && settled;
+  // Only while on screen: in the background the ringing notification takes over.
+  const ringing = shown && active;
   useEffect(() => {
     if (!ringing) return;
     Vibration.vibrate(ALARM_PATTERN, true);
     return () => Vibration.cancel();
   }, [ringing, offer?.id]);
 
-  if (!offer) return null;
+  if (!shown || !offer) return null;
   const category = (offer.incidents?.category ?? 'Emergency').replace(/_/g, ' ');
   const more = pendingOffers.length - 1;
 
@@ -71,7 +100,7 @@ function ResponderAssignmentAlarm() {
         <TouchableOpacity
           style={styles.openBtn}
           activeOpacity={0.85}
-          onPress={() => router.push(`/responder/assignment/${offer.id}` as never)}
+          onPress={() => openAssignment(router, pathname, offer.id)}
           accessibilityRole="button"
           accessibilityLabel={`Open assignment ${offer.incidents?.public_reference ?? ''}`}
         >

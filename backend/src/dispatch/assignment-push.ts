@@ -26,6 +26,11 @@ export const ASSIGNMENT_REMINDER_INTERVAL_MS = 30_000;
 export const ASSIGNMENT_REMINDER_MAX = 6;
 /** Dispatch statuses that are still waiting for the crew's answer. */
 export const ASSIGNMENT_WAITING_STATUSES: ReadonlySet<string> = new Set(['PENDING', 'SENT']);
+/**
+ * A phone that was offline longer than this does not ring for the assignment when it
+ * reconnects: a newer repeat (or the 15-second poll in the app) covers it if still open.
+ */
+export const ASSIGNMENT_PUSH_TTL_MS = 2 * 60_000;
 /** Start of the escalation reason, also used to raise it only once per dispatch. */
 export const NO_ANSWER_REASON_PREFIX = 'No answer to assignment';
 
@@ -63,6 +68,9 @@ export function assignmentPush(
     data: { type: kind, dispatchId, ...(reminder && { reminder }) },
     androidChannelId: kind === 'ASSIGNMENT' ? ASSIGNMENT_ALARM_CHANNEL : ASSIGNMENTS_CHANNEL,
     androidTag: assignmentTag(dispatchId),
+    // A new assignment wakes the app's code, which rings until the crew answers. A
+    // cancellation stays a plain push: it replaces (and so silences) the ringing one.
+    ...(kind === 'ASSIGNMENT' && { androidDataOnly: true, androidTtlMs: ASSIGNMENT_PUSH_TTL_MS }),
   };
 }
 

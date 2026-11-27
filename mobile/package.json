@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "AGAP Mobile — Expo React Native app for citizens and responders",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "scripts": {
     "start": "expo start --clear",
     "start:no-clear": "expo start",
@@ -46,6 +46,7 @@
     "expo-secure-store": "~57.0.4",
     "expo-sensors": "~57.0.3",
     "expo-sharing": "~57.0.23",
+    "expo-task-manager": "~57.0.24",
     "nativewind": "^4.2.7",
     "react": "19.2.3",
     "react-native": "0.86.3",

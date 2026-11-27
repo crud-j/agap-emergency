@@ -4,6 +4,7 @@ import {
   ASSIGNMENT_ALARM_CHANNEL,
   ASSIGNMENT_REMINDER_JOB,
   ASSIGNMENT_PUSH_JOB,
+  ASSIGNMENT_PUSH_TTL_MS,
   assignmentPush,
   assignmentPushJobId,
 } from '../../src/dispatch/assignment-push';
@@ -104,6 +105,8 @@ describe('assignmentPush (message builder)', () => {
       data: { type: 'ASSIGNMENT', dispatchId: 'disp-1' },
       androidChannelId: ASSIGNMENT_ALARM_CHANNEL,
       androidTag: 'assignment-disp-1',
+      androidDataOnly: true,
+      androidTtlMs: ASSIGNMENT_PUSH_TTL_MS,
     });
   });
 

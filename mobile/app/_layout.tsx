@@ -2,7 +2,7 @@ import '../global.css';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { Stack, useGlobalSearchParams, useRouter, useSegments } from 'expo-router';
+import { Stack, useGlobalSearchParams, usePathname, useRouter, useSegments } from 'expo-router';
 import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ import { useLiveIncidentRefresh } from '../src/hooks/useLiveIncidentRefresh';
 import { AgapSplash } from '../src/components/splash/AgapSplash';
 import { loadDevRoute, saveDevRoute, type DevRoute } from '../src/lib/dev-route-restore';
 import { hasCompletedOnboarding, markOnboardingComplete } from '../src/lib/onboarding-status';
+import { openAssignment } from '../src/lib/assignment-navigation';
 
 // Wire React Native's AppState into TanStack Query's focus manager so
 // refetchOnWindowFocus works when the app comes back to the foreground.
@@ -55,6 +56,7 @@ const AUTH_ONLY_SEGMENTS = ['auth', 'onboarding'];
 function AuthGuard() {
   const router = useRouter();
   const segments = useSegments();
+  const pathname = usePathname();
   const { isAuthenticated, isLoading, loadFromStorage } = useAuthStore();
   const accessToken = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
@@ -173,7 +175,12 @@ function AuthGuard() {
       router.push(tapped.pathname as never);
     } else {
       if (!isAuthenticated) return;
-      router.push({ pathname: tapped.pathname, params: { id: tapped.id } } as never);
+      if (tapped.pathname === '/responder/assignment/[id]' && tapped.id) {
+        // Already on that assignment (e.g. tapped again): stay, don't stack a copy.
+        openAssignment(router, pathname, tapped.id);
+      } else {
+        router.push({ pathname: tapped.pathname, params: { id: tapped.id } } as never);
+      }
     }
     setTapped(null);
   }, [tapped, isAuthenticated, isLoading, accessibilityLoaded]);
