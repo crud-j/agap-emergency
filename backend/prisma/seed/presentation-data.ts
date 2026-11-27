@@ -48,7 +48,6 @@ export interface PresentationContext {
   /** Registered citizens whose History screen should show past reports. */
   citizens: Array<{ id: string; name: string; phone: string }>;
   bystander: { id: string; name: string; phone: string };
-  crew: { alpha1: string; charlie1: string };
 }
 
 // ─── Units (fixed ids from the main seed) ─────────────────────────────────────
@@ -356,19 +355,16 @@ function planCurrentShift(ctx: PresentationContext, now: number): PlannedInciden
   const [first] = ctx.citizens;
   return [
     {
-      // Kept id: the ready-made dispatch for responder1 (ALPHA-1), offer waiting.
+      // Assessed, waiting for a unit: the dispatcher sends ALPHA-1 live during a demo.
+      // No responder starts with an assignment (the phones start clean).
       id: '00000000-0000-0000-0005-000000000001',
-      category: incident_category.MEDICAL, priority: incident_priority.HIGH, status: incident_status.DISPATCHED,
+      category: incident_category.MEDICAL, priority: incident_priority.HIGH, status: incident_status.ASSESSED,
       channel: report_channel.APP,
       description: 'Si Lolo (74) biglang nahirapang huminga at sumasakit ang dibdib. Gising pa pero pawis na pawis.',
       patients: 1,
       reporter: { userId: first!.id, isGuest: false, name: first!.name, phone: first!.phone, status: 'SAFE' },
       barangay: 'Turo', street: 'Mabini St.', landmark: 'tapat ng elementary school',
-      stamps: { submitted_at: ago(9), received_at: ago(9), acknowledged_at: ago(8), assessed_at: ago(7), dispatched_at: ago(5) },
-      dispatch: {
-        id: '00000000-0000-0000-0006-000000000001', unit: UNIT.ALPHA1, status: dispatch_status.SENT,
-        crewUserId: ctx.crew.alpha1, notes: 'Possible cardiac. Patient conscious, diaphoretic.',
-      },
+      stamps: { submitted_at: ago(9), received_at: ago(9), acknowledged_at: ago(8), assessed_at: ago(7) },
     },
     {
       id: '00000000-0000-0000-0005-000000000002',
@@ -403,17 +399,13 @@ function planCurrentShift(ctx: PresentationContext, now: number): PlannedInciden
     },
     {
       id: '00000000-0000-0000-0005-000000000005',
-      category: incident_category.FIRE, priority: incident_priority.CRITICAL, status: incident_status.DISPATCHED,
+      category: incident_category.FIRE, priority: incident_priority.CRITICAL, status: incident_status.ASSESSED,
       channel: report_channel.APP,
       description: 'Nasusunog ang bodega ng paputok! May naririnig kaming maliliit na pagsabog. Wala raw tao sa loob sabi ng guard.',
       patients: 0,
       reporter: { isGuest: true, name: 'Edgardo Manalo', phone: '+639170000023', status: 'SAFE' },
       barangay: 'Bundukan', street: 'Del Pilar St.', landmark: 'sa likod ng health center',
-      stamps: { submitted_at: ago(8), received_at: ago(8), acknowledged_at: ago(7), assessed_at: ago(6), dispatched_at: ago(4) },
-      dispatch: {
-        id: '00000000-0000-0000-0006-000000000005', unit: UNIT.CHARLIE1, status: dispatch_status.SENT,
-        crewUserId: ctx.crew.charlie1, notes: 'Fireworks storage. Secondary explosions reported. Stage upwind.',
-      },
+      stamps: { submitted_at: ago(8), received_at: ago(8), acknowledged_at: ago(7), assessed_at: ago(6) },
     },
     {
       id: '00000000-0000-0000-0005-000000000006',

@@ -1089,8 +1089,9 @@ async function main() {
   console.log(`  Demo citizen ready: ${PRESENTATION_CITIZEN_EMAIL}`);
 
   // ── Presentation data: incidents, dispatches, announcements ─────────────────
-  // The current shift (8 incidents; ALPHA-1 has an offer waiting for responder1 and
-  // CHARLIE-1 one for responder3), 30 days of history and the announcements feed.
+  // The current shift (8 incidents; no responder starts with an assignment, the Turo
+  // chest-pain call and the Bundukan fire wait for a unit), 30 days of history and the
+  // announcements feed.
   // See presentation-data.ts.
 
   await seedPresentationData(prisma, {
@@ -1104,7 +1105,6 @@ async function main() {
       { id: demoCitizen.id, name: 'Maricel Dizon', phone: '+639170000001' },
     ],
     bystander: { id: bystander.id, name: 'Ramon Castillo', phone: '+639170000002' },
-    crew: { alpha1: responder1.id, charlie1: responder3.id },
   });
 
   // ── Barangay hotline directory (MOD-17 / MOD-34) ───────────────────────────
@@ -1140,10 +1140,10 @@ async function main() {
   console.log('    CITIZEN                : citizen@demo.agap');
   console.log('    CITIZEN                : citizenaccountdemo@demo.com / 09757072301 (own demo password, see docs/module-reports/README.md)');
   console.log('    BYSTANDER              : bystander@demo.agap');
-  console.log('\n  Ready-made offers on the current shift:');
-  console.log('    responder1@mdrrmo.bocaue.gov.ph : ALPHA-1 to the Turo chest-pain call (reporter citizen@demo.agap)');
-  console.log('    responder3@bfp.bocaue.gov.ph    : CHARLIE-1 to the Bundukan fireworks fire');
-  console.log('  Free for the live SOS: ALPHA-2 (responder4), ALPHA-3 (responder5), BRAVO-1 (responder2), CHARLIE-3 (responder6)');
+  console.log('\n  No responder starts with an assignment. Waiting for a unit on the current shift:');
+  console.log('    Turo chest-pain call (reporter citizen@demo.agap) : send ALPHA-1 (responder1)');
+  console.log('    Bundukan fireworks fire                           : send CHARLIE-1 (responder3)');
+  console.log('  Also free: ALPHA-2 (responder4), ALPHA-3 (responder5), BRAVO-1 (responder2), CHARLIE-3 (responder6)');
 }
 
 main()
