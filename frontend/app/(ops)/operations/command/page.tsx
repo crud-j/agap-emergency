@@ -1,7 +1,6 @@
 'use client';
 
 import { Suspense, useEffect, useState, type JSX, type ReactNode } from 'react';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Siren, Plus, CheckCircle2, Circle, Users, AlertTriangle, ClipboardList, ArrowRightLeft, Check,
@@ -33,7 +32,6 @@ import {
   useHandovers,
   useAcknowledgeHandover,
   useHandoverRecipients,
-  useIncidentAgencies,
 } from '@/features/incidents/command-hooks';
 import { useResponders } from '@/features/responders/hooks';
 import { buildIcsCandidates } from '@/features/incidents/ics-candidates';
@@ -43,7 +41,6 @@ import { cn } from '@/lib/utils';
 import { CreateHandoverDialog } from '@/components/command/CreateHandoverDialog';
 import { IncidentDetailDrawer } from '@/components/incidents/IncidentDetailDrawer';
 import {
-  AgencyCoordinationPanel,
   CommandBriefPanel,
   CommandLogPanel,
   HospitalEvacuationPanel,
@@ -562,13 +559,11 @@ function SetupChecklist({ incidentId, ics, onNameCommander, onEditPlan }: {
   onNameCommander: () => void;
   onEditPlan: () => void;
 }): JSX.Element | null {
-  const agencies = useIncidentAgencies(incidentId);
   const holders = current(ics);
   const hasCommander = holders.some((a) => a.position === INCIDENT_COMMANDER);
   const otherJobs = holders.some((a) => a.position !== INCIDENT_COMMANDER);
   const hasGoals = ics.objectives.length > 0;
   const hasUpdate = !!ics.situation_notes?.trim();
-  const hasAgencies = (agencies.data ?? []).some((a) => !a.left_at);
 
   const required = [hasCommander, hasGoals, hasUpdate];
   const doneCount = required.filter(Boolean).length;
@@ -631,17 +626,6 @@ function SetupChecklist({ incidentId, ics, onNameCommander, onEditPlan }: {
           title="Give out other jobs"
           hint="For bigger incidents: someone for the teams on the ground, supplies, safety, public updates."
           action={<Button size="sm" variant="secondary" onClick={() => scrollTo('command-team')}>See jobs</Button>}
-        />
-        <ChecklistItem
-          done={hasAgencies}
-          optional
-          title="Add other agencies"
-          hint="When BFP, PNP or another agency joins the response."
-          action={(
-            <Link href="/operations/multi-agency" className="inline-flex h-8 items-center gap-1 rounded-lg border border-agap-track/50 px-3 text-[12px] font-semibold text-agap-textMain hover:bg-agap-surface">
-              Multi-Agency <ExternalLink size={12} />
-            </Link>
-          )}
         />
       </ol>
       {allDone && (
@@ -1113,7 +1097,6 @@ function Workspace({ incidentId, canCommand }: { incidentId: string; canCommand:
           </div>
           <div className="min-w-0 space-y-4">
             <CommandBriefPanel incidentId={incidentId} ics={ics} editable={editable} editRequest={editRequest} id="command-plan" />
-            <AgencyCoordinationPanel incidentId={incidentId} />
           </div>
         </div>
         {running && <HospitalEvacuationPanel />}

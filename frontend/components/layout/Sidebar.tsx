@@ -18,7 +18,7 @@ import styles from './Sidebar.module.css';
 import {
   LayoutDashboard, List, Filter, Radio,
   Ambulance, Building2, Hospital, AlarmClock,
-  Shield, Network, Zap, BarChart2, Layers,
+  Shield, Zap, BarChart2, Layers,
   Megaphone, FileSearch, PanelLeftClose, PanelLeftOpen,
   UsersRound, Landmark, Circle, History, Archive, Inbox, ShieldCheck, LogOut,
   Fingerprint, IdCard, ChevronRight, Timer, ScrollText, SlidersHorizontal,
@@ -37,7 +37,6 @@ const ICONS: Record<string, LucideIcon> = {
   '/operations/escalations': AlarmClock,
   '/operations/sla-targets': Timer,
   '/operations/command': Shield,
-  '/operations/multi-agency': Network,
   '/operations/surge': Zap,
   '/organizations': Building2,
   '/operations/fleet': Ambulance,

@@ -36,7 +36,6 @@ const PATH_LABELS: Record<string, string> = {
   escalations:     'Escalations',
   'sla-targets':   'Response Targets',
   command:         'Command',
-  'multi-agency':  'Multi-Agency',
   surge:           'Surge',
   risk:            'Risk Map',
   resources:       'Resources',

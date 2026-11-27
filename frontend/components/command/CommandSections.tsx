@@ -3,14 +3,14 @@
 import { useEffect, useState, type JSX } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, ArrowRight, BedDouble, Building2, FileText, HeartPulse, Network, PencilLine, ScrollText, Siren, Target, Tent, Zap,
+  AlertTriangle, BedDouble, FileText, HeartPulse, Network, PencilLine, ScrollText, Siren, Target, Tent, Zap,
 } from 'lucide-react';
 import { useNow } from '@/lib/use-now';
 import { Badge, Button, PriorityBadge, Skeleton, StatusChip } from '@/components/ui';
 import { notify } from '@/components/ui/alerts';
 import { DashboardPanel } from '@/components/dashboard/DashboardPanel';
 import { useMajorIncidents } from '@/features/oversight/hooks';
-import { useIncidentAgencies, useUpdateIcs } from '@/features/incidents/command-hooks';
+import { useUpdateIcs } from '@/features/incidents/command-hooks';
 import type { IcsStructure } from '@/features/incidents/command';
 import { useIncidentAudit } from '@/features/audit/hooks';
 import { useFacilities } from '@/features/hospitals/hooks';
@@ -212,46 +212,6 @@ export function CommandBriefPanel({ incidentId, ics, editable, editRequest = 0, 
             )}
           </div>
         </div>
-      )}
-    </DashboardPanel>
-  );
-}
-
-// ─── Agency coordination ─────────────────────────────────────────────────────
-
-/** Organizations participating in this incident (MOD-34). Adding agencies stays on Multi-Agency. */
-export function AgencyCoordinationPanel({ incidentId }: { incidentId: string }): JSX.Element {
-  const { data, isLoading, isError } = useIncidentAgencies(incidentId);
-  const current = (data ?? []).filter((a) => !a.left_at);
-  return (
-    <DashboardPanel
-      title={<><Network size={14} className="text-agap-textSub" /> Other agencies helping</>}
-      action={(
-        <Link href="/operations/multi-agency" className="flex items-center gap-1 text-[12px] font-semibold text-agap-green hover:text-agap-green/80">
-          Add an agency <ArrowRight size={13} />
-        </Link>
-      )}
-    >
-      {isError ? (
-        <p className="text-sm text-agap-danger">Couldn&apos;t load agencies.</p>
-      ) : isLoading ? (
-        <Skeleton className="h-16 w-full" />
-      ) : current.length === 0 ? (
-        <p className="text-sm text-agap-textSub">Only MDRRMO so far. Add BFP, PNP or others on the Multi-Agency page when they join.</p>
-      ) : (
-        <ul className="divide-y divide-agap-track/15">
-          {current.map((a) => (
-            <li key={a.id} className="flex items-center gap-3 py-2">
-              <Building2 size={14} className="shrink-0 text-agap-textSub" />
-              <span className="text-[13px] font-semibold text-agap-textMain">
-                {a.organizations?.short_name ?? a.organizations?.name ?? '—'}
-              </span>
-              {a.organizations && <Badge variant="muted">{titleCase(a.organizations.organization_type)}</Badge>}
-              <span className="truncate text-[12px] text-agap-textSub">{a.role_in_incident ?? ''}</span>
-              <span className="ml-auto whitespace-nowrap text-[11px] text-agap-textSub">joined {timeAgo(a.joined_at)}</span>
-            </li>
-          ))}
-        </ul>
       )}
     </DashboardPanel>
   );

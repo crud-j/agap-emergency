@@ -33,7 +33,6 @@ const ROUTE_ROLES: { prefix: string; roles: readonly string[] }[] = [
   { prefix: '/operations/map', roles: OPS },
   { prefix: '/operations/triage', roles: OPS },
   { prefix: '/operations/dispatch', roles: OPS },
-  { prefix: '/operations/multi-agency', roles: OPS },
   { prefix: '/operations/history', roles: OPS },
   { prefix: '/operations/escalations', roles: [SUPERVISOR] },
   // MOD-41 response targets: the escalation alarm and Analytics read them (API-enforced).
@@ -145,12 +144,6 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Command',
-    items: [
-      { href: '/operations/multi-agency', label: 'Multi-Agency', roles: [DISPATCHER] },
-    ],
-  },
-  {
     label: 'Resources',
     items: [
       { href: '/organizations', label: 'Organizations', roles: [ORG_ADMIN] },
@@ -227,7 +220,6 @@ export const SUPERVISOR_NAV_GROUPS: NavGroup[] = [
     opensDuringMajorIncident: true,
     items: [
       { href: '/operations/command', label: 'Command / ICS', roles: S },
-      { href: '/operations/multi-agency', label: 'Multi-Agency', roles: S },
       { href: '/operations/surge', label: 'Surge Mode', roles: S },
     ],
   },
@@ -347,7 +339,6 @@ export const ACCESS_PAGES: readonly { area: string; pages: readonly { href: stri
     area: 'Major Incident',
     pages: [
       { href: '/operations/command', label: 'Command / ICS' },
-      { href: '/operations/multi-agency', label: 'Multi-Agency' },
       { href: '/operations/surge', label: 'Surge Mode' },
     ],
   },

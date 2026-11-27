@@ -13,7 +13,7 @@ import { useCreateHandover, useHandoverRecipients } from '@/features/incidents/c
 /**
  * MOD-44 — Create Handover. The incoming operator is picked by name from the
  * Dispatchers and Supervisors who can sign in (GET /incidents/handover/recipients).
- * Used by Multi-Agency → Handover and Command / ICS → Handover panel.
+ * Used by the Command / ICS → Handover panel.
  */
 export function CreateHandoverDialog({
   incidentId,

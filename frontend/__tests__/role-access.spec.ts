@@ -132,7 +132,7 @@ describe('role-access', () => {
   it('sidebars match the agreed spec', () => {
     expect(labels(ROLE.DISPATCHER)).toEqual([
       'Dashboard', 'Incident Queue', 'Triage', 'Live Dispatch', 'Risk Map',
-      'Multi-Agency', 'Fleet & Units', 'Hospitals & Facilities', 'Incident History',
+      'Fleet & Units', 'Hospitals & Facilities', 'Incident History',
       'Account Security',
     ]);
     expect(labels(ROLE.PUBLISHER)).toEqual(['Dashboard', 'Announcements', 'Publication History', 'Account Security']);
@@ -146,7 +146,7 @@ describe('role-access', () => {
     expect(labels(ROLE.SUPERVISOR)).toEqual([
       'Dashboard', 'Escalations', 'Response Targets', 'Approvals', 'Live Dispatch',
       'Incident Queue', 'Triage',
-      'Command / ICS', 'Multi-Agency', 'Surge Mode',
+      'Command / ICS', 'Surge Mode',
       'Analytics', 'Risk Map', 'Activity Log', 'Incident History',
       'Fleet & Units', 'Hospitals & Facilities',
       'Account Security',
